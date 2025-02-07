@@ -2,7 +2,7 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
 import java.time.format.DateTimeFormatter
 
-class DiscordEventListener(val engine: ConversationEngine) extends ListenerAdapter {
+class DiscordEventListener(val processor: MessageProcessor) extends ListenerAdapter {
 
   override def onMessageReceived(event: MessageReceivedEvent): Unit =
     val message = event.getMessage().getContentDisplay()
@@ -16,11 +16,9 @@ class DiscordEventListener(val engine: ConversationEngine) extends ListenerAdapt
       message
     ))
     if (!event.getAuthor.isBot && event.getChannel().getId() == "1337074638307594280") {
-      val responseJson = engine.chat(message)
-      val response = parseAssistantMessage(responseJson)
-      response match {
-        case Some(r) => event.getChannel().sendMessage(r.message).complete()
-        case None => println("failed to parse: " + responseJson)
+      processor.response(message) match {
+        case Right(r) => event.getChannel().sendMessage(r).complete()
+        case Left(err) => println("failed to parse: " + err)
       }
     }
 }

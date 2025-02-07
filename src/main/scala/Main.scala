@@ -8,10 +8,11 @@ import net.dv8tion.jda.api.entities.Activity
     if mode == "openai"
     then new OpenAIConversationEngine(scala.util.Properties.envOrElse("OPENAI_API_KEY", ""))
     else new DummyConversationEngine
+  val processor = new MessageProcessor(engine)
   val token = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
   val client =
     JDABuilder.createLight(token, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
-    .addEventListeners(new DiscordEventListener(engine))
+    .addEventListeners(new DiscordEventListener(processor))
     .build()
   client.getRestPing.queue(ping => println("Logged in with ping: " + ping))
 }
