@@ -1,0 +1,13 @@
+version: '3'
+
+dotenv: ['.env']
+
+tasks:
+  deploy:
+    desc: Deploy to production
+    cmds:
+      - sbt docker:stage
+      - wsl --user $WSL_USER -- DOCKER_HOST=$DOCKER_HOST TAG={{.TAG}} docker compose up --build --detach
+    vars:
+      TAG:
+        sh: git log -n 1 --format=%h

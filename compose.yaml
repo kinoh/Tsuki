@@ -1,0 +1,6 @@
+services:
+  app:
+    image: tsuki:${TAG}
+    build: target/docker/stage
+    command: openai
+    env_file: .env

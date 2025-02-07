@@ -1,5 +1,10 @@
 val scala3Version = "3.6.3"
 
+enablePlugins(JavaAppPackaging)
+enablePlugins(DockerPlugin)
+
+dockerBaseImage := "eclipse-temurin:latest"
+
 lazy val root = project
   .in(file("."))
   .settings(
