@@ -21,7 +21,7 @@ class OpenAIConversationEngine(apiKey: String) extends ConversationEngine {
   def chat(history: Seq[MessageRecord]): MessageRecord =
     var paramsBuilder =
       ChatCompletionCreateParams.builder()
-      .model(ChatModel.GPT_4O_MINI)
+      .model(ChatModel.GPT_4O)
       .store(true)
     for (message <- history)
       paramsBuilder =
