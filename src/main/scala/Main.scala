@@ -40,6 +40,7 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
     else new DummyConversationEngine
   val repository = new MessageRepository(config.historyCsvPath, config.persist)
   val processor = new MessageProcessor(engine, repository)
+  processor.initializeIfEmpty()
   val token = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
   val client =
     JDABuilder.createLight(token, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
