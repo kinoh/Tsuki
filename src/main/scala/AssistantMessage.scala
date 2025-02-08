@@ -1,19 +1,14 @@
-import play.api.libs.json._
+import upickle.default._
 
 case class AssistantMessage(feeling: Int, activity: Int, message: String)
 object AssistantMessage {
-    implicit val jsonReads: Reads[AssistantMessage] = Json.reads[AssistantMessage]
+    implicit val rw: ReadWriter[AssistantMessage] = macroRW
 }
 
-def parseAssistantMessage(data: String): Option[AssistantMessage] =
+def parseAssistantMessage(data: String): Either[AssistantMessageParseError, AssistantMessage] =
   try {
-    Json
-    .parse(data)
-    .validate[AssistantMessage]
-    .asOpt
+    Right(read[AssistantMessage](data))
   }
   catch {
-    case err =>
-      println("parsing error: " + err.toString())
-      None
+    case err => Left(AssistantMessageParseError(err.toString()))
   }
