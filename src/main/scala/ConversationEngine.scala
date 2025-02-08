@@ -1,3 +1,3 @@
 trait ConversationEngine {
-  def chat(history: Seq[MessageRecord]): MessageRecord
+  def chat(history: Seq[MessageRecord]): Either[ProgramError, MessageRecord]
 }

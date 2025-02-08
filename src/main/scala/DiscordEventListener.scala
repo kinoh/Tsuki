@@ -1,6 +1,7 @@
 import net.dv8tion.jda.api.hooks.ListenerAdapter
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent
 import java.time.format.DateTimeFormatter
+import java.time.Instant
 
 class DiscordEventListener(val processor: MessageProcessor) extends ListenerAdapter {
 
@@ -16,7 +17,8 @@ class DiscordEventListener(val processor: MessageProcessor) extends ListenerAdap
       message
     ))
     if (!event.getAuthor.isBot && isInSpecifiedChannel(event)) {
-      processor.response(message) match {
+      val name = event.getAuthor().getEffectiveName()
+      processor.response(message, name, Instant.now()) match {
         case Right(r) => event.getChannel().sendMessage(r).complete()
         case Left(err) => println("failed to parse: " + err)
       }

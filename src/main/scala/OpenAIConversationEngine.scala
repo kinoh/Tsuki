@@ -18,23 +18,26 @@ class OpenAIConversationEngine(apiKey: String) extends ConversationEngine {
     .apiKey(apiKey)
     .build()
 
-  def chat(history: Seq[MessageRecord]): MessageRecord =
+  def chat(history: Seq[MessageRecord]): Either[ProgramError, MessageRecord] =
     var paramsBuilder =
       ChatCompletionCreateParams.builder()
       .model(ChatModel.GPT_4O)
       .store(true)
-    for (message <- history)
+    for (record <- history)
       paramsBuilder =
-        message.role match {
-          case "developer" => paramsBuilder.addDeveloperMessage(message.content)
-          case "user" => paramsBuilder.addUserMessage(message.content)
-          case "assistant" => paramsBuilder.addMessage(
-            ChatCompletionMessage
-            .builder()
-            .refusal(java.util.Optional.empty())
-            .content(message.content)
-            .build()
-          )
+        record.message match {
+          case u: UserMessage =>
+            record.role match {
+              case "developer" => paramsBuilder.addDeveloperMessage(u.content)
+              case _           => paramsBuilder.addUserMessage(encodeUserMessage(u))
+            }
+          case a: AssistantMessage =>
+            paramsBuilder.addMessage(
+              ChatCompletionMessage.builder()
+                .refusal(java.util.Optional.empty())
+                .content(encodeAssistantMessage(a))
+                .build()
+            )
         }
     val completion = client.chat().completions().create(paramsBuilder.build())
     completion.usage().toScala match {
@@ -45,7 +48,7 @@ class OpenAIConversationEngine(apiKey: String) extends ConversationEngine {
     println(message.toString())
     val role = message._role().toString()
     val content = message.content().get()
-    new MessageRecord(role, content)
+    parseAssistantMessage(content).map(m => MessageRecord(role, "", m))
 }
 
 val instruction = """あなたはタメ口でかわいい口調ながら完璧な知性と豊かな感情を備えた雑談エージェントです。

@@ -28,7 +28,7 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
 
 @main def main(args: String*): Unit = {
   val config =
-    parseArgs(Config("dummy", "./history.csv", false), args) match {
+    parseArgs(Config("dummy", "./history.jsonl", false), args) match {
       case Left(ArgumentParseError(argument)) =>
         println("invalid arg: " + argument)
         return

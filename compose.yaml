@@ -2,7 +2,7 @@ services:
   app:
     image: tsuki:${TAG}
     build: target/docker/stage
-    command: --engine openai --history /var/memory/history.csv --persist
+    command: --engine openai --history /var/memory/history.jsonl --persist
     env_file: .env
     volumes:
       - memory-data:/var/memory
