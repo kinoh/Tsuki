@@ -10,33 +10,10 @@ import java.io.PrintWriter
 import java.nio.charset.Charset
 import java.io.FileWriter
 
-case class MessageRecord(role: String, name: String, message: Message)
+case class MessageRecord(role: String, name: String, message: String)
 
 object MessageRecord {
-  implicit val messageRW: ReadWriter[MessageRecord] = readwriter[ujson.Value].bimap[MessageRecord](
-    {
-      case MessageRecord(role, name, message) =>
-        val messageJson = message match {
-          case u: UserMessage      => writeJs(u)
-          case a: AssistantMessage => writeJs(a)
-        }
-        messageJson.obj.remove("$type")
-        ujson.Obj("role" -> role, "name" -> name, "message" -> messageJson)
-    },
-    json => {
-      val role = json("role").str
-      val messageJson = json("message")
-      val message = role match {
-        case "assistant" =>
-          messageJson("$type") = classOf[AssistantMessage].getName()
-          read[AssistantMessage](messageJson)
-        case _ =>
-          messageJson("$type") = classOf[UserMessage].getName()
-          read[UserMessage](messageJson)
-      }
-      MessageRecord(role, json("name").str, message)
-    }
-  )
+  implicit val rw: ReadWriter[MessageRecord] = macroRW
 }
 
 class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {

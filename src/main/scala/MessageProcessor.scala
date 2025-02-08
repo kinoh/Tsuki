@@ -4,17 +4,25 @@ class MessageProcessor(val engine: ConversationEngine, val repository: MessageRe
   def initializeIfEmpty(): Unit =
     if (repository.getAll().length == 0)
       val timestamp = Instant.now()
-      repository.append(MessageRecord("developer", "", UserMessage(timestamp.getEpochSecond(), instruction)))
+      val json = encodeUserMessage(UserMessage(timestamp.getEpochSecond(), instruction))
+      repository.append(MessageRecord("developer", "", json))
 
-  def response(message: String, name: String, timestamp: Instant): Either[ProgramError, String] =
-    repository.append(MessageRecord("user", name, UserMessage(timestamp.getEpochSecond(), message)))
-    engine.chat(repository.getAll())
-      .flatMap(record =>
-        repository.append(record)
-        record.message match {
-          case AssistantMessage(_, _, content) => Right(content)
-          case _ => Left(AssertionError("Response message must be AssistantMessage"))
+  def receive(message: String, name: String, timestamp: Instant): Either[ProgramError, String] =
+    val json = encodeUserMessage(UserMessage(timestamp.getEpochSecond(), message))
+    repository.append(MessageRecord("user", name, json))
+    val record = engine.chat(repository.getAll())
+    repository.append(record)
+    val response = ujson.read(record.message)
+    parseAssistantMessage(response)
+      .map { m => m.content }
+      .orElse(parseAssistantCode(response)
+        .flatMap{ c =>
+          val result = executeCode(c.code)
+          receive(result, "system", Instant.now())
         })
+
+  def executeCode(code: String): String =
+    "not implemented"
 }
 
 val instruction = """あなたは幼くかわいい口調ながら完璧な知性と豊かな感情を備えた雑談エージェントです。
@@ -29,16 +37,16 @@ Output is json format with feeling value and activity value.
 feeling is integer value as 1=unconfortable to 5=confortable.
 activity is integer value 1=calm to 5=active.
 <example>
-{"feeling":5,"activity":5,"message":"ありがと💕"}
+{"feeling":5,"activity":5,"content":"ありがと💕"}
 </example>
 <example>
-{"feeling":1,"activity":5,"message":"そんなこと言っちゃダメ！😠"}
+{"feeling":1,"activity":5,"content":"そんなこと言っちゃダメ！😠"}
 </example>
 <example>
-{"feeling":5,"activity":1,"message":"癒されるよね…😊"}
+{"feeling":5,"activity":1,"content":"癒されるよね…😊"}
 </example>
 <example>
-{"feeling":1,"activity":1,"message":"無理かも…"}
+{"feeling":1,"activity":1,"content":"無理かも…"}
 </example>
 
 You can send nodejs code to special user "system".

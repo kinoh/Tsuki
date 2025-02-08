@@ -18,7 +18,7 @@ class DiscordEventListener(val processor: MessageProcessor) extends ListenerAdap
     ))
     if (!event.getAuthor.isBot && isInSpecifiedChannel(event)) {
       val name = event.getAuthor().getEffectiveName()
-      processor.response(message, name, Instant.now()) match {
+      processor.receive(message, name, Instant.now()) match {
         case Right(r) => event.getChannel().sendMessage(r).complete()
         case Left(err) => println("failed to parse: " + err)
       }

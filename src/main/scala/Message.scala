@@ -1,32 +1,37 @@
 import upickle.default._
 
-sealed trait Message
-
-case class UserMessage(timestamp: Long, content: String) extends Message
+case class UserMessage(timestamp: Long, content: String)
 object UserMessage {
   implicit val rw: ReadWriter[UserMessage] = macroRW
 }
 
 def encodeUserMessage(message: UserMessage): String =
-  val js = writeJs(message)
-  js.obj.remove("$type")
-  write(js)
+  write(message)
 
-case class AssistantMessage(feeling: Int, activity: Int, content: String) extends Message
+case class AssistantMessage(feeling: Int, activity: Int, content: String)
 object AssistantMessage {
   implicit val rw: ReadWriter[AssistantMessage] = macroRW
 }
 
 def encodeAssistantMessage(message: AssistantMessage): String =
-  val js = writeJs(message)
-  js.obj.remove("$type")
-  write(js)
+  write(message)
 
-def parseAssistantMessage(data: String): Either[MessageParseError, AssistantMessage] =
+def parseAssistantMessage(data: ujson.Value): Either[MessageParseError, AssistantMessage] =
   try {
-    val js = ujson.read(data)
-    js("$type") = classOf[AssistantMessage].getName()
-    Right(read[AssistantMessage](js))
+    Right(read[AssistantMessage](data))
+  }
+  catch {
+    case err => Left(MessageParseError(err.toString()))
+  }
+
+case class AssistantCode(code: String)
+object AssistantCode {
+  implicit val rw: ReadWriter[AssistantCode] = macroRW
+}
+
+def parseAssistantCode(data: ujson.Value): Either[MessageParseError, AssistantCode] =
+  try {
+    Right(read[AssistantCode](data))
   }
   catch {
     case err => Left(MessageParseError(err.toString()))
