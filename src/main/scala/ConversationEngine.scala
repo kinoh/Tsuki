@@ -1,3 +1,3 @@
 trait ConversationEngine {
-  def chat(text: String): String
+  def chat(history: Seq[MessageRecord]): MessageRecord
 }

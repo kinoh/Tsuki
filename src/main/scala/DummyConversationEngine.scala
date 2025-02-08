@@ -1,3 +1,4 @@
 class DummyConversationEngine extends ConversationEngine {
-  def chat(content: String): String = content
+  def chat(history: Seq[MessageRecord]): MessageRecord =
+    MessageRecord("assistant", "{\"feeling\":0,\"activity\":0,\"message\":\"%s\"}".format(history.last.content))
 }

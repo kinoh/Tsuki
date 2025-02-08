@@ -16,5 +16,6 @@ lazy val root = project
     libraryDependencies += "org.scalameta" %% "munit" % "1.0.0" % Test,
     libraryDependencies += "net.dv8tion" % "JDA" % "5.0.0-beta.15",
     libraryDependencies += "com.openai" % "openai-java" % "0.21.1",
-    libraryDependencies += "org.playframework" %% "play-json" % "3.0.4"
+    libraryDependencies += "org.playframework" %% "play-json" % "3.0.4",
+    libraryDependencies += "com.github.tototoshi" %% "scala-csv" % "2.0.0",
   )

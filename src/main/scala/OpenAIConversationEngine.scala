@@ -6,42 +6,33 @@ import com.openai.models.ChatModel
 import com.openai.models.ChatCompletion
 import com.openai.models.ChatCompletionMessage
 import com.openai.models.CompletionUsage
-import com.openai.core.JsonValue
 import scala.collection.mutable.ArrayBuffer
 import com.openai.models.ChatCompletionDeveloperMessageParam
 import com.openai.models.ChatCompletionUserMessageParam
 import com.openai.models.ChatCompletionMessageParam
 import java.util.Optional
 
-enum Role:
-  case Developer, User, Assistant
-
 class OpenAIConversationEngine(apiKey: String) extends ConversationEngine {
   val client =
     OpenAIOkHttpClient.builder()
     .apiKey(apiKey)
     .build()
-  val history = ArrayBuffer(
-    (Role.Developer, instruction)
-  )
 
-  def chat(content: String): String =
-    history += ((Role.User, content))
+  def chat(history: Seq[MessageRecord]): MessageRecord =
     var paramsBuilder =
       ChatCompletionCreateParams.builder()
       .model(ChatModel.GPT_4O_MINI)
       .store(true)
     for (message <- history)
-      val (role, content) = message
       paramsBuilder =
-        role match {
-          case Role.Developer => paramsBuilder.addDeveloperMessage(content)
-          case Role.User => paramsBuilder.addUserMessage(content)
-          case Role.Assistant => paramsBuilder.addMessage(
+        message.role match {
+          case "developer" => paramsBuilder.addDeveloperMessage(message.content)
+          case "user" => paramsBuilder.addUserMessage(message.content)
+          case "assistant" => paramsBuilder.addMessage(
             ChatCompletionMessage
             .builder()
             .refusal(java.util.Optional.empty())
-            .content(content)
+            .content(message.content)
             .build()
           )
         }
@@ -52,9 +43,9 @@ class OpenAIConversationEngine(apiKey: String) extends ConversationEngine {
     }
     val message = completion.choices().asScala.head.message()
     println(message.toString())
-    val response = message.content().get()
-    history += ((Role.Assistant, response))
-    response
+    val role = message._role().toString()
+    val content = message.content().get()
+    new MessageRecord(role, content)
 }
 
 val instruction = """あなたはタメ口でかわいい口調ながら完璧な知性と豊かな感情を備えた雑談エージェントです。

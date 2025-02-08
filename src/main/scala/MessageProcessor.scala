@@ -1,10 +1,11 @@
-class MessageProcessor(val engine: ConversationEngine) {
+class MessageProcessor(val engine: ConversationEngine, val repository: MessageRepository) {
   def response(message: String): Either[AssistantMessageParseError, String] = {
-    val responseJson = engine.chat(message)
-    val response = parseAssistantMessage(responseJson)
-    response match {
+    repository.append(MessageRecord("user", message))
+    val response = engine.chat(repository.getAll())
+    repository.append(response)
+    parseAssistantMessage(response.content) match {
     case Some(r) => Right(r.message)
-    case None => Left(AssistantMessageParseError(responseJson))
+    case None => Left(AssistantMessageParseError(response.content))
     }
   }
 }

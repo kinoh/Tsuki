@@ -6,7 +6,14 @@ object AssistantMessage {
 }
 
 def parseAssistantMessage(data: String): Option[AssistantMessage] =
-  Json
-  .parse(data)
-  .validate[AssistantMessage]
-  .asOpt
+  try {
+    Json
+    .parse(data)
+    .validate[AssistantMessage]
+    .asOpt
+  }
+  catch {
+    case err =>
+      println("parsing error: " + err.toString())
+      None
+  }
