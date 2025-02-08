@@ -4,7 +4,6 @@ enablePlugins(JavaAppPackaging)
 enablePlugins(DockerPlugin)
 
 dockerBaseImage := "eclipse-temurin:latest"
-mappings in Universal += file("history.csv") -> "history.csv"
 
 lazy val root = project
   .in(file("."))
