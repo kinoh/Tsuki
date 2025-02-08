@@ -11,3 +11,17 @@ tasks:
     vars:
       TAG:
         sh: git log -n 1 --format=%h
+  up:
+    desc: Start production
+    cmds:
+      - wsl --user $WSL_USER -- DOCKER_HOST=$DOCKER_HOST TAG={{.TAG}} docker compose up --detach
+    vars:
+      TAG:
+        sh: git log -n 1 --format=%h
+  ps:
+    desc: Do ps in production
+    cmds:
+      - wsl --user $WSL_USER -- DOCKER_HOST=$DOCKER_HOST TAG={{.TAG}} docker compose ps
+    vars:
+      TAG:
+        sh: git log -n 1 --format=%h
