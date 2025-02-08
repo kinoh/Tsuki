@@ -15,10 +15,16 @@ class DiscordEventListener(val processor: MessageProcessor) extends ListenerAdap
       event.getMessage().getTimeCreated().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
       message
     ))
-    if (!event.getAuthor.isBot && event.getChannel().getId() == "1337074638307594280") {
+    if (!event.getAuthor.isBot && isInSpecifiedChannel(event)) {
       processor.response(message) match {
         case Right(r) => event.getChannel().sendMessage(r).complete()
         case Left(err) => println("failed to parse: " + err)
       }
+    }
+  
+  private def isInSpecifiedChannel(event: MessageReceivedEvent): Boolean =
+    scala.util.Properties.envOrElse("DISCORD_CHANNEL", "") match {
+      case "" => true
+      case id => event.getChannel().getId() == id
     }
 }
