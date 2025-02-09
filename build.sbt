@@ -17,4 +17,5 @@ lazy val root = project
     libraryDependencies += "net.dv8tion" % "JDA" % "5.0.0-beta.15",
     libraryDependencies += "com.openai" % "openai-java" % "0.21.1",
     libraryDependencies += "com.lihaoyi" %% "upickle" % "4.1.0",
+    libraryDependencies += "com.softwaremill.sttp.client4" %% "core" % "4.0.0-RC1",
   )

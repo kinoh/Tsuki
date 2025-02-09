@@ -11,7 +11,7 @@ services:
   sandbox:
     image: langgenius/dify-sandbox:0.2.10
     environment:
-      API_KEY: ${SANDBOX_API_KEY}
+      API_KEY: ${DIFY_SANDBOX_API_KEY}
       GIN_MODE: release
       WORKER_TIMEOUT: 10
       ENABLE_NETWORK: true

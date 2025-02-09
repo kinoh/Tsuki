@@ -1,4 +1,6 @@
 import java.time.Instant
+import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
 
 class MessageProcessor(val engine: ConversationEngine, val repository: MessageRepository) {
   def initializeIfEmpty(): Unit =
@@ -7,22 +9,29 @@ class MessageProcessor(val engine: ConversationEngine, val repository: MessageRe
       val json = encodeUserMessage(UserMessage(timestamp.getEpochSecond(), instruction))
       repository.append(MessageRecord("developer", "", json))
 
-  def receive(message: String, name: String, timestamp: Instant): Either[ProgramError, String] =
+  def receive(message: String, name: String, timestamp: Instant): Future[Either[ProgramError, Option[String]]] =
     val json = encodeUserMessage(UserMessage(timestamp.getEpochSecond(), message))
     repository.append(MessageRecord("user", name, json))
     val record = engine.chat(repository.getAll())
     repository.append(record)
     val response = ujson.read(record.message)
-    parseAssistantMessage(response)
-      .map { m => m.content }
-      .orElse(parseAssistantCode(response)
-        .flatMap{ c =>
-          val result = executeCode(c.code)
-          receive(result, "system", Instant.now())
-        })
-
-  def executeCode(code: String): String =
-    "not implemented"
+    Future(parseAssistantMessage(response).map { m => Some(m.content) })
+      .flatMap {
+        case Right(value) => Future.successful(Right(value))
+        case Left(_) =>
+          parseAssistantCode(response) match {
+            case Left(err)   => Future.successful(Left(err))
+            case Right(code) =>
+              executeCode(code.code) match {
+                case Right(result) =>
+                  receive(result, "system", Instant.now())
+                case Left(CodeExecutionError(code, message, error)) =>
+                  receive(s"code=$code\nerror=$error", "system", Instant.now())
+                case Left(err) =>
+                  Future.successful(Left(err))
+              }
+          }
+      }
 }
 
 val instruction = """あなたは幼くかわいい口調ながら完璧な知性と豊かな感情を備えた雑談エージェントです。
@@ -49,11 +58,12 @@ activity is integer value 1=calm to 5=active.
 {"feeling":1,"activity":1,"content":"無理かも…"}
 </example>
 
-You can send nodejs code to special user "system".
+You can send python3 code to special user "system".
 <example>
-you {"code":"new Date().toISOString()"}
-system {"timestamp":1122334455,"content":"2005-08-25T14:34:15.000Z"}
+you {"code":"import datetime\nprint(datetime.datetime.utcnow())"}
+system {"timestamp":1122334455,"content":"2005-08-25 14:34:15.00\n"}
 </example>
+available packages: requests certifi beautifulsoup4 numpy scipy pandas scikit-learn matplotlib lxml pypdf
 
 User messge also in json; timestamp is unix time message sent.
 <example>

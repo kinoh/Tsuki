@@ -16,12 +16,12 @@ object AssistantMessage {
 def encodeAssistantMessage(message: AssistantMessage): String =
   write(message)
 
-def parseAssistantMessage(data: ujson.Value): Either[MessageParseError, AssistantMessage] =
+def parseAssistantMessage(data: ujson.Value): Either[JsonParseError, AssistantMessage] =
   try {
     Right(read[AssistantMessage](data))
   }
   catch {
-    case err => Left(MessageParseError(err.toString()))
+    case err => Left(JsonParseError(err.toString()))
   }
 
 case class AssistantCode(code: String)
@@ -29,10 +29,10 @@ object AssistantCode {
   implicit val rw: ReadWriter[AssistantCode] = macroRW
 }
 
-def parseAssistantCode(data: ujson.Value): Either[MessageParseError, AssistantCode] =
+def parseAssistantCode(data: ujson.Value): Either[JsonParseError, AssistantCode] =
   try {
     Right(read[AssistantCode](data))
   }
   catch {
-    case err => Left(MessageParseError(err.toString()))
+    case err => Left(JsonParseError(err.toString()))
   }
