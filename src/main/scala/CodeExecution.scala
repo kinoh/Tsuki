@@ -6,14 +6,14 @@ import scala.util.Failure
 import scala.util.Success
 import sttp.model.Uri
 
-case class DefiRunResultData(error: String, stdout: String)
-object DefiRunResultData {
-  implicit val rw: ReadWriter[DefiRunResultData] = macroRW
+case class DifyRunResultData(error: String, stdout: String)
+object DifyRunResultData {
+  implicit val rw: ReadWriter[DifyRunResultData] = macroRW
 }
 
-case class DefiRunResult(code: Int, message: String, data: Option[DefiRunResultData])
-object DefiRunResult {
-  implicit val rw: ReadWriter[DefiRunResult] = macroRW
+case class DifyRunResult(code: Int, message: String, data: Option[DifyRunResultData])
+object DifyRunResult {
+  implicit val rw: ReadWriter[DifyRunResult] = macroRW
 }
 
 def executeCode(code: String): Either[ProgramError, String] =
@@ -47,7 +47,7 @@ def executeCode(code: String): Either[ProgramError, String] =
       else Left(HttpRequestError("response code=" + response.code))
     }
     .flatMap { r =>
-      Try(read[DefiRunResult](response.body)) match {
+      Try(read[DifyRunResult](response.body)) match {
         case Success(result) => Right(result)
         case Failure(exception) => Left(JsonParseError(response.body))
       }
