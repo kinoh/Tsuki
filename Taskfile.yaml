@@ -7,21 +7,22 @@ tasks:
     desc: Deploy to production
     cmds:
       - sbt docker:stage
-      - wsl --user $WSL_USER -- DOCKER_HOST=$DOCKER_HOST TAG={{.TAG}} docker compose up --build --detach
+      - wsl --user $WSL_USER -- rsync --recursive --delete ${WSL_PROJECT_ROOT}docker/ $DOCKER_HOST:/etc/tsuki/
+      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose up --build --detach
     vars:
       TAG:
         sh: git log -n 1 --format=%h
   up:
     desc: Start production
     cmds:
-      - wsl --user $WSL_USER -- DOCKER_HOST=$DOCKER_HOST TAG={{.TAG}} docker compose up --detach
+      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose up --detach
     vars:
       TAG:
         sh: git log -n 1 --format=%h
   ps:
     desc: Do ps in production
     cmds:
-      - wsl --user $WSL_USER -- DOCKER_HOST=$DOCKER_HOST TAG={{.TAG}} docker compose ps
+      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose ps
     vars:
       TAG:
         sh: git log -n 1 --format=%h
