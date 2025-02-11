@@ -6,14 +6,14 @@ import scala.util.Failure
 import scala.util.Success
 import sttp.model.Uri
 
-case class DifyRunResultData(error: String, stdout: String)
-object DifyRunResultData {
-  implicit val rw: ReadWriter[DifyRunResultData] = macroRW
+case class SandboxRunResultData(error: String, stdout: String)
+object SandboxRunResultData {
+  implicit val rw: ReadWriter[SandboxRunResultData] = macroRW
 }
 
-case class DifyRunResult(code: Int, message: String, data: Option[DifyRunResultData])
-object DifyRunResult {
-  implicit val rw: ReadWriter[DifyRunResult] = macroRW
+case class SandboxRunResult(code: Int, message: String, data: Option[SandboxRunResultData])
+object SandboxRunResult {
+  implicit val rw: ReadWriter[SandboxRunResult] = macroRW
 }
 
 def executeCode(code: String): Either[ProgramError, String] =
@@ -41,22 +41,20 @@ def executeCode(code: String): Either[ProgramError, String] =
     .header("X-Api-Key", apiKey)
     .body(ujson.write(json))
     .send()
-  Right(response)
+  Either.cond(response.code.isSuccess, response, HttpRequestError(s"response code=${response.code}"))
     .flatMap { r =>
-      if (response.code.isSuccess) Right(r)
-      else Left(HttpRequestError("response code=" + response.code))
-    }
-    .flatMap { r =>
-      Try(read[DifyRunResult](response.body)) match {
-        case Success(result) => Right(result)
-        case Failure(exception) => Left(JsonParseError(response.body))
-      }
+      Try(read[SandboxRunResult](response.body))
+        .toEither
+        .left.map { err => JsonParseError(s"${err} : ${response.body}") }
     }
     .flatMap { r =>
       r.data match {
         case Some(data) =>
-          if (data.error == "") Right(data.stdout)
-          else Left(CodeExecutionError(r.code, r.message, Some(data.error)))
-        case None => Left(CodeExecutionError(r.code, r.message, None))
+          Either.cond(
+            data.error.isEmpty(),
+            data.stdout,
+            CodeExecutionError(r.code, r.message, Some(data.error)))
+        case None =>
+          Left(CodeExecutionError(r.code, r.message, None))
       }
     }
