@@ -6,9 +6,9 @@ import java.io.File
 import upickle.default._
 import scala.io.Source
 import scala.util.Using
-import java.io.PrintWriter
 import java.nio.charset.Charset
 import java.io.FileWriter
+import java.io.BufferedWriter
 
 case class MessageRecord(role: String, name: String, message: String)
 
@@ -18,7 +18,7 @@ object MessageRecord {
 
 class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
   private val data = load(path)
-  private var writer = Option.when(persist)(new PrintWriter(FileWriter(path, Charset.forName("UTF-8"), true)))
+  private var writer = Option.when(persist)(new BufferedWriter(FileWriter(path, Charset.forName("UTF-8"), true)))
 
   private def load(path: String): ArrayBuffer[MessageRecord] = {
     val buf = new ArrayBuffer[MessageRecord]
@@ -47,7 +47,8 @@ class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
     println("append: " + record.toString())
     data.addOne(record)
     writer.foreach { w =>
-      w.println(write(record))
+      w.write(write(record))
+      w.write("\n")
       w.flush()
     }
 
@@ -60,10 +61,11 @@ class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
       writer.foreach { w =>
         println("work with writer")
         w.close()
-        val rewriter = new PrintWriter(FileWriter(path, Charset.forName("UTF-8")))
+        val rewriter = new BufferedWriter(FileWriter(path, Charset.forName("UTF-8")))
         data.foreach { record =>
           println(s"rewrite: ${record}")
-          rewriter.println(write(record))
+          rewriter.write(write(record))
+          rewriter.write("\n")
         }
         rewriter.flush()
         writer = Some(rewriter)
