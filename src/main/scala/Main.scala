@@ -3,7 +3,7 @@ import net.dv8tion.jda.api.JDABuilder
 import net.dv8tion.jda.api.requests.GatewayIntent
 import net.dv8tion.jda.api.entities.Activity
 
-case class Config(engine: String, historyCsvPath: String, persist: Boolean)
+case class Config(engine: String, historyCsvPath: String, persist: Boolean, rewrite: Boolean)
 
 @scala.annotation.tailrec
 def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Config] = {
@@ -17,6 +17,9 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
     case "--persist" :: rest => {
       parseArgs(result.copy(persist = true), rest)
     }
+    case "--rewrite" :: rest => {
+      parseArgs(result.copy(rewrite = true), rest)
+    }
     case Nil => {
       Right(result)
     }
@@ -28,7 +31,7 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
 
 @main def main(args: String*): Unit = {
   val config =
-    parseArgs(Config("dummy", "./history.jsonl", false), args) match {
+    parseArgs(Config("dummy", "./history.jsonl", false, false), args) match {
       case Left(ArgumentParseError(argument)) =>
         println("invalid arg: " + argument)
         return
@@ -40,7 +43,7 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
     else new DummyConversationEngine
   val repository = new MessageRepository(config.historyCsvPath, config.persist)
   val processor = new MessageProcessor(engine, repository)
-  processor.initializeIfEmpty()
+  processor.initialize(config.rewrite)
   val token = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
   val client =
     JDABuilder.createLight(token, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)

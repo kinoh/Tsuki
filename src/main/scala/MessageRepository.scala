@@ -18,7 +18,7 @@ object MessageRecord {
 
 class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
   private val data = load(path)
-  private val writer = Option.when(persist)(new PrintWriter(FileWriter(path, Charset.forName("UTF-8"), true)))
+  private var writer = Option.when(persist)(new PrintWriter(FileWriter(path, Charset.forName("UTF-8"), true)))
 
   private def load(path: String): ArrayBuffer[MessageRecord] = {
     val buf = new ArrayBuffer[MessageRecord]
@@ -35,6 +35,14 @@ class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
   def getAll(): IndexedSeq[MessageRecord] =
     data.toIndexedSeq
 
+  def getDeveloperAndRecent(n: Int): IndexedSeq[MessageRecord] =
+    data.zipWithIndex
+      .filter { (record, index) =>
+        record.role == "developer" || index >= data.length - n
+      }
+      .map { (record, index) => record }
+      .toIndexedSeq
+
   def append(record: MessageRecord): Unit =
     println("append: " + record.toString())
     data.addOne(record)
@@ -42,6 +50,26 @@ class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
       w.println(write(record))
       w.flush()
     }
+
+  def rewriteDeveloperPrompt(record: MessageRecord): Unit =
+    println("rewrite developer prompt: " + record.toString())
+    if (data.nonEmpty && data(0).role == "developer")
+      println("do rewrite")
+      data(0) = record
+      println(s"records: ${data.length}")
+      writer.foreach { w =>
+        println("work with writer")
+        w.close()
+        val rewriter = new PrintWriter(FileWriter(path, Charset.forName("UTF-8")))
+        data.foreach { record =>
+          println(s"rewrite: ${record}")
+          rewriter.println(write(record))
+        }
+        rewriter.flush()
+        writer = Some(rewriter)
+      }
+    else
+      throw new RuntimeException("developer prompt not found")
 
   def close(): Unit =
     writer.foreach { w =>
