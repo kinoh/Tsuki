@@ -19,10 +19,31 @@ tasks:
     vars:
       TAG:
         sh: git log -n 1 --format=%h
+  down:
+    desc: Stop production
+    cmds:
+      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose down
+    vars:
+      TAG:
+        sh: git log -n 1 --format=%h
+  restart:
+    desc: Restart in production
+    cmds:
+      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose restart
+    vars:
+      TAG:
+        sh: git log -n 1 --format=%h
   ps:
     desc: Do ps in production
     cmds:
       - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose ps
+    vars:
+      TAG:
+        sh: git log -n 1 --format=%h
+  build:
+    desc: Do build in production
+    cmds:
+      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose build
     vars:
       TAG:
         sh: git log -n 1 --format=%h
