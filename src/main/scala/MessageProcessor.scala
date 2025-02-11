@@ -3,7 +3,7 @@ import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 
 class MessageProcessor(val engine: ConversationEngine, val repository: MessageRepository) {
-  val historyLimit = 11;
+  val historyLimit = 11
 
   def initialize(rewriteDeveloperPrompt: Boolean): Unit =
     val timestamp = Instant.now()
