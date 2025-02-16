@@ -1,0 +1,7 @@
+services:
+  app:
+    image: tsuki-dev
+    build: .devcontainer/
+    command: []
+    volumes:
+      - .:/workspace:cached
