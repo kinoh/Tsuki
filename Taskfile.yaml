@@ -1,49 +1,35 @@
 version: '3'
 
-dotenv: ['.env']
+dotenv: ['.env', '.env.local']
+
+env:
+  TAG:
+    sh: git log -n 1 --format=%h
 
 tasks:
   deploy:
     desc: Deploy to production
     cmds:
       - sbt docker:stage
-      - wsl --user $WSL_USER -- rsync --recursive --delete ${WSL_PROJECT_ROOT}docker/ $DOCKER_HOST:/etc/tsuki/
-      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose up --build --detach
-    vars:
-      TAG:
-        sh: git log -n 1 --format=%h
+      - rsync --recursive --delete ./docker/ {{.REMOTE_HOST}}:/etc/tsuki/
+      - docker compose up --build --detach
   up:
     desc: Start production
     cmds:
-      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose up --detach
-    vars:
-      TAG:
-        sh: git log -n 1 --format=%h
+      - docker compose up --detach
   down:
     desc: Stop production
     cmds:
-      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose down
-    vars:
-      TAG:
-        sh: git log -n 1 --format=%h
+      - docker compose down
   restart:
     desc: Restart in production
     cmds:
-      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose restart
-    vars:
-      TAG:
-        sh: git log -n 1 --format=%h
+      - docker compose restart
   ps:
     desc: Do ps in production
     cmds:
-      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose ps
-    vars:
-      TAG:
-        sh: git log -n 1 --format=%h
+      - docker compose ps
   build:
     desc: Do build in production
     cmds:
-      - wsl --user $WSL_USER -- DOCKER_HOST=ssh://$DOCKER_HOST TAG={{.TAG}} docker compose build
-    vars:
-      TAG:
-        sh: git log -n 1 --format=%h
+      - docker compose build
