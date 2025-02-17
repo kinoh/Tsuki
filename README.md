@@ -1,5 +1,9 @@
 ## Tsuki: Kawaii chat agent
 
+### Development
+
+- You may have to run `sbt bloopInstall` right after rebuilding dev container
+
 ### License
 
 This software includes modified versions of the following components:
