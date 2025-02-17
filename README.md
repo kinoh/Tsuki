@@ -2,7 +2,7 @@
 
 ### License
 
-This software includes modified versions of the following Apache-licensed components:
+This software includes modified versions of the following components:
 
 #### [Dify](https://github.com/langgenius/dify)
 
