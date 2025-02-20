@@ -10,6 +10,7 @@ services:
       - sandbox
   sandbox:
     image: langgenius/dify-sandbox:0.2.10
+    build: docker/dify-sandbox
     environment:
       API_KEY: ${DIFY_SANDBOX_API_KEY}
       GIN_MODE: release
@@ -18,19 +19,13 @@ services:
       HTTP_PROXY: http://ssrf-proxy:3128
       HTTPS_PROXY: http://ssrf-proxy:3128
       SANDBOX_PORT: 8194
-    volumes:
-      - /etc/tsuki/volumes/sandbox/dependencies:/dependencies
-      - /etc/tsuki/volumes/sandbox/conf:/conf
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8194/health" ]
     networks:
       - ssrf_proxy_network
   ssrf-proxy:
-    image: ubuntu/squid:6.6-24.04_beta
-    volumes:
-      - /etc/tsuki/ssrf_proxy/squid.conf.template:/etc/squid/squid.conf.template
-      - /etc/tsuki/ssrf_proxy/docker-entrypoint.sh:/docker-entrypoint-mount.sh
-    entrypoint: [ "sh", "-c", "cp /docker-entrypoint-mount.sh /docker-entrypoint.sh && sed -i 's/\r$$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh && /docker-entrypoint.sh" ]
+    image: ssrf-proxy:6.6-24.04_beta
+    build: docker/ssrf-proxy
     environment:
       HTTP_PORT: 3128
       COREDUMP_DIR: /var/spool/squid
