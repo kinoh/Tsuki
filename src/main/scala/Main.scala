@@ -49,7 +49,7 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
     JDABuilder.createLight(token, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
     .addEventListeners(new DiscordEventListener(queue))
     .build()
-  val processor = new MessageProcessor(engine, repository, (content, channel) => {
+  val processor = new EventProcessor(engine, repository, (content, channel) => {
     client.getTextChannelById(channel).sendMessage(content).complete()
   })
   processor.initialize(config.rewrite)

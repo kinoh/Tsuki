@@ -13,7 +13,7 @@ case class AssistantCodeExecutionEvent(code: AssistantCode, channel: String) ext
 
 type MessageSender = (String, String) => Unit
 
-class MessageProcessor(val engine: ConversationEngine, val repository: MessageRepository, val sender: MessageSender) {
+class EventProcessor(val engine: ConversationEngine, val repository: MessageRepository, val sender: MessageSender) {
   val historyLimit = 11
 
   def initialize(rewriteDeveloperPrompt: Boolean): Unit =
