@@ -2,6 +2,7 @@ import collection.JavaConverters._
 import net.dv8tion.jda.api.JDABuilder
 import net.dv8tion.jda.api.requests.GatewayIntent
 import net.dv8tion.jda.api.entities.Activity
+import java.util.concurrent.LinkedBlockingQueue
 
 case class Config(engine: String, historyCsvPath: String, persist: Boolean, rewrite: Boolean)
 
@@ -42,14 +43,19 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
     then new OpenAIConversationEngine(scala.util.Properties.envOrElse("OPENAI_API_KEY", ""))
     else new DummyConversationEngine
   val repository = new MessageRepository(config.historyCsvPath, config.persist)
-  val processor = new MessageProcessor(engine, repository)
-  processor.initialize(config.rewrite)
+  val queue = LinkedBlockingQueue[Event]()
   val token = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
   val client =
     JDABuilder.createLight(token, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
-    .addEventListeners(new DiscordEventListener(processor))
+    .addEventListeners(new DiscordEventListener(queue))
     .build()
+  val processor = new MessageProcessor(engine, repository, (content, channel) => {
+    client.getTextChannelById(channel).sendMessage(content).complete()
+  })
+  processor.initialize(config.rewrite)
   client.getRestPing.queue(ping => println("Logged in with ping: " + ping))
+
+  processor.run(queue)
 
   // Event listener runs in different thread
   Runtime.getRuntime.addShutdownHook(new Thread(() =>

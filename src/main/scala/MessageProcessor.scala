@@ -1,8 +1,19 @@
 import java.time.Instant
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
+import java.util.concurrent.BlockingQueue
+import scala.util.Failure
+import scala.util.Success
 
-class MessageProcessor(val engine: ConversationEngine, val repository: MessageRepository) {
+sealed abstract class Event
+
+case class UserMessageEvent(content: String, name: String, channel: String) extends Event
+case class AssistantMessageIntentEvent(message: AssistantMessage, channel: String) extends Event
+case class AssistantCodeExecutionEvent(code: AssistantCode, channel: String) extends Event
+
+type MessageSender = (String, String) => Unit
+
+class MessageProcessor(val engine: ConversationEngine, val repository: MessageRepository, val sender: MessageSender) {
   val historyLimit = 11
 
   def initialize(rewriteDeveloperPrompt: Boolean): Unit =
@@ -13,29 +24,51 @@ class MessageProcessor(val engine: ConversationEngine, val repository: MessageRe
     else if (rewriteDeveloperPrompt)
       repository.rewriteDeveloperPrompt(MessageRecord("developer", "", json))
 
-  def receive(message: String, name: String, timestamp: Instant): Future[Either[ProgramError, Option[String]]] =
-    val json = encodeUserMessage(UserMessage(timestamp.getEpochSecond(), message))
-    repository.append(MessageRecord("user", name, json))
-    val record = engine.chat(repository.getDeveloperAndRecent(historyLimit))
-    repository.append(record)
-    val response = ujson.read(record.message)
-    Future(parseAssistantMessage(response).map { m => Some(m.content) })
-      .flatMap {
-        case Right(value) => Future.successful(Right(value))
-        case Left(_) =>
-          parseAssistantCode(response) match {
-            case Left(err)   => Future.successful(Left(err))
-            case Right(code) =>
-              executeCode(code.code) match {
-                case Right(result) =>
-                  receive(result, "system", Instant.now())
-                case Left(CodeExecutionError(code, message, error)) =>
-                  receive(s"code=$code\nerror=$error", "system", Instant.now())
-                case Left(err) =>
-                  Future.successful(Left(err))
+  def run(queue: BlockingQueue[Event]): Unit =
+    while (true)
+      val event = queue.take()
+      Future(next(event, Instant.now()))
+        .onComplete {
+          case Success(response) => response match {
+            case Right(content) => content match {
+              case Some(value) => queue.put(value)
+              case None => println("event finished")
+            }
+            case Left(value) => println(s"error: $value")
+          }
+          case Failure(exception) => println(s"future failed: $exception")
+        }
+
+  private def next(event: Event, timestamp: Instant): Either[ProgramError, Option[Event]] =
+    event match
+      case UserMessageEvent(content, name, channel) =>
+        val json = encodeUserMessage(UserMessage(timestamp.getEpochSecond(), content))
+        repository.append(MessageRecord("user", name, json))
+        val record = engine.chat(repository.getDeveloperAndRecent(historyLimit))
+        repository.append(record)
+        val response = ujson.read(record.message)
+        parseAssistantMessage(response)
+          .map { m =>
+            Some(AssistantMessageIntentEvent(m, channel))
+          }
+          .orElse {
+            parseAssistantCode(response)
+              .map { code =>
+                Some(AssistantCodeExecutionEvent(code, channel))
               }
           }
-      }
+      case AssistantMessageIntentEvent(message, channel) =>
+        sender(message.content, channel)
+        Right(None)
+      case AssistantCodeExecutionEvent(code, channel) =>
+        executeCode(code.code) match {
+          case Right(result) =>
+            Right(Some(UserMessageEvent(result, "system", channel)))
+          case Left(CodeExecutionError(code, message, error)) =>
+            Right(Some(UserMessageEvent(s"code=$code\nerror=$error", "system", channel)))
+          case Left(err) =>
+            Left(err)
+        }
 }
 
 val instruction = """あなたは幼くかわいい口調ながら完璧な知性と豊かな感情を備えた雑談エージェントです。
