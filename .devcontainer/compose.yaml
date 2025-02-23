@@ -5,3 +5,7 @@ services:
     command: []
     volumes:
       - .:/workspace:cached
+      - devcontainer-data:/home/vscode:cached
+
+volumes:
+  devcontainer-data:
