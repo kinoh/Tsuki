@@ -38,9 +38,17 @@ services:
     networks:
       - ssrf_proxy_network
       - default
+  mumble-server:
+    image: mumblevoip/mumble-server:v1.5.735-2
+    ports:
+      - "64738:64738"
+      - "64738:64738/udp"
+    volumes:
+      - mumble-data:/data
 
 volumes:
   memory-data:
+  mumble-data:
 
 networks:
   ssrf_proxy_network:

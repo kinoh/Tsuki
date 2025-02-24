@@ -13,9 +13,16 @@ lazy val root = project
 
     scalaVersion := scala3Version,
 
+    resolvers += "jitpack" at "https://jitpack.io",
+
     libraryDependencies += "org.scalameta" %% "munit" % "1.0.0" % Test,
     libraryDependencies += "net.dv8tion" % "JDA" % "5.0.0-beta.15",
     libraryDependencies += "com.openai" % "openai-java" % "0.21.1",
     libraryDependencies += "com.lihaoyi" %% "upickle" % "4.1.0",
     libraryDependencies += "com.softwaremill.sttp.client4" %% "core" % "4.0.0-RC1",
+    libraryDependencies += "com.github.lostromb.concentus" % "Concentus" % "6c2328dc19044601e33a9c11628b8d60e1f3011c",
+  )
+
+Compile / PB.targets := Seq(
+  scalapb.gen(flatPackage=true) -> (Compile / sourceManaged).value / "scalapb"
   )

@@ -6,6 +6,9 @@ services:
     volumes:
       - .:/workspace:cached
       - devcontainer-data:/home/vscode:cached
+  mumble-server:
+    environment:
+      MUMBLE_VERBOSE: true
 
 volumes:
   devcontainer-data:
