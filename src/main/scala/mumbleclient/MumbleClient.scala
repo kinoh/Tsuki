@@ -15,6 +15,8 @@ import club.minnced.opus.util.OpusLibrary
 import org.concentus.OpusDecoder
 import org.apache.hc.core5.util.ByteArrayBuffer
 import java.util.concurrent.BlockingQueue
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 type MumbleMessage =
   Mumble.Version
@@ -76,7 +78,7 @@ enum MumblePacketType(val id: Char):
   case SuggestConfig          extends MumblePacketType(25)
   case PluginDataTransmission extends MumblePacketType(26)
 
-class MumbleClient(val hostname: String, val port: Int) {
+class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = false) {
   val engine = initEngine()
   val socketChannel = openSocketChannel()
   val session = engine.getSession()
@@ -85,10 +87,14 @@ class MumbleClient(val hostname: String, val port: Int) {
   val peerAppData = ByteBuffer.allocate(session.getApplicationBufferSize())
   val peerNetData = ByteBuffer.allocate(session.getPacketBufferSize())
 
+  def sampleRate: Int =
+    48000
   def audioChannels: Int =
     1
   def audioBufferSize: Int =
     960 * audioChannels
+  def pingInterval: Int =
+    20000
 
   private def openSocketChannel(): SocketChannel =
     val channel = SocketChannel.open()
@@ -232,12 +238,20 @@ class MumbleClient(val hostname: String, val port: Int) {
 
     println("receive CryptSetup")
 
-    val decoder = OpusDecoder(48000, audioChannels)
+    val decoder = OpusDecoder(sampleRate, audioChannels)
 
     if sharedBuffer.length < audioBufferSize then
       return Some("buffer length not enough")
 
+    var lastPing = Instant.now()
+
     while (true) {
+      val now = Instant.now()
+      if lastPing.until(now, ChronoUnit.MILLIS) >= pingInterval then
+        val ping = MumbleUDP.Ping(now.toEpochMilli(), false)
+        sendMessage(ping)
+        lastPing = now
+
       val num = socketChannel.read(peerNetData)
       if (num == -1) {
         return Some("closed!")
@@ -254,7 +268,8 @@ class MumbleClient(val hostname: String, val port: Int) {
             println(s"  serverNonce: ${message.serverNonce}")
             println(s"  key: ${message.key}")
           case Right(audio: MumbleUDP.Audio) =>
-            println(s"Audio: header=${audio.header} session=${audio.senderSession} framenum=${audio.frameNumber}")
+            if logUDP then
+              println(s"Audio: header=${audio.header} session=${audio.senderSession} framenum=${audio.frameNumber}")
             val data = audio.opusData.toByteArray()
             val n = sharedBuffer.synchronized {
               decoder.decode(data, 0, data.length, sharedBuffer, 0, sharedBuffer.length, false)
@@ -366,7 +381,8 @@ class MumbleClient(val hostname: String, val port: Int) {
     val payloadLength = packet.getInt()
     val buffer = new Array[Byte](payloadLength)
     packet.get(buffer, 0, payloadLength)
-    println(s"packetType=${packetType.toInt} payloadLength=${payloadLength}")
+    if packetType != MumblePacketType.UDPTunnel.id || logUDP then
+      println(s"packetType=${packetType.toInt} payloadLength=${payloadLength}")
     // println(s"payload: ${Hex.encodeHexString(buffer)}")
     val data = packetType match {
       case MumblePacketType.Version.id =>                Mumble.Version.validate(buffer)
