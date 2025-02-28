@@ -38,24 +38,29 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
         return
       case Right(value) => value
     }
+
   val engine =
     if config.engine == "openai"
     then new OpenAIConversationEngine(scala.util.Properties.envOrElse("OPENAI_API_KEY", ""))
     else new DummyConversationEngine
   val repository = new MessageRepository(config.historyCsvPath, config.persist)
-  val queue = LinkedBlockingQueue[Event]()
-  val token = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
-  val client =
-    JDABuilder.createLight(token, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
-    .addEventListeners(new DiscordEventListener(queue))
+  val eventQueue = LinkedBlockingQueue[Event]()
+
+  val discordToken = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
+  val discordChannel = scala.util.Properties.envOrElse("DISCORD_CHANNEL", "")
+  val discord =
+    JDABuilder.createLight(discordToken, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
+    .addEventListeners(new DiscordEventListener(eventQueue, discordChannel))
     .build()
-  val processor = new EventProcessor(engine, repository, (content, channel) => {
-    client.getTextChannelById(channel).sendMessage(content).complete()
+
+  discord.getRestPing.queue(ping => println("Logged in with ping: " + ping))
+
+  val processor = new EventProcessor(engine, repository, (content) => {
+    discord.getTextChannelById(discordChannel).sendMessage(content).complete()
   })
   processor.initialize(config.rewrite)
-  client.getRestPing.queue(ping => println("Logged in with ping: " + ping))
 
-  processor.run(queue)
+  processor.run(eventQueue)
 
   // Event listener runs in different thread
   Runtime.getRuntime.addShutdownHook(new Thread(() =>

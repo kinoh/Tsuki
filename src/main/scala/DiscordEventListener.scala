@@ -7,7 +7,7 @@ import scala.util.Failure
 import scala.concurrent.ExecutionContext.Implicits.global
 import java.util.concurrent.BlockingQueue
 
-class DiscordEventListener(val queue: BlockingQueue[Event]) extends ListenerAdapter {
+class DiscordEventListener(val queue: BlockingQueue[Event], val channelId: String) extends ListenerAdapter {
 
   override def onMessageReceived(event: MessageReceivedEvent): Unit =
     val message = event.getMessage().getContentDisplay()
@@ -20,14 +20,7 @@ class DiscordEventListener(val queue: BlockingQueue[Event]) extends ListenerAdap
       event.getMessage().getTimeCreated().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
       message
     ))
-    if (!event.getAuthor.isBot && isInSpecifiedChannel(event)) {
+    if !event.getAuthor.isBot && event.getChannel().getId() == channelId then
       val name = event.getAuthor().getEffectiveName()
-      queue.put(UserMessageEvent(message, name, event.getChannel().getId()))
-    }
-  
-  private def isInSpecifiedChannel(event: MessageReceivedEvent): Boolean =
-    scala.util.Properties.envOrElse("DISCORD_CHANNEL", "") match {
-      case "" => true
-      case id => event.getChannel().getId() == id
-    }
+      queue.put(UserMessageEvent(name, "text", message))
 }

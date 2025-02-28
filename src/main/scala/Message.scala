@@ -1,6 +1,6 @@
 import upickle.default._
 
-case class UserMessage(timestamp: Long, content: String)
+case class UserMessage(modality: String, content: String)
 object UserMessage {
   implicit val rw: ReadWriter[UserMessage] = macroRW
 }
