@@ -1,22 +1,25 @@
 package mumbleclient
 
-import javax.net.ssl.*
-import java.security.*
-import java.nio.channels.SocketChannel
+import club.minnced.opus.util.OpusLibrary
+import org.apache.hc.client5.http.utils.Hex
+import org.apache.hc.core5.util.ByteArrayBuffer
+import org.concentus.OpusDecoder
+
+import java.io.FileInputStream
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
-import java.io.FileInputStream
-import org.apache.hc.client5.http.utils.Hex
-import javax.net.ssl.SSLEngineResult.HandshakeStatus
-import javax.net.ssl.SSLEngineResult.Status
+import java.nio.channels.SocketChannel
+import java.security.*
 import java.security.cert.X509Certificate
-import scala.util.{Try, Success, Failure}
-import club.minnced.opus.util.OpusLibrary
-import org.concentus.OpusDecoder
-import org.apache.hc.core5.util.ByteArrayBuffer
-import java.util.concurrent.BlockingQueue
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.BlockingQueue
+import javax.net.ssl.*
+import javax.net.ssl.SSLEngineResult.HandshakeStatus
+import javax.net.ssl.SSLEngineResult.Status
+import scala.util.Failure
+import scala.util.Success
+import scala.util.Try
 
 type MumbleMessage =
   Mumble.Version
