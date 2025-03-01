@@ -23,7 +23,7 @@ import scala.util.Try
 
 type MumbleMessage =
   Mumble.Version
-  // | Mumble.UDPTunnel
+  | Mumble.UDPTunnel
   | Mumble.Authenticate
   | Mumble.Ping
   | Mumble.Reject
@@ -90,6 +90,8 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
   val myNetData = ByteBuffer.allocate(session.getPacketBufferSize())
   val peerAppData = ByteBuffer.allocate(session.getApplicationBufferSize())
   val peerNetData = ByteBuffer.allocate(session.getPacketBufferSize())
+
+  var socketChannel: Option[SocketChannel] = None
   var userBySession = Map[Int, String]()
 
   def sampleRate: Int =
@@ -124,7 +126,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     }
     channel
 
-  private def doHandshake(socketChannel: SocketChannel): Option[String] =
+  private def doHandshake(socketChannel: SocketChannel): Either[String, ConnectionState] =
     val appBufferSize = engine.getSession().getApplicationBufferSize()
     val myAppData = ByteBuffer.allocate(appBufferSize)
     val peerAppData = ByteBuffer.allocate(appBufferSize)
@@ -134,11 +136,13 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     while (true) {
       println(s"HandshakeStatus: ${hs}")
       hs match {
+        case HandshakeStatus.FINISHED =>
+          return Right(ConnectionState(socketChannel, Map(), Map()))
         case HandshakeStatus.NEED_UNWRAP =>
           var remaining = true
           while (remaining) {
             if (socketChannel.read(peerNetData) < 0) {
-              return Some("channel closed")
+              return Left("channel closed")
             }
             peerNetData.flip()
             val res = engine.unwrap(peerNetData, peerAppData)
@@ -150,9 +154,9 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
               case Status.BUFFER_UNDERFLOW =>
                 Thread.sleep(100)
               case Status.BUFFER_OVERFLOW =>
-                return Some("buffer overflow")
+                return Left("buffer overflow")
               case Status.CLOSED =>
-                return Some("closed")
+                return Left("closed")
             }
           }
         case HandshakeStatus.NEED_WRAP =>
@@ -164,15 +168,15 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
                 myNetData.flip()
                 while (myNetData.hasRemaining()) {
                   if (socketChannel.write(myNetData) < 0) {
-                    return Some("channel closed")
+                    return Left("channel closed")
                   }
                 }
               case Status.BUFFER_OVERFLOW =>
-                return Some("buffer overflow")
+                return Left("buffer overflow")
               case Status.BUFFER_UNDERFLOW =>
-                return Some("buffer underflow")
+                return Left("buffer underflow")
               case Status.CLOSED =>
-                return Some("closed")
+                return Left("closed")
             }
         case HandshakeStatus.NEED_TASK =>
           var task: Runnable = null
@@ -184,123 +188,119 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
           }
           hs = engine.getHandshakeStatus()
           if (hs == HandshakeStatus.NEED_TASK) {
-            return Some("handshake shouldn't need additional tasks")
+            return Left("handshake shouldn't need additional tasks")
           }
-
-        case HandshakeStatus.FINISHED =>
-          return None
         case HandshakeStatus.NEED_UNWRAP_AGAIN =>
-          return Some("need unwrap again (not implemented)")
+          return Left("need unwrap again (not implemented)")
         case HandshakeStatus.NOT_HANDSHAKING =>
-          return Some("not handshaking")
+          return Left("not handshaking")
       }
     }
-    Some("unreachable")
+    Left("unreachable")
 
-  def connect(sharedBuffer: Array[Short], notifier: BlockingQueue[AudioNotification]): Option[String] =
-    val socketChannel = openSocketChannel()
+  def connect(): Option[String] =
+    doHandshake(openSocketChannel())
+      .left.map { err => s"handshake error: ${err}" }
+      .flatMap { c =>
+        unwrapMessage()
+          .flatMap(c.receive)
+      }
+      .flatMap { c =>
+        val version = Mumble.Version(
+          None,
+          Some(0x0001000500000000L),
+          Some("Tsuki"),
+          Option(System.getProperty("os.name")),
+          Option(System.getProperty("os.version"))
+        )
+        println(s"client version: ${version}")
+        sendMessage(c.socketChannel, version)
+          .toLeft(c)
+      }
+      .flatMap { c =>
+        val auth = Mumble.Authenticate(
+          Some("tsuki"),
+          None,
+          Seq(),
+          Seq(),
+          Some(true)
+        )
+        println(s"authenticate: ${auth}")
+        sendMessage(c.socketChannel, auth)
+          .toLeft(c)
+      }
+      .flatMap { c =>
+        receiveMessage(c.socketChannel)
+          .flatMap(c.receive)
+      }
+      .flatMap { c =>
+        userBySession = userBySession ++ c.userBySession
+        socketChannel = Some(c.socketChannel)
+        Either.cond(userBySession.size == 0, (), "connection not established")
+      }
+      .left.toOption
 
-    doHandshake(socketChannel) match {
+  def run(sharedBuffer: Array[Short], notifier: BlockingQueue[AudioNotification]): Option[String] =
+    socketChannel match
       case None =>
-      case Some(err) =>
-        return Some(s"handshake error: ${err}")
-    }
+        Some("no connection established")
 
-    println("receive version message")
+      case Some(channel) =>
+        val decoder = OpusDecoder(sampleRate, audioChannels)
 
-    readMessage() match {
-      case Left("no data") =>
-        return Some("version not received")
-      case Right(messages: Seq[MumbleMessage]) =>
-        messages.foreach { m =>
-          println(s"receive: ${m}")
-        }
-      case Left(err) =>
-        return Some(err)
-    }
+        if sharedBuffer.length < audioBufferSize then
+          return Some("buffer length not enough")
 
-    println("send version message")
+        var lastPing = Instant.now()
 
-    val version = Mumble.Version(
-      None,
-      Some(0x0001000500000000L),
-      Some("Tsuki"),
-      Option(System.getProperty("os.name")),
-      Option(System.getProperty("os.version"))
-    )
-    sendMessage(socketChannel, version)
+        while true do
+          val now = Instant.now()
+          if lastPing.until(now, ChronoUnit.MILLIS) >= pingInterval then
+            val ping = MumbleUDP.Ping(now.toEpochMilli(), false)
+            sendMessage(channel, ping)
+            lastPing = now
 
-    println("send auth")
+          val num = channel.read(peerNetData)
+          if num == -1 then
+            return Some("closed!")
+          else if num == 0 then
+            Thread.sleep(2)
+          else
+            unwrapMessage() match
+              case Left("no data") =>
+                println("no data")
+              case Right(messages: Seq[MumbleMessage]) =>
+                messages.foreach {
+                  case audio: MumbleUDP.Audio =>
+                    if logUDP then
+                      println(s"Audio: header=${audio.header} session=${audio.senderSession} framenum=${audio.frameNumber}")
+                    userBySession.get(audio.senderSession) match
+                      case None =>
+                        println("unknown user")
+                      case Some(user) =>
+                        val data = audio.opusData.toByteArray()
+                        val n = sharedBuffer.synchronized {
+                          decoder.decode(data, 0, data.length, sharedBuffer, 0, sharedBuffer.length, false)
+                        }
+                        notifier.put(AudioNotification(n, user))
+                  case userState: Mumble.UserState =>
+                    (userState.session, userState.name) match
+                      case (Some(session), Some(name)) =>
+                        userBySession = userBySession + (session -> name)
+                      case _ =>
+                        println(s"incomplete UserState")
+                  case message =>
+                    println(s"received: ${message}")
+                }
+              case Left(err) =>
+                return Some(err)
 
-    val auth = Mumble.Authenticate(
-      Some("tsuki"),
-      None,
-      Seq(),
-      Seq(),
-      Some(true)
-    )
-    sendMessage(socketChannel, auth)
-
-    println("receive CryptSetup")
-
-    val decoder = OpusDecoder(sampleRate, audioChannels)
-
-    if sharedBuffer.length < audioBufferSize then
-      return Some("buffer length not enough")
-
-    var lastPing = Instant.now()
-
-    while (true) {
-      val now = Instant.now()
-      if lastPing.until(now, ChronoUnit.MILLIS) >= pingInterval then
-        val ping = MumbleUDP.Ping(now.toEpochMilli(), false)
-        sendMessage(socketChannel, ping)
-        lastPing = now
-
-      val num = socketChannel.read(peerNetData)
-      if (num == -1) {
-        return Some("closed!")
-      }
-      else if (num == 0) {
-        Thread.sleep(2)
-      } else {
-        readMessage() match {
-          case Left("no data") =>
-            println("no data")
-          case Right(messages: Seq[MumbleMessage]) =>
-            messages.foreach {
-              case audio: MumbleUDP.Audio =>
-                if logUDP then
-                  println(s"Audio: header=${audio.header} session=${audio.senderSession} framenum=${audio.frameNumber}")
-                userBySession.get(audio.senderSession) match
-                  case None =>
-                    println("unknown user")
-                  case Some(user) =>
-                    val data = audio.opusData.toByteArray()
-                    val n = sharedBuffer.synchronized {
-                      decoder.decode(data, 0, data.length, sharedBuffer, 0, sharedBuffer.length, false)
-                    }
-                    notifier.put(AudioNotification(n, user))
-              case userState: Mumble.UserState =>
-                (userState.session, userState.name) match
-                  case (Some(session), Some(name)) =>
-                    userBySession = userBySession + (session -> name)
-                  case _ =>
-                    println(s"incomplete UserState")
-              case message =>
-                println(s"received: ${message}")
-            }
-          case Left(err) =>
-            return Some(err)
-        }
-      }
-    }
-    Some("unreachable code")
+        Some("unreachable code")
 
   private def sendMessage(socketChannel: SocketChannel, message: MumbleMessage): Option[String] =
     val packetType = message match {
       case _: Mumble.Version                => MumblePacketType.Version
-      // case _: Mumble.UDPTunnel              => MumblePacketType.UDPTunnel
+      case _: Mumble.UDPTunnel              => return Some("unallowed packet type")
       case _: Mumble.Authenticate           => MumblePacketType.Authenticate
       case _: Mumble.Ping                   => MumblePacketType.Ping
       case _: Mumble.Reject                 => MumblePacketType.Reject
@@ -366,7 +366,18 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     }
     None
 
-  private def readMessage(): Either[String, Seq[MumbleMessage]] =
+  private def receiveMessage(socketChannel: SocketChannel): Either[String, Seq[MumbleMessage]] =
+    while true do
+      val num = socketChannel.read(peerNetData)
+      if num == -1 then
+        return Left("closed!")
+      else if num == 0 then
+        Thread.sleep(2)
+      else
+        return unwrapMessage()
+    Left("unreachable")
+
+  private def unwrapMessage(): Either[String, Seq[MumbleMessage]] =
     peerNetData.flip()
     if peerNetData.hasRemaining() then
       peerAppData.clear()
