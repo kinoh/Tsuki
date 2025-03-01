@@ -121,9 +121,8 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     val channel = SocketChannel.open()
     channel.configureBlocking(false)
     channel.connect(InetSocketAddress(hostname, port))
-    while (!channel.finishConnect()) {
+    while !channel.finishConnect() do
       Thread.sleep(100)
-    }
     channel
 
   private def doHandshake(socketChannel: SocketChannel): Either[String, ConnectionState] =
@@ -133,22 +132,22 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
 
     engine.beginHandshake()
     var hs = engine.getHandshakeStatus()
-    while (true) {
+    while true do
       println(s"HandshakeStatus: ${hs}")
-      hs match {
+      hs match
         case HandshakeStatus.FINISHED =>
           return Right(ConnectionState(socketChannel, Map(), Map()))
+
         case HandshakeStatus.NEED_UNWRAP =>
           var remaining = true
-          while (remaining) {
-            if (socketChannel.read(peerNetData) < 0) {
+          while remaining do
+            if socketChannel.read(peerNetData) < 0 then
               return Left("channel closed")
-            }
             peerNetData.flip()
             val res = engine.unwrap(peerNetData, peerAppData)
             peerNetData.compact()
             hs = res.getHandshakeStatus()
-            res.getStatus() match {
+            res.getStatus() match
               case Status.OK =>
                 remaining = false
               case Status.BUFFER_UNDERFLOW =>
@@ -157,45 +156,38 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
                 return Left("buffer overflow")
               case Status.CLOSED =>
                 return Left("closed")
-            }
-          }
+
         case HandshakeStatus.NEED_WRAP =>
             myNetData.clear()
             val res = engine.wrap(myAppData, myNetData)
             hs = res.getHandshakeStatus()
-            res.getStatus() match {
+            res.getStatus() match
               case Status.OK =>
                 myNetData.flip()
-                while (myNetData.hasRemaining()) {
-                  if (socketChannel.write(myNetData) < 0) {
+                while myNetData.hasRemaining() do
+                  if socketChannel.write(myNetData) < 0 then
                     return Left("channel closed")
-                  }
-                }
               case Status.BUFFER_OVERFLOW =>
                 return Left("buffer overflow")
               case Status.BUFFER_UNDERFLOW =>
                 return Left("buffer underflow")
               case Status.CLOSED =>
                 return Left("closed")
-            }
+
         case HandshakeStatus.NEED_TASK =>
-          var task: Runnable = null
-          val getTask = () =>
-            task = engine.getDelegatedTask()
-            task
-          while (getTask() != null) {
-            task.run()
-          }
+          val tasks = Iterator.unfold(())(_ =>
+            Option(engine.getDelegatedTask()).map(t => (t, ())))
+          tasks.foreach(t => t.run())
           hs = engine.getHandshakeStatus()
-          if (hs == HandshakeStatus.NEED_TASK) {
+          if hs == HandshakeStatus.NEED_TASK then
             return Left("handshake shouldn't need additional tasks")
-          }
+
         case HandshakeStatus.NEED_UNWRAP_AGAIN =>
           return Left("need unwrap again (not implemented)")
+
         case HandshakeStatus.NOT_HANDSHAKING =>
           return Left("not handshaking")
-      }
-    }
+
     Left("unreachable")
 
   def connect(): Option[String] =
@@ -298,7 +290,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
         Some("unreachable code")
 
   private def sendMessage(socketChannel: SocketChannel, message: MumbleMessage): Option[String] =
-    val packetType = message match {
+    val packetType = message match
       case _: Mumble.Version                => MumblePacketType.Version
       case _: Mumble.UDPTunnel              => return Some("unallowed packet type")
       case _: Mumble.Authenticate           => MumblePacketType.Authenticate
@@ -328,11 +320,10 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
       case _: Mumble.PluginDataTransmission => MumblePacketType.PluginDataTransmission
       case _: MumbleUDP.Audio               => MumblePacketType.UDPTunnel
       case _: MumbleUDP.Ping                => MumblePacketType.UDPTunnel
-    }
-    val payload = message match {
+
+    val payload = message match
       case pb: scalapb.GeneratedMessage =>
         pb.toByteArray
-    }
 
     myAppData.clear()
     myAppData.putChar(packetType.id)
@@ -340,30 +331,27 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     myAppData.put(payload)
     myAppData.flip()
 
-    while (myAppData.hasRemaining()) {
+    while myAppData.hasRemaining() do
       myNetData.clear()
       val res = engine.wrap(myAppData, myNetData)
-      res.getStatus() match {
+      res.getStatus() match
         case Status.OK =>
           myNetData.flip()
-          while (myNetData.hasRemaining()) {
+          while myNetData.hasRemaining() do
             val num = socketChannel.write(myNetData)
             println(s"written: ${num}")
-            if (num == -1) {
+            if num == -1 then
               return Some("closed channel")
-            } else if (num == 0) {
+            else if num == 0 then
               // no bytes written; try again later
               Thread.sleep(100)
-            }
-          }
         case Status.BUFFER_UNDERFLOW =>
           return Some("BUFFER_UNDERFLOW")
         case Status.BUFFER_OVERFLOW =>
           return Some("BUFFER_OVERFLOW")
         case Status.CLOSED =>
           return Some("CLOSED")
-      }
-    }
+
     None
 
   private def receiveMessage(socketChannel: SocketChannel): Either[String, Seq[MumbleMessage]] =
@@ -382,7 +370,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     if peerNetData.hasRemaining() then
       peerAppData.clear()
       val res = engine.unwrap(peerNetData, peerAppData)
-      res.getStatus() match {
+      res.getStatus() match
         case Status.OK =>
           peerNetData.compact()
           peerAppData.flip()
@@ -398,7 +386,6 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
           Left("BUFFER_UNDERFLOW")
         case Status.CLOSED =>
           Left("CLOSED")
-      }
     else
       Left("no data")
 
@@ -410,7 +397,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     if packetType != MumblePacketType.UDPTunnel.id || logUDP then
       println(s"packetType=${packetType.toInt} payloadLength=${payloadLength}")
     // println(s"payload: ${Hex.encodeHexString(buffer)}")
-    val data = packetType match {
+    val data = packetType match
       case MumblePacketType.Version.id =>                Mumble.Version.validate(buffer)
       case MumblePacketType.Authenticate.id =>           Mumble.Authenticate.validate(buffer)
       case MumblePacketType.Ping.id =>                   Mumble.Ping.validate(buffer)
@@ -438,11 +425,9 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
       case MumblePacketType.SuggestConfig.id =>          Mumble.SuggestConfig.validate(buffer)
       case MumblePacketType.PluginDataTransmission.id => Mumble.PluginDataTransmission.validate(buffer)
       case MumblePacketType.UDPTunnel.id =>
-        buffer(0) match {
+        buffer(0) match
           case 0x00 => MumbleUDP.Audio.validate(buffer.slice(1, buffer.length))
           case 0x20 => MumbleUDP.Ping.validate(buffer.slice(1, buffer.length))
           case _    => Failure(Throwable("unexpected UDP packet header"))
-        }
-    }
     data.toEither.left.map(t => t.toString())
 }
