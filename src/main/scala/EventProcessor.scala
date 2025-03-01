@@ -108,6 +108,10 @@ User message also in json.
 <example>
 {"modality":"text","content":"おはよう"}
 </example>
+Message in audio modality passed by speech recognizer; may contains errors. You can ask back for clarification.
+<example>
+{"modality":"audio","content":"おはよう ござい ます"}
+</example>
 
 Message history may have been truncated.
 """

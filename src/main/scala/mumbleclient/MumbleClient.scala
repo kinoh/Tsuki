@@ -236,7 +236,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
       .flatMap { c =>
         userBySession = userBySession ++ c.userBySession
         socketChannel = Some(c.socketChannel)
-        Either.cond(userBySession.size == 0, (), "connection not established")
+        Either.cond(userBySession.size > 0, (), "connection not established")
       }
       .left.toOption
 

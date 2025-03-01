@@ -1,43 +1,44 @@
-import collection.JavaConverters._
+import mumbleclient.MumbleClient
 import net.dv8tion.jda.api.JDABuilder
-import net.dv8tion.jda.api.requests.GatewayIntent
 import net.dv8tion.jda.api.entities.Activity
+import net.dv8tion.jda.api.requests.GatewayIntent
+
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 
-case class Config(engine: String, historyCsvPath: String, persist: Boolean, rewrite: Boolean)
+import collection.JavaConverters.*
+import concurrent.{ExecutionContext, Future}
+
+case class Config(engine: String, historyCsvPath: String, persist: Boolean, rewrite: Boolean, voskModelPath: String)
 
 @scala.annotation.tailrec
-def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Config] = {
-  input match {
-    case "--engine" :: x :: rest => {
+def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Config] =
+  input match
+    case "--engine" :: x :: rest =>
       parseArgs(result.copy(engine = x), rest)
-    }
-    case "--history" :: x :: rest => {
+    case "--history" :: x :: rest =>
       parseArgs(result.copy(historyCsvPath = x), rest)
-    }
-    case "--persist" :: rest => {
+    case "--persist" :: rest =>
       parseArgs(result.copy(persist = true), rest)
-    }
-    case "--rewrite" :: rest => {
+    case "--rewrite" :: rest =>
       parseArgs(result.copy(rewrite = true), rest)
-    }
-    case Nil => {
+    case "--vosk-model" :: x :: rest =>
+      parseArgs(result.copy(voskModelPath = x), rest)
+    case Nil =>
       Right(result)
-    }
-    case option :: rest => {
+    case option :: rest =>
       Left(ArgumentParseError(option))
-    }
-  }
-}
 
-@main def main(args: String*): Unit = {
+def singleThreadContext(): ExecutionContext =
+  ExecutionContext.fromExecutor(Executors.newSingleThreadExecutor())
+
+@main def main(args: String*): Unit =
   val config =
-    parseArgs(Config("dummy", "./history.jsonl", false, false), args) match {
+    parseArgs(Config("dummy", "./history.jsonl", false, false, "/var/vosk/vosk-model-ja-0.22"), args) match
       case Left(ArgumentParseError(argument)) =>
         println("invalid arg: " + argument)
         return
       case Right(value) => value
-    }
 
   val engine =
     if config.engine == "openai"
@@ -45,6 +46,34 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
     else new DummyConversationEngine
   val repository = new MessageRepository(config.historyCsvPath, config.persist)
   val eventQueue = LinkedBlockingQueue[Event]()
+
+  val mumble = MumbleClient("mumble-server", 64738)
+  val audioBuffer = new Array[Short](mumble.audioBufferSize)
+  val audioNotifier = LinkedBlockingQueue[mumbleclient.AudioNotification]()
+
+  val speechRecognizer = VoskSpeechRecognizer(mumble.sampleRate, config.voskModelPath)
+  val recognitionResult = LinkedBlockingQueue[RecognitionResult]()
+
+  val mapped = MappedBlockingQueue(audioNotifier, e => if e == null then null else AudioNotification(e.size, e.user))
+
+  scala.concurrent.Future {
+    speechRecognizer.run(audioBuffer, mapped, recognitionResult)
+  }(singleThreadContext())
+
+  scala.concurrent.Future {
+    while true do
+      val result = recognitionResult.take()
+      eventQueue.put(UserMessageEvent(result.user, "audio", result.text))
+  }(singleThreadContext())
+
+  scala.concurrent.Future {
+    mumble.connect() match
+      case Some(err) => println(s"connection failed: ${err}")
+      case None =>
+        mumble.run(audioBuffer, audioNotifier) match
+          case Some(err) => println(s"connection closed: ${err}")
+          case None =>
+  }(singleThreadContext())
 
   val discordToken = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
   val discordChannel = scala.util.Properties.envOrElse("DISCORD_CHANNEL", "")
@@ -55,9 +84,9 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
 
   discord.getRestPing.queue(ping => println("Logged in with ping: " + ping))
 
-  val processor = new EventProcessor(engine, repository, (content) => {
+  val processor = new EventProcessor(engine, repository, (content) =>
     discord.getTextChannelById(discordChannel).sendMessage(content).complete()
-  })
+  )
   processor.initialize(config.rewrite)
 
   processor.run(eventQueue)
@@ -66,4 +95,3 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
   Runtime.getRuntime.addShutdownHook(new Thread(() =>
     repository.close()
   ))
-}

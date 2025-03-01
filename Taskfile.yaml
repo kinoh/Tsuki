@@ -32,3 +32,9 @@ tasks:
     desc: Do build in production
     cmds:
       - docker compose build
+  download_model:
+    desc: Download Vosk model
+    cmds:
+      - curl -sSfL -o /tmp/vosk-model-ja.zip https://alphacephei.com/vosk/models/vosk-model-ja-0.22.zip
+      - unzip /tmp/vosk-model-ja.zip -d /var/vosk/
+      - rm /tmp/vosk-model-ja.zip
