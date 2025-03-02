@@ -29,17 +29,16 @@ class EventProcessor(val engine: ConversationEngine, val repository: MessageRepo
       val event = queue.take()
       Future {
         next(event, Instant.now())
+      }(context).onComplete {
+        case Success(response) => response match
+          case Right(content) => content match
+            case Some(value) =>
+              queue.put(value)
+            case None =>
+              scribe.debug("event finished")
+          case Left(value) => scribe.error("next failed", scribe.data("error", value))
+        case Failure(exception) => scribe.error("future failed", scribe.data("error", exception))
       }(context)
-        .onComplete {
-          case Success(response) => response match
-            case Right(content) => content match
-              case Some(value) =>
-                queue.put(value)
-              case None =>
-                scribe.debug("event finished")
-            case Left(value) => scribe.error("next failed", scribe.data("error", value))
-          case Failure(exception) => scribe.error("future failed", scribe.data("error", exception))
-        }(context)
 
   private def next(event: Event, timestamp: Instant): Either[ProgramError, Option[Event]] =
     event match

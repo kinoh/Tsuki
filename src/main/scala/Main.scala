@@ -6,6 +6,8 @@ import net.dv8tion.jda.api.requests.GatewayIntent
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadFactory
+import scala.util.Failure
+import scala.util.Success
 
 import collection.JavaConverters.*
 import concurrent.{ExecutionContext, Future}
@@ -61,25 +63,30 @@ def singleThreadContext(name: String): ExecutionContext =
   val audioBuffer = new Array[Short](mumble.audioBufferSize)
   val audioNotifier = LinkedBlockingQueue[mumbleclient.AudioNotification]()
 
-  val speechRecognizer = VoskSpeechRecognizer(mumble.sampleRate, config.voskModelPath)
-
   val mapped = MappedBlockingQueue(audioNotifier, e => if e == null then null else AudioNotification(e.size, e.user))
 
   scala.concurrent.Future {
+    val speechRecognizer = VoskSpeechRecognizer(mumble.sampleRate, config.voskModelPath)
     speechRecognizer.run(audioBuffer, mapped, eventQueue)
   }(singleThreadContext("SpeechRecognizer"))
 
+  val mumbleContext = singleThreadContext("MumbleClient")
   scala.concurrent.Future {
     mumble.connect()
       .toLeft(())
-      .left.map { err => scribe.error("connection failed", scribe.data("error", err)) }
+      .left.map { err => s"connection failed: ${err}" }
       .flatMap { _ =>
         mumble.run(audioBuffer, audioNotifier)
           .toLeft(())
       }
-      .left.map { err => scribe.error("connection closed", scribe.data("error", err)) }
-
-  }(singleThreadContext("MumbleClient"))
+      .left.map { err => s"connection closed: ${err}" }
+  }(mumbleContext).onComplete {
+    case Success(Right(_)) =>
+    case Success(Left(err)) =>
+      scribe.error("Mumble client failed", err)
+    case Failure(exception) =>
+      scribe.error("future failed", exception)
+  }(mumbleContext)
 
   val discordToken = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
   val discordChannel = scala.util.Properties.envOrElse("DISCORD_CHANNEL", "")
