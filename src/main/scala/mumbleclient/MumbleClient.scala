@@ -96,7 +96,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
   def audioChannels: Int =
     1
   def audioBufferSize: Int =
-    960 * audioChannels
+    sampleRate * 60 / 1000 * audioChannels
   def pingInterval: Int =
     20000
 
