@@ -23,6 +23,7 @@ lazy val root = project
     libraryDependencies += "net.java.dev.jna" % "jna" % "5.16.0",
     libraryDependencies += "com.alphacephei" % "vosk" % "0.3.45",
     libraryDependencies += "com.github.lostromb.concentus" % "Concentus" % "6c2328dc19044601e33a9c11628b8d60e1f3011c",
+    libraryDependencies += "com.outr" %% "scribe" % "3.16.0",
   )
 
 Compile / PB.targets := Seq(

@@ -1,8 +1,5 @@
 package mumbleclient
 
-import club.minnced.opus.util.OpusLibrary
-import org.apache.hc.client5.http.utils.Hex
-import org.apache.hc.core5.util.ByteArrayBuffer
 import org.concentus.OpusDecoder
 
 import java.io.FileInputStream
@@ -130,12 +127,15 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     val myAppData = ByteBuffer.allocate(appBufferSize)
     val peerAppData = ByteBuffer.allocate(appBufferSize)
 
+    scribe.debug("start handshake")
+
     engine.beginHandshake()
     var hs = engine.getHandshakeStatus()
     while true do
-      println(s"HandshakeStatus: ${hs}")
+      scribe.trace("hanshake goes on...", scribe.data("status", hs))
       hs match
         case HandshakeStatus.FINISHED =>
+          scribe.debug("handshake finished")
           return Right(ConnectionState(socketChannel, Map(), Map()))
 
         case HandshakeStatus.NEED_UNWRAP =>
@@ -205,7 +205,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
           Option(System.getProperty("os.name")),
           Option(System.getProperty("os.version"))
         )
-        println(s"client version: ${version}")
+        scribe.debug(s"client version", scribe.data("message", version))
         sendMessage(c.socketChannel, version)
           .toLeft(c)
       }
@@ -217,7 +217,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
           Seq(),
           Some(true)
         )
-        println(s"authenticate: ${auth}")
+        scribe.debug(s"authenticate", scribe.data("message", auth))
         sendMessage(c.socketChannel, auth)
           .toLeft(c)
       }
@@ -230,6 +230,7 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
         socketChannel = Some(c.socketChannel)
         Either.cond(userBySession.size > 0, (), "connection not established")
       }
+      .map { _ => scribe.info("connection established") }
       .left.toOption
 
   def run(sharedBuffer: Array[Short], notifier: BlockingQueue[AudioNotification]): Option[String] =
@@ -260,15 +261,18 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
           else
             unwrapMessage() match
               case Left("no data") =>
-                println("no data")
+                scribe.debug("no data")
               case Right(messages: Seq[MumbleMessage]) =>
                 messages.foreach {
                   case audio: MumbleUDP.Audio =>
-                    if logUDP then
-                      println(s"Audio: header=${audio.header} session=${audio.senderSession} framenum=${audio.frameNumber}")
+                    scribe.trace(s"audio", scribe.data(Map(
+                      "header"   -> audio.header,
+                      "session"  -> audio.senderSession,
+                      "framenum" -> audio.frameNumber,
+                    )))
                     userBySession.get(audio.senderSession) match
                       case None =>
-                        println("unknown user")
+                        scribe.warn("unknown user")
                       case Some(user) =>
                         val data = audio.opusData.toByteArray()
                         val n = sharedBuffer.synchronized {
@@ -280,9 +284,9 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
                       case (Some(session), Some(name)) =>
                         userBySession = userBySession + (session -> name)
                       case _ =>
-                        println(s"incomplete UserState")
+                        scribe.warn("incomplete UserState")
                   case message =>
-                    println(s"received: ${message}")
+                    scribe.debug("unhandled message", scribe.data("message", message))
                 }
               case Left(err) =>
                 return Some(err)
@@ -321,6 +325,11 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
       case _: MumbleUDP.Audio               => MumblePacketType.UDPTunnel
       case _: MumbleUDP.Ping                => MumblePacketType.UDPTunnel
 
+    scribe.debug("send message", scribe.data(Map(
+      "message"    -> message,
+      "packetType" -> packetType,
+    )))
+
     val payload = message match
       case pb: scalapb.GeneratedMessage =>
         pb.toByteArray
@@ -339,7 +348,6 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
           myNetData.flip()
           while myNetData.hasRemaining() do
             val num = socketChannel.write(myNetData)
-            println(s"written: ${num}")
             if num == -1 then
               return Some("closed channel")
             else if num == 0 then
@@ -394,9 +402,11 @@ class MumbleClient(val hostname: String, val port: Int, val logUDP: Boolean = fa
     val payloadLength = packet.getInt()
     val buffer = new Array[Byte](payloadLength)
     packet.get(buffer, 0, payloadLength)
-    if packetType != MumblePacketType.UDPTunnel.id || logUDP then
-      println(s"packetType=${packetType.toInt} payloadLength=${payloadLength}")
-    // println(s"payload: ${Hex.encodeHexString(buffer)}")
+    if packetType != MumblePacketType.UDPTunnel.id then
+      scribe.trace("parse message", scribe.data(Map(
+        "packetType"    -> packetType.toInt,
+        "payloadLength" -> payloadLength,
+      )))
     val data = packetType match
       case MumblePacketType.Version.id =>                Mumble.Version.validate(buffer)
       case MumblePacketType.Authenticate.id =>           Mumble.Authenticate.validate(buffer)

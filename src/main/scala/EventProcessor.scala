@@ -25,18 +25,18 @@ class EventProcessor(val engine: ConversationEngine, val repository: MessageRepo
       repository.rewriteDeveloperPrompt(MessageRecord("developer", "", json))
 
   def run(queue: BlockingQueue[Event]): Unit =
-    while (true)
+    while true do
       val event = queue.take()
       Future(next(event, Instant.now()))
         .onComplete {
-          case Success(response) => response match {
-            case Right(content) => content match {
-              case Some(value) => queue.put(value)
-              case None => println("event finished")
-            }
-            case Left(value) => println(s"error: $value")
-          }
-          case Failure(exception) => println(s"future failed: $exception")
+          case Success(response) => response match
+            case Right(content) => content match
+              case Some(value) =>
+                queue.put(value)
+              case None =>
+                scribe.debug("event finished")
+            case Left(value) => scribe.error("next failed", scribe.data("error", value))
+          case Failure(exception) => scribe.error("future failed", scribe.data("error", exception))
         }
 
   private def next(event: Event, timestamp: Instant): Either[ProgramError, Option[Event]] =

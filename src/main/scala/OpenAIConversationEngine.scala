@@ -38,17 +38,23 @@ class OpenAIConversationEngine(apiKey: String) extends ConversationEngine {
                 .build()
             )
           case r =>
-            println("unknown role: " + r)
+            scribe.warn("unknown role", scribe.data("role", r))
             paramsBuilder
         }
     val completion = client.chat().completions().create(paramsBuilder.build())
-    completion.usage().toScala match {
-      case Some(x: CompletionUsage) => println("prompt: %d, completion: %d".format(x.promptTokens(), x.completionTokens()))
-      case None => println("no usage")
-    }
+
+    completion.usage().toScala match
+      case Some(x: CompletionUsage) =>
+        scribe.info("token usage", scribe.data(Map(
+          "prompt"     -> x.promptTokens(),
+          "completion" -> x.completionTokens(),
+        )))
+      case None =>
+        scribe.warn("no usage")
+
     val message = completion.choices().asScala.head.message()
-    println(message.toString())
     val role = message._role().toString()
     val content = message.content().get()
+
     MessageRecord(role, "", content)
 }

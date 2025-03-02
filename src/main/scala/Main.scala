@@ -5,6 +5,7 @@ import net.dv8tion.jda.api.requests.GatewayIntent
 
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadFactory
 
 import collection.JavaConverters.*
 import concurrent.{ExecutionContext, Future}
@@ -29,14 +30,20 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
     case option :: rest =>
       Left(ArgumentParseError(option))
 
-def singleThreadContext(): ExecutionContext =
-  ExecutionContext.fromExecutor(Executors.newSingleThreadExecutor())
+def singleThreadContext(name: String): ExecutionContext =
+  val factory = new ThreadFactory {
+    override def newThread(r: Runnable): Thread =
+      return new Thread(r, name)
+ }
+  ExecutionContext.fromExecutor(Executors.newSingleThreadExecutor(factory))
 
 @main def main(args: String*): Unit =
+  scribe.Logger.root.withMinimumLevel(scribe.Level.Debug).replace()
+
   val config =
     parseArgs(Config("dummy", "./history.jsonl", false, false, "/var/vosk/vosk-model-ja-0.22"), args) match
       case Left(ArgumentParseError(argument)) =>
-        println("invalid arg: " + argument)
+        scribe.error("failed to parse", scribe.data("argument", argument))
         return
       case Right(value) => value
 
@@ -58,22 +65,22 @@ def singleThreadContext(): ExecutionContext =
 
   scala.concurrent.Future {
     speechRecognizer.run(audioBuffer, mapped, recognitionResult)
-  }(singleThreadContext())
+  }(singleThreadContext("speechRecognizer"))
 
   scala.concurrent.Future {
     while true do
       val result = recognitionResult.take()
       eventQueue.put(UserMessageEvent(result.user, "audio", result.text))
-  }(singleThreadContext())
+  }(singleThreadContext("recognitionToEvent"))
 
   scala.concurrent.Future {
     mumble.connect() match
-      case Some(err) => println(s"connection failed: ${err}")
+      case Some(err) => scribe.error("connection failed", scribe.data("error", err))
       case None =>
         mumble.run(audioBuffer, audioNotifier) match
-          case Some(err) => println(s"connection closed: ${err}")
+          case Some(err) => scribe.error("connection closed", scribe.data("error", err))
           case None =>
-  }(singleThreadContext())
+  }(singleThreadContext("mumbleClient"))
 
   val discordToken = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
   val discordChannel = scala.util.Properties.envOrElse("DISCORD_CHANNEL", "")
@@ -82,7 +89,7 @@ def singleThreadContext(): ExecutionContext =
     .addEventListeners(new DiscordEventListener(eventQueue, discordChannel))
     .build()
 
-  discord.getRestPing.queue(ping => println("Logged in with ping: " + ping))
+  discord.getRestPing.queue(ping => scribe.info("discord client logged in", scribe.data("ping", ping)))
 
   val processor = new EventProcessor(engine, repository, (content) =>
     discord.getTextChannelById(discordChannel).sendMessage(content).complete()

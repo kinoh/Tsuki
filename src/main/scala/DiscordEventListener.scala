@@ -11,15 +11,15 @@ class DiscordEventListener(val queue: BlockingQueue[Event], val channelId: Strin
 
   override def onMessageReceived(event: MessageReceivedEvent): Unit =
     val message = event.getMessage().getContentDisplay()
-    println("%s, %s, %s, %s, %s, %s, %s".format(
-      event.getAuthor().getId(),
-      event.getAuthor().getName(),
-      event.getAuthor().getEffectiveName(),
-      event.getChannel().getName(),
-      event.getChannel().getId(),
-      event.getMessage().getTimeCreated().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-      message
-    ))
+    scribe.info("received", scribe.data(Map(
+      "authorId"            -> event.getAuthor().getId(),
+      "authorName"          -> event.getAuthor().getName(),
+      "authorEffectiveName" -> event.getAuthor().getEffectiveName(),
+      "channelId"           -> event.getChannel().getId(),
+      "channelName"         -> event.getChannel().getName(),
+      "timeCreated"         -> event.getMessage().getTimeCreated().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+      "messageContent"      -> message,
+    )))
     if !event.getAuthor.isBot && event.getChannel().getId() == channelId then
       val name = event.getAuthor().getEffectiveName()
       queue.put(UserMessageEvent(name, "text", message))

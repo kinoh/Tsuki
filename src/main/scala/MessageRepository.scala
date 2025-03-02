@@ -25,7 +25,7 @@ class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
     val source = Source.fromFile(path, "UTF-8")
     source.getLines().foreach { l =>
       val record = read[MessageRecord](l)
-      println("loaded: " + record.toString())
+      scribe.debug("loaded", scribe.data("record", record))
       buf.addOne(record)
     }
     source.close()
@@ -44,7 +44,7 @@ class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
       .toIndexedSeq
 
   def append(record: MessageRecord): Unit =
-    println("append: " + record.toString())
+    scribe.debug("append", scribe.data("record", record))
     data.addOne(record)
     writer.foreach { w =>
       w.write(write(record))
@@ -53,17 +53,14 @@ class MessageRepository(path: String, persist: Boolean) extends AutoCloseable {
     }
 
   def rewriteDeveloperPrompt(record: MessageRecord): Unit =
-    println("rewrite developer prompt: " + record.toString())
+    scribe.debug("rewrite developer prompt", scribe.data("record", record))
     if (data.nonEmpty && data(0).role == "developer")
-      println("do rewrite")
       data(0) = record
-      println(s"records: ${data.length}")
       writer.foreach { w =>
-        println("work with writer")
         w.close()
         val rewriter = new BufferedWriter(FileWriter(path, Charset.forName("UTF-8")))
         data.foreach { record =>
-          println(s"rewrite: ${record}")
+          scribe.debug("rewrite", scribe.data("record", record))
           rewriter.write(write(record))
           rewriter.write("\n")
         }
