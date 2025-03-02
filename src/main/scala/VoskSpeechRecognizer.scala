@@ -8,7 +8,6 @@ import java.util.concurrent.BlockingQueue
 import java.util.concurrent.TimeUnit
 
 case class AudioNotification(size: Int, user: String)
-case class RecognitionResult(text: String, user: String)
 
 case class VoskRecognitionResult(text: String)
 object VoskRecognitionResult {
@@ -18,7 +17,7 @@ object VoskRecognitionResult {
 class VoskSpeechRecognizer(val sampleRate: Int, val modelPath: String) {
   private val model = Model(modelPath)
 
-  def run(sharedBuffer: Array[Short], audioNotifier: BlockingQueue[AudioNotification], resultNotifier: BlockingQueue[RecognitionResult]): Unit =
+  def run(sharedBuffer: Array[Short], audioNotifier: BlockingQueue[AudioNotification], eventQueue: BlockingQueue[Event]): Unit =
     System.setProperty("jna.encoding", "UTF-8")
     LibVosk.setLogLevel(LogLevel.DEBUG)
 
@@ -45,6 +44,6 @@ class VoskSpeechRecognizer(val sampleRate: Int, val modelPath: String) {
         val result = core.getResult()
         val data = read[VoskRecognitionResult](result)
         if !data.text.isEmpty() then
-          resultNotifier.put(RecognitionResult(data.text, speakingUser.getOrElse("unknown")))
+          eventQueue.put(UserMessageEvent(speakingUser.getOrElse("unknown"), "text", data.text))
         speakingUser = None
 }

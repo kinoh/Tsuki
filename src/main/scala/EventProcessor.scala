@@ -1,7 +1,7 @@
 import java.time.Instant
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext.Implicits.global
 import java.util.concurrent.BlockingQueue
+import scala.concurrent.ExecutionContext
+import scala.concurrent.Future
 import scala.util.Failure
 import scala.util.Success
 
@@ -24,10 +24,12 @@ class EventProcessor(val engine: ConversationEngine, val repository: MessageRepo
     else if (rewriteDeveloperPrompt)
       repository.rewriteDeveloperPrompt(MessageRecord("developer", "", json))
 
-  def run(queue: BlockingQueue[Event]): Unit =
+  def run(queue: BlockingQueue[Event], context: ExecutionContext): Unit =
     while true do
       val event = queue.take()
-      Future(next(event, Instant.now()))
+      Future {
+        next(event, Instant.now())
+      }(context)
         .onComplete {
           case Success(response) => response match
             case Right(content) => content match
@@ -37,7 +39,7 @@ class EventProcessor(val engine: ConversationEngine, val repository: MessageRepo
                 scribe.debug("event finished")
             case Left(value) => scribe.error("next failed", scribe.data("error", value))
           case Failure(exception) => scribe.error("future failed", scribe.data("error", exception))
-        }
+        }(context)
 
   private def next(event: Event, timestamp: Instant): Either[ProgramError, Option[Event]] =
     event match

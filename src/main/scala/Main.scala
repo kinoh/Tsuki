@@ -30,12 +30,15 @@ def parseArgs(result: Config, input: Seq[String]): Either[ArgumentParseError, Co
     case option :: rest =>
       Left(ArgumentParseError(option))
 
-def singleThreadContext(name: String): ExecutionContext =
+def fixedThreadPoolContext(n: Int, name: String): ExecutionContext =
   val factory = new ThreadFactory {
     override def newThread(r: Runnable): Thread =
       return new Thread(r, name)
- }
-  ExecutionContext.fromExecutor(Executors.newSingleThreadExecutor(factory))
+  }
+  ExecutionContext.fromExecutor(Executors.newFixedThreadPool(n, factory))
+
+def singleThreadContext(name: String): ExecutionContext =
+  fixedThreadPoolContext(1, name)
 
 @main def main(args: String*): Unit =
   scribe.Logger.root.withMinimumLevel(scribe.Level.Debug).replace()
@@ -49,9 +52,9 @@ def singleThreadContext(name: String): ExecutionContext =
 
   val engine =
     if config.engine == "openai"
-    then new OpenAIConversationEngine(scala.util.Properties.envOrElse("OPENAI_API_KEY", ""))
-    else new DummyConversationEngine
-  val repository = new MessageRepository(config.historyCsvPath, config.persist)
+    then OpenAIConversationEngine(scala.util.Properties.envOrElse("OPENAI_API_KEY", ""))
+    else DummyConversationEngine()
+  val repository = MessageRepository(config.historyCsvPath, config.persist)
   val eventQueue = LinkedBlockingQueue[Event]()
 
   val mumble = MumbleClient("mumble-server", 64738)
@@ -59,44 +62,40 @@ def singleThreadContext(name: String): ExecutionContext =
   val audioNotifier = LinkedBlockingQueue[mumbleclient.AudioNotification]()
 
   val speechRecognizer = VoskSpeechRecognizer(mumble.sampleRate, config.voskModelPath)
-  val recognitionResult = LinkedBlockingQueue[RecognitionResult]()
 
   val mapped = MappedBlockingQueue(audioNotifier, e => if e == null then null else AudioNotification(e.size, e.user))
 
   scala.concurrent.Future {
-    speechRecognizer.run(audioBuffer, mapped, recognitionResult)
-  }(singleThreadContext("speechRecognizer"))
+    speechRecognizer.run(audioBuffer, mapped, eventQueue)
+  }(singleThreadContext("SpeechRecognizer"))
 
   scala.concurrent.Future {
-    while true do
-      val result = recognitionResult.take()
-      eventQueue.put(UserMessageEvent(result.user, "audio", result.text))
-  }(singleThreadContext("recognitionToEvent"))
+    mumble.connect()
+      .toLeft(())
+      .left.map { err => scribe.error("connection failed", scribe.data("error", err)) }
+      .flatMap { _ =>
+        mumble.run(audioBuffer, audioNotifier)
+          .toLeft(())
+      }
+      .left.map { err => scribe.error("connection closed", scribe.data("error", err)) }
 
-  scala.concurrent.Future {
-    mumble.connect() match
-      case Some(err) => scribe.error("connection failed", scribe.data("error", err))
-      case None =>
-        mumble.run(audioBuffer, audioNotifier) match
-          case Some(err) => scribe.error("connection closed", scribe.data("error", err))
-          case None =>
-  }(singleThreadContext("mumbleClient"))
+  }(singleThreadContext("MumbleClient"))
 
   val discordToken = scala.util.Properties.envOrElse("DISCORD_TOKEN", "")
   val discordChannel = scala.util.Properties.envOrElse("DISCORD_CHANNEL", "")
   val discord =
     JDABuilder.createLight(discordToken, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
-    .addEventListeners(new DiscordEventListener(eventQueue, discordChannel))
+    .addEventListeners(DiscordEventListener(eventQueue, discordChannel))
     .build()
 
   discord.getRestPing.queue(ping => scribe.info("discord client logged in", scribe.data("ping", ping)))
 
-  val processor = new EventProcessor(engine, repository, (content) =>
+  val processor = EventProcessor(engine, repository, (content) =>
     discord.getTextChannelById(discordChannel).sendMessage(content).complete()
   )
   processor.initialize(config.rewrite)
 
-  processor.run(eventQueue)
+  processor.run(eventQueue, fixedThreadPoolContext(4, "EventProcessor"))
 
   // Event listener runs in different thread
   Runtime.getRuntime.addShutdownHook(new Thread(() =>
