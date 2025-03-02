@@ -35,6 +35,8 @@ class VoskSpeechRecognizer(val sampleRate: Int, val modelPath: String) {
             else
               false
           case Some(n) =>
+            if speakingUser.isEmpty then
+              scribe.debug("hearing...", scribe.data("user", n.user))
             speakingUser = Some(n.user)
             sharedBuffer.synchronized {
               System.arraycopy(sharedBuffer, 0, buffer, 0, n.size)
@@ -43,6 +45,7 @@ class VoskSpeechRecognizer(val sampleRate: Int, val modelPath: String) {
       if finished then
         val result = core.getResult()
         val data = read[VoskRecognitionResult](result)
+        scribe.debug("recognition result", scribe.data("text", data.text))
         if !data.text.isEmpty() then
           eventQueue.put(UserMessageEvent(speakingUser.getOrElse("unknown"), "text", data.text))
         speakingUser = None
