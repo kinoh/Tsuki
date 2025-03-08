@@ -1,31 +1,7 @@
+// https://github.com/devcontainers/templates/blob/main/src/rust/.devcontainer/devcontainer.json
 {
-    "name": "Scala",
+	"name": "Rust",
+	"workspaceFolder": "/workspace",
     "dockerComposeFile": ["../compose.yaml", "./compose.yaml"],
-    "service": "app",
-    "workspaceFolder": "/workspace",
-    "customizations": {
-        "vscode": {
-            // Set *default* container specific settings.json values on container create.
-            "settings": {
-                "terminal.integrated.profiles.linux": {
-                    "bash": {
-                        "path": "/bin/bash"
-                    },
-                    "sbt": {
-                        "path": "/bin/bash",
-                        "args": [
-                            "sbt"
-                        ]
-                    }
-                },
-                "terminal.integrated.defaultProfile.linux": "bash",
-                "java.jdt.ls.java.home": "/docker-java-home"
-            },
-            // Add the IDs of extensions you want installed when the container is created.
-            "extensions": [
-                "vscjava.vscode-java-pack",
-                "scalameta.metals"
-            ]
-        }
-    }
-  }
+    "service": "app"
+}

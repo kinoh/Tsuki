@@ -1,36 +1,14 @@
-ARG VARIANT=21
-FROM mcr.microsoft.com/vscode/devcontainers/java:${VARIANT}
+FROM mcr.microsoft.com/devcontainers/rust:1-1-bookworm
 
-# [Option] Install Maven
-ARG INSTALL_MAVEN="false"
-ARG MAVEN_VERSION=""
-# [Option] Install Gradle
-ARG INSTALL_GRADLE="false"
-ARG GRADLE_VERSION=""
-RUN if [ "${INSTALL_MAVEN}" = "true" ]; then su vscode -c "umask 0002 && . /usr/local/sdkman/bin/sdkman-init.sh && sdk install maven \"${MAVEN_VERSION}\""; fi \
-    && if [ "${INSTALL_GRADLE}" = "true" ]; then su vscode -c "umask 0002 && . /usr/local/sdkman/bin/sdkman-init.sh && sdk install gradle \"${GRADLE_VERSION}\""; fi
+RUN rustup toolchain install nightly \
+    && rustup override set nightly \
+    && rustup component add rustfmt \
+    && rustup component add rust-src
 
-# [Option] Install Node.js
-ARG INSTALL_NODE="true"
-ARG NODE_VERSION="lts/*"
-RUN if [ "${INSTALL_NODE}" = "true" ]; then su vscode -c "umask 0002 && . /usr/local/share/nvm/nvm.sh && nvm install ${NODE_VERSION} 2>&1"; fi
-
-# [Option] Install sbt
-ARG INSTALL_SBT="true"
-RUN if [ "${INSTALL_SBT}" = "true" ]; then \
-    echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" > /etc/apt/sources.list.d/sbt.list \
-    && echo "deb https://repo.scala-sbt.org/scalasbt/debian /" > /etc/apt/sources.list.d/sbt_old.list \
-    && curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | apt-key add \
-    && apt-get update \
-    && apt-get install sbt \
-    && apt-get clean -y && rm -rf /var/lib/apt/lists/* ; fi
-
-# [Optional] Uncomment this section to install additional OS packages.
-# RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-#     && apt-get -y install --no-install-recommends <your-package-list-here>
-
-# [Optional] Uncomment this line to install global node packages.
-# RUN su vscode -c "source /usr/local/share/nvm/nvm.sh && npm install -g <your-package-here>" 2>&1
+RUN curl -sSLf -o /tmp/vosk.zip https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-$(arch)-0.3.45.zip \
+    && unzip -qj -d /tmp /tmp/vosk.zip vosk-linux-x86_64-0.3.45/libvosk.so \
+    && install /tmp/libvosk.so /usr/local/lib \
+    && rm /tmp/vosk.zip /tmp/libvosk.so
 
 RUN apt-get update \
     && apt-get -y install distro-info \
@@ -44,5 +22,5 @@ RUN apt-get update \
         $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
         tee /etc/apt/sources.list.d/docker.list > /dev/null \
     && apt-get update \
-    && apt-get -y install docker-ce-cli docker-compose-plugin \
+    && apt-get -y install docker-ce-cli docker-compose-plugin protobuf-compiler \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*
