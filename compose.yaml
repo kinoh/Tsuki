@@ -1,11 +1,15 @@
 services:
   app:
     image: tsuki:${TAG}
-    build: target/docker/stage
-    command: --engine openai --history /var/memory/history.jsonl --persist --rewrite
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+      target: final
+    command: --history /var/memory/history.jsonl --openai-model gpt-4o --vosk-model /var/model/vosk-model-ja-0.22 --mumble-host mumble-server
     env_file: .env
     volumes:
       - memory-data:/var/memory
+      - model-data:/var/model
     depends_on:
       - sandbox
   sandbox:
@@ -48,6 +52,7 @@ services:
 
 volumes:
   memory-data:
+  model-data:
   mumble-data:
 
 networks:

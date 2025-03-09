@@ -4,13 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-mumble-protocol-2x = "0.6.0" # Require protoc
+mumble-protocol-2x = { git = "https://github.com/kinoh/rust-mumble-protocol.git" } # Require protoc
 futures = "0.3"
 bytes = "1.0"
-native-tls = "0.2"
 tokio = { version = "1", features = ["full"] }
-tokio-native-tls = "0.3"
 tokio-util = { version = "0.7", features = ["codec", "net"] }
+tokio-rustls = "0.26"
 thiserror = "2.0"
 opus = "0.3"
 vosk = "0.3"

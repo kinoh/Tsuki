@@ -32,6 +32,12 @@ tasks:
     desc: Do build in production
     cmds:
       - docker compose build
+  build-*:
+    desc: Do build in production
+    vars:
+      SERVICE: '{{index .MATCH 0}}'
+    cmds:
+      - docker compose build {{.SERVICE}}
   download_model:
     desc: Download Vosk model
     cmds:

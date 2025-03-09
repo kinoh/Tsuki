@@ -22,5 +22,5 @@ RUN apt-get update \
         $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
         tee /etc/apt/sources.list.d/docker.list > /dev/null \
     && apt-get update \
-    && apt-get -y install docker-ce-cli docker-compose-plugin protobuf-compiler \
+    && apt-get -y install docker-ce-cli docker-compose-plugin protobuf-compiler cmake \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*
