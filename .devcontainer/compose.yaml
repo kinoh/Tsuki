@@ -1,7 +1,9 @@
 services:
   app:
     image: tsuki-dev
-    build: .devcontainer/
+    build:
+      context: .devcontainer/
+      dockerfile: Dockerfile
     command: []
     volumes:
       - .:/workspace:cached

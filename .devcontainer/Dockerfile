@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/rust:1-1-bookworm
+FROM mcr.microsoft.com/devcontainers/rust:1-1-bookworm as final
 
 RUN rustup toolchain install nightly \
     && rustup override set nightly \
