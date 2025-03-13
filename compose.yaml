@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: docker/app/Dockerfile
       target: final
-    command: --history /var/memory/history.jsonl --openai-model gpt-4o --vosk-model /var/model/vosk-model-ja-0.22 --mumble-host mumble-server
+    command: --history /var/memory/history.jsonl --openai-model gpt-4o --vosk-model /var/model/vosk-model-ja-0.22 --voicevox-endpoint http://voicevox-engine:50021 --mumble-host mumble-server
     env_file: .env
     volumes:
       - memory-data:/var/memory
@@ -49,6 +49,10 @@ services:
       - "64738:64738/udp"
     volumes:
       - mumble-data:/data
+  voicevox-engine:
+    image: voicevox/voicevox_engine:cpu-0.24.0-dev
+    ports:
+      - "50021:50021"
 
 volumes:
   memory-data:

@@ -33,7 +33,7 @@ impl From<openai_api_rust::Error> for Error {
     }
 }
 
-const ASSISTANT_NAME: &str = "つき";
+pub const ASSISTANT_NAME: &str = "つき";
 
 pub enum Model {
     Echo,
@@ -141,7 +141,7 @@ impl OpenAiCore {
             match event {
                 Event::RecognizedSpeech { user, message } => {
                     let response = self.receive(user, message).await?;
-                    sender.send(Event::AssistantMessageIntent { message: response })?;
+                    sender.send(Event::AssistantSpeech { message: response })?;
                 }
                 _ => {}
             }

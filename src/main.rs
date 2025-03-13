@@ -5,6 +5,7 @@ mod events;
 mod messages;
 mod mumble;
 mod recognizer;
+mod speak;
 
 use clap::Parser;
 use std::time::Duration;
@@ -37,6 +38,8 @@ struct Args {
     history: String,
     #[arg(long, default_value = "")]
     openai_model: String,
+    #[arg(long)]
+    voicevox_endpoint: String,
 }
 
 async fn app() -> Result<(), ApplicationError> {
@@ -46,7 +49,7 @@ async fn app() -> Result<(), ApplicationError> {
         args.mumble_host,
         args.mumble_port,
         true,
-        "tsuki".to_string(),
+        core::ASSISTANT_NAME.to_string(),
     )
     .await?;
 
@@ -56,6 +59,8 @@ async fn app() -> Result<(), ApplicationError> {
         Duration::from_millis(100),
         Duration::from_millis(500),
     )?;
+
+    let speaker = speak::SpeechEngine::new(args.voicevox_endpoint, 58);
 
     let repository = RwLock::new(messages::MessageRepository::new(args.history)?);
 
@@ -71,6 +76,7 @@ async fn app() -> Result<(), ApplicationError> {
     select! {
         r = event_system.run(speech_recognizer).await => { println!("recognizer finished: {:?}", r); }
         r = event_system.run(core).await => { println!("core finished: {:?}", r); }
+        r = event_system.run(speaker).await => { println!("speaker finished: {:?}", r); }
     }
     Ok(())
 }

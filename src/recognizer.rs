@@ -1,14 +1,12 @@
 use crate::events::{self, Event, EventComponent};
-use crate::mumble;
+use crate::mumble::{self, Voice};
 use async_trait::async_trait;
-use core::slice::SlicePattern;
-use opus::Channels;
 use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio::task::JoinError;
 use tokio::{select, sync::mpsc, time};
-use vosk::{Model, Recognizer};
+use vosk::{Model, Recognizer, SpeakerModel};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -20,6 +18,10 @@ pub enum Error {
     SystemTime(#[from] std::time::SystemTimeError),
     #[error("failed to send event: {0}")]
     SendText(#[from] broadcast::error::SendError<Event>),
+    #[error("failed to receive event: {0}")]
+    Receive(#[from] tokio::sync::broadcast::error::RecvError),
+    #[error("failed to send voice: {0}")]
+    SendVoice(#[from] tokio::sync::mpsc::error::SendError<Voice>),
     #[error("join error: {0}")]
     Join(#[from] JoinError),
     #[error("mumble error: {0}")]
@@ -33,10 +35,6 @@ pub enum Error {
     #[error("mumble client finished")]
     MumbleFinished,
 }
-
-const SAMPLE_RATE: u32 = 48000;
-const MAX_AUDIO_MILLISEC: usize = 60;
-const CHANNEL_COUNT: Channels = Channels::Mono;
 
 pub struct SpeechRecognizer {
     mumble: Option<mumble::Client>,
@@ -53,8 +51,7 @@ impl SpeechRecognizer {
         silence_timeout: time::Duration,
     ) -> Result<Self, Error> {
         let model = Model::new(vosk_model_path).ok_or(Error::LoadModel)?;
-        let recognizer =
-            Recognizer::new(&model, SAMPLE_RATE as f32).ok_or(Error::CreateRecognizer)?;
+        let mut recognizer = Recognizer::new(&model, 48000f32).ok_or(Error::CreateRecognizer)?;
         Ok(Self {
             mumble: Some(mumble),
             recognizer,
@@ -63,28 +60,25 @@ impl SpeechRecognizer {
         })
     }
 
-    async fn run_internal(&mut self, sender: Sender<Event>) -> Result<(), Error> {
-        let (audio_sender, mut audio_receiver) = mpsc::channel(32);
+    async fn run_internal(
+        &mut self,
+        sender: Sender<Event>,
+        receiver: &mut Receiver<Event>,
+    ) -> Result<(), Error> {
+        let (hear_sender, mut hear_receiver) = mpsc::channel(32);
+        let (speak_sender, mut speak_receiver) = mpsc::channel(32);
 
         let mut mumble_client = std::mem::take(&mut self.mumble).ok_or(Error::DuplicateRun)?;
-        let mut mumble = Some(tokio::spawn(async move {
-            mumble_client.run(audio_sender).await
-        }));
-
-        const BUFFER_SIZE: usize =
-            (SAMPLE_RATE as usize) * MAX_AUDIO_MILLISEC / 1000 * (CHANNEL_COUNT as usize);
-        let mut decoder = opus::Decoder::new(SAMPLE_RATE, CHANNEL_COUNT)?;
-        let mut output = [0i16; BUFFER_SIZE];
+        let mut mumble =
+            tokio::spawn(async move { mumble_client.run(hear_sender, &mut speak_receiver).await });
 
         let mut last_receipt: Option<(String, SystemTime)> = None;
         let mut interval = time::interval(self.monitor_interval);
 
         loop {
             select! {
-                Some(voice) = audio_receiver.recv() => {
-                    let size = decoder.decode(voice.audio.as_slice(), &mut output, false)?;
-
-                    let state = self.recognizer.accept_waveform(&output[0..size])?;
+                Some(voice) = hear_receiver.recv() => {
+                    let state = self.recognizer.accept_waveform(&voice.audio)?;
 
                     last_receipt = Some((voice.user.clone(), SystemTime::now()));
 
@@ -97,7 +91,7 @@ impl SpeechRecognizer {
                             match result {
                                 None => println!("no result"),
                                 Some(value) => {
-                                    println!("result: {}", value.text);
+                                    println!("result: {:?}", value);
                                     sender.send(Event::RecognizedSpeech { user: voice.user, message: value.text.to_string() })?;
                                 }
                             }
@@ -113,7 +107,7 @@ impl SpeechRecognizer {
                             match result {
                                 None => println!("no final result"),
                                 Some(value) => {
-                                    println!("final result: {}", value.text);
+                                    println!("final result: {:?}", value);
                                     sender.send(Event::RecognizedSpeech { user: user, message: value.text.to_string() })?;
                                 }
                             }
@@ -123,7 +117,15 @@ impl SpeechRecognizer {
                         }
                     }
                 }
-                result = async { if let Some(m) = mumble.take() { m.await } else { unreachable!() } }, if mumble.is_some() => {
+                event = receiver.recv() => {
+                    match event? {
+                        Event::PlayAudio { sample_rate, audio } => {
+                            speak_sender.send(Voice { user: "".to_string(), sample_rate, audio }).await?;
+                        }
+                        _ => {}
+                    }
+                }
+                result = &mut mumble => {
                     result??;
                     return Err(Error::MumbleFinished);
                 }
@@ -137,9 +139,9 @@ impl EventComponent for SpeechRecognizer {
     async fn run(
         &mut self,
         sender: Sender<Event>,
-        _receiver: &mut Receiver<Event>,
+        receiver: &mut Receiver<Event>,
     ) -> Result<(), crate::events::Error> {
-        self.run_internal(sender)
+        self.run_internal(sender, receiver)
             .await
             .map_err(|e| events::Error::Component(format!("recognizer: {}", e)))
     }

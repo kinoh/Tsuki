@@ -6,7 +6,8 @@ use tokio::task::{self, JoinHandle};
 #[derive(Clone, Debug)]
 pub enum Event {
     RecognizedSpeech { user: String, message: String },
-    AssistantMessageIntent { message: String },
+    AssistantSpeech { message: String },
+    PlayAudio { sample_rate: u32, audio: Vec<i16> },
 }
 
 #[derive(Error, Debug)]

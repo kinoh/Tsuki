@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use core::slice::SlicePattern;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
 use futures::SinkExt;
@@ -11,7 +12,9 @@ use mumble_protocol_2x::voice::Clientbound;
 use mumble_protocol_2x::voice::Serverbound;
 use mumble_protocol_2x::voice::VoicePacket;
 use mumble_protocol_2x::voice::VoicePacketPayload;
+use opus::Channels;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -36,9 +39,11 @@ pub enum Error {
     #[error("tokio io error: {0}")]
     Io(#[from] tokio::io::Error),
     #[error("tokio mpsc send error: {0}")]
-    MpscSend(#[from] mpsc::error::SendError<Voice>),
+    MpscSend(#[from] mpsc::error::TrySendError<Voice>),
     #[error("invalid dns name error: {0}")]
     InvalidDnsName(#[from] tokio_rustls::rustls::pki_types::InvalidDnsNameError),
+    #[error("opus error: {0}")]
+    Opus(#[from] opus::Error),
     #[error("failed to resolve address")]
     AddressResolution,
     #[error("connection closed")]
@@ -105,9 +110,81 @@ impl ServerCertVerifier for NoCertificateVerification {
     }
 }
 
+const SAMPLE_RATE: u32 = 48000;
+const MAX_AUDIO_MILLISEC: usize = 60;
+const CHANNEL_COUNT: Channels = Channels::Mono;
+
+const AUDIO_PAYLOAD_UNIT_MILLISEC: u32 = 10;
+const AUDIO_PAYLOAD_N: u32 = 2;
+
 pub struct Voice {
     pub user: String,
-    pub audio: Bytes,
+    pub sample_rate: u32,
+    pub audio: Vec<i16>,
+}
+
+struct AudioEncoder {
+    encoder: opus::Encoder,
+    send_buffer: Vec<i16>,
+    seq_num: u64,
+    packet_duration: u32,
+    packet_samples: usize,
+    audio_encoded: Vec<u8>,
+}
+
+impl AudioEncoder {
+    fn new(sample_rate: u32) -> Result<Self, Error> {
+        let packet_duration = AUDIO_PAYLOAD_UNIT_MILLISEC * AUDIO_PAYLOAD_N;
+        let packet_samples = (sample_rate * packet_duration / 1000) as usize;
+        Ok(Self {
+            encoder: opus::Encoder::new(
+                sample_rate,
+                opus::Channels::Mono,
+                opus::Application::Voip,
+            )?,
+            send_buffer: Vec::<i16>::new(),
+            seq_num: 1,
+            packet_duration,
+            packet_samples,
+            audio_encoded: vec![0; packet_samples],
+        })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.send_buffer.is_empty()
+    }
+
+    fn push(&mut self, data: &[i16]) {
+        self.send_buffer.extend_from_slice(data);
+    }
+
+    fn next_packet(&mut self) -> Result<ControlPacket<Serverbound>, Error> {
+        if self.send_buffer.len() < self.packet_samples {
+            self.send_buffer.resize(self.packet_samples, 0);
+        }
+        let frame = &self.send_buffer[..self.packet_samples];
+        let encoded_len = self.encoder.encode(frame, &mut self.audio_encoded)?;
+
+        let is_end = self.send_buffer.len() <= self.packet_duration as usize;
+        let payload = VoicePacketPayload::Opus(
+            Bytes::copy_from_slice(&self.audio_encoded[..encoded_len]),
+            is_end,
+        );
+        let audio = VoicePacket::Audio {
+            _dst: PhantomData,
+            target: 0,
+            session_id: (),
+            seq_num: self.seq_num,
+            payload,
+            position_info: None,
+        };
+        let packet = ControlPacket::UDPTunnel(Box::new(audio));
+
+        self.send_buffer.drain(..self.packet_samples);
+        self.seq_num += AUDIO_PAYLOAD_N as u64;
+
+        Ok(packet)
+    }
 }
 
 pub struct Client {
@@ -117,6 +194,7 @@ pub struct Client {
     >,
     read: SplitStream<Framed<TlsStream<TcpStream>, ControlCodec<Serverbound, Clientbound>>>,
     user_by_session: HashMap<u32, String>,
+    current_session: Option<u32>,
 }
 
 impl Client {
@@ -139,7 +217,8 @@ impl Client {
         let stream = TcpStream::connect(&server_addr).await?;
         println!("TCP connected..");
 
-        // Wrap the connection in TLS
+        // https://github.com/rustls/rustls/issues/1938
+        let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
         let config = ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
@@ -167,11 +246,66 @@ impl Client {
             write,
             read,
             user_by_session: HashMap::new(),
+            current_session: None,
         })
     }
 
-    pub async fn run(&mut self, sender: mpsc::Sender<Voice>) -> Result<(), Error> {
+    async fn receive_audio(
+        &mut self,
+        sender: &mpsc::Sender<Voice>,
+        session_id: u32,
+        seq_num: u64,
+        payload: VoicePacketPayload,
+    ) -> Result<(), Error> {
+        println!("receive audio {} {}", session_id, seq_num);
+        let mut decoder = opus::Decoder::new(SAMPLE_RATE, CHANNEL_COUNT)?;
+        const BUFFER_SIZE: usize =
+            (SAMPLE_RATE as usize) * MAX_AUDIO_MILLISEC / 1000 * (CHANNEL_COUNT as usize);
+        let mut output = [0i16; BUFFER_SIZE];
+        match payload {
+            VoicePacketPayload::Opus(audio, end) => {
+                if end {
+                    println!("end of transmission!");
+                }
+                let user = self
+                    .user_by_session
+                    .get(&session_id)
+                    .map(|u| u.clone())
+                    .unwrap_or("unknown".to_string());
+                let size = decoder.decode(audio.as_slice(), &mut output, false)?;
+                sender
+                    .try_send(Voice {
+                        user,
+                        sample_rate: SAMPLE_RATE,
+                        audio: output[..size].to_vec(),
+                    })
+                    .or_else(|e| match e {
+                        mpsc::error::TrySendError::Full(_) => {
+                            println!("voice queue is full");
+                            Ok(())
+                        }
+                        e => Err(e),
+                    })?;
+            }
+            _ => {
+                println!("unsupported voice packet");
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn run(
+        &mut self,
+        sender: mpsc::Sender<Voice>,
+        receiver: &mut mpsc::Receiver<Voice>,
+    ) -> Result<(), Error> {
+        let mut encoder = AudioEncoder::new(24000)?;
+
         let mut ping_interval = time::interval(time::Duration::from_secs(20));
+        let mut send_interval = time::interval(time::Duration::from_millis(
+            (AUDIO_PAYLOAD_UNIT_MILLISEC * AUDIO_PAYLOAD_N) as u64,
+        ));
+
         loop {
             select! {
                 _ = ping_interval.tick() => {
@@ -182,7 +316,21 @@ impl Client {
                     };
                     ping_msg.set_timestamp(timestamp);
                     self.write.send(ping_msg.into()).await?;
-                },
+                }
+                _ = send_interval.tick() => {
+                    if !encoder.is_empty() {
+                        self.write.send(encoder.next_packet()?).await?;
+                    }
+                }
+                Some(voice) = receiver.recv() => {
+                    encoder.push(&voice.audio);
+                    for _ in 0..5 {
+                        if encoder.is_empty() {
+                            break;
+                        }
+                        self.write.send(encoder.next_packet()?).await?;
+                    }
+                }
                 msg = self.read.next() => {
                     match msg {
                         Some(result) => {
@@ -193,30 +341,20 @@ impl Client {
                                             println!("receive ping {}", timestamp);
                                         }
                                         VoicePacket::Audio { session_id, seq_num, payload, .. } => {
-                                            println!("receive audio {} {}", session_id, seq_num);
-                                            match payload {
-                                                VoicePacketPayload::Opus(audio, end) => {
-                                                    if end {
-                                                        println!("end of transmission!");
-                                                    }
-                                                    let user = self.user_by_session.get(&session_id).map(|u| u.clone()).unwrap_or("unknown".to_string());
-                                                    sender.send(Voice { user, audio }).await?;
-                                                }
-                                                _ => {
-                                                    println!("unsupported voice packet");
-                                                }
-                                            }
+                                            self.receive_audio(&sender, session_id, seq_num, payload).await?;
                                         }
                                     };
                                 }
                                 ControlPacket::UserState(packet) => {
-                                    match (packet.session, packet.name) {
-                                        (Some(session), Some(name)) => {
-                                            self.user_by_session.insert(session, name);
-                                        }
-                                        _ => {
-                                            println!("incomplete user state");
-                                        }
+                                    if let (Some(session), Some(name)) = (packet.session, packet.name) {
+                                        self.user_by_session.insert(session, name);
+                                    } else {
+                                        println!("incomplete user state");
+                                    }
+                                }
+                                ControlPacket::ServerSync(packet) => {
+                                    if let Some(session) = packet.session {
+                                        self.current_session = Some(session);
                                     }
                                 }
                                 packet => {
@@ -228,7 +366,7 @@ impl Client {
                             return Err(Error::ConnectionClosed);
                         }
                     }
-                },
+                }
             }
         }
     }
