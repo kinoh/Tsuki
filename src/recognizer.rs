@@ -43,10 +43,10 @@ const VAD_THREASHOLD: f32 = 0.7;
 const VAD_REQUIRED_COUNT: u32 = 3;
 
 pub struct BufferingVad {
-    sample_rate: u32,
     chunk_size: usize,
     vad: VoiceActivityDetector,
     buffer: Vec<i16>,
+    count: u32,
 }
 
 impl BufferingVad {
@@ -58,26 +58,26 @@ impl BufferingVad {
             .chunk_size(chunk_size)
             .build()?;
         Ok(BufferingVad {
-            sample_rate,
             chunk_size,
             vad,
             buffer: Vec::new(),
+            count: 0,
         })
     }
 
-    pub fn detect(&mut self, audio: &[i16]) -> Option<f32> {
+    pub fn detect(&mut self, audio: &[i16]) {
         self.buffer.extend_from_slice(audio);
         if self.buffer.len() >= self.chunk_size {
             let result = self.vad.predict(self.buffer.clone());
-            println!("vad {} len={}", result, self.buffer.len());
-            Some(result)
-        } else {
-            None
+            if result > VAD_THREASHOLD {
+                self.count += 1
+            }
         }
     }
 
     pub fn clear(&mut self) {
         self.buffer.clear();
+        self.count = 0;
     }
 }
 
@@ -121,19 +121,12 @@ impl SpeechRecognizer {
             tokio::spawn(async move { mumble_client.run(hear_sender, &mut speak_receiver).await });
 
         let mut last_receipt: Option<(String, SystemTime)> = None;
-        let mut vad_count = 0;
         let mut interval = time::interval(self.monitor_interval);
 
         loop {
             select! {
                 Some(voice) = hear_receiver.recv() => {
-                    let is_voice = self.buffering_vad.detect(&voice.audio);
-                    if let Some(value) = is_voice {
-                        if value >= VAD_THREASHOLD {
-                            vad_count += 1;
-                        }
-                    }
-
+                    self.buffering_vad.detect(&voice.audio);
                     let state = self.recognizer.accept_waveform(&voice.audio)?;
 
                     last_receipt = Some((voice.user.clone(), SystemTime::now()));
@@ -143,14 +136,19 @@ impl SpeechRecognizer {
                             println!("recognition failed");
                         }
                         vosk::DecodingState::Finalized => {
-                            let result = self.recognizer.result().single();
-                            match result {
-                                None => println!("no result"),
-                                Some(value) => {
-                                    println!("result: {:?}", value);
-                                    let text = value.text;
-                                    if !text.is_empty() {
-                                        sender.send(Event::RecognizedSpeech { user: voice.user, message: text.to_string() })?;
+                            if self.buffering_vad.count < VAD_REQUIRED_COUNT {
+                                println!("vad count too few");
+                                self.recognizer.reset();
+                            } else {
+                                let result = self.recognizer.result().single();
+                                match result {
+                                    None => println!("no result"),
+                                    Some(value) => {
+                                        println!("result: {:?} vad={}", value, self.buffering_vad.count);
+                                        let text = value.text;
+                                        if !text.is_empty() {
+                                            sender.send(Event::RecognizedSpeech { user: voice.user, message: text.to_string() })?;
+                                        }
                                     }
                                 }
                             }
@@ -162,7 +160,7 @@ impl SpeechRecognizer {
                     if let Some((user, t)) = last_receipt.take() {
                         let elapsed = SystemTime::now().duration_since(t)?;
                         if elapsed > self.silence_timeout {
-                            if vad_count < VAD_REQUIRED_COUNT {
+                            if self.buffering_vad.count < VAD_REQUIRED_COUNT {
                                 println!("vad count too few");
                                 self.recognizer.reset();
                             } else {
@@ -170,7 +168,7 @@ impl SpeechRecognizer {
                                 match result {
                                     None => println!("no final result"),
                                     Some(value) => {
-                                        println!("final result: {:?} vad={}", value, vad_count);
+                                        println!("final result: {:?} vad={}", value, self.buffering_vad.count);
                                         let text = value.text;
                                         if !text.is_empty() {
                                             sender.send(Event::RecognizedSpeech { user: user, message: text.to_string() })?;
@@ -179,7 +177,6 @@ impl SpeechRecognizer {
                                 }
                             }
                             last_receipt = None;
-                            vad_count = 0;
                             self.buffering_vad.clear();
                         } else {
                             last_receipt = Some((user, t));
