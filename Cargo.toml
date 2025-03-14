@@ -20,3 +20,5 @@ async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 reqwest = "0.12"
 hound = "3.5"
+voice_activity_detector = "0.1.1"
+ort-sys = "=2.0.0-rc.4" # voice_activity_detector is not compatible with rc.9

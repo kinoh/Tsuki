@@ -110,7 +110,7 @@ impl ServerCertVerifier for NoCertificateVerification {
     }
 }
 
-const SAMPLE_RATE: u32 = 48000;
+pub const SAMPLE_RATE: u32 = 48000;
 const MAX_AUDIO_MILLISEC: usize = 60;
 const CHANNEL_COUNT: Channels = Channels::Mono;
 
