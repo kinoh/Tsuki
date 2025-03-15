@@ -11,24 +11,33 @@ pub enum Error {
     SerdeJson(#[from] serde_json::Error),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum Role {
     System,
     Assistant,
     User,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub enum Modality {
+    Bare,
+    Text,
+    Audio,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MessageRecord {
     pub timestamp: u64,
+    pub modality: Modality,
     pub role: Role,
     pub user: String,
-    pub message: String,
+    pub chat: String,
 }
 
 pub struct MessageRepository {
     data: Vec<MessageRecord>,
     writer: std::fs::File,
+    path: String,
 }
 
 impl MessageRepository {
@@ -49,7 +58,39 @@ impl MessageRepository {
             }
         }
 
-        Ok(Self { data, writer: file })
+        Ok(Self {
+            data,
+            writer: file,
+            path,
+        })
+    }
+
+    pub fn load_initial_prompt(&mut self, message: &str) -> Result<(), Error> {
+        let record = MessageRecord {
+            timestamp: 0,
+            modality: Modality::Bare,
+            role: Role::System,
+            user: "".to_string(),
+            chat: message.to_string(),
+        };
+        if self.data.len() == 0 {
+            self.data.push(record);
+        } else {
+            self.data[0] = record;
+        }
+
+        self.writer = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&self.path)?;
+
+        for record in &self.data {
+            let json = serde_json::to_string(&record)?;
+            writeln!(self.writer, "{}", json)?;
+        }
+        self.writer.flush()?;
+
+        Ok(())
     }
 
     pub fn append(&mut self, record: MessageRecord) -> Result<(), Error> {

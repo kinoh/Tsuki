@@ -1,8 +1,9 @@
 use crate::events::{self, Event, EventComponent};
-use crate::messages::{self, MessageRecord, MessageRepository};
+use crate::messages::{self, MessageRecord, MessageRepository, Modality};
 use async_trait::async_trait;
 use openai_api_rust::chat::{ChatApi, ChatBody};
 use openai_api_rust::{Auth, Message, OpenAI, Role};
+use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
@@ -20,6 +21,8 @@ pub enum Error {
     ReceiveEvent(#[from] broadcast::error::RecvError),
     #[error("failed to send event: {0}")]
     SendEvent(#[from] broadcast::error::SendError<Event>),
+    #[error("serde json error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 impl From<openai_api_rust::Error> for Error {
@@ -40,12 +43,29 @@ pub enum Model {
     OpenAi(String),
 }
 
-fn convert_role(role: messages::Role) -> Role {
-    match role {
-        messages::Role::Assistant => Role::Assistant,
-        messages::Role::System => Role::System,
-        messages::Role::User => Role::User,
+impl From<messages::Role> for Role {
+    fn from(value: messages::Role) -> Self {
+        match value {
+            messages::Role::Assistant => Role::Assistant,
+            messages::Role::System => Role::System,
+            messages::Role::User => Role::User,
+        }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct OpenAiChatInput {
+    modality: Modality,
+    user: String,
+    content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct OpenAiChatOutput {
+    feeling: Option<u8>,
+    activity: Option<u8>,
+    modality: Modality,
+    content: String,
 }
 
 pub struct OpenAiCore {
@@ -56,9 +76,14 @@ pub struct OpenAiCore {
 }
 
 impl OpenAiCore {
-    pub fn new(repository: RwLock<MessageRepository>, model: Model) -> Result<Self, Error> {
+    pub async fn new(repository: RwLock<MessageRepository>, model: Model) -> Result<Self, Error> {
         let auth = Auth::from_env().map_err(|e| Error::OpenAi(format!("auth: {}", e)))?;
         let openai = OpenAI::new(auth, "https://api.openai.com/v1/");
+
+        repository
+            .write()
+            .await
+            .load_initial_prompt(include_str!("prompt/initial.txt"))?;
 
         Ok(Self {
             repository,
@@ -68,32 +93,34 @@ impl OpenAiCore {
         })
     }
 
-    async fn receive(&mut self, user: String, message: String) -> Result<String, Error> {
+    async fn receive(&mut self, input_chat: OpenAiChatInput) -> Result<OpenAiChatOutput, Error> {
+        let input_chat_json = serde_json::to_string(&input_chat)?;
         let user_record = MessageRecord {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs(),
+            modality: input_chat.modality,
             role: messages::Role::User,
-            user: user.clone(),
-            message: message.clone(),
+            user: input_chat.user.clone(),
+            chat: input_chat_json,
         };
         self.repository.write().await.append(user_record)?;
 
-        let response_message = match &self.model {
-            Model::Echo => format!("{}> {}", user, message),
+        let output_chat_json = match &self.model {
             Model::OpenAi(model) => {
                 let records = self.repository.read().await.get_all().to_vec();
-                let mut messages = Vec::with_capacity(records.len());
-                for r in records {
-                    messages.push(Message {
-                        role: convert_role(r.role),
-                        content: r.message,
-                    });
-                }
+                let messages: Vec<Message> = records
+                    .iter()
+                    .map(|r| Message {
+                        role: r.role.into(),
+                        content: r.chat.clone(),
+                    })
+                    .collect();
+
                 let chat_body = ChatBody {
                     model: model.clone(),
                     messages,
-                    user: None,
+                    user: Some(input_chat.user),
                     max_tokens: Some(self.max_tokens),
                     temperature: None,
                     top_p: None,
@@ -105,6 +132,7 @@ impl OpenAiCore {
                     logit_bias: None,
                 };
                 let completion = self.openai.chat_completion_create(&chat_body)?;
+
                 let choice = completion
                     .choices
                     .get(0)
@@ -116,19 +144,43 @@ impl OpenAiCore {
 
                 response.content.clone()
             }
+            Model::Echo => {
+                let chat = OpenAiChatOutput {
+                    activity: None,
+                    feeling: None,
+                    modality: Modality::Text,
+                    content: serde_json::to_string(&input_chat)?,
+                };
+                serde_json::to_string(&chat)?
+            }
         };
+
+        let output_chat: OpenAiChatOutput = serde_json::from_str(&output_chat_json)?;
 
         let assistant_record = MessageRecord {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs(),
+            modality: output_chat.modality,
             role: messages::Role::Assistant,
             user: ASSISTANT_NAME.to_string(),
-            message: response_message.clone(),
+            chat: output_chat_json.clone(),
         };
         self.repository.write().await.append(assistant_record)?;
 
-        Ok(response_message)
+        Ok(output_chat)
+    }
+
+    fn to_event(&self, output_chat: OpenAiChatOutput) -> Option<Event> {
+        match output_chat.modality {
+            Modality::Audio => Some(Event::AssistantSpeech {
+                message: output_chat.content,
+            }),
+            Modality::Text => Some(Event::AssistantText {
+                message: output_chat.content,
+            }),
+            _ => None,
+        }
     }
 
     async fn run_internal(
@@ -138,16 +190,24 @@ impl OpenAiCore {
     ) -> Result<(), Error> {
         loop {
             let event = receiver.recv().await?;
-            match event {
-                Event::RecognizedSpeech { user, message } => {
-                    let response = self.receive(user, message).await?;
-                    sender.send(Event::AssistantSpeech { message: response })?;
+            let input_chat = match event {
+                Event::RecognizedSpeech { user, message } => Some(OpenAiChatInput {
+                    modality: Modality::Audio,
+                    user,
+                    content: message,
+                }),
+                Event::TextMessage { user, message } => Some(OpenAiChatInput {
+                    modality: Modality::Text,
+                    user,
+                    content: message,
+                }),
+                _ => None,
+            };
+            if let Some(input_chat) = input_chat {
+                let output_chat = self.receive(input_chat).await?;
+                if let Some(event) = self.to_event(output_chat) {
+                    sender.send(event)?;
                 }
-                Event::TextMessage { user, message } => {
-                    let response = self.receive(user, message).await?;
-                    sender.send(Event::AssistantText { message: response })?;
-                }
-                _ => {}
             }
         }
     }

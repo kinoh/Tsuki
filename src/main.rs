@@ -88,7 +88,7 @@ async fn app() -> Result<(), ApplicationError> {
     } else {
         core::Model::OpenAi(args.openai_model)
     };
-    let core = core::OpenAiCore::new(repository, model)?;
+    let core = core::OpenAiCore::new(repository, model).await?;
     futures.push(event_system.run(core));
 
     let web_interface = web::WebState::new(args.port);

@@ -30,6 +30,8 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
+
+    println!("start listen port={}", port);
     axum::serve(listener, app).await?;
 
     Ok(())

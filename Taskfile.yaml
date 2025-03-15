@@ -44,3 +44,11 @@ tasks:
       - curl -sSfL -o /tmp/vosk-model-ja.zip https://alphacephei.com/vosk/models/vosk-model-ja-0.22.zip
       - unzip /tmp/vosk-model-ja.zip -d /var/vosk/
       - rm /tmp/vosk-model-ja.zip
+  decrypt_prompt:
+    desc: Decrypt prompt file
+    cmds:
+      - age -d -i $PROMPT_PRIVATE_KEY_PATH src/prompt/initial.txt.age > src/prompt/initial.txt
+  encrypt_prompt:
+    desc: Encrypt prompt file
+    cmds:
+      - age -R $PROMPT_PUBLIC_KEY_PATH src/prompt/initial.txt > src/prompt/initial.txt.age
