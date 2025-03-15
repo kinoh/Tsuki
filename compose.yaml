@@ -7,6 +7,8 @@ services:
       target: final
     command: --history /var/memory/history.jsonl --openai-model gpt-4o --vosk-model /var/model/vosk-model-ja-0.22 --voicevox-endpoint http://voicevox-engine:50021 --mumble-host mumble-server
     env_file: .env
+    ports:
+      - "2953:2953"
     volumes:
       - memory-data:/var/memory
       - model-data:/var/model

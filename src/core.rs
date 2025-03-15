@@ -134,7 +134,7 @@ impl OpenAiCore {
     async fn run_internal(
         &mut self,
         sender: Sender<Event>,
-        receiver: &mut Receiver<Event>,
+        mut receiver: Receiver<Event>,
     ) -> Result<(), Error> {
         loop {
             let event = receiver.recv().await?;
@@ -142,6 +142,10 @@ impl OpenAiCore {
                 Event::RecognizedSpeech { user, message } => {
                     let response = self.receive(user, message).await?;
                     sender.send(Event::AssistantSpeech { message: response })?;
+                }
+                Event::TextMessage { user, message } => {
+                    let response = self.receive(user, message).await?;
+                    sender.send(Event::AssistantText { message: response })?;
                 }
                 _ => {}
             }
@@ -151,11 +155,8 @@ impl OpenAiCore {
 
 #[async_trait]
 impl EventComponent for OpenAiCore {
-    async fn run(
-        &mut self,
-        sender: Sender<Event>,
-        receiver: &mut Receiver<Event>,
-    ) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+        let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await
             .map_err(|e| events::Error::Component(format!("core: {}", e)))

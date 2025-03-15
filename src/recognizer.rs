@@ -111,7 +111,7 @@ impl SpeechRecognizer {
     async fn run_internal(
         &mut self,
         sender: Sender<Event>,
-        receiver: &mut Receiver<Event>,
+        mut receiver: Receiver<Event>,
     ) -> Result<(), Error> {
         let (hear_sender, mut hear_receiver) = mpsc::channel(32);
         let (speak_sender, mut speak_receiver) = mpsc::channel(32);
@@ -202,11 +202,8 @@ impl SpeechRecognizer {
 
 #[async_trait]
 impl EventComponent for SpeechRecognizer {
-    async fn run(
-        &mut self,
-        sender: Sender<Event>,
-        receiver: &mut Receiver<Event>,
-    ) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+        let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await
             .map_err(|e| events::Error::Component(format!("recognizer: {}", e)))

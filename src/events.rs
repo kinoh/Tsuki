@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 use thiserror::Error;
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::broadcast::{self, Sender};
 use tokio::task::{self, JoinHandle};
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    TextMessage { user: String, message: String },
+    AssistantText { message: String },
     RecognizedSpeech { user: String, message: String },
     AssistantSpeech { message: String },
     PlayAudio { sample_rate: u32, audio: Vec<i16> },
@@ -20,11 +22,7 @@ pub enum Error {
 
 #[async_trait]
 pub trait EventComponent {
-    async fn run(
-        &mut self,
-        sender: Sender<Event>,
-        receiver: &mut Receiver<Event>,
-    ) -> Result<(), Error>;
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), Error>;
 }
 
 pub struct EventSystem {
@@ -37,12 +35,11 @@ impl EventSystem {
         EventSystem { sender }
     }
 
-    pub async fn run<T: EventComponent + Send + 'static>(
+    pub fn run<T: EventComponent + Send + 'static>(
         &self,
         mut component: T,
     ) -> JoinHandle<Result<(), Error>> {
-        let mut receiver = self.sender.subscribe();
         let sender = self.sender.clone();
-        task::spawn(async move { component.run(sender, &mut receiver).await })
+        task::spawn(async move { component.run(sender).await })
     }
 }

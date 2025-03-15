@@ -96,7 +96,7 @@ impl SpeechEngine {
     async fn run_internal(
         &mut self,
         sender: Sender<Event>,
-        receiver: &mut Receiver<Event>,
+        mut receiver: Receiver<Event>,
     ) -> Result<(), Error> {
         loop {
             let event = receiver.recv().await?;
@@ -123,11 +123,8 @@ impl SpeechEngine {
 
 #[async_trait]
 impl EventComponent for SpeechEngine {
-    async fn run(
-        &mut self,
-        sender: Sender<Event>,
-        receiver: &mut Receiver<Event>,
-    ) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+        let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await
             .map_err(|e| events::Error::Component(format!("speech: {}", e)))
