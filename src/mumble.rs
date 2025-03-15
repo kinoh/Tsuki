@@ -201,7 +201,6 @@ impl Client {
     pub async fn new(
         server_host: String,
         server_port: u16,
-        accept_invalid_cert: bool,
         user_name: String,
     ) -> Result<Self, Error> {
         let server_addr = (server_host.as_ref(), server_port)

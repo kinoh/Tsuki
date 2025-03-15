@@ -61,7 +61,6 @@ async fn app() -> Result<(), ApplicationError> {
         let mumble_client = mumble::Client::new(
             args.mumble_host,
             args.mumble_port,
-            true,
             core::ASSISTANT_NAME.to_string(),
         )
         .await?;
