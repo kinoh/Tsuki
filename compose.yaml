@@ -1,3 +1,5 @@
+name: tsuki
+
 services:
   app:
     image: tsuki:${TAG}
