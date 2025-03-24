@@ -10,7 +10,6 @@ tasks:
   deploy:
     desc: Deploy to production
     cmds:
-      - sbt docker:stage
       - docker compose up --build --detach
   up:
     desc: Start production
@@ -38,6 +37,12 @@ tasks:
       SERVICE: '{{index .MATCH 0}}'
     cmds:
       - docker compose build {{.SERVICE}}
+  log-*:
+    desc: Show log in production
+    vars:
+      SERVICE: '{{index .MATCH 0}}'
+    cmds:
+      - docker compose logs {{.SERVICE}}
   download_model:
     desc: Download Vosk model
     cmds:

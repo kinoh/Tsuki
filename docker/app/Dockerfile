@@ -40,4 +40,4 @@ ENV LD_LIBRARY_PATH="/usr/local/lib"
 COPY --from=build /usr/local/lib/libvosk.so /usr/local/lib/
 COPY --from=build /bin/tsuki /bin/
 
-CMD ["/bin/tsuki"]
+ENTRYPOINT ["/bin/tsuki"]
