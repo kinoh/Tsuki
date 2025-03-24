@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 use tokio::{select, sync::broadcast::Sender, sync::RwLock};
-use tokio::{select, sync::broadcast::Sender};
+use tower_http::cors::CorsLayer;
 
 use crate::{
     events::{self, Event, EventComponent},
@@ -29,6 +29,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Axum error: {0}")]
     Axum(#[from] axum::Error),
+    #[error("invalid header value: {0}")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
 }
 
 async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
@@ -36,6 +38,7 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
         .route("/", get(root))
         .route("/messages", get(messages))
         .route("/ws", any(ws_handler))
+        .layer(CorsLayer::new().allow_origin("http://localhost:1420".parse::<HeaderValue>()?))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
