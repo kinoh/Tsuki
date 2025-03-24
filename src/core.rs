@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use openai_api_rust::chat::{ChatApi, ChatBody};
 use openai_api_rust::{Auth, Message, OpenAI, Role};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
@@ -69,14 +70,17 @@ struct OpenAiChatOutput {
 }
 
 pub struct OpenAiCore {
-    repository: RwLock<MessageRepository>,
+    repository: Arc<RwLock<MessageRepository>>,
     openai: OpenAI,
     model: Model,
     max_tokens: i32,
 }
 
 impl OpenAiCore {
-    pub async fn new(repository: RwLock<MessageRepository>, model: Model) -> Result<Self, Error> {
+    pub async fn new(
+        repository: Arc<RwLock<MessageRepository>>,
+        model: Model,
+    ) -> Result<Self, Error> {
         let auth = Auth::from_env().map_err(|e| Error::OpenAi(format!("auth: {}", e)))?;
         let openai = OpenAI::new(auth, "https://api.openai.com/v1/");
 

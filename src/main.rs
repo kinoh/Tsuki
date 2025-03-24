@@ -10,7 +10,7 @@ mod web;
 
 use clap::Parser;
 use futures::future::select_all;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::RwLock;
 
@@ -81,17 +81,17 @@ async fn app() -> Result<(), ApplicationError> {
         futures.push(event_system.run(speaker));
     }
 
-    let repository = RwLock::new(messages::MessageRepository::new(args.history)?);
+    let repository = Arc::new(RwLock::new(messages::MessageRepository::new(args.history)?));
 
     let model = if args.openai_model.is_empty() {
         core::Model::Echo
     } else {
         core::Model::OpenAi(args.openai_model)
     };
-    let core = core::OpenAiCore::new(repository, model).await?;
+    let core = core::OpenAiCore::new(repository.clone(), model).await?;
     futures.push(event_system.run(core));
 
-    let web_interface = web::WebState::new(args.port);
+    let web_interface = web::WebState::new(repository, args.port);
     futures.push(event_system.run(web_interface));
 
     let (result, index, _) = select_all(futures).await;

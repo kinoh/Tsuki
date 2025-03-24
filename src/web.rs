@@ -6,14 +6,22 @@ use axum::{
         ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::{HeaderValue, StatusCode},
     response::Response,
     routing::{any, get},
-    Router,
+    Json, Router,
 };
+use reqwest::header::InvalidHeaderValue;
+use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
+use tokio::{select, sync::broadcast::Sender, sync::RwLock};
 use tokio::{select, sync::broadcast::Sender};
 
-use crate::events::{self, Event, EventComponent};
+use crate::{
+    events::{self, Event, EventComponent},
+    messages::MessageRepository,
+};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -26,6 +34,7 @@ pub enum Error {
 async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
     let app = Router::new()
         .route("/", get(root))
+        .route("/messages", get(messages))
         .route("/ws", any(ws_handler))
         .with_state(state);
 
@@ -39,6 +48,32 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
 
 async fn root() -> &'static str {
     "Hello, World!"
+}
+
+#[derive(Serialize)]
+struct ResponseMessage {
+    modality: crate::messages::Modality,
+    role: crate::messages::Role,
+    user: String,
+    chat: Value,
+}
+
+async fn messages(
+    State(state): State<Arc<WebState>>,
+) -> Result<Json<Vec<ResponseMessage>>, StatusCode> {
+    let reepo = state.repository.read().await;
+    let response: Vec<ResponseMessage> = reepo
+        .get_all()
+        .iter()
+        .filter(|m| m.role != crate::messages::Role::System)
+        .map(|m| ResponseMessage {
+            modality: m.modality,
+            role: m.role,
+            user: m.user.clone(),
+            chat: serde_json::from_str(&m.chat).unwrap_or(Value::String("error".to_string())),
+        })
+        .collect();
+    Ok(Json(response))
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WebState>>) -> Response {
@@ -103,13 +138,18 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
 pub struct WebState {
     port: u16,
     sender: Option<Sender<Event>>,
+    repository: Arc<RwLock<MessageRepository>>,
 }
 
 type WebInterface = Arc<WebState>;
 
 impl WebState {
-    pub fn new(port: u16) -> WebInterface {
-        Arc::new(Self { port, sender: None })
+    pub fn new(repository: Arc<RwLock<MessageRepository>>, port: u16) -> WebInterface {
+        Arc::new(Self {
+            port,
+            sender: None,
+            repository,
+        })
     }
 }
 

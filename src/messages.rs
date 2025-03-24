@@ -11,7 +11,7 @@ pub enum Error {
     SerdeJson(#[from] serde_json::Error),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum Role {
     System,
     Assistant,
