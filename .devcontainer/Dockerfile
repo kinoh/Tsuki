@@ -10,6 +10,11 @@ RUN curl -sSLf -o /tmp/vosk.zip https://github.com/alphacep/vosk-api/releases/do
     && install /tmp/libvosk.so /usr/local/lib \
     && rm /tmp/vosk.zip /tmp/libvosk.so
 
+RUN curl -sSLf -o /tmp/pnpm https://github.com/pnpm/pnpm/releases/download/v10.6.3/pnpm-linux-x64 \
+    && chmod +x /tmp/pnpm \
+    && ENV="/home/vscode/.bashrc" SHELL="/usr/bin/bash" /tmp/pnpm setup \
+    && rm /tmp/pnpm
+
 RUN apt-get update \
     && apt-get -y install distro-info \
     && bash -c "$(curl -fsSL https://pacstall.dev/q/install)" \
@@ -22,5 +27,6 @@ RUN apt-get update \
         $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
         tee /etc/apt/sources.list.d/docker.list > /dev/null \
     && apt-get update \
-    && apt-get -y install docker-ce-cli docker-compose-plugin protobuf-compiler cmake age \
+    && apt-get -y install docker-ce-cli docker-compose-plugin protobuf-compiler cmake age nodejs \
+        libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xdg-utils \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*

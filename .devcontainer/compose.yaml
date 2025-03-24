@@ -8,6 +8,7 @@ services:
     volumes:
       - .:/workspace:cached
       - devcontainer-data:/home/vscode:cached
+    network_mode: host
   mumble-server:
     environment:
       MUMBLE_VERBOSE: true
