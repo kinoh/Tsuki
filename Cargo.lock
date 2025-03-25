@@ -2061,6 +2061,7 @@ dependencies = [
  "clap",
  "futures",
  "hound",
+ "memsec",
  "mumble-protocol-2x",
  "openai_api_rust",
  "opus",

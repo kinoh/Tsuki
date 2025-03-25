@@ -30,6 +30,8 @@ enum ApplicationError {
     TokioJoin(#[from] tokio::task::JoinError),
     #[error("component stopped: {0}")]
     ComponentStopped(usize),
+    #[error("web error: {0}")]
+    Web(#[from] web::Error),
 }
 
 #[derive(Parser, Debug)]
@@ -91,7 +93,7 @@ async fn app() -> Result<(), ApplicationError> {
     let core = core::OpenAiCore::new(repository.clone(), model).await?;
     futures.push(event_system.run(core));
 
-    let web_interface = web::WebState::new(repository, args.port);
+    let web_interface = web::WebState::new(repository, args.port)?;
     futures.push(event_system.run(web_interface));
 
     let (result, index, _) = select_all(futures).await;

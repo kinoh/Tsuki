@@ -1,12 +1,13 @@
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 use async_trait::async_trait;
 use axum::{
     extract::{
         ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-        State,
+        Request, State,
     },
-    http::{HeaderValue, StatusCode},
+    http::{self, HeaderValue, StatusCode},
+    middleware::{self, Next},
     response::Response,
     routing::{any, get},
     Json, Router,
@@ -31,6 +32,40 @@ pub enum Error {
     Axum(#[from] axum::Error),
     #[error("invalid header value: {0}")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
+    #[error("envvar not set: {0}")]
+    EnvVar(&'static str),
+}
+
+fn secure_eq(a: &str, b: &str) -> bool {
+    let a_bytes: Vec<u8> = a.bytes().collect();
+    let b_bytes: Vec<u8> = b.bytes().collect();
+    if a_bytes.len() != b_bytes.len() {
+        return false;
+    }
+    unsafe { memsec::memeq(&a_bytes[0], &b_bytes[0], a_bytes.len()) }
+}
+
+async fn auth_middleware(
+    State(state): State<Arc<WebState>>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if req.uri() != "/ws" {
+        let auth_header = req.headers_mut().get(http::header::AUTHORIZATION);
+        let auth_header = match auth_header {
+            Some(header) => header.to_str().map_err(|_| StatusCode::FORBIDDEN)?,
+            None => return Err(StatusCode::FORBIDDEN),
+        };
+        let mut parts = auth_header.split_whitespace();
+        let token = match (parts.next(), parts.next()) {
+            (Some("Bearer"), Some(t)) => t,
+            _ => return Err(StatusCode::FORBIDDEN),
+        };
+        if !secure_eq(token, &state.auth_token) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+    Ok(next.run(req).await)
 }
 
 async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
@@ -39,6 +74,10 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
         .route("/messages", get(messages))
         .route("/ws", any(ws_handler))
         .layer(CorsLayer::new().allow_origin("http://localhost:1420".parse::<HeaderValue>()?))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
@@ -92,6 +131,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
         return;
     };
     let mut receiver = sender.subscribe();
+    let mut authorized_user: Option<String> = None;
 
     loop {
         select! {
@@ -100,13 +140,23 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                     Some(Ok(message)) => {
                         match message {
                             Message::Text(text) => {
-                                let v: Vec<&str> = text.splitn(2, ' ').collect();
-                                let (user, content) = if v.len() == 2 {
-                                    (v[0], v[1])
+                                if let Some(ref user) = authorized_user {
+                                    let _ = sender.send(Event::TextMessage { user: user.to_string(), message: text.to_string()}).map_err(|e| println!("event send error: {}", e));
                                 } else {
-                                    ("", text.as_ref())
-                                };
-                                let _ = sender.send(Event::TextMessage { user: user.to_string(), message: content.to_string() }).map_err(|e| println!("event send error: {}", e));
+                                    let mut parts = text.splitn(2, ':');
+                                    let (user, token) = match (parts.next(), parts.next()) {
+                                        (Some(u), Some(t)) => (u, t),
+                                        _ => {
+                                            println!("invalid auth");
+                                            return;
+                                        }
+                                    };
+                                    if !secure_eq(token, &state.auth_token) {
+                                        println!("invalid auth token");
+                                        return;
+                                    }
+                                    authorized_user = Some(user.to_string());
+                                }
                             }
                             Message::Close(_) => {
                                 println!("stream closed gracefully");
@@ -142,17 +192,26 @@ pub struct WebState {
     port: u16,
     sender: Option<Sender<Event>>,
     repository: Arc<RwLock<MessageRepository>>,
+    auth_token: String,
 }
 
 type WebInterface = Arc<WebState>;
 
 impl WebState {
-    pub fn new(repository: Arc<RwLock<MessageRepository>>, port: u16) -> WebInterface {
-        Arc::new(Self {
+    pub fn new(
+        repository: Arc<RwLock<MessageRepository>>,
+        port: u16,
+    ) -> Result<WebInterface, Error> {
+        let auth_token = env::var_os("WEB_AUTH_TOKEN")
+            .map(|t| t.to_string_lossy().to_string())
+            .and_then(|t| if t.is_empty() { None } else { Some(t) })
+            .ok_or(Error::EnvVar("WEB_AUTH_TOKEN"))?;
+        Ok(Arc::new(Self {
             port,
             sender: None,
             repository,
-        })
+            auth_token,
+        }))
     }
 }
 
