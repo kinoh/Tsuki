@@ -14,6 +14,7 @@ services:
     volumes:
       - memory-data:/var/memory
       - model-data:/var/model
+    restart: always
     depends_on:
       - sandbox
   sandbox:
@@ -31,6 +32,7 @@ services:
       test: [ "CMD", "curl", "-f", "http://localhost:8194/health" ]
     networks:
       - ssrf_proxy_network
+    restart: always
   ssrf-proxy:
     image: ssrf-proxy:6.6-24.04_beta
     build: docker/ssrf-proxy
@@ -46,6 +48,7 @@ services:
     networks:
       - ssrf_proxy_network
       - default
+    restart: always
   mumble-server:
     image: mumblevoip/mumble-server:v1.5.735-2
     ports:
@@ -53,10 +56,12 @@ services:
       - "64738:64738/udp"
     volumes:
       - mumble-data:/data
+    restart: always
   voicevox-engine:
     image: voicevox/voicevox_engine:cpu-0.24.0-dev
     ports:
       - "50021:50021"
+    restart: always
 
 volumes:
   memory-data:
