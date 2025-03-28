@@ -99,6 +99,9 @@
 :root {
   background: rgba(0, 0, 0, 0) !important;
   font-family: "SourceHanSans", sans-serif;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.2rem;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -114,7 +117,9 @@
 .horizontal {
   display: flex;
   flex-direction: row;
-  gap: 5mm;
+  justify-content: center;
+  align-items: stretch;
+  gap: 0.1rem;
   height: 90vh;
 }
 
@@ -122,45 +127,49 @@
   display: flex;
   flex-direction: column-reverse;
   flex: auto;
-  margin: 2vh;
   min-width: 0;
+  padding: 0 2vw;
 }
 
 .avatar-box {
   overflow: hidden;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .avatar {
   object-fit: contain;
-  max-width: 20vw;
-  filter: drop-shadow(0 0 8px #223344);
+  max-width: 10rem;
+  filter: drop-shadow(0 0 6px #7763b3);
 }
 
 .message {
-  color: #0f0f0f;
-  padding: 0.8em 1.2em;
+  color: #222;
+  padding: 0.8rem 1.2rem;
   border: none;
   border-radius: 5px;
   overflow-wrap: break-word;
 }
 
 .assistant-message {
-  background: RGBA(224, 217, 240, 0.8);
-  margin: 0.4em 1.5em 0.4em 0;
-  box-shadow: 0 0 5px #334466;
+  background: RGBA(224, 217, 240, 0.9);
+  margin: 0.4rem 1.5rem 0.4rem 0;
+  /* box-shadow: 0 0 5px #334466; */
 }
 
 .user-message {
-  background-color: RGBA(255, 255, 255, 0.8);
-  margin: 0.4em 0 0.4em 1.5em;
+  background-color: RGBA(255, 255, 255, 0.9);
+  margin: 0.4rem 0 0.4rem 1.5rem;
   transition: border-color 0.25s;
-  box-shadow: 0 0 5px gray;
+  /* box-shadow: 0 0 5px gray; */
 }
 
 form {
-  margin-top: auto;
-  margin-bottom: 1em;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .row {
@@ -168,33 +177,35 @@ form {
   justify-content: center;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-form {
-  display: flex;
-  flex-direction: column;
-}
-
-input,
-button {
-  font-size: 4mm;
-}
-
-button {
-  cursor: pointer;
-}
-
-input,
-button {
+input {
   outline: none;
+  font-size: 1rem;
+}
+
+@media screen and (max-width: 36rem) {
+  :root {
+    background: #bbbbc3 !important;
+  }
+
+  .horizontal {
+    flex-direction: column;
+    justify-content: stretch;
+    align-items: stretch;
+  }
+
+  .avatar-box {
+    background-color: #f3f3f3;
+    max-height: 15rem;
+    border-radius: 6px;
+  }
+
+  .avatar {
+    max-width: 12rem;
+  }
+
+  form {
+    margin-bottom: 0;
+  }
 }
 
 </style>
