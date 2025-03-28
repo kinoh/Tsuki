@@ -1,22 +1,33 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { fetch } from '@tauri-apps/plugin-http';
 	import { onMount } from 'svelte';
+  import { PUBLIC_USER_NAME, PUBLIC_WEB_HOST, PUBLIC_WEB_AUTH_TOKEN } from '$env/static/public';
+
+  const WEB_HOST = PUBLIC_WEB_HOST;
+  const WEB_AUTH_TOKEN = PUBLIC_WEB_AUTH_TOKEN;
+  const USER_NAME = PUBLIC_USER_NAME;
 
   let messages: { role: string; chat: any }[] = $state([]);
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
   let avatarImage: string = $state("/tsuki_default.png");
 
-  fetch("http://localhost:2953/messages")
+  fetch(`https://${WEB_HOST}/messages`, {
+    headers: {
+      "Authorization": `Bearer ${WEB_AUTH_TOKEN}`,
+    }
+  })
     .then(response => response.json())
     .then(data => {
       messages = [...data.toReversed(), ...messages];
     });
 
-  let connection = new WebSocket("ws://localhost:2953/ws");
+  let connection = new WebSocket(`wss://${WEB_HOST}/ws`);
 
   connection.onopen = function(event) {
     inputPlaceholder = "";
+    connection.send(`${USER_NAME}:${WEB_AUTH_TOKEN}`);
   }
   connection.onclose = function(event) {
     inputPlaceholder = "Connection closed!";
@@ -37,7 +48,7 @@
       "role": "user",
       "chat": { "content": inputText },
     });
-    connection.send("きの " + inputText);
+    connection.send(inputText);
     inputText = "";
   }
 

@@ -12,6 +12,7 @@ async fn set_frame(app_handle: tauri::AppHandle, visible: bool) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let win = app.get_webview_window("main").unwrap();
             win.move_window(Position::BottomRight).unwrap();
