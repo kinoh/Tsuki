@@ -90,11 +90,15 @@
 
 <style>
 
+@font-face {
+  font-display: block;
+  font-family: "SourceHanSans";
+  src: url("/src/assets/fonts/SourceHanSans-VF.ttf");
+}
+
 :root {
   background: rgba(0, 0, 0, 0) !important;
-  font-family: "Meiryo", "Noto Sans", "Segoe UI", "Arial", sans-serif;
-  font-size: 4mm;
-  line-height: 1.2em;
+  font-family: "SourceHanSans", sans-serif;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
