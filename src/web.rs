@@ -69,11 +69,17 @@ async fn auth_middleware(
 }
 
 async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
+    let cors = if cfg!(debug_assertions) {
+        CorsLayer::permissive()
+    } else {
+        CorsLayer::new()
+    };
+
     let app = Router::new()
         .route("/", get(root))
         .route("/messages", get(messages))
         .route("/ws", any(ws_handler))
-        .layer(CorsLayer::new().allow_origin("http://localhost:1420".parse::<HeaderValue>()?))
+        .layer(cors)
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
