@@ -69,11 +69,11 @@
 </script>
 
 <main class="container">
-  <div class="horizontal">
+  <div class="layout">
     <div class="avatar-box">
       <img data-tauri-drag-region alt="tsuki avatar" class="avatar" src={avatarImage} />
     </div>
-    <div class="vertical">
+    <div class="message-list">
       <form onsubmit={handleSubmit}>
         <input class="message user-message" type="text" bind:value={inputText} placeholder={inputPlaceholder} />
       </form>
@@ -111,24 +111,26 @@
 }
 
 .container {
-  margin: 0;
+  margin: 0.8rem 0.5rem;
 }
 
-.horizontal {
+.layout {
   display: flex;
   flex-direction: row;
   justify-content: center;
   align-items: stretch;
-  gap: 0.1rem;
-  height: 90vh;
+  gap: 0.5rem;
+  height: calc(100vh - 1.6rem);
 }
 
-.vertical {
+.message-list {
+  overflow: hidden;
   display: flex;
   flex-direction: column-reverse;
   flex: auto;
   min-width: 0;
   padding: 0 2vw;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 10%, #000 100%);
 }
 
 .avatar-box {
@@ -187,10 +189,9 @@ input {
     background: #bbbbc3 !important;
   }
 
-  .horizontal {
+  .layout {
     flex-direction: column;
     justify-content: stretch;
-    align-items: stretch;
   }
 
   .avatar-box {
