@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
   import { fetch } from '@tauri-apps/plugin-http';
-	import { onMount } from 'svelte';
   import { PUBLIC_USER_NAME, PUBLIC_WEB_HOST, PUBLIC_WEB_AUTH_TOKEN } from '$env/static/public';
+  import {
+    onResume,
+    onPause,
+  } from "tauri-plugin-app-events-api";
 
   const WEB_HOST = PUBLIC_WEB_HOST;
   const WEB_AUTH_TOKEN = PUBLIC_WEB_AUTH_TOKEN;
@@ -11,67 +13,98 @@
   let messages: { role: string; chat: any }[] = $state([]);
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
-  let avatarImage: string = $state("/tsuki_default.png");
+  let avatarExpression: "default" | "blink" = $state("default");
+  let connection: WebSocket | null = null;
+  let intervalId: number | null = null;
 
-  fetch(`https://${WEB_HOST}/messages`, {
-    headers: {
-      "Authorization": `Bearer ${WEB_AUTH_TOKEN}`,
+  function connect() {
+    fetch(`https://${WEB_HOST}/messages`, {
+      headers: {
+        "Authorization": `Bearer ${WEB_AUTH_TOKEN}`,
+      }
+    })
+      .then(response => response.json())
+      .then(data => {
+        messages = [...data.toReversed(), ...messages];
+      });
+
+    connection = new WebSocket(`wss://${WEB_HOST}/ws`);
+
+    connection.onopen = function(event) {
+      inputPlaceholder = "";
+      if (connection !== null) {
+        connection.send(`${USER_NAME}:${WEB_AUTH_TOKEN}`);
+      }
     }
-  })
-    .then(response => response.json())
-    .then(data => {
-      messages = [...data.toReversed(), ...messages];
-    });
-
-  let connection = new WebSocket(`wss://${WEB_HOST}/ws`);
-
-  connection.onopen = function(event) {
-    inputPlaceholder = "";
-    connection.send(`${USER_NAME}:${WEB_AUTH_TOKEN}`);
+    connection.onclose = function(event) {
+      inputPlaceholder = "Connection closed!";
+    }
+    connection.onmessage = function(event) {
+      messages.unshift({
+        "role": "assistant",
+        "chat": { "content": event.data },
+      });
+    };
   }
-  connection.onclose = function(event) {
-    inputPlaceholder = "Connection closed!";
-  }
-  connection.onmessage = function(event) {
-    messages.unshift({
-      "role": "assistant",
-      "chat": { "content": event.data },
-    });
-  };
 
   function handleSubmit(event: Event) {
     event.preventDefault();
     if (inputText.length == 0) {
       return;
     }
-    messages.unshift({
-      "role": "user",
-      "chat": { "content": inputText },
-    });
-    connection.send(inputText);
-    inputText = "";
+    if (connection !== null) {
+      messages.unshift({
+        "role": "user",
+        "chat": { "content": inputText },
+      });
+      connection.send(inputText);
+      inputText = "";
+    }
   }
 
   function blink() {
-    avatarImage = "/tsuki_blink.png";
-    setTimeout(() => {
-      avatarImage = "/tsuki_default.png";
-    }, 100);
-    let interval = 500 + 8000 * Math.random();
-    setTimeout(() => {
-      blink();
-    }, interval);
+    console.log(`blink ${close}`);
+
+    intervalId = setInterval(() => {
+      if (Math.random() < 0.1) {
+        avatarExpression = "blink";
+        setTimeout(() => {
+          avatarExpression = "default";
+        }, 50);
+      }
+    }, 500);
   }
 
-  onMount(() => {
-    blink();
+  blink();
+  connect();
+
+  onPause(() => {
+    console.log("App pause");
+    if (intervalId !== null) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+    avatarExpression = "blink";
+    connection?.close();
+    connection = null;
+  });
+  onResume(() => {
+    console.log("App resume");
+    if (intervalId === null) {
+      blink();
+    }
+    if (connection === null) {
+      connect();
+    }
   });
 </script>
 
 <main class="container">
   <div class="layout">
     <div class="avatar-box">
-      <img data-tauri-drag-region alt="tsuki avatar" class="avatar" src={avatarImage} />
+    	{#each ["default", "blink"] as item}
+        <img data-tauri-drag-region alt="tsuki avatar" class={["avatar", avatarExpression == item ? "shown" : "hidden"]} src={`tsuki_${item}.png`} />
+      {/each}
     </div>
     <div class="message-list">
       <form onsubmit={handleSubmit}>
@@ -145,6 +178,14 @@
   object-fit: contain;
   max-width: 10rem;
   filter: drop-shadow(0 0 6px #7763b3);
+}
+
+.avatar.shown {
+  display: block;
+}
+
+.avatar.hidden {
+  display: none;
 }
 
 .message {

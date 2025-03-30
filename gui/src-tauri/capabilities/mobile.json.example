@@ -1,10 +1,11 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Capability for the main window",
+  "$schema": "../gen/schemas/android-schema.json",
+  "identifier": "mobile",
+  "description": "Capability for the mobile main window",
   "windows": [
     "main"
   ],
+  "platforms": ["android", "iOS"],
   "remote": {
     "urls": [
       "https://localhost/*",
@@ -16,6 +17,7 @@
     "opener:default",
     "core:window:default",
     "core:window:allow-start-dragging",
+    "app-events:default",
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://TSUKI_HOST" }],

@@ -17,6 +17,9 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.2.6
+      tauri-plugin-app-events-api:
+        specifier: ^0.2.0
+        version: 0.2.0
     devDependencies:
       '@sveltejs/adapter-static':
         specifier: ^3.0.6
@@ -569,6 +572,9 @@ packages:
     resolution: {integrity: sha512-v0lL3NuKontiCxholEiAXCB+BYbndlKbwlDMK0DS86WgGELMJSpyqCSbJeMEMBDwOglnS7Ar2Rq0wwa/z2L8Vg==}
     engines: {node: '>=18'}
 
+  tauri-plugin-app-events-api@0.2.0:
+    resolution: {integrity: sha512-CnlAeucWhT+Rgx6CCsqUpq2D3pqgx0fhjSPKomH7O2t1rGVu5kGLMkYvaCX6gqVTUYpIWX5BLV7LGY2DRri0QA==}
+
   totalist@3.0.1:
     resolution: {integrity: sha512-sf4i37nQ2LBx4m3wB74y+ubopq6W/dIzXg0FDGjsYnZHVa1Da8FH853wlL2gtUhg+xJXjfk3kUZS3BRoQeoQBQ==}
     engines: {node: '>=6'}
@@ -1051,6 +1057,10 @@ snapshots:
       locate-character: 3.0.0
       magic-string: 0.30.17
       zimmerframe: 1.1.2
+
+  tauri-plugin-app-events-api@0.2.0:
+    dependencies:
+      '@tauri-apps/api': 2.3.0
 
   totalist@3.0.1: {}
 
