@@ -78,7 +78,7 @@
         <input class="message user-message" type="text" bind:value={inputText} placeholder={inputPlaceholder} />
       </form>
     	{#each messages as item, i}
-        {#if i < 5}
+        {#if i < 10}
           <div class="message {item.role.toLowerCase()}-message">
             {item.chat.content}
           </div>
