@@ -1,26 +1,23 @@
 <script lang="ts">
   import { fetch } from '@tauri-apps/plugin-http';
-  import { PUBLIC_USER_NAME, PUBLIC_WEB_HOST, PUBLIC_WEB_AUTH_TOKEN } from '$env/static/public';
   import {
     onResume,
     onPause,
   } from "tauri-plugin-app-events-api";
 
-  const WEB_HOST = PUBLIC_WEB_HOST;
-  const WEB_AUTH_TOKEN = PUBLIC_WEB_AUTH_TOKEN;
-  const USER_NAME = PUBLIC_USER_NAME;
-
+  let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let messages: { role: string; chat: any }[] = $state([]);
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
   let avatarExpression: "default" | "blink" = $state("default");
+  let showConfig: boolean = $state(false);
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
 
   function connect() {
-    fetch(`https://${WEB_HOST}/messages`, {
+    fetch(`https://${config.endpoint}/messages`, {
       headers: {
-        "Authorization": `Bearer ${WEB_AUTH_TOKEN}`,
+        "Authorization": `Bearer ${config.token}`,
       }
     })
       .then(response => response.json())
@@ -28,12 +25,12 @@
         messages = [...data.toReversed(), ...messages];
       });
 
-    connection = new WebSocket(`wss://${WEB_HOST}/ws`);
+    connection = new WebSocket(`wss://${config.endpoint}/ws`);
 
     connection.onopen = function(event) {
       inputPlaceholder = "";
       if (connection !== null) {
-        connection.send(`${USER_NAME}:${WEB_AUTH_TOKEN}`);
+        connection.send(`${config.user}:${config.token}`);
       }
     }
     connection.onclose = function(event) {
@@ -60,6 +57,10 @@
       connection.send(inputText);
       inputText = "";
     }
+  }
+
+  function handleConfigClick() {
+    showConfig = !showConfig;
   }
 
   function blink() {
@@ -102,7 +103,14 @@
 <main class="container">
   <div class="layout">
     <div class="avatar-box">
-    	{#each ["default", "blink"] as item}
+      <div class="menu">
+        <div class="menu-item">
+          <button onclick={handleConfigClick}>
+            <img src="/src/assets/icons/config.svg" alt="Config" />
+          </button>
+        </div>
+      </div>
+      {#each ["default", "blink"] as item}
         <img data-tauri-drag-region alt="tsuki avatar" class={["avatar", avatarExpression == item ? "shown" : "hidden"]} src={`tsuki_${item}.png`} />
       {/each}
     </div>
@@ -118,6 +126,7 @@
         {/if}
       {/each}
     </div>
+    <iframe class={["floating-window", showConfig ? "shown" : "hidden"]} src="/config" title="config"></iframe>
   </div>
 </main>
 
@@ -154,6 +163,35 @@
   align-items: stretch;
   gap: 0.5rem;
   height: calc(100vh - 1.6rem);
+  position: relative;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.5rem;
+}
+
+.menu-item button {
+  background-color: RGBA(187, 187, 220, 0.5);
+  border: none;
+  border-radius: 5px;
+  width: 2rem;
+  height: 2rem;
+}
+
+.menu-item button:hover {
+  background-color: RGBA(187, 187, 220, 0.9);
+}
+
+.floating-window {
+  border: none;
+  border-radius: 10px;
+  width: 20rem;
+  height: 12rem;
+  position: absolute;
+  left: calc(50% - 10rem);
+  top: calc(50% - 6rem);
 }
 
 .message-list {
@@ -170,22 +208,15 @@
   overflow: hidden;
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .avatar {
   object-fit: contain;
   max-width: 10rem;
   filter: drop-shadow(0 0 6px #7763b3);
-}
-
-.avatar.shown {
-  display: block;
-}
-
-.avatar.hidden {
-  display: none;
 }
 
 .message {
@@ -225,6 +256,14 @@ input {
   font-size: 1rem;
 }
 
+.shown {
+  display: block;
+}
+
+.hidden {
+  display: none;
+}
+
 @media screen and (max-width: 36rem) {
   :root {
     background: #bbbbc3 !important;
@@ -239,6 +278,13 @@ input {
     background-color: #f3f3f3;
     max-height: 15rem;
     border-radius: 6px;
+  }
+
+  .menu {
+    position: absolute;
+    left: 0rem;
+    top: 0rem;
+    margin-left: 0.5rem;
   }
 
   .avatar {
