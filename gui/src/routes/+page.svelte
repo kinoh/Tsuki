@@ -23,7 +23,7 @@
     })
       .then(response => response.json())
       .then(data => {
-        messages = [...data.toReversed(), ...messages];
+        messages = data.toReversed();
       });
 
     connection = new WebSocket(`ws${secure}://${config.endpoint}/ws`);
@@ -204,6 +204,9 @@
   padding: 0 2vw;
   mask-image: linear-gradient(to bottom, transparent 0%, #000 10%, #000 100%);
 }
+.message-list:hover {
+  overflow-y: scroll;
+}
 
 .avatar-box {
   overflow: hidden;
@@ -290,6 +293,10 @@ input {
 
   .avatar {
     max-width: 12rem;
+  }
+
+  .message-list {
+    overflow: scroll;
   }
 
   form {
