@@ -8,7 +8,7 @@
   "platforms": ["android", "iOS"],
   "remote": {
     "urls": [
-      "https://localhost/*",
+      "http://10.0.2.2:2953/*",
       "https://TSUKI_HOST/*"
     ]
   },
@@ -20,7 +20,10 @@
     "app-events:default",
     {
       "identifier": "http:default",
-      "allow": [{ "url": "https://TSUKI_HOST" }],
+      "allow": [
+        { "url": "http://10.0.2.2:2953" },
+        { "url": "https://TSUKI_HOST" }
+      ],
       "deny": []
     }
   ]

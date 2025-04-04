@@ -11,11 +11,12 @@
   let inputPlaceholder: string = $state("Connecting...");
   let avatarExpression: "default" | "blink" = $state("default");
   let showConfig: boolean = $state(false);
+  let secure: "s" | "" = (import.meta.env.MODE == "development" ? "" : "s");
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
 
   function connect() {
-    fetch(`https://${config.endpoint}/messages`, {
+    fetch(`http${secure}://${config.endpoint}/messages`, {
       headers: {
         "Authorization": `Bearer ${config.token}`,
       }
@@ -25,7 +26,7 @@
         messages = [...data.toReversed(), ...messages];
       });
 
-    connection = new WebSocket(`wss://${config.endpoint}/ws`);
+    connection = new WebSocket(`ws${secure}://${config.endpoint}/ws`);
 
     connection.onopen = function(event) {
       inputPlaceholder = "";
