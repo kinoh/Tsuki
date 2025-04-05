@@ -191,24 +191,6 @@ impl OpenAiCore {
         Ok(output_chat)
     }
 
-    fn to_event(&self, output_chat: OpenAiChatOutput) -> Option<Event> {
-        match output_chat.modality {
-            Modality::Audio => Some(Event::AssistantSpeech {
-                message: output_chat.content,
-            }),
-            Modality::Text => Some(Event::AssistantText {
-                message: output_chat.content,
-            }),
-            Modality::Code => Some(Event::CodeExecutionRequest {
-                code: output_chat.content,
-            }),
-            _ => {
-                println!("unsupported modality: {:?}", output_chat.modality);
-                None
-            }
-        }
-    }
-
     async fn run_internal(
         &mut self,
         sender: Sender<Event>,
@@ -231,9 +213,11 @@ impl OpenAiCore {
             };
             if let Some(input_chat) = input_chat {
                 let output_chat = self.receive(input_chat).await?;
-                if let Some(event) = self.to_event(output_chat) {
-                    sender.send(event)?;
-                }
+                let event = Event::AssistantMessage {
+                    modality: output_chat.modality,
+                    message: output_chat.content,
+                };
+                sender.send(event)?;
             }
         }
     }

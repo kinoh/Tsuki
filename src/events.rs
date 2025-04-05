@@ -3,13 +3,13 @@ use thiserror::Error;
 use tokio::sync::broadcast::{self, Sender};
 use tokio::task::{self, JoinHandle};
 
+use crate::messages::Modality;
+
 #[derive(Clone, Debug)]
 pub enum Event {
     TextMessage { user: String, message: String },
-    AssistantText { message: String },
-    CodeExecutionRequest { code: String },
+    AssistantMessage { modality: Modality, message: String },
     RecognizedSpeech { user: String, message: String },
-    AssistantSpeech { message: String },
     PlayAudio { sample_rate: u32, audio: Vec<i16> },
 }
 

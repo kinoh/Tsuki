@@ -9,7 +9,10 @@ use std::io::Cursor;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
-use crate::events::{self, Event, EventComponent};
+use crate::{
+    events::{self, Event, EventComponent},
+    messages::Modality,
+};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -101,7 +104,10 @@ impl SpeechEngine {
         loop {
             let event = receiver.recv().await?;
             match event {
-                Event::AssistantSpeech { message } => {
+                Event::AssistantMessage {
+                    modality: Modality::Audio,
+                    message,
+                } => {
                     let mut query = self.query(&message).await?;
                     query.speed_scale = 1.1;
                     query.pitch_scale = -0.02;

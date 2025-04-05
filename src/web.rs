@@ -180,11 +180,8 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
             },
             event = receiver.recv() => {
                 if let Some(text) = match event {
-                    Ok(Event::AssistantText { message }) => {
+                    Ok(Event::AssistantMessage { modality: _, message }) => {
                         Some(message)
-                    },
-                    Ok(Event::CodeExecutionRequest { code }) => {
-                        Some(code)
                     },
                     Ok(Event::TextMessage { user, message }) => {
                         Some(format!("[{}] {}", user, message))

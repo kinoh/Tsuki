@@ -1,6 +1,9 @@
 use std::env;
 
-use crate::events::{self, Event, EventComponent};
+use crate::{
+    events::{self, Event, EventComponent},
+    messages::Modality,
+};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
@@ -105,8 +108,11 @@ impl CodeExecutor {
         loop {
             let event = receiver.recv().await?;
             match event {
-                Event::CodeExecutionRequest { code } => {
-                    let result = self.execute(&code).await;
+                Event::AssistantMessage {
+                    modality: Modality::Code,
+                    message,
+                } => {
+                    let result = self.execute(&message).await;
                     let message = match result {
                         Err(Error::CodeExecution(_, _, Some(detail))) => {
                             format!("[code error] {}", detail)
