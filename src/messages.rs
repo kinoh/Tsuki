@@ -105,4 +105,14 @@ impl MessageRepository {
     pub fn get_all(&self) -> &[MessageRecord] {
         &self.data
     }
+
+    pub fn get_latest_n(&self, n: usize) -> Vec<&MessageRecord> {
+        let start = self.data.len() - n;
+        self.data
+            .iter()
+            .enumerate()
+            .filter(|(i, r)| r.role == Role::System || *i >= start)
+            .map(|(_, r)| r)
+            .collect()
+    }
 }

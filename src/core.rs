@@ -38,6 +38,7 @@ impl From<openai_api_rust::Error> for Error {
 }
 
 pub const ASSISTANT_NAME: &str = "つき";
+pub const MAX_HISTORY_LENGTH: usize = 20;
 
 pub enum Model {
     Echo,
@@ -112,8 +113,11 @@ impl OpenAiCore {
 
         let output_chat_json = match &self.model {
             Model::OpenAi(model) => {
-                let records = self.repository.read().await.get_all().to_vec();
-                let messages: Vec<Message> = records
+                let messages = self
+                    .repository
+                    .read()
+                    .await
+                    .get_latest_n(MAX_HISTORY_LENGTH)
                     .iter()
                     .map(|r| Message {
                         role: r.role.into(),
