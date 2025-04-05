@@ -149,11 +149,23 @@ impl OpenAiCore {
                 response.content.clone()
             }
             Model::Echo => {
-                let chat = OpenAiChatOutput {
-                    activity: None,
-                    feeling: None,
-                    modality: Modality::Text,
-                    content: serde_json::to_string(&input_chat)?,
+                let chat = if let Some((a, b)) = input_chat.content.split_once(' ') {
+                    OpenAiChatOutput {
+                        activity: None,
+                        feeling: None,
+                        modality: match a {
+                            "Code" => Modality::Code,
+                            _ => Modality::Text,
+                        },
+                        content: b.to_string(),
+                    }
+                } else {
+                    OpenAiChatOutput {
+                        activity: None,
+                        feeling: None,
+                        modality: Modality::Text,
+                        content: serde_json::to_string(&input_chat)?,
+                    }
                 };
                 serde_json::to_string(&chat)?
             }
