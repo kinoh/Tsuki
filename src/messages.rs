@@ -24,6 +24,7 @@ pub enum Modality {
     Text,
     Audio,
     Code,
+    Memory,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -107,11 +108,13 @@ impl MessageRepository {
     }
 
     pub fn get_latest_n(&self, n: usize) -> Vec<&MessageRecord> {
-        let start = self.data.len() - n;
+        let start = self.data.len().saturating_sub(n);
         self.data
             .iter()
             .enumerate()
-            .filter(|(i, r)| r.role == Role::System || *i >= start)
+            .filter(|(i, r)| {
+                r.role == Role::System || r.modality == Modality::Memory || *i >= start
+            })
             .map(|(_, r)| r)
             .collect()
     }

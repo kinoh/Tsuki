@@ -70,6 +70,15 @@ struct OpenAiChatOutput {
     content: String,
 }
 
+impl OpenAiChatOutput {
+    fn to_event(&self) -> Event {
+        Event::AssistantMessage {
+            modality: self.modality,
+            message: self.content.clone(),
+        }
+    }
+}
+
 pub struct OpenAiCore {
     repository: Arc<RwLock<MessageRepository>>,
     openai: OpenAI,
@@ -159,6 +168,7 @@ impl OpenAiCore {
                         feeling: None,
                         modality: match a {
                             "Code" => Modality::Code,
+                            "Memory" => Modality::Memory,
                             _ => Modality::Text,
                         },
                         content: b.to_string(),
@@ -198,26 +208,35 @@ impl OpenAiCore {
     ) -> Result<(), Error> {
         loop {
             let event = receiver.recv().await?;
-            let input_chat = match event {
-                Event::RecognizedSpeech { user, message } => Some(OpenAiChatInput {
-                    modality: Modality::Audio,
-                    user,
-                    content: message,
-                }),
-                Event::TextMessage { user, message } => Some(OpenAiChatInput {
-                    modality: Modality::Text,
-                    user,
-                    content: message,
+            if let Some(response) = match event {
+                Event::RecognizedSpeech { user, message } => Some(
+                    self.receive(OpenAiChatInput {
+                        modality: Modality::Audio,
+                        user,
+                        content: message,
+                    })
+                    .await?
+                    .to_event(),
+                ),
+                Event::TextMessage { user, message } => Some(
+                    self.receive(OpenAiChatInput {
+                        modality: Modality::Text,
+                        user,
+                        content: message,
+                    })
+                    .await?
+                    .to_event(),
+                ),
+                Event::AssistantMessage {
+                    modality: Modality::Memory,
+                    message: _,
+                } => Some(Event::TextMessage {
+                    user: "system".to_string(),
+                    message: "memorized".to_string(),
                 }),
                 _ => None,
-            };
-            if let Some(input_chat) = input_chat {
-                let output_chat = self.receive(input_chat).await?;
-                let event = Event::AssistantMessage {
-                    modality: output_chat.modality,
-                    message: output_chat.content,
-                };
-                sender.send(event)?;
+            } {
+                sender.send(response)?;
             }
         }
     }

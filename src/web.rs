@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use axum::{
     extract::{
         ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-        Request, State,
+        Query, Request, State,
     },
     http::{self, StatusCode},
     middleware::{self, Next},
@@ -13,7 +13,7 @@ use axum::{
     Json, Router,
 };
 use reqwest::header::InvalidHeaderValue;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::{select, sync::broadcast::Sender, sync::RwLock};
@@ -21,7 +21,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::{
     events::{self, Event, EventComponent},
-    messages::MessageRepository,
+    messages::{MessageRecord, MessageRepository},
 };
 
 #[derive(Error, Debug)]
@@ -106,12 +106,22 @@ struct ResponseMessage {
     chat: Value,
 }
 
+#[derive(Debug, Deserialize)]
+struct MessagesParams {
+    n: Option<usize>,
+}
+
 async fn messages(
     State(state): State<Arc<WebState>>,
+    Query(params): Query<MessagesParams>,
 ) -> Result<Json<Vec<ResponseMessage>>, StatusCode> {
-    let reepo = state.repository.read().await;
-    let response: Vec<ResponseMessage> = reepo
-        .get_all()
+    let repo = state.repository.read().await;
+    let data: Vec<&MessageRecord> = if let Some(n) = params.n {
+        repo.get_latest_n(n)
+    } else {
+        repo.get_all().iter().map(|m| m).collect()
+    };
+    let response: Vec<ResponseMessage> = data
         .iter()
         .filter(|m| m.role != crate::messages::Role::System)
         .map(|m| ResponseMessage {
