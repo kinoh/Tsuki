@@ -183,7 +183,13 @@ impl OpenAiCore {
             Modality::Text => Some(Event::AssistantText {
                 message: output_chat.content,
             }),
-            _ => None,
+            Modality::Code => Some(Event::CodeExecutionRequest {
+                code: output_chat.content,
+            }),
+            _ => {
+                println!("unsupported modality: {:?}", output_chat.modality);
+                None
+            }
         }
     }
 

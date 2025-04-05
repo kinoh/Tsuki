@@ -6,7 +6,7 @@ use axum::{
         ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
         Request, State,
     },
-    http::{self, HeaderValue, StatusCode},
+    http::{self, StatusCode},
     middleware::{self, Next},
     response::Response,
     routing::{any, get},
@@ -179,14 +179,25 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                 }
             },
             event = receiver.recv() => {
-                match event {
+                if let Some(text) = match event {
                     Ok(Event::AssistantText { message }) => {
-                        if socket.send(Message::Text(Utf8Bytes::from(message))).await.is_err() {
-                            return;
-                        }
+                        Some(message)
                     },
-                    Err(e) => println!("event recv error: {}", e),
-                    _ => (),
+                    Ok(Event::CodeExecutionRequest { code }) => {
+                        Some(code)
+                    },
+                    Ok(Event::TextMessage { user, message }) => {
+                        Some(format!("[{}] {}", user, message))
+                    },
+                    Err(e) => {
+                        println!("event recv error: {}", e);
+                        None
+                    },
+                    _ => None,
+                } {
+                    if socket.send(Message::Text(Utf8Bytes::from(text))).await.is_err() {
+                        return;
+                    }
                 }
             }
         }

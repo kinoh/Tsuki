@@ -23,6 +23,7 @@ pub enum Modality {
     Bare,
     Text,
     Audio,
+    Code,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

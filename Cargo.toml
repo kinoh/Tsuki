@@ -18,7 +18,7 @@ serde = "1.0"
 serde_json = "1.0"
 async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
-reqwest = { version = "0.12", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 hound = "3.5"
 voice_activity_detector = "0.1.1"
 ort-sys = "=2.0.0-rc.4" # voice_activity_detector is not compatible with rc.9

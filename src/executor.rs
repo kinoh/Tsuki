@@ -1,0 +1,142 @@
+use std::env;
+
+use crate::events::{self, Event, EventComponent};
+use async_trait::async_trait;
+use reqwest::Client;
+use serde::Deserialize;
+use thiserror::Error;
+use tokio::sync::broadcast::{self, Receiver, Sender};
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("DIFY_SANDBOX_API_KEY not set")]
+    MissingApiKey,
+    #[error("Invalid response: {0}")]
+    HttpRequest(String),
+    #[error("Code execution error: code={0}, message={1}, detail={2:?}")]
+    CodeExecution(i32, String, Option<String>),
+    #[error("JSON parse error: {0}")]
+    JsonParse(#[from] serde_json::Error),
+    #[error("Request error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("Failed to receive event: {0}")]
+    ReceiveEvent(#[from] broadcast::error::RecvError),
+    #[error("Failed to send event: {0}")]
+    SendEvent(#[from] broadcast::error::SendError<Event>),
+}
+
+#[derive(Deserialize)]
+struct SandboxRunResultData {
+    error: String,
+    stdout: String,
+}
+
+#[derive(Deserialize)]
+struct SandboxRunResult {
+    code: i32,
+    message: String,
+    data: Option<SandboxRunResultData>,
+}
+
+pub struct CodeExecutor {
+    host: String,
+    api_key: String,
+}
+
+impl CodeExecutor {
+    pub fn new(dify_sandbox_host: &str) -> Result<CodeExecutor, Error> {
+        let api_key = env::var("DIFY_SANDBOX_API_KEY").map_err(|_| Error::MissingApiKey)?;
+        Ok(Self {
+            host: dify_sandbox_host.to_string(),
+            api_key,
+        })
+    }
+
+    async fn execute(&self, code: &str) -> Result<String, Error> {
+        let url = format!("http://{}/v1/sandbox/run", self.host);
+
+        let json = serde_json::json!({
+            "language": "python3",
+            "code": code,
+            "enable_network": true,
+        });
+
+        let client = Client::new();
+        let response = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("X-Api-Key", &self.api_key)
+            .json(&json)
+            .send()
+            .await
+            .map_err(|e| Error::HttpRequest(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(Error::HttpRequest(format!(
+                "response code={}",
+                response.status()
+            )));
+        }
+
+        let body = response.text().await?;
+        let result: SandboxRunResult = serde_json::from_str(&body)?;
+
+        match result.data {
+            Some(data) => {
+                if data.error.is_empty() {
+                    Ok(data.stdout)
+                } else {
+                    Err(Error::CodeExecution(
+                        result.code,
+                        result.message,
+                        Some(data.error),
+                    ))
+                }
+            }
+            None => Err(Error::CodeExecution(result.code, result.message, None)),
+        }
+    }
+
+    async fn run_internal(
+        &mut self,
+        sender: Sender<Event>,
+        mut receiver: Receiver<Event>,
+    ) -> Result<(), Error> {
+        loop {
+            let event = receiver.recv().await?;
+            match event {
+                Event::CodeExecutionRequest { code } => {
+                    let result = self.execute(&code).await;
+                    let message = match result {
+                        Err(Error::CodeExecution(_, _, Some(detail))) => {
+                            format!("[code error] {}", detail)
+                        }
+                        Err(Error::CodeExecution(code, _, None)) => {
+                            format!("[exit status {}]", code)
+                        }
+                        Err(e) => {
+                            format!("[error] {}", e)
+                        }
+                        Ok(output) => output,
+                    };
+                    let event = Event::TextMessage {
+                        user: "system".to_string(),
+                        message,
+                    };
+                    let _ = sender.send(event)?;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl EventComponent for CodeExecutor {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+        let receiver = sender.subscribe();
+        self.run_internal(sender, receiver)
+            .await
+            .map_err(|e| events::Error::Component(format!("executor: {}", e)))
+    }
+}

@@ -2,6 +2,7 @@
 
 mod core;
 mod events;
+mod executor;
 mod messages;
 mod mumble;
 mod recognizer;
@@ -32,6 +33,8 @@ enum ApplicationError {
     ComponentStopped(usize),
     #[error("web error: {0}")]
     Web(#[from] web::Error),
+    #[error("executor error: {0}")]
+    Executor(#[from] executor::Error),
 }
 
 #[derive(Parser, Debug)]
@@ -49,6 +52,8 @@ struct Args {
     openai_model: String,
     #[arg(long, default_value = "")]
     voicevox_endpoint: String,
+    #[arg(long, default_value = "")]
+    dify_host: String,
     #[arg(long, default_value_t = 2953u16)]
     port: u16,
 }
@@ -81,6 +86,12 @@ async fn app() -> Result<(), ApplicationError> {
         let speaker = speak::SpeechEngine::new(args.voicevox_endpoint, 58);
 
         futures.push(event_system.run(speaker));
+    }
+
+    if !args.dify_host.is_empty() {
+        let executor = executor::CodeExecutor::new(&args.dify_host)?;
+
+        futures.push(event_system.run(executor));
     }
 
     let repository = Arc::new(RwLock::new(messages::MessageRepository::new(args.history)?));
