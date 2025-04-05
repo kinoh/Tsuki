@@ -4,3 +4,6 @@
 .vscode
 docker
 target
+
+.pnpm-store
+/gui
