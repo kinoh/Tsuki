@@ -38,6 +38,9 @@
       inputPlaceholder = "Connection closed!";
     }
     connection.onmessage = function(event) {
+      if (event.data.startsWith(`[${config.user}] `)) {
+        return;
+      }
       messages.unshift({
         "role": "assistant",
         "chat": { "content": event.data },
