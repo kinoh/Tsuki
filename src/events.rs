@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use async_trait::async_trait;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Sender};
@@ -11,6 +13,24 @@ pub enum Event {
     AssistantMessage { modality: Modality, message: String },
     RecognizedSpeech { user: String, message: String },
     PlayAudio { sample_rate: u32, audio: Vec<i16> },
+}
+
+impl Display for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PlayAudio { sample_rate, audio } => {
+                write!(
+                    f,
+                    "PlayAudio {{ sample_rate: {}, audio: <{}> }}",
+                    sample_rate,
+                    audio.len()
+                )
+            }
+            event => {
+                write!(f, "{:?}", event)
+            }
+        }
+    }
 }
 
 #[derive(Error, Debug)]

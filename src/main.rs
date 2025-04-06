@@ -1,6 +1,7 @@
 #![feature(slice_pattern)]
 
 mod core;
+mod eventlogger;
 mod events;
 mod executor;
 mod messages;
@@ -95,6 +96,9 @@ async fn app() -> Result<(), ApplicationError> {
 
         futures.push(event_system.run(executor));
     }
+
+    let eventlogger = eventlogger::EventLogger::new();
+    futures.push(event_system.run(eventlogger));
 
     let repository = Arc::new(RwLock::new(messages::MessageRepository::new(args.history)?));
 

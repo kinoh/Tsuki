@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio::sync::RwLock;
+use tracing::info;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -162,7 +163,14 @@ impl OpenAiCore {
                 response.content.clone()
             }
             Model::Echo => {
-                let chat = if let Some((a, b)) = input_chat.content.split_once(' ') {
+                let chat = if input_chat.modality == Modality::Audio {
+                    OpenAiChatOutput {
+                        activity: None,
+                        feeling: None,
+                        modality: Modality::Audio,
+                        content: input_chat.content,
+                    }
+                } else if let Some((a, b)) = input_chat.content.split_once(' ') {
                     OpenAiChatOutput {
                         activity: None,
                         feeling: None,
@@ -206,6 +214,8 @@ impl OpenAiCore {
         sender: Sender<Event>,
         mut receiver: Receiver<Event>,
     ) -> Result<(), Error> {
+        info!("start core");
+
         loop {
             let event = receiver.recv().await?;
             if let Some(response) = match event {

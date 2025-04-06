@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{
     events::{self, Event, EventComponent},
@@ -102,6 +102,8 @@ impl SpeechEngine {
         sender: Sender<Event>,
         mut receiver: Receiver<Event>,
     ) -> Result<(), Error> {
+        info!("start speech");
+
         loop {
             let event = receiver.recv().await?;
             match event {
@@ -113,8 +115,11 @@ impl SpeechEngine {
                     query.speed_scale = 1.1;
                     query.pitch_scale = -0.02;
                     let audio = self.synthesis(query).await?;
+                    info!(message = message, audio_size = audio.len(), "synthesized");
+
                     let cursor = Cursor::new(audio);
                     let mut reader = hound::WavReader::new(cursor)?;
+
                     sender.send(Event::PlayAudio {
                         sample_rate: reader.spec().sample_rate,
                         audio: reader

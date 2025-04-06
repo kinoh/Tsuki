@@ -9,6 +9,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
+use tracing::{info, warn};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -42,21 +43,21 @@ struct SandboxRunResult {
 }
 
 pub struct CodeExecutor {
-    host: String,
+    endpoint: String,
     api_key: String,
 }
 
 impl CodeExecutor {
-    pub fn new(dify_sandbox_host: &str) -> Result<CodeExecutor, Error> {
+    pub fn new(dify_sandbox_host: &str) -> Result<Self, Error> {
         let api_key = env::var("DIFY_SANDBOX_API_KEY").map_err(|_| Error::MissingApiKey)?;
         Ok(Self {
-            host: dify_sandbox_host.to_string(),
+            endpoint: format!("http://{}/v1/sandbox/run", dify_sandbox_host),
             api_key,
         })
     }
 
     async fn execute(&self, code: &str) -> Result<String, Error> {
-        let url = format!("http://{}/v1/sandbox/run", self.host);
+        info!(code = code, "execute");
 
         let json = serde_json::json!({
             "language": "python3",
@@ -66,7 +67,7 @@ impl CodeExecutor {
 
         let client = Client::new();
         let response = client
-            .post(&url)
+            .post(&self.endpoint)
             .header("Content-Type", "application/json")
             .header("X-Api-Key", &self.api_key)
             .json(&json)
@@ -74,14 +75,15 @@ impl CodeExecutor {
             .await
             .map_err(|e| Error::HttpRequest(e.to_string()))?;
 
-        if !response.status().is_success() {
-            return Err(Error::HttpRequest(format!(
-                "response code={}",
-                response.status()
-            )));
+        let status = response.status();
+        if !status.is_success() {
+            warn!(status = status.as_str(), "request failed");
+            return Err(Error::HttpRequest(format!("response code={}", status)));
         }
 
         let body = response.text().await?;
+        info!(body = body, "response");
+
         let result: SandboxRunResult = serde_json::from_str(&body)?;
 
         match result.data {
@@ -105,6 +107,8 @@ impl CodeExecutor {
         sender: Sender<Event>,
         mut receiver: Receiver<Event>,
     ) -> Result<(), Error> {
+        info!("start executor");
+
         loop {
             let event = receiver.recv().await?;
             match event {

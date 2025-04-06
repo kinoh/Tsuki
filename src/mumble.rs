@@ -306,6 +306,8 @@ impl Client {
             (AUDIO_PAYLOAD_UNIT_MILLISEC * AUDIO_PAYLOAD_N) as u64,
         ));
 
+        info!("start mumble client");
+
         loop {
             select! {
                 _ = ping_interval.tick() => {

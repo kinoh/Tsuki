@@ -97,6 +97,7 @@ impl SpeechRecognizer {
         monitor_interval: time::Duration,
         silence_timeout: time::Duration,
     ) -> Result<Self, Error> {
+        vosk::set_log_level(vosk::LogLevel::Warn);
         let model = Model::new(vosk_model_path).ok_or(Error::LoadModel)?;
         let recognizer = Recognizer::new(&model, 48000f32).ok_or(Error::CreateRecognizer)?;
         let buffering_vad = BufferingVad::new(Duration::from_millis(500))?;
@@ -124,6 +125,8 @@ impl SpeechRecognizer {
         let mut last_receipt: Option<(String, SystemTime)> = None;
         let mut interval = time::interval(self.monitor_interval);
 
+        info!("start recognizer");
+
         loop {
             select! {
                 Some(voice) = hear_receiver.recv() => {
@@ -138,7 +141,7 @@ impl SpeechRecognizer {
                         }
                         vosk::DecodingState::Finalized => {
                             if self.buffering_vad.count < VAD_REQUIRED_COUNT {
-                                info!("vad count too few");
+                                info!(count = self.buffering_vad.count, "vad count too few");
                                 self.recognizer.reset();
                             } else {
                                 let result = self.recognizer.result().single();
@@ -162,7 +165,7 @@ impl SpeechRecognizer {
                         let elapsed = SystemTime::now().duration_since(t)?;
                         if elapsed > self.silence_timeout {
                             if self.buffering_vad.count < VAD_REQUIRED_COUNT {
-                                info!("vad count too few");
+                                info!(count = self.buffering_vad.count, "vad count too few");
                                 self.recognizer.reset();
                             } else {
                                 let result = self.recognizer.final_result().single();
