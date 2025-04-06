@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
+use tracing::debug;
 
 use crate::{
     events::{self, Event, EventComponent},
@@ -76,7 +77,7 @@ impl SpeechEngine {
             .text()
             .await?;
 
-        println!("query: {}", response);
+        debug!(query = response);
         Ok(serde_json::from_str(&response)?)
     }
 

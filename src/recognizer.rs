@@ -6,6 +6,7 @@ use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio::task::JoinError;
 use tokio::{select, sync::mpsc, time};
+use tracing::{error, info, warn};
 use voice_activity_detector::VoiceActivityDetector;
 use vosk::{Model, Recognizer};
 
@@ -133,19 +134,19 @@ impl SpeechRecognizer {
 
                     match state {
                         vosk::DecodingState::Failed => {
-                            println!("recognition failed");
+                            warn!("recognition failed");
                         }
                         vosk::DecodingState::Finalized => {
                             if self.buffering_vad.count < VAD_REQUIRED_COUNT {
-                                println!("vad count too few");
+                                info!("vad count too few");
                                 self.recognizer.reset();
                             } else {
                                 let result = self.recognizer.result().single();
                                 match result {
-                                    None => println!("no result"),
+                                    None => info!("no result"),
                                     Some(value) => {
-                                        println!("result: {:?} vad={}", value, self.buffering_vad.count);
                                         let text = value.text;
+                                        info!(text = text, vad = self.buffering_vad.count, "result");
                                         if !text.is_empty() {
                                             sender.send(Event::RecognizedSpeech { user: voice.user, message: text.to_string() })?;
                                         }
@@ -161,15 +162,15 @@ impl SpeechRecognizer {
                         let elapsed = SystemTime::now().duration_since(t)?;
                         if elapsed > self.silence_timeout {
                             if self.buffering_vad.count < VAD_REQUIRED_COUNT {
-                                println!("vad count too few");
+                                info!("vad count too few");
                                 self.recognizer.reset();
                             } else {
                                 let result = self.recognizer.final_result().single();
                                 match result {
-                                    None => println!("no final result"),
+                                    None => info!("no final result"),
                                     Some(value) => {
-                                        println!("final result: {:?} vad={}", value, self.buffering_vad.count);
                                         let text = value.text;
+                                        info!(text = text, vad = self.buffering_vad.count, "final result");
                                         if !text.is_empty() {
                                             sender.send(Event::RecognizedSpeech { user: user, message: text.to_string() })?;
                                         }

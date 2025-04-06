@@ -33,6 +33,7 @@ use tokio_rustls::rustls::SignatureScheme;
 use tokio_rustls::TlsConnector;
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Framed;
+use tracing::{debug, error, info, warn};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -214,7 +215,7 @@ impl Client {
         // let mut crypt_state_sender = Some(crypt_state_sender);
 
         let stream = TcpStream::connect(&server_addr).await?;
-        println!("TCP connected..");
+        debug!("TCP connected..");
 
         // https://github.com/rustls/rustls/issues/1938
         let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
@@ -226,7 +227,7 @@ impl Client {
         let domain = server_host.try_into()?;
         let tls_stream = connector.connect(domain, stream).await?;
 
-        println!("TLS connected..");
+        debug!("TLS connected..");
 
         let (mut write, read) = ClientControlCodec::new().framed(tls_stream).split();
 
@@ -256,7 +257,7 @@ impl Client {
         seq_num: u64,
         payload: VoicePacketPayload,
     ) -> Result<(), Error> {
-        println!("receive audio {} {}", session_id, seq_num);
+        debug!(session_id = session_id, seq_num = seq_num, "receive audio");
         let mut decoder = opus::Decoder::new(SAMPLE_RATE, CHANNEL_COUNT)?;
         const BUFFER_SIZE: usize =
             (SAMPLE_RATE as usize) * MAX_AUDIO_MILLISEC / 1000 * (CHANNEL_COUNT as usize);
@@ -264,7 +265,7 @@ impl Client {
         match payload {
             VoicePacketPayload::Opus(audio, end) => {
                 if end {
-                    println!("end of transmission!");
+                    debug!("end of transmission!");
                 }
                 let user = self
                     .user_by_session
@@ -280,14 +281,14 @@ impl Client {
                     })
                     .or_else(|e| match e {
                         mpsc::error::TrySendError::Full(_) => {
-                            println!("voice queue is full");
+                            warn!("voice queue is full");
                             Ok(())
                         }
                         e => Err(e),
                     })?;
             }
             _ => {
-                println!("unsupported voice packet");
+                warn!("unsupported voice packet");
             }
         }
         Ok(())
@@ -337,7 +338,7 @@ impl Client {
                                 ControlPacket::UDPTunnel(packet) => {
                                     match *packet {
                                         VoicePacket::Ping { timestamp } => {
-                                            println!("receive ping {}", timestamp);
+                                            debug!(timestamp = timestamp, "receive ping");
                                         }
                                         VoicePacket::Audio { session_id, seq_num, payload, .. } => {
                                             self.receive_audio(&sender, session_id, seq_num, payload).await?;
@@ -348,7 +349,7 @@ impl Client {
                                     if let (Some(session), Some(name)) = (packet.session, packet.name) {
                                         self.user_by_session.insert(session, name);
                                     } else {
-                                        println!("incomplete user state");
+                                        warn!("incomplete user state");
                                     }
                                 }
                                 ControlPacket::ServerSync(packet) => {
@@ -357,7 +358,7 @@ impl Client {
                                     }
                                 }
                                 packet => {
-                                    println!("receive {:?}", packet);
+                                    debug!(packet = format!("{:?}", packet), "receive");
                                 }
                             };
                         }

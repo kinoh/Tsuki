@@ -1,10 +1,10 @@
-use std::{env, sync::Arc};
+use std::{env, net::SocketAddr, sync::Arc};
 
 use async_trait::async_trait;
 use axum::{
     extract::{
         ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-        Query, Request, State,
+        ConnectInfo, Query, Request, State,
     },
     http::{self, StatusCode},
     middleware::{self, Next},
@@ -16,8 +16,12 @@ use reqwest::header::InvalidHeaderValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
-use tokio::{select, sync::broadcast::Sender, sync::RwLock};
+use tokio::{
+    select,
+    sync::{broadcast::Sender, RwLock},
+};
 use tower_http::cors::CorsLayer;
+use tracing::{debug, error, info, warn};
 
 use crate::{
     events::{self, Event, EventComponent},
@@ -43,6 +47,26 @@ fn secure_eq(a: &str, b: &str) -> bool {
         return false;
     }
     unsafe { memsec::memeq(&a_bytes[0], &b_bytes[0], a_bytes.len()) }
+}
+
+async fn logging_middleware(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let path = req.uri().path().to_string();
+    let method = req.method().to_string();
+
+    let response = next.run(req).await;
+
+    info!(
+        client = addr.to_string(),
+        method = method,
+        path = path,
+        status = response.status().as_str()
+    );
+
+    response
 }
 
 async fn auth_middleware(
@@ -85,12 +109,17 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
             state.clone(),
             auth_middleware,
         ))
+        .layer(middleware::from_fn(logging_middleware))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
 
-    println!("start listen port={}", port);
-    axum::serve(listener, app).await?;
+    info!(port = port, "start listen");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -148,7 +177,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
     let sender = if let Some(s) = &c.sender {
         s
     } else {
-        println!("not ready");
+        error!("not ready");
         return;
     };
     let mut receiver = sender.subscribe();
@@ -162,33 +191,34 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                         match message {
                             Message::Text(text) => {
                                 if let Some(ref user) = authorized_user {
-                                    let _ = sender.send(Event::TextMessage { user: user.to_string(), message: text.to_string()}).map_err(|e| println!("event send error: {}", e));
+                                    let _ = sender.send(Event::TextMessage { user: user.to_string(), message: text.to_string()}).map_err(|e| warn!("event send error: {}", e));
                                 } else {
                                     let mut parts = text.splitn(2, ':');
                                     let (user, token) = match (parts.next(), parts.next()) {
                                         (Some(u), Some(t)) => (u, t),
-                                        _ => {
-                                            println!("invalid auth");
+                                        (u, _) => {
+                                            info!(user = u, "invalid auth");
                                             return;
                                         }
                                     };
                                     if !secure_eq(token, &state.auth_token) {
-                                        println!("invalid auth token");
+                                        info!("invalid auth token");
                                         return;
                                     }
+                                    info!(user = user, "authenticated");
                                     authorized_user = Some(user.to_string());
                                 }
                             }
                             Message::Close(_) => {
-                                println!("stream closed gracefully");
+                                info!("stream closed gracefully");
                                 return;
                             }
-                            _ => println!("unexpected message type")
+                            _ => debug!("unexpected message type")
                         }
                     }
-                    Some(Err(e)) => println!("recv error: {}", e),
+                    Some(Err(e)) => warn!("recv error: {}", e),
                     None => {
-                        println!("stream closed");
+                        info!("stream closed");
                         return;
                     }
                 }
@@ -202,7 +232,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                         Some(format!("[{}] {}", user, message))
                     },
                     Err(e) => {
-                        println!("event recv error: {}", e);
+                        warn!("event recv error: {}", e);
                         None
                     },
                     _ => None,

@@ -117,6 +117,8 @@ async fn app() -> Result<(), ApplicationError> {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     match app().await {
         Ok(_) => (),
         Err(e) => panic!("Error: {}", e),
