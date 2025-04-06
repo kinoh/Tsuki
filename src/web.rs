@@ -77,6 +77,7 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
 
     let app = Router::new()
         .route("/", get(root))
+        .route("/config", get(config))
         .route("/messages", get(messages))
         .route("/ws", any(ws_handler))
         .layer(cors)
@@ -132,6 +133,10 @@ async fn messages(
         })
         .collect();
     Ok(Json(response))
+}
+
+async fn config(State(state): State<Arc<WebState>>) -> Json<Value> {
+    Json(state.app_args.clone())
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WebState>>) -> Response {
@@ -217,6 +222,7 @@ pub struct WebState {
     sender: Option<Sender<Event>>,
     repository: Arc<RwLock<MessageRepository>>,
     auth_token: String,
+    app_args: Value,
 }
 
 type WebInterface = Arc<WebState>;
@@ -225,6 +231,7 @@ impl WebState {
     pub fn new(
         repository: Arc<RwLock<MessageRepository>>,
         port: u16,
+        app_args: Value,
     ) -> Result<WebInterface, Error> {
         let auth_token = env::var_os("WEB_AUTH_TOKEN")
             .map(|t| t.to_string_lossy().to_string())
@@ -235,6 +242,7 @@ impl WebState {
             sender: None,
             repository,
             auth_token,
+            app_args,
         }))
     }
 }

@@ -11,6 +11,7 @@ mod web;
 
 use clap::Parser;
 use futures::future::select_all;
+use serde::Serialize;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -37,7 +38,7 @@ enum ApplicationError {
     Executor(#[from] executor::Error),
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Serialize)]
 #[command(version, about, long_about = None)]
 struct Args {
     #[arg(long, default_value = "")]
@@ -60,6 +61,7 @@ struct Args {
 
 async fn app() -> Result<(), ApplicationError> {
     let args = Args::parse();
+    let args_json = serde_json::to_value(&args).unwrap();
 
     let event_system = events::EventSystem::new(32);
     let mut futures = Vec::new();
@@ -104,7 +106,7 @@ async fn app() -> Result<(), ApplicationError> {
     let core = core::OpenAiCore::new(repository.clone(), model).await?;
     futures.push(event_system.run(core));
 
-    let web_interface = web::WebState::new(repository, args.port)?;
+    let web_interface = web::WebState::new(repository, args.port, args_json)?;
     futures.push(event_system.run(web_interface));
 
     let (result, index, _) = select_all(futures).await;
