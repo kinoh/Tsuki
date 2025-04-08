@@ -112,14 +112,25 @@ impl MessageRepository {
     }
 
     pub fn get_latest_n(&self, n: usize) -> Vec<&MessageRecord> {
-        let start = self.data.len().saturating_sub(n);
-        self.data
-            .iter()
-            .enumerate()
-            .filter(|(i, r)| {
-                r.role == Role::System || r.modality == Modality::Memory || *i >= start
-            })
-            .map(|(_, r)| r)
-            .collect()
+        let mut response = Vec::with_capacity(n);
+        let mut is_last_none = false;
+        let mut normal_count = 0;
+        for i in 1..=self.data.len() {
+            let record = &self.data[self.data.len() - i];
+            let is_none = record.modality == Modality::None;
+            let is_important = record.role == Role::System || record.modality == Modality::Memory;
+            if !is_none
+                && !(record.modality == Modality::Tick && is_last_none)
+                && (is_important || normal_count < n)
+            {
+                response.push(record);
+                if !is_important {
+                    normal_count += 1;
+                }
+            }
+            is_last_none = is_none;
+        }
+        response.reverse();
+        response
     }
 }
