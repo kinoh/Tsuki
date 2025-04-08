@@ -23,7 +23,12 @@
     })
       .then(response => response.json())
       .then(data => {
-        messages = data.toReversed();
+        messages = data.toReversed().map((m: { role: string; user: string; chat: any }) => {
+          if (m.role === "User" && m.user !== config.user) {
+            return { role: "assistant", chat: { content: `[${m.user}] ${m.chat.content}` } };
+          }
+          return m;
+        });
       });
 
     connection = new WebSocket(`ws${secure}://${config.endpoint}/ws`);
