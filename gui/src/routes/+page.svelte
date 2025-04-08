@@ -16,7 +16,7 @@
   let intervalId: number | null = null;
 
   function connect() {
-    fetch(`http${secure}://${config.endpoint}/messages`, {
+    fetch(`http${secure}://${config.endpoint}/messages?n=20`, {
       headers: {
         "Authorization": `Bearer ${config.token}`,
       }
@@ -128,7 +128,7 @@
         <input class="message user-message" type="text" bind:value={inputText} placeholder={inputPlaceholder} />
       </form>
     	{#each messages as item, i}
-        {#if i < 10}
+        {#if i < 20}
           <div class="message {item.role.toLowerCase()}-message">
             {item.chat.content}
           </div>
