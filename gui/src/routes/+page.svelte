@@ -11,7 +11,7 @@
   let inputPlaceholder: string = $state("Connecting...");
   let avatarExpression: "default" | "blink" = $state("default");
   let showConfig: boolean = $state(false);
-  let secure: "s" | "" = (import.meta.env.MODE == "development" ? "" : "s");
+  let secure: "s" | "" = (config.endpoint.startsWith("localhost") ? "" : "s");
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
 
