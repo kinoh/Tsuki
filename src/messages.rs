@@ -11,6 +11,8 @@ pub enum Error {
     SerdeJson(#[from] serde_json::Error),
 }
 
+pub const SYSTEM_USER_NAME: &str = "system";
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum Role {
     System,
@@ -20,11 +22,13 @@ pub enum Role {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum Modality {
+    None,
     Bare,
     Text,
     Audio,
     Code,
     Memory,
+    Tick,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

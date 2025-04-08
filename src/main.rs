@@ -8,6 +8,7 @@ mod messages;
 mod mumble;
 mod recognizer;
 mod speak;
+mod ticker;
 mod web;
 
 use clap::Parser;
@@ -58,6 +59,8 @@ struct Args {
     dify_host: String,
     #[arg(long, default_value_t = 2953u16)]
     port: u16,
+    #[arg(long, default_value_t = 0u64)]
+    tick_interval_mins: u64,
 }
 
 async fn app() -> Result<(), ApplicationError> {
@@ -100,6 +103,11 @@ async fn app() -> Result<(), ApplicationError> {
     let eventlogger = eventlogger::EventLogger::new();
     futures.push(event_system.run(eventlogger));
 
+    if args.tick_interval_mins > 0 {
+        let ticker = ticker::Ticker::new(Duration::from_secs(args.tick_interval_mins * 60));
+        futures.push(event_system.run(ticker));
+    }
+
     let repository = Arc::new(RwLock::new(messages::MessageRepository::new(args.history)?));
 
     let model = if args.openai_model.is_empty() {
@@ -121,7 +129,9 @@ async fn app() -> Result<(), ApplicationError> {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     match app().await {
         Ok(_) => (),

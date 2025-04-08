@@ -129,8 +129,8 @@ impl CodeExecutor {
                         }
                         Ok(output) => output,
                     };
-                    let event = Event::TextMessage {
-                        user: "system".to_string(),
+                    let event = Event::SystemMessage {
+                        modality: Modality::Text,
                         message,
                     };
                     let _ = sender.send(event)?;

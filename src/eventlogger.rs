@@ -7,8 +7,6 @@ use crate::events::{self, Event, EventComponent};
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("JSON parse error: {0}")]
-    JsonParse(#[from] serde_json::Error),
     #[error("Request error: {0}")]
     ReceiveEvent(#[from] broadcast::error::RecvError),
 }

@@ -25,7 +25,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     events::{self, Event, EventComponent},
-    messages::{MessageRecord, MessageRepository},
+    messages::{self, MessageRecord, MessageRepository},
 };
 
 #[derive(Error, Debug)]
@@ -227,6 +227,9 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                 if let Some(text) = match event {
                     Ok(Event::AssistantMessage { modality: _, message }) => {
                         Some(message)
+                    },
+                    Ok(Event::SystemMessage { modality: _, message }) => {
+                        Some(format!("[{}] {}", messages::SYSTEM_USER_NAME, message))
                     },
                     Ok(Event::TextMessage { user, message }) => {
                         Some(format!("[{}] {}", user, message))

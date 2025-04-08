@@ -68,14 +68,18 @@ struct OpenAiChatOutput {
     feeling: Option<u8>,
     activity: Option<u8>,
     modality: Modality,
-    content: String,
+    content: Option<String>,
 }
 
 impl OpenAiChatOutput {
-    fn to_event(&self) -> Event {
-        Event::AssistantMessage {
-            modality: self.modality,
-            message: self.content.clone(),
+    fn to_event(&self) -> Option<Event> {
+        if let Some(ref content) = self.content {
+            Some(Event::AssistantMessage {
+                modality: self.modality,
+                message: content.clone(),
+            })
+        } else {
+            None
         }
     }
 }
@@ -168,7 +172,7 @@ impl OpenAiCore {
                         activity: None,
                         feeling: None,
                         modality: Modality::Audio,
-                        content: input_chat.content,
+                        content: Some(input_chat.content),
                     }
                 } else if let Some((a, b)) = input_chat.content.split_once(' ') {
                     OpenAiChatOutput {
@@ -179,14 +183,14 @@ impl OpenAiCore {
                             "Memory" => Modality::Memory,
                             _ => Modality::Text,
                         },
-                        content: b.to_string(),
+                        content: Some(b.to_string()),
                     }
                 } else {
                     OpenAiChatOutput {
                         activity: None,
                         feeling: None,
                         modality: Modality::Text,
-                        content: serde_json::to_string(&input_chat)?,
+                        content: Some(serde_json::to_string(&input_chat)?),
                     }
                 };
                 serde_json::to_string(&chat)?
@@ -219,29 +223,35 @@ impl OpenAiCore {
         loop {
             let event = receiver.recv().await?;
             if let Some(response) = match event {
-                Event::RecognizedSpeech { user, message } => Some(
-                    self.receive(OpenAiChatInput {
+                Event::RecognizedSpeech { user, message } => self
+                    .receive(OpenAiChatInput {
                         modality: Modality::Audio,
                         user,
                         content: message,
                     })
                     .await?
                     .to_event(),
-                ),
-                Event::TextMessage { user, message } => Some(
-                    self.receive(OpenAiChatInput {
+                Event::SystemMessage { modality, message } => self
+                    .receive(OpenAiChatInput {
+                        modality,
+                        user: messages::SYSTEM_USER_NAME.to_string(),
+                        content: message,
+                    })
+                    .await?
+                    .to_event(),
+                Event::TextMessage { user, message } => self
+                    .receive(OpenAiChatInput {
                         modality: Modality::Text,
                         user,
                         content: message,
                     })
                     .await?
                     .to_event(),
-                ),
                 Event::AssistantMessage {
                     modality: Modality::Memory,
                     message: _,
-                } => Some(Event::TextMessage {
-                    user: "system".to_string(),
+                } => Some(Event::SystemMessage {
+                    modality: Modality::Text,
                     message: "memorized".to_string(),
                 }),
                 _ => None,

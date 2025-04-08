@@ -10,6 +10,7 @@ use crate::messages::Modality;
 #[derive(Clone, Debug)]
 pub enum Event {
     TextMessage { user: String, message: String },
+    SystemMessage { modality: Modality, message: String },
     AssistantMessage { modality: Modality, message: String },
     RecognizedSpeech { user: String, message: String },
     PlayAudio { sample_rate: u32, audio: Vec<i16> },
