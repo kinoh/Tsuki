@@ -24,6 +24,10 @@ EOF
 
 FROM debian:stable-slim as final
 
+RUN apt-get update \
+    && apt-get install -y ca-certificates \
+    && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+
 ARG UID=10001
 RUN adduser \
     --disabled-password \
