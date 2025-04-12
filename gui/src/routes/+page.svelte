@@ -154,7 +154,8 @@
     </div>
     <div class="message-list">
       <form onsubmit={handleSubmit}>
-        <input class="message user-message" type="text" bind:value={inputText} placeholder={inputPlaceholder} onfocus={handleMessageInputFocus} />
+        <textarea class="message user-message" bind:value={inputText} placeholder={inputPlaceholder} onfocus={handleMessageInputFocus}>
+        </textarea>
       </form>
     	{#each messages as item, i}
         {#if i < 20}
@@ -292,9 +293,13 @@ form {
   justify-content: center;
 }
 
-input {
+textarea {
   outline: none;
+  font-family: "SourceHanSans", sans-serif;
   font-size: 1rem;
+  min-height: 1.6rem;
+  field-sizing: content;
+  resize: none;
 }
 
 .shown {
