@@ -15,7 +15,7 @@
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
   let avatarExpression: "default" | "blink" = $state("default");
-  let showConfig: boolean = $state(false);
+  let overlay: "config" | "note" | null = $state(null);
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
   let loadingMore: boolean = false;
@@ -111,7 +111,19 @@
   }
 
   function handleConfigClick() {
-    showConfig = !showConfig;
+    if (overlay === "config") {
+      overlay = null;
+    } else {
+      overlay = "config";
+    }
+  }
+
+  function handleNoteClick() {
+    if (overlay === "note") {
+      overlay = null;
+    } else {
+      overlay = "note";
+    }
   }
 
   function handleMessageInputFocus() {
@@ -186,6 +198,11 @@
             <img src="/src/assets/icons/config.svg" alt="Config" />
           </button>
         </div>
+        <div class="menu-item">
+          <button onclick={handleNoteClick}>
+            <img src="/src/assets/icons/note.svg" alt="Note" />
+          </button>
+        </div>
       </div>
       {#each ["default", "blink"] as item}
         <img data-tauri-drag-region alt="tsuki avatar" class={["avatar", avatarExpression == item ? "shown" : "hidden"]} src={`tsuki_${item}.png`} />
@@ -202,7 +219,8 @@
         </div>
       {/each}
     </div>
-    <iframe class={["floating-window", showConfig ? "shown" : "hidden"]} src="/config" title="config"></iframe>
+    <iframe class={["floating-window", overlay === "config" ? "shown" : "hidden"]} src="/config" title="config"></iframe>
+    <iframe class={["floating-window", overlay === "note" ? "shown" : "hidden"]} src="/note" title="note"></iframe>
   </div>
 </main>
 
@@ -246,6 +264,7 @@
   display: flex;
   flex-direction: column;
   margin-top: 0.5rem;
+  gap: 0.4rem;
 }
 
 .menu-item button {
@@ -254,6 +273,7 @@
   border-radius: 5px;
   width: 2rem;
   height: 2rem;
+  padding: 0.4rem;
 }
 
 .menu-item button:hover {
