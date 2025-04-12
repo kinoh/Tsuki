@@ -131,7 +131,7 @@ impl OpenAiCore {
                     .repository
                     .read()
                     .await
-                    .get_latest_n(MAX_HISTORY_LENGTH)
+                    .get_latest_n(MAX_HISTORY_LENGTH, None)
                     .iter()
                     .map(|r| Message {
                         role: r.role.into(),

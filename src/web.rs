@@ -135,11 +135,13 @@ struct ResponseMessage {
     role: crate::messages::Role,
     user: String,
     chat: Value,
+    timestamp: u64,
 }
 
 #[derive(Debug, Deserialize)]
 struct MessagesParams {
     n: Option<usize>,
+    before: Option<u64>,
 }
 
 async fn messages(
@@ -148,7 +150,7 @@ async fn messages(
 ) -> Result<Json<Vec<ResponseMessage>>, StatusCode> {
     let repo = state.repository.read().await;
     let data: Vec<&MessageRecord> = if let Some(n) = params.n {
-        repo.get_latest_n(n)
+        repo.get_latest_n(n, params.before)
     } else {
         repo.get_all().iter().map(|m| m).collect()
     };
@@ -160,6 +162,7 @@ async fn messages(
             role: m.role,
             user: m.user.clone(),
             chat: serde_json::from_str(&m.chat).unwrap_or(Value::String("error".to_string())),
+            timestamp: m.timestamp,
         })
         .collect();
     Ok(Json(response))

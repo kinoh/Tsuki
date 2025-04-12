@@ -111,7 +111,7 @@ impl MessageRepository {
         &self.data
     }
 
-    pub fn get_latest_n(&self, n: usize) -> Vec<&MessageRecord> {
+    pub fn get_latest_n(&self, n: usize, before: Option<u64>) -> Vec<&MessageRecord> {
         let mut response = Vec::with_capacity(n);
         let mut is_last_none = false;
         let mut normal_count = 0;
@@ -122,6 +122,7 @@ impl MessageRepository {
             if !is_none
                 && !(record.modality == Modality::Tick && is_last_none)
                 && (is_important || normal_count < n)
+                && (before.is_none_or(|t| record.timestamp < t))
             {
                 response.push(record);
                 if !is_important {
