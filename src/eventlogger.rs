@@ -7,7 +7,7 @@ use crate::events::{self, Event, EventComponent};
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Request error: {0}")]
+    #[error("Failed to receive event: {0}")]
     ReceiveEvent(#[from] broadcast::error::RecvError),
 }
 
