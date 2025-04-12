@@ -8,34 +8,39 @@
   import { subscribeToTopic, getFCMToken, onPushNotificationOpened, getLatestNotificationData } from "@tauri-plugin-fcm-api";
   import { onMount } from 'svelte';
 
+  type Message = { role: string; chat: any; timestamp: number };
+
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
-  let messages: { role: string; chat: any }[] = $state([]);
+  let messages: Message[] = $state([]);
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
   let avatarExpression: "default" | "blink" = $state("default");
   let showConfig: boolean = $state(false);
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
+  let loadingMore: boolean = false;
+
+  function secure(): "s" | "" {
+    return ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
+  }
 
   function connect() {
-    let secure: "s" | "" = ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
-
-    fetch(`http${secure}://${config.endpoint}/messages?n=20`, {
+    fetch(`http${secure()}://${config.endpoint}/messages?n=20`, {
       headers: {
         "Authorization": `Bearer ${config.token}`,
       }
     })
       .then(response => response.json())
       .then(data => {
-        messages = data.toReversed().map((m: { role: string; user: string; chat: any }) => {
+        messages = data.toReversed().map((m: { role: string; user: string; chat: any; timestamp: number }) => {
           if (m.role === "User" && m.user !== config.user) {
-            return { role: "assistant", chat: { content: `[${m.user}] ${m.chat.content}` } };
+            return { role: "assistant", chat: { content: `[${m.user}] ${m.chat.content}`, timestamp: m.timestamp } };
           }
           return m;
         });
       });
 
-    connection = new WebSocket(`ws${secure}://${config.endpoint}/ws`);
+    connection = new WebSocket(`ws${secure()}://${config.endpoint}/ws`);
 
     connection.onopen = function(event) {
       inputPlaceholder = "";
@@ -56,10 +61,37 @@
         return;
       }
       messages.unshift({
-        "role": "assistant",
-        "chat": { "content": event.data },
+        role: "assistant",
+        chat: { "content": event.data },
+        timestamp: Date.now() / 1000,
       });
     };
+  }
+
+  function loadMore() {
+    if (loadingMore) return;
+
+    loadingMore = true;
+
+    let lastMessage = messages[messages.length - 1];
+    fetch(`http${secure()}://${config.endpoint}/messages?n=20&before=${lastMessage.timestamp}`, {
+      headers: {
+        "Authorization": `Bearer ${config.token}`,
+      }
+    })
+      .then(response => response.json())
+      .then(data => {
+        let more = data.toReversed().map((m: { role: string; user: string; chat: any }) => {
+          if (m.role === "User" && m.user !== config.user) {
+            return { role: "assistant", chat: { content: `[${m.user}] ${m.chat.content}` } };
+          }
+          return m;
+        });
+        messages.push(...more);
+      })
+      .finally(() => {
+        loadingMore = false;
+      });
   }
 
   function handleSubmit(event: Event) {
@@ -69,8 +101,9 @@
     }
     if (connection !== null) {
       messages.unshift({
-        "role": "user",
-        "chat": { "content": inputText },
+        role: "user",
+        chat: { "content": inputText },
+        timestamp: Date.now() / 1000,
       });
       connection.send(inputText);
       inputText = "";
@@ -84,6 +117,12 @@
   function handleMessageInputFocus() {
     if (connection === null) {
       connect();
+    }
+  }
+  function handleMessageListScroll(event: Event) {
+    let lastMessage = document.querySelector(".message-list>.message:last-child");
+    if (lastMessage !== null && lastMessage.getBoundingClientRect().y > 0) {
+      loadMore();
     }
   }
 
@@ -152,17 +191,15 @@
         <img data-tauri-drag-region alt="tsuki avatar" class={["avatar", avatarExpression == item ? "shown" : "hidden"]} src={`tsuki_${item}.png`} />
       {/each}
     </div>
-    <div class="message-list">
+    <div class="message-list" onscroll={handleMessageListScroll}>
       <form onsubmit={handleSubmit}>
         <textarea class="message user-message" bind:value={inputText} placeholder={inputPlaceholder} onfocus={handleMessageInputFocus}>
         </textarea>
       </form>
     	{#each messages as item, i}
-        {#if i < 20}
-          <div class="message {item.role.toLowerCase()}-message">
-            {item.chat.content}
-          </div>
-        {/if}
+        <div class="message {item.role.toLowerCase()}-message">
+          {item.chat.content}
+        </div>
       {/each}
     </div>
     <iframe class={["floating-window", showConfig ? "shown" : "hidden"]} src="/config" title="config"></iframe>
