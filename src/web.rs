@@ -54,7 +54,10 @@ async fn logging_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let path = req.uri().path().to_string();
+    let path = req
+        .uri()
+        .path_and_query()
+        .map_or(String::new(), |p| p.to_string());
     let method = req.method().to_string();
 
     let response = next.run(req).await;
