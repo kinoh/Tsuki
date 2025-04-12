@@ -14,7 +14,7 @@ use axum::{
 };
 use reqwest::header::InvalidHeaderValue;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::{
     select,
@@ -104,7 +104,7 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
 
     let app = Router::new()
         .route("/", get(root))
-        .route("/config", get(config))
+        .route("/metadata", get(metadata))
         .route("/messages", get(messages))
         .route("/notification/test", post(notification_test))
         .route("/ws", any(ws_handler))
@@ -171,8 +171,11 @@ async fn messages(
     Ok(Json(response))
 }
 
-async fn config(State(state): State<Arc<WebState>>) -> Json<Value> {
-    Json(state.app_args.clone())
+async fn metadata(State(state): State<Arc<WebState>>) -> Json<Value> {
+    Json(json!({
+        "revision": env!("GIT_HASH"),
+        "args": state.app_args.clone(),
+    }))
 }
 
 async fn notification_test(State(state): State<Arc<WebState>>) -> Result<String, StatusCode> {
