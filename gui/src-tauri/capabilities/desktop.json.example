@@ -17,6 +17,8 @@
     "opener:default",
     "core:window:default",
     "core:window:allow-start-dragging",
+    "notification:allow-is-permission-granted",
+    "notification:default",
     {
       "identifier": "http:default",
       "allow": [

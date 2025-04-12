@@ -14,9 +14,15 @@ importers:
       '@tauri-apps/plugin-http':
         specifier: ~2
         version: 2.4.2
+      '@tauri-apps/plugin-notification':
+        specifier: ^2.2.2
+        version: 2.2.2
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.2.6
+      '@tauri-plugin-fcm-api':
+        specifier: git@github.com:kinoh/tauri-plugin-fcm.git#5d66eb89e43aaa406844baf20923f11d71f6e580
+        version: tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/5d66eb89e43aaa406844baf20923f11d71f6e580
       tauri-plugin-app-events-api:
         specifier: ^0.2.0
         version: 0.2.0
@@ -423,6 +429,9 @@ packages:
   '@tauri-apps/plugin-http@2.4.2':
     resolution: {integrity: sha512-deoafidYelei/fmd4AQoHa2aCA9N2DvnnQrF/91QNjE0xCCTuVpPhIQdVRgdHDhFehEal9uI14OTvERBpcfHrg==}
 
+  '@tauri-apps/plugin-notification@2.2.2':
+    resolution: {integrity: sha512-d71rJdtkFUTcG4dqydnv6d7ZwlNZVcdjrVOPwc9GsF6y9DgVN1WCZ9T/vbfD2qrJslf7ai+rnNJc62TLLC2IdA==}
+
   '@tauri-apps/plugin-opener@2.2.6':
     resolution: {integrity: sha512-bSdkuP71ZQRepPOn8BOEdBKYJQvl6+jb160QtJX/i2H9BF6ZySY/kYljh76N2Ne5fJMQRge7rlKoStYQY5Jq1w==}
 
@@ -574,6 +583,10 @@ packages:
 
   tauri-plugin-app-events-api@0.2.0:
     resolution: {integrity: sha512-CnlAeucWhT+Rgx6CCsqUpq2D3pqgx0fhjSPKomH7O2t1rGVu5kGLMkYvaCX6gqVTUYpIWX5BLV7LGY2DRri0QA==}
+
+  tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/5d66eb89e43aaa406844baf20923f11d71f6e580:
+    resolution: {tarball: https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/5d66eb89e43aaa406844baf20923f11d71f6e580}
+    version: 0.0.0
 
   totalist@3.0.1:
     resolution: {integrity: sha512-sf4i37nQ2LBx4m3wB74y+ubopq6W/dIzXg0FDGjsYnZHVa1Da8FH853wlL2gtUhg+xJXjfk3kUZS3BRoQeoQBQ==}
@@ -889,6 +902,10 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 2.3.0
 
+  '@tauri-apps/plugin-notification@2.2.2':
+    dependencies:
+      '@tauri-apps/api': 2.3.0
+
   '@tauri-apps/plugin-opener@2.2.6':
     dependencies:
       '@tauri-apps/api': 2.3.0
@@ -1059,6 +1076,10 @@ snapshots:
       zimmerframe: 1.1.2
 
   tauri-plugin-app-events-api@0.2.0:
+    dependencies:
+      '@tauri-apps/api': 2.3.0
+
+  tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/5d66eb89e43aaa406844baf20923f11d71f6e580:
     dependencies:
       '@tauri-apps/api': 2.3.0
 

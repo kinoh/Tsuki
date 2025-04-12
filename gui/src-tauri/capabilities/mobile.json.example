@@ -18,6 +18,10 @@
     "core:window:default",
     "core:window:allow-start-dragging",
     "app-events:default",
+    "notification:allow-is-permission-granted",
+    "notification:default",
+    "fcm:allow-subscribe-to-topic",
+    "fcm:default",
     {
       "identifier": "http:default",
       "allow": [

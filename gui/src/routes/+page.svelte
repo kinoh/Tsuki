@@ -4,6 +4,9 @@
     onResume,
     onPause,
   } from "tauri-plugin-app-events-api";
+  import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+  import { subscribeToTopic, getFCMToken, onPushNotificationOpened, getLatestNotificationData } from "@tauri-plugin-fcm-api";
+  import { onMount } from 'svelte';
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let messages: { role: string; chat: any }[] = $state([]);
@@ -11,11 +14,12 @@
   let inputPlaceholder: string = $state("Connecting...");
   let avatarExpression: "default" | "blink" = $state("default");
   let showConfig: boolean = $state(false);
-  let secure: "s" | "" = (config.endpoint.startsWith("localhost") ? "" : "s");
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
 
   function connect() {
+    let secure: "s" | "" = ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
+
     fetch(`http${secure}://${config.endpoint}/messages?n=20`, {
       headers: {
         "Authorization": `Bearer ${config.token}`,
@@ -41,6 +45,11 @@
     }
     connection.onclose = function(event) {
       inputPlaceholder = "Connection closed!";
+      connection = null;
+    }
+    connection.onerror = function(event) {
+      inputPlaceholder = "Connection error";
+      connection = null;
     }
     connection.onmessage = function(event) {
       if (event.data.startsWith(`[${config.user}] `)) {
@@ -70,6 +79,12 @@
 
   function handleConfigClick() {
     showConfig = !showConfig;
+  }
+
+  function handleMessageInputFocus() {
+    if (connection === null) {
+      connect();
+    }
   }
 
   function blink() {
@@ -107,6 +122,20 @@
       connect();
     }
   });
+  onMount(() => {
+    let notificationSetup = async () => {
+      let permissionGranted = await isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await requestPermission();
+        permissionGranted = permission === "granted";
+      }
+      if (permissionGranted) {
+        // sendNotification({ title: "Tsuki", body: "届いてるかな～？" });
+        subscribeToTopic("message");
+      }
+    };
+    notificationSetup();
+  });
 </script>
 
 <main class="container">
@@ -125,7 +154,7 @@
     </div>
     <div class="message-list">
       <form onsubmit={handleSubmit}>
-        <input class="message user-message" type="text" bind:value={inputText} placeholder={inputPlaceholder} />
+        <input class="message user-message" type="text" bind:value={inputText} placeholder={inputPlaceholder} onfocus={handleMessageInputFocus} />
       </form>
     	{#each messages as item, i}
         {#if i < 20}
