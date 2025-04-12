@@ -183,7 +183,7 @@
       <div class="menu">
         <div class="menu-item">
           <button onclick={handleConfigClick}>
-            <img src="/src/assets/icons/config.svg" alt="Config" />
+            <img src="/src/assets/icons/config.png" alt="Config" />
           </button>
         </div>
       </div>
@@ -254,10 +254,19 @@
   border-radius: 5px;
   width: 2rem;
   height: 2rem;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .menu-item button:hover {
   background-color: RGBA(187, 187, 220, 0.9);
+}
+
+.menu-item img {
+  width: 60%;
+  height: 60%;
 }
 
 .floating-window {
