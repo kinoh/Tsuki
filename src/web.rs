@@ -9,7 +9,7 @@ use axum::{
     http::{self, StatusCode},
     middleware::{self, Next},
     response::Response,
-    routing::{any, get},
+    routing::{any, get, post},
     Json, Router,
 };
 use reqwest::header::InvalidHeaderValue;
@@ -103,6 +103,7 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
         .route("/", get(root))
         .route("/config", get(config))
         .route("/messages", get(messages))
+        .route("/notification/test", post(notification_test))
         .route("/ws", any(ws_handler))
         .layer(cors)
         .layer(middleware::from_fn_with_state(
@@ -168,6 +169,23 @@ async fn config(State(state): State<Arc<WebState>>) -> Json<Value> {
     Json(state.app_args.clone())
 }
 
+async fn notification_test(State(state): State<Arc<WebState>>) -> Result<String, StatusCode> {
+    let c = state.as_ref();
+    if let Some(s) = &c.sender {
+        s.send(Event::Notify {
+            content: format!("通知テストだよ🔎 ({})", chrono::Utc::now().format("%+")),
+        })
+        .map_err(|e| {
+            error!("event send error: {}", e);
+            StatusCode::from_u16(500).unwrap()
+        })?;
+        Ok("ok".to_string())
+    } else {
+        warn!("not ready");
+        Err(StatusCode::from_u16(503).unwrap())
+    }
+}
+
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WebState>>) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
@@ -177,7 +195,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
     let sender = if let Some(s) = &c.sender {
         s
     } else {
-        error!("not ready");
+        warn!("not ready");
         return;
     };
     let mut receiver = sender.subscribe();
@@ -191,7 +209,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                         match message {
                             Message::Text(text) => {
                                 if let Some(ref user) = authorized_user {
-                                    let _ = sender.send(Event::TextMessage { user: user.to_string(), message: text.to_string()}).map_err(|e| warn!("event send error: {}", e));
+                                    let _ = sender.send(Event::TextMessage { user: user.to_string(), message: text.to_string()}).map_err(|e| error!("event send error: {}", e));
                                 } else {
                                     let mut parts = text.splitn(2, ':');
                                     let (user, token) = match (parts.next(), parts.next()) {

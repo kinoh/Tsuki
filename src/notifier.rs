@@ -5,12 +5,14 @@ use fcm::{
     message::{Message, Notification, Target},
     FcmClient,
 };
-use reqwest::Client;
 use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
-use crate::events::{self, Event, EventComponent};
+use crate::{
+    events::{self, Event, EventComponent},
+    messages::Modality,
+};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -92,8 +94,15 @@ impl Notifier {
 
         loop {
             let event = receiver.recv().await?;
-            let serialized = format!("{}", event);
-            info!(event = serialized);
+            match event {
+                Event::AssistantMessage { modality, message } => {
+                    if modality != Modality::None {
+                        self.notify(&message).await?
+                    }
+                }
+                Event::Notify { content } => self.notify(&content).await?,
+                _ => (),
+            }
         }
     }
 }

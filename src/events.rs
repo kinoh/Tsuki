@@ -14,6 +14,7 @@ pub enum Event {
     AssistantMessage { modality: Modality, message: String },
     RecognizedSpeech { user: String, message: String },
     PlayAudio { sample_rate: u32, audio: Vec<i16> },
+    Notify { content: String },
 }
 
 impl Display for Event {
