@@ -11,6 +11,10 @@ tasks:
     desc: Deploy to production
     cmds:
       - docker compose up --build --detach
+  deploy-app:
+    desc: Deploy to production
+    cmds:
+      - docker compose up app --build --detach
   up:
     desc: Start production
     cmds:
