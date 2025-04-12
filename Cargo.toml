@@ -28,4 +28,4 @@ memsec = "0.7"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 chrono = "0.4"
-fcm = { git = "https://github.com/rj76/fcm-rust.git", rev = "f6db9c8d8f3f21ad2ebd4fbd5cc0d7d6130e1d10" }
+fcm = { git = "https://github.com/rj76/fcm-rust.git", rev = "f6db9c8d8f3f21ad2ebd4fbd5cc0d7d6130e1d10", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots"] }
