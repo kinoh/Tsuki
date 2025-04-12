@@ -6,6 +6,7 @@ mod events;
 mod executor;
 mod messages;
 mod mumble;
+mod notifier;
 mod recognizer;
 mod speak;
 mod ticker;
@@ -38,6 +39,8 @@ enum ApplicationError {
     Web(#[from] web::Error),
     #[error("executor error: {0}")]
     Executor(#[from] executor::Error),
+    #[error("notifier error: {0}")]
+    Notifier(#[from] notifier::Error),
 }
 
 #[derive(Parser, Debug, Serialize)]
@@ -99,6 +102,9 @@ async fn app() -> Result<(), ApplicationError> {
 
         futures.push(event_system.run(executor));
     }
+
+    let notifier = notifier::Notifier::new().await?;
+    futures.push(event_system.run(notifier));
 
     let eventlogger = eventlogger::EventLogger::new();
     futures.push(event_system.run(eventlogger));
