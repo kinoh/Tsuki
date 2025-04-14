@@ -157,18 +157,27 @@ async fn messages(
     } else {
         repo.get_all().iter().map(|m| m).collect()
     };
-    let response: Vec<ResponseMessage> = data
+    let response: Result<Vec<ResponseMessage>, serde_json::Error> = data
         .iter()
         .filter(|m| m.role != crate::messages::Role::System)
-        .map(|m| ResponseMessage {
-            modality: m.modality,
-            role: m.role,
-            user: m.user.clone(),
-            chat: serde_json::from_str(&m.chat).unwrap_or(Value::String("error".to_string())),
-            timestamp: m.timestamp,
+        .map(|m| {
+            Ok(ResponseMessage {
+                modality: m.modality(),
+                role: m.role,
+                user: m.user(),
+                chat: match m.chat {
+                    messages::MessageRecordChat::Bare(_) => serde_json::Value::from("N/A"),
+                    messages::MessageRecordChat::Input(ref chat) => serde_json::to_value(chat)?,
+                    messages::MessageRecordChat::Output(ref chat) => serde_json::to_value(chat)?,
+                },
+                timestamp: m.timestamp,
+            })
         })
         .collect();
-    Ok(Json(response))
+    Ok(Json(response.map_err(|e| {
+        error!("serialization error: {}", e);
+        StatusCode::from_u16(500).unwrap()
+    })?))
 }
 
 async fn metadata(State(state): State<Arc<WebState>>) -> Json<Value> {

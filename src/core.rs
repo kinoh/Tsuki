@@ -1,9 +1,10 @@
 use crate::events::{self, Event, EventComponent};
-use crate::messages::{self, MessageRecord, MessageRepository, Modality};
+use crate::messages::{
+    self, ChatInput, ChatOutput, MessageRecord, MessageRecordChat, MessageRepository, Modality,
+};
 use async_trait::async_trait;
 use openai_api_rust::chat::{ChatApi, ChatBody};
 use openai_api_rust::{Auth, Message, OpenAI, Role};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::SystemTime;
 use thiserror::Error;
@@ -38,7 +39,6 @@ impl From<openai_api_rust::Error> for Error {
     }
 }
 
-pub const ASSISTANT_NAME: &str = "つき";
 pub const MAX_HISTORY_LENGTH: usize = 20;
 
 pub enum Model {
@@ -56,22 +56,7 @@ impl From<messages::Role> for Role {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct OpenAiChatInput {
-    modality: Modality,
-    user: String,
-    content: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct OpenAiChatOutput {
-    feeling: Option<u8>,
-    activity: Option<u8>,
-    modality: Modality,
-    content: Option<String>,
-}
-
-impl OpenAiChatOutput {
+impl ChatOutput {
     fn to_event(&self) -> Option<Event> {
         if let Some(ref content) = self.content {
             Some(Event::AssistantMessage {
@@ -112,36 +97,35 @@ impl OpenAiCore {
         })
     }
 
-    async fn receive(&mut self, input_chat: OpenAiChatInput) -> Result<OpenAiChatOutput, Error> {
-        let input_chat_json = serde_json::to_string(&input_chat)?;
+    async fn receive(&mut self, input_chat: ChatInput) -> Result<ChatOutput, Error> {
         let user_record = MessageRecord {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs(),
-            modality: input_chat.modality,
             role: messages::Role::User,
-            user: input_chat.user.clone(),
-            chat: input_chat_json,
+            chat: MessageRecordChat::Input(input_chat.clone()),
         };
         self.repository.write().await.append(user_record)?;
 
         let output_chat_json = match &self.model {
             Model::OpenAi(model) => {
-                let messages = self
+                let messages: Result<Vec<Message>, serde_json::Error> = self
                     .repository
                     .read()
                     .await
                     .get_latest_n(MAX_HISTORY_LENGTH, None)
                     .iter()
-                    .map(|r| Message {
-                        role: r.role.into(),
-                        content: r.chat.clone(),
+                    .map(|r| {
+                        Ok(Message {
+                            role: r.role.into(),
+                            content: r.json_chat()?,
+                        })
                     })
                     .collect();
 
                 let chat_body = ChatBody {
                     model: model.clone(),
-                    messages,
+                    messages: messages?,
                     user: Some(input_chat.user),
                     max_tokens: Some(self.max_tokens),
                     temperature: None,
@@ -168,14 +152,14 @@ impl OpenAiCore {
             }
             Model::Echo => {
                 let chat = if input_chat.modality == Modality::Audio {
-                    OpenAiChatOutput {
+                    ChatOutput {
                         activity: None,
                         feeling: None,
                         modality: Modality::Audio,
                         content: Some(input_chat.content),
                     }
                 } else if let Some((a, b)) = input_chat.content.split_once(' ') {
-                    OpenAiChatOutput {
+                    ChatOutput {
                         activity: None,
                         feeling: None,
                         modality: match a {
@@ -186,7 +170,7 @@ impl OpenAiCore {
                         content: Some(b.to_string()),
                     }
                 } else {
-                    OpenAiChatOutput {
+                    ChatOutput {
                         activity: None,
                         feeling: None,
                         modality: Modality::Text,
@@ -197,16 +181,14 @@ impl OpenAiCore {
             }
         };
 
-        let output_chat: OpenAiChatOutput = serde_json::from_str(&output_chat_json)?;
+        let output_chat: ChatOutput = serde_json::from_str(&output_chat_json)?;
 
         let assistant_record = MessageRecord {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs(),
-            modality: output_chat.modality,
             role: messages::Role::Assistant,
-            user: ASSISTANT_NAME.to_string(),
-            chat: output_chat_json.clone(),
+            chat: MessageRecordChat::Output(output_chat.clone()),
         };
         self.repository.write().await.append(assistant_record)?;
 
@@ -224,7 +206,7 @@ impl OpenAiCore {
             let event = receiver.recv().await?;
             if let Some(response) = match event {
                 Event::RecognizedSpeech { user, message } => self
-                    .receive(OpenAiChatInput {
+                    .receive(ChatInput {
                         modality: Modality::Audio,
                         user,
                         content: message,
@@ -232,7 +214,7 @@ impl OpenAiCore {
                     .await?
                     .to_event(),
                 Event::SystemMessage { modality, message } => self
-                    .receive(OpenAiChatInput {
+                    .receive(ChatInput {
                         modality,
                         user: messages::SYSTEM_USER_NAME.to_string(),
                         content: message,
@@ -240,7 +222,7 @@ impl OpenAiCore {
                     .await?
                     .to_event(),
                 Event::TextMessage { user, message } => self
-                    .receive(OpenAiChatInput {
+                    .receive(ChatInput {
                         modality: Modality::Text,
                         user,
                         content: message,
