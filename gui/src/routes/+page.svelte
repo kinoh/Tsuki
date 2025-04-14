@@ -131,6 +131,13 @@
       connect();
     }
   }
+
+  function handleMessageInputKeyDown(event: KeyboardEvent) {
+    if (event.code === "Enter" && !event.shiftKey) {
+      handleSubmit(event);
+    }
+  }
+
   function handleMessageListScroll(event: Event) {
     let lastMessage = document.querySelector(".message-list>.message:last-child");
     if (lastMessage !== null && lastMessage.getBoundingClientRect().y > 0) {
@@ -210,7 +217,7 @@
     </div>
     <div class="message-list" onscroll={handleMessageListScroll}>
       <form onsubmit={handleSubmit}>
-        <textarea class="message user-message" bind:value={inputText} placeholder={inputPlaceholder} onfocus={handleMessageInputFocus}>
+        <textarea class="message user-message" bind:value={inputText} placeholder={inputPlaceholder} onfocus={handleMessageInputFocus} onkeydown={handleMessageInputKeyDown}>
         </textarea>
       </form>
     	{#each messages as item, i}
