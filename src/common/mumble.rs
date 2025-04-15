@@ -1,17 +1,10 @@
 use bytes::Bytes;
 use core::slice::SlicePattern;
-use futures::stream::SplitSink;
-use futures::stream::SplitStream;
+use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
-use mumble_protocol_2x::control::msgs;
-use mumble_protocol_2x::control::ClientControlCodec;
-use mumble_protocol_2x::control::ControlCodec;
-use mumble_protocol_2x::control::ControlPacket;
-use mumble_protocol_2x::voice::Clientbound;
-use mumble_protocol_2x::voice::Serverbound;
-use mumble_protocol_2x::voice::VoicePacket;
-use mumble_protocol_2x::voice::VoicePacketPayload;
+use mumble_protocol_2x::control::{msgs, ClientControlCodec, ControlCodec, ControlPacket};
+use mumble_protocol_2x::voice::{Clientbound, Serverbound, VoicePacket, VoicePacketPayload};
 use opus::Channels;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -24,15 +17,13 @@ use tokio::select;
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_rustls::client::TlsStream;
-use tokio_rustls::rustls::client::danger::HandshakeSignatureValid;
-use tokio_rustls::rustls::client::danger::ServerCertVerified;
-use tokio_rustls::rustls::client::danger::ServerCertVerifier;
-use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::rustls::ClientConfig;
-use tokio_rustls::rustls::SignatureScheme;
+use tokio_rustls::rustls::{
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    pki_types::ServerName,
+    ClientConfig, SignatureScheme,
+};
 use tokio_rustls::TlsConnector;
-use tokio_util::codec::Decoder;
-use tokio_util::codec::Framed;
+use tokio_util::codec::{Decoder, Framed};
 use tracing::{debug, error, info, warn};
 
 #[derive(Error, Debug)]
@@ -188,7 +179,7 @@ impl AudioEncoder {
     }
 }
 
-pub struct Client {
+pub struct MumbleClient {
     write: SplitSink<
         Framed<TlsStream<TcpStream>, ControlCodec<Serverbound, Clientbound>>,
         ControlPacket<Serverbound>,
@@ -198,7 +189,7 @@ pub struct Client {
     current_session: Option<u32>,
 }
 
-impl Client {
+impl MumbleClient {
     pub async fn new(
         server_host: String,
         server_port: u16,

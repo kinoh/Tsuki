@@ -10,8 +10,8 @@ use tokio::{
 use tracing::{debug, info};
 
 use crate::{
-    events::{self, Event, EventComponent},
-    messages::Modality,
+    common::events::{self, Event, EventComponent},
+    common::messages::Modality,
 };
 
 #[derive(Error, Debug)]
@@ -69,7 +69,7 @@ impl Ticker {
 
 #[async_trait]
 impl EventComponent for Ticker {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
         let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await

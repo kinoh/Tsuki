@@ -1,8 +1,8 @@
 use std::env;
 
 use crate::{
-    events::{self, Event, EventComponent},
-    messages::Modality,
+    common::events::{self, Event, EventComponent},
+    common::messages::Modality,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -143,7 +143,7 @@ impl CodeExecutor {
 
 #[async_trait]
 impl EventComponent for CodeExecutor {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
         let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await

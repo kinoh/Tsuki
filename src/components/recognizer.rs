@@ -1,5 +1,5 @@
-use crate::events::{self, Event, EventComponent};
-use crate::mumble::{self, Voice};
+use crate::common::events::{self, Event, EventComponent};
+use crate::common::mumble::{self, Voice};
 use async_trait::async_trait;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
@@ -83,7 +83,7 @@ impl BufferingVad {
 }
 
 pub struct SpeechRecognizer {
-    mumble: Option<mumble::Client>,
+    mumble: Option<mumble::MumbleClient>,
     recognizer: Recognizer,
     monitor_interval: time::Duration,
     silence_timeout: time::Duration,
@@ -92,7 +92,7 @@ pub struct SpeechRecognizer {
 
 impl SpeechRecognizer {
     pub fn new(
-        mumble: mumble::Client,
+        mumble: mumble::MumbleClient,
         vosk_model_path: String,
         monitor_interval: time::Duration,
         silence_timeout: time::Duration,
@@ -206,7 +206,7 @@ impl SpeechRecognizer {
 
 #[async_trait]
 impl EventComponent for SpeechRecognizer {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
         let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await

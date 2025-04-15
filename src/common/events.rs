@@ -5,7 +5,7 @@ use thiserror::Error;
 use tokio::sync::broadcast::{self, Sender};
 use tokio::task::{self, JoinHandle};
 
-use crate::messages::Modality;
+use crate::common::messages::Modality;
 
 #[derive(Clone, Debug)]
 pub enum Event {

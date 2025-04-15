@@ -24,8 +24,8 @@ use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    events::{self, Event, EventComponent},
-    messages::{self, MessageRecord, MessageRepository},
+    common::events::{self, Event, EventComponent},
+    common::messages::{self, MessageRecord, MessageRepository},
 };
 
 #[derive(Error, Debug)]
@@ -134,8 +134,8 @@ async fn root() -> &'static str {
 
 #[derive(Serialize)]
 struct ResponseMessage {
-    modality: crate::messages::Modality,
-    role: crate::messages::Role,
+    modality: crate::common::messages::Modality,
+    role: crate::common::messages::Role,
     user: String,
     chat: Value,
     timestamp: u64,
@@ -159,7 +159,7 @@ async fn messages(
     };
     let response: Result<Vec<ResponseMessage>, serde_json::Error> = data
         .iter()
-        .filter(|m| m.role != crate::messages::Role::System)
+        .filter(|m| m.role != crate::common::messages::Role::System)
         .map(|m| {
             Ok(ResponseMessage {
                 modality: m.modality(),
@@ -318,7 +318,7 @@ impl WebState {
 
 #[async_trait]
 impl EventComponent for WebInterface {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
         Arc::get_mut(self).map(|c| c.sender = Some(sender));
         serve(Arc::clone(self), self.port)
             .await

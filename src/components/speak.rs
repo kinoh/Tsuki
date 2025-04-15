@@ -11,8 +11,8 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{debug, info};
 
 use crate::{
-    events::{self, Event, EventComponent},
-    messages::Modality,
+    common::events::{self, Event, EventComponent},
+    common::messages::Modality,
 };
 
 #[derive(Error, Debug)]
@@ -135,7 +135,7 @@ impl SpeechEngine {
 
 #[async_trait]
 impl EventComponent for SpeechEngine {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
         let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await

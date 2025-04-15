@@ -10,8 +10,8 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{debug, info};
 
 use crate::{
-    events::{self, Event, EventComponent},
-    messages::Modality,
+    common::events::{self, Event, EventComponent},
+    common::messages::Modality,
 };
 
 #[derive(Error, Debug)]
@@ -45,7 +45,7 @@ impl Notifier {
         let client = fcm::FcmClient::builder()
             // Comment to use GOOGLE_APPLICATION_CREDENTIALS environment
             // variable. The variable can also be defined in .env file.
-            .service_account_key_json_string(include_str!("service_account_key.json"))
+            .service_account_key_json_string(include_str!("../service_account_key.json"))
             .build()
             .await?;
         Ok(Self { client })
@@ -109,7 +109,7 @@ impl Notifier {
 
 #[async_trait]
 impl EventComponent for Notifier {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
         let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await

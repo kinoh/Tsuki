@@ -1,5 +1,5 @@
-use crate::events::{self, Event, EventComponent};
-use crate::messages::{
+use crate::common::events::{self, Event, EventComponent};
+use crate::common::messages::{
     self, ChatInput, ChatOutput, MessageRecord, MessageRecordChat, MessageRepository, Modality,
 };
 use async_trait::async_trait;
@@ -19,7 +19,7 @@ pub enum Error {
     #[error("system time error: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
     #[error("repository error: {0}")]
-    Repository(#[from] crate::messages::Error),
+    Repository(#[from] crate::common::messages::Error),
     #[error("failed to receive event: {0}")]
     ReceiveEvent(#[from] broadcast::error::RecvError),
     #[error("failed to send event: {0}")]
@@ -87,7 +87,7 @@ impl OpenAiCore {
         repository
             .write()
             .await
-            .load_initial_prompt(include_str!("prompt/initial.txt"))?;
+            .load_initial_prompt(include_str!("../prompt/initial.txt"))?;
 
         Ok(Self {
             repository,
@@ -246,7 +246,7 @@ impl OpenAiCore {
 
 #[async_trait]
 impl EventComponent for OpenAiCore {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
         let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await

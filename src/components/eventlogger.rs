@@ -3,7 +3,7 @@ use thiserror::Error;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::info;
 
-use crate::events::{self, Event, EventComponent};
+use crate::common::events::{self, Event, EventComponent};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -35,7 +35,7 @@ impl EventLogger {
 
 #[async_trait]
 impl EventComponent for EventLogger {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::events::Error> {
+    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
         let receiver = sender.subscribe();
         self.run_internal(sender, receiver)
             .await

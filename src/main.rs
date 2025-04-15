@@ -1,18 +1,24 @@
 #![feature(slice_pattern)]
 
-mod core;
-mod eventlogger;
-mod events;
-mod executor;
-mod messages;
-mod mumble;
-mod notifier;
-mod recognizer;
-mod speak;
-mod ticker;
-mod web;
+mod common;
+mod components;
 
 use clap::Parser;
+use common::{
+    events::EventSystem,
+    messages::{MessageRepository, ASSISTANT_NAME},
+    mumble::MumbleClient,
+};
+use components::{
+    core::{Model, OpenAiCore},
+    eventlogger::EventLogger,
+    executor::CodeExecutor,
+    notifier::Notifier,
+    recognizer::SpeechRecognizer,
+    speak::SpeechEngine,
+    ticker::Ticker,
+    web::WebState,
+};
 use futures::future::select_all;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
@@ -21,26 +27,26 @@ use tokio::sync::RwLock;
 
 #[derive(Error, Debug)]
 enum ApplicationError {
-    #[error("mumble error: {0}")]
-    Mumble(#[from] mumble::Error),
-    #[error("recognizer error: {0}")]
-    Recognizer(#[from] recognizer::Error),
-    #[error("repository error: {0}")]
-    Repository(#[from] messages::Error),
-    #[error("core error: {0}")]
-    Core(#[from] core::Error),
-    #[error("events error: {0}")]
-    Events(#[from] events::Error),
-    #[error("tokio join error: {0}")]
-    TokioJoin(#[from] tokio::task::JoinError),
     #[error("component stopped: {0}")]
     ComponentStopped(usize),
+    #[error("tokio join error: {0}")]
+    TokioJoin(#[from] tokio::task::JoinError),
+    #[error("events error: {0}")]
+    Events(#[from] common::events::Error),
+    #[error("repository error: {0}")]
+    Repository(#[from] common::messages::Error),
+    #[error("mumble error: {0}")]
+    Mumble(#[from] common::mumble::Error),
+    #[error("recognizer error: {0}")]
+    Recognizer(#[from] components::recognizer::Error),
+    #[error("core error: {0}")]
+    Core(#[from] components::core::Error),
     #[error("web error: {0}")]
-    Web(#[from] web::Error),
+    Web(#[from] components::web::Error),
     #[error("executor error: {0}")]
-    Executor(#[from] executor::Error),
+    Executor(#[from] components::executor::Error),
     #[error("notifier error: {0}")]
-    Notifier(#[from] notifier::Error),
+    Notifier(#[from] components::notifier::Error),
 }
 
 #[derive(Parser, Debug, Serialize)]
@@ -70,17 +76,17 @@ async fn app() -> Result<(), ApplicationError> {
     let args = Args::parse();
     let args_json = serde_json::to_value(&args).unwrap();
 
-    let mut event_system = events::EventSystem::new(32);
+    let mut event_system = EventSystem::new(32);
 
     if !args.mumble_host.is_empty() && !args.vosk_model.is_empty() {
-        let mumble_client = mumble::Client::new(
+        let mumble_client = MumbleClient::new(
             args.mumble_host,
             args.mumble_port,
-            messages::ASSISTANT_NAME.to_string(),
+            ASSISTANT_NAME.to_string(),
         )
         .await?;
 
-        let speech_recognizer = recognizer::SpeechRecognizer::new(
+        let speech_recognizer = SpeechRecognizer::new(
             mumble_client,
             args.vosk_model,
             Duration::from_millis(100),
@@ -91,39 +97,39 @@ async fn app() -> Result<(), ApplicationError> {
     }
 
     if !args.voicevox_endpoint.is_empty() {
-        let speaker = speak::SpeechEngine::new(args.voicevox_endpoint, 58);
+        let speaker = SpeechEngine::new(args.voicevox_endpoint, 58);
 
         event_system.run(speaker);
     }
 
     if !args.dify_host.is_empty() {
-        let executor = executor::CodeExecutor::new(&args.dify_host)?;
+        let executor = CodeExecutor::new(&args.dify_host)?;
 
         event_system.run(executor);
     }
 
-    let notifier = notifier::Notifier::new().await?;
+    let notifier = Notifier::new().await?;
     event_system.run(notifier);
 
-    let eventlogger = eventlogger::EventLogger::new();
+    let eventlogger = EventLogger::new();
     event_system.run(eventlogger);
 
     if args.tick_interval_mins > 0 {
-        let ticker = ticker::Ticker::new(Duration::from_secs(args.tick_interval_mins * 60));
+        let ticker = Ticker::new(Duration::from_secs(args.tick_interval_mins * 60));
         event_system.run(ticker);
     }
 
-    let repository = Arc::new(RwLock::new(messages::MessageRepository::new(args.history)?));
+    let repository = Arc::new(RwLock::new(MessageRepository::new(args.history)?));
 
     let model = if args.openai_model.is_empty() {
-        core::Model::Echo
+        Model::Echo
     } else {
-        core::Model::OpenAi(args.openai_model)
+        Model::OpenAi(args.openai_model)
     };
-    let core = core::OpenAiCore::new(repository.clone(), model).await?;
+    let core = OpenAiCore::new(repository.clone(), model).await?;
     event_system.run(core);
 
-    let web_interface = web::WebState::new(repository, args.port, args_json)?;
+    let web_interface = WebState::new(repository, args.port, args_json)?;
     event_system.run(web_interface);
 
     let (result, index, _) = select_all(event_system.futures()).await;
