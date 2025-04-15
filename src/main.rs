@@ -70,8 +70,7 @@ async fn app() -> Result<(), ApplicationError> {
     let args = Args::parse();
     let args_json = serde_json::to_value(&args).unwrap();
 
-    let event_system = events::EventSystem::new(32);
-    let mut futures = Vec::new();
+    let mut event_system = events::EventSystem::new(32);
 
     if !args.mumble_host.is_empty() && !args.vosk_model.is_empty() {
         let mumble_client = mumble::Client::new(
@@ -88,30 +87,30 @@ async fn app() -> Result<(), ApplicationError> {
             Duration::from_millis(500),
         )?;
 
-        futures.push(event_system.run(speech_recognizer));
+        event_system.run(speech_recognizer);
     }
 
     if !args.voicevox_endpoint.is_empty() {
         let speaker = speak::SpeechEngine::new(args.voicevox_endpoint, 58);
 
-        futures.push(event_system.run(speaker));
+        event_system.run(speaker);
     }
 
     if !args.dify_host.is_empty() {
         let executor = executor::CodeExecutor::new(&args.dify_host)?;
 
-        futures.push(event_system.run(executor));
+        event_system.run(executor);
     }
 
     let notifier = notifier::Notifier::new().await?;
-    futures.push(event_system.run(notifier));
+    event_system.run(notifier);
 
     let eventlogger = eventlogger::EventLogger::new();
-    futures.push(event_system.run(eventlogger));
+    event_system.run(eventlogger);
 
     if args.tick_interval_mins > 0 {
         let ticker = ticker::Ticker::new(Duration::from_secs(args.tick_interval_mins * 60));
-        futures.push(event_system.run(ticker));
+        event_system.run(ticker);
     }
 
     let repository = Arc::new(RwLock::new(messages::MessageRepository::new(args.history)?));
@@ -122,12 +121,12 @@ async fn app() -> Result<(), ApplicationError> {
         core::Model::OpenAi(args.openai_model)
     };
     let core = core::OpenAiCore::new(repository.clone(), model).await?;
-    futures.push(event_system.run(core));
+    event_system.run(core);
 
     let web_interface = web::WebState::new(repository, args.port, args_json)?;
-    futures.push(event_system.run(web_interface));
+    event_system.run(web_interface);
 
-    let (result, index, _) = select_all(futures).await;
+    let (result, index, _) = select_all(event_system.futures()).await;
 
     result??;
     Err(ApplicationError::ComponentStopped(index))

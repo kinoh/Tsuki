@@ -50,19 +50,29 @@ pub trait EventComponent {
 
 pub struct EventSystem {
     sender: Sender<Event>,
+    futures: Vec<Option<JoinHandle<Result<(), Error>>>>,
 }
 
 impl EventSystem {
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        EventSystem { sender }
+        EventSystem {
+            sender,
+            futures: Vec::new(),
+        }
     }
 
-    pub fn run<T: EventComponent + Send + 'static>(
-        &self,
-        mut component: T,
-    ) -> JoinHandle<Result<(), Error>> {
+    pub fn futures(&mut self) -> Vec<JoinHandle<Result<(), Error>>> {
+        self.futures
+            .drain(..)
+            .filter_map(|ref mut f| f.take())
+            .collect()
+    }
+
+    pub fn run<T: EventComponent + Send + 'static>(&mut self, mut component: T) {
         let sender = self.sender.clone();
-        task::spawn(async move { component.run(sender).await })
+        self.futures.push(Some(task::spawn(
+            async move { component.run(sender).await },
+        )));
     }
 }
