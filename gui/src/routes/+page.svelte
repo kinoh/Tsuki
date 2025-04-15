@@ -19,6 +19,7 @@
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
   let loadingMore: boolean = false;
+  let compositioning: boolean = false;
 
   function secure(): "s" | "" {
     return ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
@@ -133,9 +134,17 @@
   }
 
   function handleMessageInputKeyDown(event: KeyboardEvent) {
-    if (event.code === "Enter" && !event.shiftKey) {
+    if (event.code === "Enter" && !event.shiftKey && !compositioning) {
       handleSubmit(event);
     }
+  }
+
+  function handleMessageInputCompositionStart() {
+    compositioning = true;
+  }
+
+  function handleMessageInputCompositionEnd() {
+    compositioning = false;
   }
 
   function handleMessageListScroll(event: Event) {
@@ -217,7 +226,11 @@
     </div>
     <div class="message-list" onscroll={handleMessageListScroll}>
       <form onsubmit={handleSubmit}>
-        <textarea class="message user-message" bind:value={inputText} placeholder={inputPlaceholder} onfocus={handleMessageInputFocus} onkeydown={handleMessageInputKeyDown}>
+        <textarea class="message user-message" bind:value={inputText} placeholder={inputPlaceholder}
+          onfocus={handleMessageInputFocus}
+          onkeydown={handleMessageInputKeyDown}
+          oncompositionstart={handleMessageInputCompositionStart}
+          oncompositionend={handleMessageInputCompositionEnd}>
         </textarea>
       </form>
     	{#each messages as item, i}
