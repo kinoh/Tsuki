@@ -26,7 +26,7 @@
 @font-face {
   font-display: block;
   font-family: "SourceHanSans";
-  src: url("/src/assets/fonts/SourceHanSans-VF.ttf");
+  src: url("/fonts/SourceHanSans-VF.ttf");
 }
 
 :root {

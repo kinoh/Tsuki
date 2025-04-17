@@ -2,7 +2,7 @@
 
   let sourceHansSansLicense = "";
 
-  fetch("/src/assets/fonts/SourceHanSans-VF-LICENSE.txt")
+  fetch("/fonts/SourceHanSans-VF-LICENSE.txt")
     .then(response => response.text())
     .then(text => {
       sourceHansSansLicense = text;
@@ -25,7 +25,7 @@
 @font-face {
   font-display: block;
   font-family: "SourceHanSans";
-  src: url("/src/assets/fonts/SourceHanSans-VF.ttf");
+  src: url("/fonts/SourceHanSans-VF.ttf");
 }
 
 :root {

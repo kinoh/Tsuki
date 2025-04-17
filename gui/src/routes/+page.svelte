@@ -211,12 +211,12 @@
       <div class="menu">
         <div class="menu-item">
           <button onclick={handleConfigClick}>
-            <img src="/src/assets/icons/config.svg" alt="Config" />
+            <img src="/icons/config.svg" alt="Config" />
           </button>
         </div>
         <div class="menu-item">
           <button onclick={handleNoteClick}>
-            <img src="/src/assets/icons/note.svg" alt="Note" />
+            <img src="/icons/note.svg" alt="Note" />
           </button>
         </div>
       </div>
@@ -249,7 +249,7 @@
 @font-face {
   font-display: block;
   font-family: "SourceHanSans";
-  src: url("/src/assets/fonts/SourceHanSans-VF.ttf");
+  src: url("/fonts/SourceHanSans-VF.ttf");
 }
 
 :root {
