@@ -7,12 +7,12 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Cursor;
 use thiserror::Error;
-use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{debug, info};
 
-use crate::{
-    common::events::{self, Event, EventComponent},
-    common::messages::Modality,
+use crate::common::{
+    broadcast::{self, IdentifiedBroadcast},
+    events::{self, Event, EventComponent},
+    messages::Modality,
 };
 
 #[derive(Error, Debug)]
@@ -21,12 +21,10 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("serde_json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
-    #[error("failed to receive event: {0}")]
-    ReceiveEvent(#[from] broadcast::error::RecvError),
-    #[error("failed to send event: {0}")]
-    SendEvent(#[from] broadcast::error::SendError<Event>),
     #[error("hound error: {0}")]
     Hound(#[from] hound::Error),
+    #[error("broadcast error: {0}")]
+    Broadcast(#[from] broadcast::Error),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -99,13 +97,12 @@ impl SpeechEngine {
 
     async fn run_internal(
         &mut self,
-        sender: Sender<Event>,
-        mut receiver: Receiver<Event>,
+        mut broadcast: IdentifiedBroadcast<Event>,
     ) -> Result<(), Error> {
         info!("start speech");
 
         loop {
-            let event = receiver.recv().await?;
+            let event = broadcast.recv().await?;
             match event {
                 Event::AssistantMessage {
                     modality: Modality::Audio,
@@ -120,7 +117,7 @@ impl SpeechEngine {
                     let cursor = Cursor::new(audio);
                     let mut reader = hound::WavReader::new(cursor)?;
 
-                    sender.send(Event::PlayAudio {
+                    broadcast.send(Event::PlayAudio {
                         sample_rate: reader.spec().sample_rate,
                         audio: reader
                             .samples::<i16>()
@@ -135,9 +132,11 @@ impl SpeechEngine {
 
 #[async_trait]
 impl EventComponent for SpeechEngine {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
-        let receiver = sender.subscribe();
-        self.run_internal(sender, receiver)
+    async fn run(
+        &mut self,
+        broadcast: IdentifiedBroadcast<Event>,
+    ) -> Result<(), crate::common::events::Error> {
+        self.run_internal(broadcast.participate())
             .await
             .map_err(|e| events::Error::Component(format!("speech: {}", e)))
     }

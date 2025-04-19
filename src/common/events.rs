@@ -2,10 +2,11 @@ use std::fmt::Display;
 
 use async_trait::async_trait;
 use thiserror::Error;
-use tokio::sync::broadcast::{self, Sender};
 use tokio::task::{self, JoinHandle};
 
 use crate::common::messages::Modality;
+
+use super::broadcast::IdentifiedBroadcast;
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -39,25 +40,22 @@ impl Display for Event {
 pub enum Error {
     #[error("component error: {0}")]
     Component(String),
-    #[error("event receiving error: {0}")]
-    EventRecv(#[from] broadcast::error::RecvError),
 }
 
 #[async_trait]
 pub trait EventComponent {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), Error>;
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<(), Error>;
 }
 
 pub struct EventSystem {
-    sender: Sender<Event>,
+    broadcast: IdentifiedBroadcast<Event>,
     futures: Vec<Option<JoinHandle<Result<(), Error>>>>,
 }
 
 impl EventSystem {
     pub fn new(capacity: usize) -> Self {
-        let (sender, _) = broadcast::channel(capacity);
         EventSystem {
-            sender,
+            broadcast: IdentifiedBroadcast::new(capacity),
             futures: Vec::new(),
         }
     }
@@ -70,9 +68,9 @@ impl EventSystem {
     }
 
     pub fn run<T: EventComponent + Send + 'static>(&mut self, mut component: T) {
-        let sender = self.sender.clone();
+        let broadcast = self.broadcast.participate();
         self.futures.push(Some(task::spawn(
-            async move { component.run(sender).await },
+            async move { component.run(broadcast).await },
         )));
     }
 }

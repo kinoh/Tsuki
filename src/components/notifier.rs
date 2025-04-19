@@ -6,22 +6,22 @@ use fcm::{
     FcmClient,
 };
 use thiserror::Error;
-use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{debug, info};
 
-use crate::{
-    common::events::{self, Event, EventComponent},
-    common::messages::Modality,
+use crate::common::{
+    broadcast::{self, IdentifiedBroadcast},
+    events::{self, Event, EventComponent},
+    messages::Modality,
 };
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to receive event: {0}")]
-    ReceiveEvent(#[from] broadcast::error::RecvError),
     #[error("Request error status: {0}")]
     HttpRequest(u16),
     #[error("FCM error {0}")]
     Fcm(String),
+    #[error("broadcast error: {0}")]
+    Broadcast(#[from] broadcast::Error),
 }
 
 impl From<fcm::FcmClientError> for Error {
@@ -87,13 +87,12 @@ impl Notifier {
 
     async fn run_internal(
         &mut self,
-        _sender: Sender<Event>,
-        mut receiver: Receiver<Event>,
+        mut broadcast: IdentifiedBroadcast<Event>,
     ) -> Result<(), Error> {
         info!("start notifier");
 
         loop {
-            let event = receiver.recv().await?;
+            let event = broadcast.recv().await?;
             match event {
                 Event::AssistantMessage { modality, message } => {
                     if modality != Modality::None {
@@ -109,9 +108,11 @@ impl Notifier {
 
 #[async_trait]
 impl EventComponent for Notifier {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
-        let receiver = sender.subscribe();
-        self.run_internal(sender, receiver)
+    async fn run(
+        &mut self,
+        broadcast: IdentifiedBroadcast<Event>,
+    ) -> Result<(), crate::common::events::Error> {
+        self.run_internal(broadcast.participate())
             .await
             .map_err(|e| events::Error::Component(format!("notifier: {}", e)))
     }

@@ -1,3 +1,4 @@
+use crate::common::broadcast::{self, IdentifiedBroadcast};
 use crate::common::events::{self, Event, EventComponent};
 use crate::common::messages::{
     self, ChatInput, ChatOutput, MessageRecord, MessageRecordChat, MessageRepository, Modality,
@@ -8,7 +9,6 @@ use openai_api_rust::{Auth, Message, OpenAI, Role};
 use std::sync::Arc;
 use std::time::SystemTime;
 use thiserror::Error;
-use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -18,14 +18,12 @@ pub enum Error {
     OpenAi(String),
     #[error("system time error: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
-    #[error("repository error: {0}")]
-    Repository(#[from] crate::common::messages::Error),
-    #[error("failed to receive event: {0}")]
-    ReceiveEvent(#[from] broadcast::error::RecvError),
-    #[error("failed to send event: {0}")]
-    SendEvent(#[from] broadcast::error::SendError<Event>),
     #[error("serde json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("repository error: {0}")]
+    Repository(#[from] messages::Error),
+    #[error("broadcast error: {0}")]
+    Broadcast(#[from] broadcast::Error),
 }
 
 impl From<openai_api_rust::Error> for Error {
@@ -197,13 +195,12 @@ impl OpenAiCore {
 
     async fn run_internal(
         &mut self,
-        sender: Sender<Event>,
-        mut receiver: Receiver<Event>,
+        mut broadcast: IdentifiedBroadcast<Event>,
     ) -> Result<(), Error> {
         info!("start core");
 
         loop {
-            let event = receiver.recv().await?;
+            let event = broadcast.recv().await?;
             if let Some(response) = match event {
                 Event::RecognizedSpeech { user, message } => self
                     .receive(ChatInput {
@@ -238,7 +235,7 @@ impl OpenAiCore {
                 }),
                 _ => None,
             } {
-                sender.send(response)?;
+                broadcast.send(response)?;
             }
         }
     }
@@ -246,9 +243,11 @@ impl OpenAiCore {
 
 #[async_trait]
 impl EventComponent for OpenAiCore {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
-        let receiver = sender.subscribe();
-        self.run_internal(sender, receiver)
+    async fn run(
+        &mut self,
+        broadcast: IdentifiedBroadcast<Event>,
+    ) -> Result<(), crate::common::events::Error> {
+        self.run_internal(broadcast.participate())
             .await
             .map_err(|e| events::Error::Component(format!("core: {}", e)))
     }

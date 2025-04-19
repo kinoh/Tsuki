@@ -16,16 +16,14 @@ use reqwest::header::InvalidHeaderValue;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
-use tokio::{
-    select,
-    sync::{broadcast::Sender, RwLock},
-};
+use tokio::{select, sync::RwLock};
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, warn};
 
-use crate::{
-    common::events::{self, Event, EventComponent},
-    common::messages::{self, MessageRecord, MessageRepository},
+use crate::common::{
+    broadcast::{self, IdentifiedBroadcast},
+    events::{self, Event, EventComponent},
+    messages::{self, MessageRecord, MessageRepository},
 };
 
 #[derive(Error, Debug)]
@@ -38,6 +36,8 @@ pub enum Error {
     InvalidHeaderValue(#[from] InvalidHeaderValue),
     #[error("envvar not set: {0}")]
     EnvVar(&'static str),
+    #[error("broadcast error: {0}")]
+    Broadcast(#[from] broadcast::Error),
 }
 
 fn secure_eq(a: &str, b: &str) -> bool {
@@ -189,7 +189,7 @@ async fn metadata(State(state): State<Arc<WebState>>) -> Json<Value> {
 
 async fn notification_test(State(state): State<Arc<WebState>>) -> Result<String, StatusCode> {
     let c = state.as_ref();
-    if let Some(s) = &c.sender {
+    if let Some(s) = &c.broadcast {
         s.send(Event::Notify {
             content: format!("通知テストだよ🔎 ({})", chrono::Utc::now().format("%+")),
         })
@@ -210,13 +210,13 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<WebState>>) ->
 
 async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
     let c = state.as_ref();
-    let sender = if let Some(s) = &c.sender {
-        s
+    let broadcast = if let Some(b) = &c.broadcast {
+        b
     } else {
         warn!("not ready");
         return;
     };
-    let mut receiver = sender.subscribe();
+    let mut broadcast = broadcast.participate();
     let mut authorized_user: Option<String> = None;
 
     loop {
@@ -227,7 +227,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                         match message {
                             Message::Text(text) => {
                                 if let Some(ref user) = authorized_user {
-                                    let _ = sender.send(Event::TextMessage { user: user.to_string(), message: text.to_string()}).map_err(|e| error!("event send error: {}", e));
+                                    let _ = broadcast.send(Event::TextMessage { user: user.to_string(), message: text.to_string()}).map_err(|e| error!("event send error: {}", e));
                                 } else {
                                     let mut parts = text.splitn(2, ':');
                                     let (user, token) = match (parts.next(), parts.next()) {
@@ -259,7 +259,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                     }
                 }
             },
-            event = receiver.recv() => {
+            event = broadcast.recv() => {
                 if let Some(text) = match event {
                     Ok(Event::AssistantMessage { modality: _, message }) => {
                         Some(message)
@@ -288,7 +288,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
 #[derive(Clone)]
 pub struct WebState {
     port: u16,
-    sender: Option<Sender<Event>>,
+    broadcast: Option<IdentifiedBroadcast<Event>>,
     repository: Arc<RwLock<MessageRepository>>,
     auth_token: String,
     app_args: Value,
@@ -308,7 +308,7 @@ impl WebState {
             .ok_or(Error::EnvVar("WEB_AUTH_TOKEN"))?;
         Ok(Arc::new(Self {
             port,
-            sender: None,
+            broadcast: None,
             repository,
             auth_token,
             app_args,
@@ -318,8 +318,11 @@ impl WebState {
 
 #[async_trait]
 impl EventComponent for WebInterface {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
-        Arc::get_mut(self).map(|c| c.sender = Some(sender));
+    async fn run(
+        &mut self,
+        broadcast: IdentifiedBroadcast<Event>,
+    ) -> Result<(), crate::common::events::Error> {
+        Arc::get_mut(self).map(|c| c.broadcast = Some(broadcast.participate()));
         serve(Arc::clone(self), self.port)
             .await
             .map_err(|e| events::Error::Component(format!("http: {}", e)))

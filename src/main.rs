@@ -4,6 +4,7 @@ mod common;
 mod components;
 
 use clap::Parser;
+use color_eyre::{eyre, Result};
 use common::{
     events::EventSystem,
     messages::{MessageRepository, ASSISTANT_NAME},
@@ -13,24 +14,41 @@ use components::{
     core::{Model, OpenAiCore},
     eventlogger::EventLogger,
     executor::CodeExecutor,
+    interactive::{InteractiveProxy, Signal},
     notifier::Notifier,
     recognizer::SpeechRecognizer,
     speak::SpeechEngine,
     ticker::Ticker,
     web::WebState,
 };
+use crossterm::event::{self, Event, KeyCode};
 use futures::future::select_all;
+use ratatui::{
+    layout::{Constraint, Layout},
+    style::{Color, Style},
+    text::{Line, Span},
+    DefaultTerminal, Frame,
+};
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
+use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Error, Debug)]
 enum ApplicationError {
     #[error("component stopped: {0}")]
     ComponentStopped(usize),
+    #[error("IO error: {0}")]
+    IO(#[from] std::io::Error),
     #[error("tokio join error: {0}")]
     TokioJoin(#[from] tokio::task::JoinError),
+    #[error("Failed to send signal: {0}")]
+    SendSignal(#[from] tokio::sync::mpsc::error::SendError<Signal>),
+    #[error("eyre error: {0}")]
+    EyreReport(#[from] eyre::Report),
+    #[error("tui-logger error: {0}")]
+    TuiLogger(#[from] tui_logger::TuiLoggerError),
     #[error("events error: {0}")]
     Events(#[from] common::events::Error),
     #[error("repository error: {0}")]
@@ -70,10 +88,77 @@ struct Args {
     port: u16,
     #[arg(long, default_value_t = 0u64)]
     tick_interval_mins: u64,
+    #[arg(long)]
+    interactive: bool,
+}
+
+#[derive(Debug)]
+struct InteractiveApp {
+    signal_sender: mpsc::Sender<Signal>,
+    is_waiting: Arc<RwLock<bool>>,
+}
+
+impl InteractiveApp {
+    pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<(), ApplicationError> {
+        loop {
+            terminal.draw(|frame| self.render(frame))?;
+            if event::poll(Duration::from_millis(20))? {
+                match event::read()? {
+                    Event::Key(key) => match key.code {
+                        KeyCode::Esc => {
+                            break Ok(());
+                        }
+                        KeyCode::Char('c') if *(self.is_waiting.read().await) => {
+                            self.signal_sender.send(Signal::Continue).await?;
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn render(&self, frame: &mut Frame) {
+        let [logs, prompt] =
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
+
+        frame.render_widget(tui_logger::TuiLoggerWidget::default(), logs);
+
+        let mut line = Line::from(vec![
+            Span::styled(
+                "interactive",
+                Style::new().fg(Color::Magenta).bg(Color::White),
+            ),
+            Span::raw(" [esc] exit"),
+        ]);
+
+        if self.is_waiting.try_read().map(|ptr| *ptr).unwrap_or(false) {
+            line.push_span(" [c] continue");
+        }
+
+        frame.render_widget(line, prompt);
+    }
 }
 
 async fn app() -> Result<(), ApplicationError> {
     let args = Args::parse();
+
+    if args.interactive {
+        let filter = filter::Targets::new()
+            .with_default(tracing::Level::WARN)
+            .with_target("tsuki", tracing::Level::DEBUG);
+        tracing_subscriber::registry()
+            .with(tui_logger::TuiTracingSubscriberLayer {})
+            .with(filter)
+            .init();
+        tui_logger::init_logger(tui_logger::LevelFilter::Debug)?;
+    } else {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
+    }
+
     let args_json = serde_json::to_value(&args).unwrap();
 
     let mut event_system = EventSystem::new(32);
@@ -127,23 +212,40 @@ async fn app() -> Result<(), ApplicationError> {
         Model::OpenAi(args.openai_model)
     };
     let core = OpenAiCore::new(repository.clone(), model).await?;
-    event_system.run(core);
+    let mut interactive_app = if args.interactive {
+        let (sender, receiver) = mpsc::channel(1);
+        let core_interactive = InteractiveProxy::new(32, receiver, core);
+        let is_waiting = core_interactive.watch();
+        event_system.run(core_interactive);
+        Some(InteractiveApp {
+            signal_sender: sender,
+            is_waiting,
+        })
+    } else {
+        event_system.run(core);
+        None
+    };
 
     let web_interface = WebState::new(repository, args.port, args_json)?;
     event_system.run(web_interface);
 
-    let (result, index, _) = select_all(event_system.futures()).await;
+    let any_components = select_all(event_system.futures());
 
-    result??;
-    Err(ApplicationError::ComponentStopped(index))
+    if let Some(ref mut app) = interactive_app {
+        color_eyre::install()?;
+        let mut terminal = ratatui::init();
+        let result = app.run(&mut terminal).await;
+        ratatui::restore();
+        Ok(result?)
+    } else {
+        let (result, index, _) = any_components.await;
+        result??;
+        Err(ApplicationError::ComponentStopped(index))
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
-
     match app().await {
         Ok(_) => (),
         Err(e) => panic!("Error: {}", e),

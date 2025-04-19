@@ -3,21 +3,19 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use thiserror::Error;
-use tokio::{
-    sync::broadcast::{self, Receiver, Sender},
-    time,
-};
+use tokio::time;
 use tracing::{debug, info};
 
-use crate::{
-    common::events::{self, Event, EventComponent},
-    common::messages::Modality,
+use crate::common::{
+    broadcast::{self, IdentifiedBroadcast},
+    events::{self, Event, EventComponent},
+    messages::Modality,
 };
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to send event: {0}")]
-    SendEvent(#[from] broadcast::error::SendError<Event>),
+    #[error("broadcast error: {0}")]
+    Broadcast(#[from] broadcast::Error),
 }
 
 pub struct Ticker {
@@ -29,11 +27,7 @@ impl Ticker {
         Self { interval }
     }
 
-    async fn run_internal(
-        &mut self,
-        sender: Sender<Event>,
-        mut _receiver: Receiver<Event>,
-    ) -> Result<(), Error> {
+    async fn run_internal(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<(), Error> {
         info!(interval_secs = self.interval.as_secs_f32(), "start ticker");
 
         let now = Utc::now();
@@ -55,7 +49,7 @@ impl Ticker {
             let now = Utc::now();
             let minutes = self.interval.as_secs_f32() / 60f32;
             debug!("tick");
-            sender.send(Event::SystemMessage {
+            broadcast.send(Event::SystemMessage {
                 modality: Modality::Tick,
                 message: format!(
                     "{} ({}m interval)",
@@ -69,9 +63,11 @@ impl Ticker {
 
 #[async_trait]
 impl EventComponent for Ticker {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
-        let receiver = sender.subscribe();
-        self.run_internal(sender, receiver)
+    async fn run(
+        &mut self,
+        broadcast: IdentifiedBroadcast<Event>,
+    ) -> Result<(), crate::common::events::Error> {
+        self.run_internal(broadcast.participate())
             .await
             .map_err(|e| events::Error::Component(format!("ticker: {}", e)))
     }

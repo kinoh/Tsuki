@@ -1,9 +1,9 @@
+use crate::common::broadcast::{self, IdentifiedBroadcast};
 use crate::common::events::{self, Event, EventComponent};
 use crate::common::mumble::{self, Voice};
 use async_trait::async_trait;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
-use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio::task::JoinError;
 use tokio::{select, sync::mpsc, time};
 use tracing::{error, info, warn};
@@ -18,18 +18,16 @@ pub enum Error {
     Opus(#[from] opus::Error),
     #[error("system time error: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
-    #[error("failed to send event: {0}")]
-    SendText(#[from] broadcast::error::SendError<Event>),
-    #[error("failed to receive event: {0}")]
-    Receive(#[from] tokio::sync::broadcast::error::RecvError),
     #[error("failed to send voice: {0}")]
-    SendVoice(#[from] tokio::sync::mpsc::error::SendError<Voice>),
+    SendVoice(#[from] mpsc::error::SendError<Voice>),
     #[error("voice_activity_detector error: {0}")]
     Vad(#[from] voice_activity_detector::Error),
     #[error("join error: {0}")]
     Join(#[from] JoinError),
     #[error("mumble error: {0}")]
     Mumble(#[from] mumble::Error),
+    #[error("broadcast error: {0}")]
+    Broadcast(#[from] broadcast::Error),
     #[error("failed to load model")]
     LoadModel,
     #[error("failed to create recognizer")]
@@ -112,8 +110,7 @@ impl SpeechRecognizer {
 
     async fn run_internal(
         &mut self,
-        sender: Sender<Event>,
-        mut receiver: Receiver<Event>,
+        mut broadcast: IdentifiedBroadcast<Event>,
     ) -> Result<(), Error> {
         let (hear_sender, mut hear_receiver) = mpsc::channel(32);
         let (speak_sender, mut speak_receiver) = mpsc::channel(32);
@@ -151,7 +148,7 @@ impl SpeechRecognizer {
                                         let text = value.text;
                                         info!(text = text, vad = self.buffering_vad.count, "result");
                                         if !text.is_empty() {
-                                            sender.send(Event::RecognizedSpeech { user: voice.user, message: text.to_string() })?;
+                                            broadcast.send(Event::RecognizedSpeech { user: voice.user, message: text.to_string() })?;
                                         }
                                     }
                                 }
@@ -175,7 +172,7 @@ impl SpeechRecognizer {
                                         let text = value.text;
                                         info!(text = text, vad = self.buffering_vad.count, "final result");
                                         if !text.is_empty() {
-                                            sender.send(Event::RecognizedSpeech { user: user, message: text.to_string() })?;
+                                            broadcast.send(Event::RecognizedSpeech { user: user, message: text.to_string() })?;
                                         }
                                     }
                                 }
@@ -187,7 +184,7 @@ impl SpeechRecognizer {
                         }
                     }
                 }
-                event = receiver.recv() => {
+                event = broadcast.recv() => {
                     match event? {
                         Event::PlayAudio { sample_rate, audio } => {
                             speak_sender.send(Voice { user: "".to_string(), sample_rate, audio }).await?;
@@ -206,9 +203,11 @@ impl SpeechRecognizer {
 
 #[async_trait]
 impl EventComponent for SpeechRecognizer {
-    async fn run(&mut self, sender: Sender<Event>) -> Result<(), crate::common::events::Error> {
-        let receiver = sender.subscribe();
-        self.run_internal(sender, receiver)
+    async fn run(
+        &mut self,
+        broadcast: IdentifiedBroadcast<Event>,
+    ) -> Result<(), crate::common::events::Error> {
+        self.run_internal(broadcast.participate())
             .await
             .map_err(|e| events::Error::Component(format!("recognizer: {}", e)))
     }
