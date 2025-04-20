@@ -12,7 +12,7 @@ use axum::{
     routing::{any, get, post},
     Json, Router,
 };
-use reqwest::header::InvalidHeaderValue;
+use reqwest::{header::InvalidHeaderValue, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -77,7 +77,10 @@ async fn auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if req.uri() != "/ws" {
+    // Websocket has its own authorization
+    // CORS preflight request (using OPTIONS) must not restricted
+    let bypass = (req.uri() == "/ws") || (req.method() == Method::OPTIONS);
+    if !bypass {
         let auth_header = req.headers_mut().get(http::header::AUTHORIZATION);
         let auth_header = match auth_header {
             Some(header) => header.to_str().map_err(|_| StatusCode::FORBIDDEN)?,
@@ -97,6 +100,7 @@ async fn auth_middleware(
 
 async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
     let cors = if cfg!(debug_assertions) {
+        info!("Permissive CORS policy for development");
         CorsLayer::permissive()
     } else {
         CorsLayer::new()
