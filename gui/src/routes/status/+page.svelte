@@ -1,11 +1,20 @@
 <script lang="ts">
 
-  let sourceHansSansLicense = "";
+  let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
+  let serverMetadata = $state("");
 
-  fetch("/fonts/SourceHanSans-VF-LICENSE.txt")
-    .then(response => response.text())
-    .then(text => {
-      sourceHansSansLicense = text;
+  function secure(): "s" | "" {
+    return ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
+  }
+
+  fetch(`http${secure()}://${config.endpoint}/metadata`, {
+      headers: {
+        "Authorization": `Bearer ${config.token}`,
+      }
+    })
+    .then(response => response.json())
+    .then(json => {
+      serverMetadata = JSON.stringify(json, null, "  ");
     })
     .catch(error => {
       console.log("fetch error: " + error);
@@ -14,8 +23,8 @@
 </script>
 
 <div class="field">
-  <label for="sourceHansSansLicense">Source Han Sans license</label>
-  <pre id="sourceHansSansLicense" class="license">{sourceHansSansLicense}</pre>
+  <label for="serverMetadata">Server metadata</label>
+  <pre id="serverMetadata" class="license">{serverMetadata}</pre>
 </div>
 
 <style>

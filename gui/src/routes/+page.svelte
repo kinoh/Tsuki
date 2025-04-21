@@ -15,7 +15,7 @@
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
   let avatarExpression: "default" | "blink" = $state("default");
-  let overlay: "config" | "note" | null = $state(null);
+  let overlay: "config" | "status" | "note" | null = $state(null);
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
   let loadingMore: boolean = false;
@@ -119,6 +119,14 @@
     }
   }
 
+  function handleStatusClick() {
+    if (overlay === "status") {
+      overlay = null;
+    } else {
+      overlay = "status";
+    }
+  }
+
   function handleNoteClick() {
     if (overlay === "note") {
       overlay = null;
@@ -215,6 +223,11 @@
           </button>
         </div>
         <div class="menu-item">
+          <button onclick={handleStatusClick}>
+            <img src="/icons/status.svg" alt="Status" />
+          </button>
+        </div>
+        <div class="menu-item">
           <button onclick={handleNoteClick}>
             <img src="/icons/note.svg" alt="Note" />
           </button>
@@ -240,6 +253,7 @@
       {/each}
     </div>
     <iframe class={["floating-window", overlay === "config" ? "shown" : "hidden"]} src="/config" title="config"></iframe>
+    <iframe class={["floating-window", overlay === "status" ? "shown" : "hidden"]} src="/status" title="status"></iframe>
     <iframe class={["floating-window", overlay === "note" ? "shown" : "hidden"]} src="/note" title="note"></iframe>
   </div>
 </main>
