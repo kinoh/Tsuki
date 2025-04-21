@@ -162,6 +162,10 @@
     }
   }
 
+  function handleSendClick(event: Event) {
+    handleSubmit(event);
+  }
+
   function blink() {
     console.log(`blink ${close}`);
 
@@ -245,6 +249,9 @@
           oncompositionstart={handleMessageInputCompositionStart}
           oncompositionend={handleMessageInputCompositionEnd}>
         </textarea>
+        <button class="message-send" onclick={handleSendClick}>
+          <img src="/icons/send.svg" alt="Send" />
+        </button>
       </form>
     	{#each messages as item, i}
         <div class="message {item.role.toLowerCase()}-message">
@@ -377,6 +384,7 @@ form {
   margin-bottom: 1rem;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .row {
@@ -391,6 +399,21 @@ textarea {
   min-height: 1.6rem;
   field-sizing: content;
   resize: none;
+}
+
+.message-send {
+  background-color: RGBA(0, 0, 0, 0);
+  opacity: 0.5;
+  border: none;
+  border-radius: 1rem;
+  width: 2rem;
+  height: 2rem;
+  position: absolute;
+  right: 0.5rem;
+  bottom: 1rem;
+}
+.message-send:hover {
+  opacity: 1;
 }
 
 .shown {
@@ -429,11 +452,16 @@ textarea {
   }
 
   .message-list {
-    overflow: scroll;
+    overflow-y: scroll;
   }
 
   form {
     margin-bottom: 0;
+  }
+
+  .message-send {
+    right: 0.5rem;
+    bottom: 1rem;
   }
 }
 
