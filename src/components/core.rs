@@ -3,8 +3,10 @@ use crate::common::chat::{ChatInput, ChatOutput, Modality, TokenUsage};
 use crate::common::events::{self, Event, EventComponent};
 use crate::common::messages::{self, MessageRecord, MessageRecordChat, MessageRepository};
 use async_trait::async_trait;
-use openai_api_rust::chat::{ChatApi, ChatBody};
-use openai_api_rust::{Auth, Message, OpenAI, Role};
+use openai_dive::v1::api::Client;
+use openai_dive::v1::resources::chat::{
+    ChatCompletionParametersBuilder, ChatMessage, ChatMessageContent,
+};
 use std::sync::Arc;
 use std::time::SystemTime;
 use thiserror::Error;
@@ -13,8 +15,6 @@ use tracing::info;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("OpenAI error: {0}")]
-    OpenAi(String),
     #[error("system time error: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
     #[error("serde json error: {0}")]
@@ -23,17 +23,18 @@ pub enum Error {
     Repository(#[from] messages::Error),
     #[error("broadcast error: {0}")]
     Broadcast(#[from] broadcast::Error),
-}
-
-impl From<openai_api_rust::Error> for Error {
-    fn from(value: openai_api_rust::Error) -> Self {
-        match value {
-            openai_api_rust::Error::ApiError(msg) => Error::OpenAi(format!("openai api: {}", msg)),
-            openai_api_rust::Error::RequestError(msg) => {
-                Error::OpenAi(format!("openai request: {}", msg))
-            }
-        }
-    }
+    #[error("OpenAI API error: {0}")]
+    Api(#[from] openai_dive::v1::error::APIError),
+    #[error("OpenAI parameter builder error: {0}")]
+    ParameterBuilder(
+        #[from] openai_dive::v1::resources::chat::ChatCompletionParametersBuilderError,
+    ),
+    #[error("OpenAI response has no choices")]
+    NoChoices,
+    #[error("OpenAI response has no content")]
+    EmptyContent,
+    #[error("OpenAI response has unexpected message")]
+    UnexpectedChatMessage,
 }
 
 pub const MAX_HISTORY_LENGTH: usize = 20;
@@ -41,16 +42,6 @@ pub const MAX_HISTORY_LENGTH: usize = 20;
 pub enum Model {
     Echo,
     OpenAi(String),
-}
-
-impl From<messages::Role> for Role {
-    fn from(value: messages::Role) -> Self {
-        match value {
-            messages::Role::Assistant => Role::Assistant,
-            messages::Role::System => Role::System,
-            messages::Role::User => Role::User,
-        }
-    }
 }
 
 fn to_event(output: &ChatOutput, usage: &Option<TokenUsage>) -> Option<Event> {
@@ -67,9 +58,9 @@ fn to_event(output: &ChatOutput, usage: &Option<TokenUsage>) -> Option<Event> {
 
 pub struct OpenAiCore {
     repository: Arc<RwLock<MessageRepository>>,
-    openai: OpenAI,
+    openai: Client,
     model: Model,
-    max_tokens: i32,
+    max_tokens: u32,
 }
 
 impl OpenAiCore {
@@ -77,8 +68,7 @@ impl OpenAiCore {
         repository: Arc<RwLock<MessageRepository>>,
         model: Model,
     ) -> Result<Self, Error> {
-        let auth = Auth::from_env().map_err(|e| Error::OpenAi(format!("auth: {}", e)))?;
-        let openai = OpenAI::new(auth, "https://api.openai.com/v1/");
+        let openai = Client::new_from_env();
 
         repository
             .write()
@@ -106,57 +96,63 @@ impl OpenAiCore {
 
         let (output_chat_json, usage) = match &self.model {
             Model::OpenAi(model) => {
-                let messages: Result<Vec<Message>, serde_json::Error> = self
+                let messages: Result<Vec<ChatMessage>, serde_json::Error> = self
                     .repository
                     .read()
                     .await
                     .get_latest_n(MAX_HISTORY_LENGTH, None)
                     .iter()
-                    .map(|r| {
-                        Ok(Message {
-                            role: r.role.into(),
-                            content: r.json_chat()?,
-                        })
+                    .map(|r| match r.role {
+                        messages::Role::User => Ok(ChatMessage::User {
+                            content: ChatMessageContent::Text(r.json_chat()?),
+                            name: Some(r.user()),
+                        }),
+                        messages::Role::Assistant => Ok(ChatMessage::Assistant {
+                            content: Some(ChatMessageContent::Text(r.json_chat()?)),
+                            reasoning_content: None,
+                            refusal: None,
+                            name: Some(r.user()),
+                            audio: None,
+                            tool_calls: None,
+                        }),
+                        messages::Role::System => Ok(ChatMessage::Developer {
+                            content: ChatMessageContent::Text(r.json_chat()?),
+                            name: None,
+                        }),
                     })
                     .collect();
 
-                let chat_body = ChatBody {
-                    model: model.clone(),
-                    messages: messages?,
-                    user: Some(input_chat.user),
-                    max_tokens: Some(self.max_tokens),
-                    temperature: None,
-                    top_p: None,
-                    n: Some(1),
-                    stream: Some(false),
-                    stop: None,
-                    presence_penalty: None,
-                    frequency_penalty: None,
-                    logit_bias: None,
-                };
-                let completion = self.openai.chat_completion_create(&chat_body)?;
+                let parameters = ChatCompletionParametersBuilder::default()
+                    .model(model)
+                    .messages(messages?)
+                    .max_tokens(self.max_tokens)
+                    .build()?;
 
+                let completion = self.openai.chat().create(parameters).await?;
                 let usage = completion.usage;
-                info!(
-                    prompt = usage.prompt_tokens,
-                    completion = usage.completion_tokens,
-                    "token usage"
-                );
-                let usage = match (usage.prompt_tokens, usage.completion_tokens) {
+                info!("token usage: {:?}", usage);
+                let usage = usage.and_then(|u| match (u.prompt_tokens, u.completion_tokens) {
                     (Some(prompt), Some(completion)) => Some(TokenUsage { prompt, completion }),
                     _ => None,
+                });
+
+                let choice = completion.choices.get(0).ok_or(Error::NoChoices)?;
+
+                let content = if let ChatMessage::Assistant {
+                    content,
+                    refusal: _,
+                    name: _,
+                    reasoning_content: _,
+                    tool_calls: _,
+                    audio: _,
+                } = &choice.message
+                {
+                    content.as_ref().ok_or(Error::EmptyContent)?
+                } else {
+                    return Err(Error::UnexpectedChatMessage);
                 };
 
-                let choice = completion
-                    .choices
-                    .get(0)
-                    .ok_or(Error::OpenAi("no completion".to_string()))?;
-                let response = choice
-                    .message
-                    .as_ref()
-                    .ok_or(Error::OpenAi("empty completion".to_string()))?;
-
-                (response.content.clone(), usage)
+                (content.to_string(), usage)
             }
             Model::Echo => {
                 let chat = if input_chat.modality == Modality::Audio {
