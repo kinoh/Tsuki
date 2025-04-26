@@ -61,3 +61,9 @@ tasks:
     desc: Encrypt prompt file
     cmds:
       - age -R $PROMPT_PUBLIC_KEY_PATH src/prompt/initial.txt > src/prompt/initial.txt.age
+  diff_prompt:
+    desc: Decrypt prompt file
+    cmds:
+      - age -d -i $PROMPT_PRIVATE_KEY_PATH src/prompt/initial.txt.age > src/prompt/initial.tmp.txt
+      - diff src/prompt/initial.tmp.txt src/prompt/initial.txt
+      - rm src/prompt/initial.tmp.txt
