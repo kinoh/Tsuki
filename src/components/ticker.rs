@@ -8,8 +8,8 @@ use tracing::{debug, info};
 
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
+    chat::Modality,
     events::{self, Event, EventComponent},
-    messages::Modality,
 };
 
 #[derive(Error, Debug)]

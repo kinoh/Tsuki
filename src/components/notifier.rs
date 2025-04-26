@@ -10,8 +10,8 @@ use tracing::{debug, info};
 
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
+    chat::Modality,
     events::{self, Event, EventComponent},
-    messages::Modality,
 };
 
 #[derive(Error, Debug)]
@@ -94,7 +94,11 @@ impl Notifier {
         loop {
             let event = broadcast.recv().await?;
             match event {
-                Event::AssistantMessage { modality, message } => {
+                Event::AssistantMessage {
+                    modality,
+                    message,
+                    usage: _,
+                } => {
                     if modality != Modality::None {
                         self.notify(&message).await?
                     }

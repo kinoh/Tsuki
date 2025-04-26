@@ -22,8 +22,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
+    chat::{Modality, TokenUsage},
     events::{self, Event, EventComponent},
-    messages::{self, MessageRecord, MessageRepository},
+    messages::{self, MessageRecord, MessageRepository, Role},
 };
 
 #[derive(Error, Debug)]
@@ -138,10 +139,11 @@ async fn root() -> &'static str {
 
 #[derive(Serialize)]
 struct ResponseMessage {
-    modality: crate::common::messages::Modality,
-    role: crate::common::messages::Role,
+    modality: Modality,
+    role: Role,
     user: String,
     chat: Value,
+    token_usage: Option<TokenUsage>,
     timestamp: u64,
 }
 
@@ -174,6 +176,7 @@ async fn messages(
                     messages::MessageRecordChat::Input(ref chat) => serde_json::to_value(chat)?,
                     messages::MessageRecordChat::Output(ref chat) => serde_json::to_value(chat)?,
                 },
+                token_usage: m.usage.clone(),
                 timestamp: m.timestamp,
             })
         })
@@ -265,7 +268,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
             },
             event = broadcast.recv() => {
                 if let Some(text) = match event {
-                    Ok(Event::AssistantMessage { modality: _, message }) => {
+                    Ok(Event::AssistantMessage { modality: _, message, usage: _ }) => {
                         Some(message)
                     },
                     Ok(Event::SystemMessage { modality: _, message }) => {

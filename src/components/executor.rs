@@ -2,8 +2,8 @@ use std::env;
 
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
+    chat::Modality,
     events::{self, Event, EventComponent},
-    messages::Modality,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -112,6 +112,7 @@ impl CodeExecutor {
                 Event::AssistantMessage {
                     modality: Modality::Code,
                     message,
+                    usage: _,
                 } => {
                     let result = self.execute(&message).await;
                     let message = match result {

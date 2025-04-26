@@ -4,18 +4,37 @@ use async_trait::async_trait;
 use thiserror::Error;
 use tokio::task::{self, JoinHandle};
 
-use crate::common::messages::Modality;
-
-use super::broadcast::IdentifiedBroadcast;
+use super::{
+    broadcast::IdentifiedBroadcast,
+    chat::{Modality, TokenUsage},
+};
 
 #[derive(Clone, Debug)]
 pub enum Event {
-    TextMessage { user: String, message: String },
-    SystemMessage { modality: Modality, message: String },
-    AssistantMessage { modality: Modality, message: String },
-    RecognizedSpeech { user: String, message: String },
-    PlayAudio { sample_rate: u32, audio: Vec<i16> },
-    Notify { content: String },
+    TextMessage {
+        user: String,
+        message: String,
+    },
+    SystemMessage {
+        modality: Modality,
+        message: String,
+    },
+    AssistantMessage {
+        modality: Modality,
+        message: String,
+        usage: Option<TokenUsage>,
+    },
+    RecognizedSpeech {
+        user: String,
+        message: String,
+    },
+    PlayAudio {
+        sample_rate: u32,
+        audio: Vec<i16>,
+    },
+    Notify {
+        content: String,
+    },
 }
 
 impl Display for Event {

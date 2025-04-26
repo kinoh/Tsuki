@@ -11,8 +11,8 @@ use tracing::{debug, info};
 
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
+    chat::Modality,
     events::{self, Event, EventComponent},
-    messages::Modality,
 };
 
 #[derive(Error, Debug)]
@@ -107,6 +107,7 @@ impl SpeechEngine {
                 Event::AssistantMessage {
                     modality: Modality::Audio,
                     message,
+                    usage: _,
                 } => {
                     let mut query = self.query(&message).await?;
                     query.speed_scale = 1.1;

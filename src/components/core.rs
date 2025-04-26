@@ -1,8 +1,7 @@
 use crate::common::broadcast::{self, IdentifiedBroadcast};
+use crate::common::chat::{ChatInput, ChatOutput, Modality, TokenUsage};
 use crate::common::events::{self, Event, EventComponent};
-use crate::common::messages::{
-    self, ChatInput, ChatOutput, MessageRecord, MessageRecordChat, MessageRepository, Modality,
-};
+use crate::common::messages::{self, MessageRecord, MessageRecordChat, MessageRepository};
 use async_trait::async_trait;
 use openai_api_rust::chat::{ChatApi, ChatBody};
 use openai_api_rust::{Auth, Message, OpenAI, Role};
@@ -54,16 +53,15 @@ impl From<messages::Role> for Role {
     }
 }
 
-impl ChatOutput {
-    fn to_event(&self) -> Option<Event> {
-        if let Some(ref content) = self.content {
-            Some(Event::AssistantMessage {
-                modality: self.modality,
-                message: content.clone(),
-            })
-        } else {
-            None
-        }
+fn to_event(output: &ChatOutput, usage: &Option<TokenUsage>) -> Option<Event> {
+    if let Some(ref content) = output.content {
+        Some(Event::AssistantMessage {
+            modality: output.modality,
+            message: content.clone(),
+            usage: usage.clone(),
+        })
+    } else {
+        None
     }
 }
 
@@ -95,17 +93,18 @@ impl OpenAiCore {
         })
     }
 
-    async fn receive(&mut self, input_chat: ChatInput) -> Result<ChatOutput, Error> {
+    async fn receive(&mut self, input_chat: ChatInput) -> Result<Option<Event>, Error> {
         let user_record = MessageRecord {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs(),
             role: messages::Role::User,
             chat: MessageRecordChat::Input(input_chat.clone()),
+            usage: None,
         };
         self.repository.write().await.append(user_record)?;
 
-        let output_chat_json = match &self.model {
+        let (output_chat_json, usage) = match &self.model {
             Model::OpenAi(model) => {
                 let messages: Result<Vec<Message>, serde_json::Error> = self
                     .repository
@@ -137,6 +136,17 @@ impl OpenAiCore {
                 };
                 let completion = self.openai.chat_completion_create(&chat_body)?;
 
+                let usage = completion.usage;
+                info!(
+                    prompt = usage.prompt_tokens,
+                    completion = usage.completion_tokens,
+                    "token usage"
+                );
+                let usage = match (usage.prompt_tokens, usage.completion_tokens) {
+                    (Some(prompt), Some(completion)) => Some(TokenUsage { prompt, completion }),
+                    _ => None,
+                };
+
                 let choice = completion
                     .choices
                     .get(0)
@@ -146,7 +156,7 @@ impl OpenAiCore {
                     .as_ref()
                     .ok_or(Error::OpenAi("empty completion".to_string()))?;
 
-                response.content.clone()
+                (response.content.clone(), usage)
             }
             Model::Echo => {
                 let chat = if input_chat.modality == Modality::Audio {
@@ -175,22 +185,24 @@ impl OpenAiCore {
                         content: Some(serde_json::to_string(&input_chat)?),
                     }
                 };
-                serde_json::to_string(&chat)?
+                (serde_json::to_string(&chat)?, None)
             }
         };
 
         let output_chat: ChatOutput = serde_json::from_str(&output_chat_json)?;
+        let event = to_event(&output_chat, &usage);
 
         let assistant_record = MessageRecord {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs(),
             role: messages::Role::Assistant,
-            chat: MessageRecordChat::Output(output_chat.clone()),
+            chat: MessageRecordChat::Output(output_chat),
+            usage,
         };
         self.repository.write().await.append(assistant_record)?;
 
-        Ok(output_chat)
+        Ok(event)
     }
 
     async fn run_internal(
@@ -202,33 +214,34 @@ impl OpenAiCore {
         loop {
             let event = broadcast.recv().await?;
             if let Some(response) = match event {
-                Event::RecognizedSpeech { user, message } => self
-                    .receive(ChatInput {
+                Event::RecognizedSpeech { user, message } => {
+                    self.receive(ChatInput {
                         modality: Modality::Audio,
                         user,
                         content: message,
                     })
                     .await?
-                    .to_event(),
-                Event::SystemMessage { modality, message } => self
-                    .receive(ChatInput {
+                }
+                Event::SystemMessage { modality, message } => {
+                    self.receive(ChatInput {
                         modality,
                         user: messages::SYSTEM_USER_NAME.to_string(),
                         content: message,
                     })
                     .await?
-                    .to_event(),
-                Event::TextMessage { user, message } => self
-                    .receive(ChatInput {
+                }
+                Event::TextMessage { user, message } => {
+                    self.receive(ChatInput {
                         modality: Modality::Text,
                         user,
                         content: message,
                     })
                     .await?
-                    .to_event(),
+                }
                 Event::AssistantMessage {
                     modality: Modality::Memory,
                     message: _,
+                    usage: _,
                 } => Some(Event::SystemMessage {
                     modality: Modality::Text,
                     message: "memorized".to_string(),

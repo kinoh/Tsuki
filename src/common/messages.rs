@@ -3,6 +3,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use thiserror::Error;
 
+use super::chat::{ChatInput, ChatOutput, Modality, TokenUsage};
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("std::io error: {0}")]
@@ -23,17 +25,6 @@ pub enum Role {
     User,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-pub enum Modality {
-    None,
-    Bare,
-    Text,
-    Audio,
-    Code,
-    Memory,
-    Tick,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OldMessageRecord {
     pub timestamp: u64,
@@ -41,21 +32,6 @@ pub struct OldMessageRecord {
     pub role: Role,
     pub user: String,
     pub chat: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ChatInput {
-    pub modality: Modality,
-    pub user: String,
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ChatOutput {
-    pub feeling: Option<u8>,
-    pub activity: Option<u8>,
-    pub modality: Modality,
-    pub content: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -70,6 +46,7 @@ pub struct MessageRecord {
     pub timestamp: u64,
     pub role: Role,
     pub chat: MessageRecordChat,
+    pub usage: Option<TokenUsage>,
 }
 
 impl MessageRecord {
@@ -120,16 +97,18 @@ impl MessageRepository {
             let record = if let Ok(record) = serde_json::from_str(&line) {
                 record
             } else if let Ok(old) = serde_json::from_str::<OldMessageRecord>(&line) {
+                let chat = if old.modality == Modality::Bare {
+                    MessageRecordChat::Bare(old.chat)
+                } else if old.role == Role::Assistant {
+                    MessageRecordChat::Output(serde_json::from_str(&old.chat)?)
+                } else {
+                    MessageRecordChat::Input(serde_json::from_str(&old.chat)?)
+                };
                 MessageRecord {
                     timestamp: old.timestamp,
                     role: old.role,
-                    chat: if old.modality == Modality::Bare {
-                        MessageRecordChat::Bare(old.chat)
-                    } else if old.role == Role::Assistant {
-                        MessageRecordChat::Output(serde_json::from_str(&old.chat)?)
-                    } else {
-                        MessageRecordChat::Input(serde_json::from_str(&old.chat)?)
-                    },
+                    chat,
+                    usage: None,
                 }
             } else {
                 return Err(Error::Migration);
@@ -149,6 +128,7 @@ impl MessageRepository {
             timestamp: 0,
             role: Role::System,
             chat: MessageRecordChat::Bare(message.to_string()),
+            usage: None,
         };
         if self.data.len() == 0 {
             self.data.push(record);
