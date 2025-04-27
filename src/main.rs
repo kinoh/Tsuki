@@ -32,7 +32,11 @@ use ratatui::{
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::sync::{mpsc, RwLock};
+use tokio::{
+    select,
+    sync::{mpsc, RwLock},
+    task::{yield_now, JoinHandle},
+};
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Error, Debug)]
@@ -116,6 +120,8 @@ impl InteractiveApp {
                     _ => {}
                 }
             }
+            // Required to be cancelled by select!
+            yield_now().await;
         }
     }
 
@@ -141,10 +147,17 @@ impl InteractiveApp {
     }
 }
 
+async fn wait_components(
+    futs: futures::future::SelectAll<JoinHandle<Result<(), common::events::Error>>>,
+) -> Result<(), ApplicationError> {
+    let (result, index, _) = futs.await;
+    result??;
+    Err(ApplicationError::ComponentStopped(index))
+}
+
 async fn app() -> Result<(), ApplicationError> {
     let args = Args::parse();
 
-    if args.interactive {
         let filter = filter::Targets::new()
             .with_default(tracing::Level::WARN)
             .with_target("tsuki", tracing::Level::DEBUG);
@@ -234,13 +247,14 @@ async fn app() -> Result<(), ApplicationError> {
     if let Some(ref mut app) = interactive_app {
         color_eyre::install()?;
         let mut terminal = ratatui::init();
-        let result = app.run(&mut terminal).await;
+        let result = select! {
+            r = app.run(&mut terminal) => r,
+            r = wait_components(any_components) => r,
+        };
         ratatui::restore();
         Ok(result?)
     } else {
-        let (result, index, _) = any_components.await;
-        result??;
-        Err(ApplicationError::ComponentStopped(index))
+        wait_components(any_components).await
     }
 }
 
