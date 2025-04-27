@@ -1,17 +1,16 @@
 use crate::common::broadcast::{self, IdentifiedBroadcast};
-use crate::common::chat::{ChatInput, ChatOutput, Modality, TokenUsage};
+use crate::common::chat::{ChatInput, ChatOutput, Modality};
 use crate::common::events::{self, Event, EventComponent};
 use crate::common::messages::{self, MessageRecord, MessageRecordChat, MessageRepository};
 use async_trait::async_trait;
 use openai_dive::v1::api::Client;
-use openai_dive::v1::resources::chat::{
-    ChatCompletionParametersBuilder, ChatMessage, ChatMessageContent,
-};
+use openai_dive::v1::resources::response::request::{ResponseInput, ResponseParametersBuilder};
+use openai_dive::v1::resources::response::response::{OutputContent, ResponseOutput};
 use std::sync::Arc;
 use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -25,34 +24,64 @@ pub enum Error {
     Broadcast(#[from] broadcast::Error),
     #[error("OpenAI API error: {0}")]
     Api(#[from] openai_dive::v1::error::APIError),
-    #[error("OpenAI parameter builder error: {0}")]
+    #[error("OpenAI response parameter builder error: {0}")]
     ParameterBuilder(
-        #[from] openai_dive::v1::resources::chat::ChatCompletionParametersBuilderError,
+        #[from] openai_dive::v1::resources::response::request::ResponseParametersBuilderError,
     ),
-    #[error("OpenAI response has no choices")]
-    NoChoices,
-    #[error("OpenAI response has no content")]
-    EmptyContent,
-    #[error("OpenAI response has unexpected message")]
-    UnexpectedChatMessage,
+    #[error("OpenAI response has multiple messages")]
+    MultipleResponseMessage,
+    #[error("OpenAI response has no messages")]
+    NoResponseMessage,
 }
-
-pub const MAX_HISTORY_LENGTH: usize = 20;
 
 pub enum Model {
     Echo,
     OpenAi(String),
 }
 
-fn to_event(output: &ChatOutput, usage: &Option<TokenUsage>) -> Option<Event> {
+fn to_event(output: &ChatOutput, usage: u32) -> Option<Event> {
     if let Some(ref content) = output.content {
         Some(Event::AssistantMessage {
             modality: output.modality,
             message: content.clone(),
-            usage: usage.clone(),
+            usage: usage,
         })
     } else {
         None
+    }
+}
+
+fn get_response_text(outputs: Vec<ResponseOutput>) -> Result<String, Error> {
+    let texts = outputs
+        .iter()
+        .filter_map(|o| match o {
+            ResponseOutput::Message(message) => Some(
+                message
+                    .content
+                    .iter()
+                    .map(|c| match c {
+                        OutputContent::Refusal { refusal } => {
+                            warn!(message = refusal, "refusal");
+                            format!("[refusal {}]", refusal)
+                        }
+                        OutputContent::Text {
+                            text,
+                            annotations: _,
+                        } => text.clone(),
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n\n"),
+            ),
+            other => {
+                info!("additional output: {:?}", other);
+                None
+            }
+        })
+        .collect::<Vec<String>>();
+    if texts.len() > 1 {
+        Err(Error::MultipleResponseMessage)
+    } else {
+        texts.first().cloned().ok_or(Error::NoResponseMessage)
     }
 }
 
@@ -61,6 +90,7 @@ pub struct OpenAiCore {
     openai: Client,
     model: Model,
     max_tokens: u32,
+    initial_prompt: String,
 }
 
 impl OpenAiCore {
@@ -70,16 +100,12 @@ impl OpenAiCore {
     ) -> Result<Self, Error> {
         let openai = Client::new_from_env();
 
-        repository
-            .write()
-            .await
-            .load_initial_prompt(include_str!("../prompt/initial.txt"))?;
-
         Ok(Self {
             repository,
             openai,
             model,
             max_tokens: 1000,
+            initial_prompt: include_str!("../prompt/initial.txt").to_string(),
         })
     }
 
@@ -88,71 +114,41 @@ impl OpenAiCore {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs(),
-            role: messages::Role::User,
             chat: MessageRecordChat::Input(input_chat.clone()),
-            usage: None,
+            response_id: None,
+            usage: 0,
         };
         self.repository.write().await.append(user_record)?;
 
-        let (output_chat_json, usage) = match &self.model {
+        let (output_chat_json, response_id, usage) = match &self.model {
             Model::OpenAi(model) => {
-                let messages: Result<Vec<ChatMessage>, serde_json::Error> = self
+                let previous_id = self
                     .repository
                     .read()
                     .await
-                    .get_latest_n(MAX_HISTORY_LENGTH, None)
+                    .get_all()
                     .iter()
-                    .map(|r| match r.role {
-                        messages::Role::User => Ok(ChatMessage::User {
-                            content: ChatMessageContent::Text(r.json_chat()?),
-                            name: Some(r.user()),
-                        }),
-                        messages::Role::Assistant => Ok(ChatMessage::Assistant {
-                            content: Some(ChatMessageContent::Text(r.json_chat()?)),
-                            reasoning_content: None,
-                            refusal: None,
-                            name: Some(r.user()),
-                            audio: None,
-                            tool_calls: None,
-                        }),
-                        messages::Role::System => Ok(ChatMessage::Developer {
-                            content: ChatMessageContent::Text(r.json_chat()?),
-                            name: None,
-                        }),
-                    })
-                    .collect();
+                    .rev()
+                    .find_map(|r| r.response_id.as_ref())
+                    .cloned();
 
-                let parameters = ChatCompletionParametersBuilder::default()
+                let mut parameters = ResponseParametersBuilder::default();
+                parameters
                     .model(model)
-                    .messages(messages?)
-                    .max_tokens(self.max_tokens)
-                    .build()?;
+                    .instructions(&self.initial_prompt)
+                    .input(ResponseInput::Text(serde_json::to_string(&input_chat)?))
+                    .max_output_tokens(self.max_tokens);
+                if let Some(id) = previous_id {
+                    parameters.previous_response_id(id);
+                }
 
-                let completion = self.openai.chat().create(parameters).await?;
-                let usage = completion.usage;
+                let response = self.openai.responses().create(parameters.build()?).await?;
+                let usage = response.usage;
                 info!("token usage: {:?}", usage);
-                let usage = usage.and_then(|u| match (u.prompt_tokens, u.completion_tokens) {
-                    (Some(prompt), Some(completion)) => Some(TokenUsage { prompt, completion }),
-                    _ => None,
-                });
 
-                let choice = completion.choices.get(0).ok_or(Error::NoChoices)?;
+                let text = get_response_text(response.output)?;
 
-                let content = if let ChatMessage::Assistant {
-                    content,
-                    refusal: _,
-                    name: _,
-                    reasoning_content: _,
-                    tool_calls: _,
-                    audio: _,
-                } = &choice.message
-                {
-                    content.as_ref().ok_or(Error::EmptyContent)?
-                } else {
-                    return Err(Error::UnexpectedChatMessage);
-                };
-
-                (content.to_string(), usage)
+                (text, Some(response.id), usage.total_tokens)
             }
             Model::Echo => {
                 let chat = if input_chat.modality == Modality::Audio {
@@ -181,19 +177,19 @@ impl OpenAiCore {
                         content: Some(serde_json::to_string(&input_chat)?),
                     }
                 };
-                (serde_json::to_string(&chat)?, None)
+                (serde_json::to_string(&chat)?, None, 0)
             }
         };
 
         let output_chat: ChatOutput = serde_json::from_str(&output_chat_json)?;
-        let event = to_event(&output_chat, &usage);
+        let event = to_event(&output_chat, usage);
 
         let assistant_record = MessageRecord {
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_secs(),
-            role: messages::Role::Assistant,
             chat: MessageRecordChat::Output(output_chat),
+            response_id,
             usage,
         };
         self.repository.write().await.append(assistant_record)?;

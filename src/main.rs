@@ -155,23 +155,26 @@ async fn wait_components(
     Err(ApplicationError::ComponentStopped(index))
 }
 
-async fn app() -> Result<(), ApplicationError> {
-    let args = Args::parse();
-
-        let filter = filter::Targets::new()
-            .with_default(tracing::Level::WARN)
-            .with_target("tsuki", tracing::Level::DEBUG);
+fn setup_logging(interactive: bool) -> Result<(), ApplicationError> {
+    let filter = filter::Targets::new()
+        .with_default(tracing::Level::WARN)
+        .with_target("tsuki", tracing::Level::DEBUG);
+    if interactive {
         tracing_subscriber::registry()
             .with(tui_logger::TuiTracingSubscriberLayer {})
             .with(filter)
             .init();
         tui_logger::init_logger(tui_logger::LevelFilter::Debug)?;
     } else {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .init();
+        let fmt = tracing_subscriber::fmt::layer();
+        tracing_subscriber::registry().with(filter).with(fmt).init();
     }
+    Ok(())
+}
 
+async fn app() -> Result<(), ApplicationError> {
+    let args = Args::parse();
+    setup_logging(args.interactive)?;
     let args_json = serde_json::to_value(&args).unwrap();
 
     let mut event_system = EventSystem::new(32);

@@ -1,13 +1,11 @@
-use std::fmt::Display;
+use std::{any::type_name, fmt::Display};
 
 use async_trait::async_trait;
 use thiserror::Error;
 use tokio::task::{self, JoinHandle};
+use tracing::error;
 
-use super::{
-    broadcast::IdentifiedBroadcast,
-    chat::{Modality, TokenUsage},
-};
+use super::{broadcast::IdentifiedBroadcast, chat::Modality};
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -22,7 +20,7 @@ pub enum Event {
     AssistantMessage {
         modality: Modality,
         message: String,
-        usage: Option<TokenUsage>,
+        usage: u32,
     },
     RecognizedSpeech {
         user: String,
@@ -88,8 +86,14 @@ impl EventSystem {
 
     pub fn run<T: EventComponent + Send + 'static>(&mut self, mut component: T) {
         let broadcast = self.broadcast.participate();
-        self.futures.push(Some(task::spawn(
-            async move { component.run(broadcast).await },
-        )));
+        self.futures.push(Some(task::spawn(async move {
+            let result = component.run(broadcast).await;
+            error!(
+                component = type_name::<T>(),
+                "component exit: {:?}",
+                result.as_ref().err()
+            );
+            result
+        })));
     }
 }

@@ -25,9 +25,3 @@ pub struct ChatOutput {
     pub modality: Modality,
     pub content: Option<String>,
 }
-
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
-pub struct TokenUsage {
-    pub prompt: u32,
-    pub completion: u32,
-}

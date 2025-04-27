@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use thiserror::Error;
 
-use super::chat::{ChatInput, ChatOutput, Modality, TokenUsage};
+use super::chat::{ChatInput, ChatOutput, Modality};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -18,41 +19,23 @@ pub enum Error {
 pub const ASSISTANT_NAME: &str = "つき";
 pub const SYSTEM_USER_NAME: &str = "system";
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-pub enum Role {
-    System,
-    Assistant,
-    User,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct OldMessageRecord {
-    pub timestamp: u64,
-    pub modality: Modality,
-    pub role: Role,
-    pub user: String,
-    pub chat: String,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum MessageRecordChat {
     Input(ChatInput),
     Output(ChatOutput),
-    Bare(String),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MessageRecord {
     pub timestamp: u64,
-    pub role: Role,
     pub chat: MessageRecordChat,
-    pub usage: Option<TokenUsage>,
+    pub response_id: Option<String>,
+    pub usage: u32,
 }
 
 impl MessageRecord {
     pub fn modality(&self) -> Modality {
         match self.chat {
-            MessageRecordChat::Bare(_) => Modality::Bare,
             MessageRecordChat::Input(ref chat) => chat.modality,
             MessageRecordChat::Output(ref chat) => chat.modality,
         }
@@ -60,17 +43,15 @@ impl MessageRecord {
 
     pub fn user(&self) -> String {
         match self.chat {
-            MessageRecordChat::Bare(_) => "".to_string(),
             MessageRecordChat::Input(ref chat) => chat.user.to_string(),
             MessageRecordChat::Output(_) => ASSISTANT_NAME.to_string(),
         }
     }
 
-    pub fn json_chat(&self) -> Result<String, serde_json::Error> {
+    pub fn json_chat(&self) -> Result<Value, serde_json::Error> {
         Ok(match self.chat {
-            MessageRecordChat::Bare(ref chat) => chat.clone(),
-            MessageRecordChat::Input(ref chat) => serde_json::to_string(chat)?,
-            MessageRecordChat::Output(ref chat) => serde_json::to_string(chat)?,
+            MessageRecordChat::Input(ref chat) => serde_json::to_value(chat)?,
+            MessageRecordChat::Output(ref chat) => serde_json::to_value(chat)?,
         })
     }
 }
@@ -78,7 +59,6 @@ impl MessageRecord {
 pub struct MessageRepository {
     data: Vec<MessageRecord>,
     writer: std::fs::File,
-    path: String,
 }
 
 impl MessageRepository {
@@ -96,58 +76,13 @@ impl MessageRepository {
             let line = line?;
             let record = if let Ok(record) = serde_json::from_str(&line) {
                 record
-            } else if let Ok(old) = serde_json::from_str::<OldMessageRecord>(&line) {
-                let chat = if old.modality == Modality::Bare {
-                    MessageRecordChat::Bare(old.chat)
-                } else if old.role == Role::Assistant {
-                    MessageRecordChat::Output(serde_json::from_str(&old.chat)?)
-                } else {
-                    MessageRecordChat::Input(serde_json::from_str(&old.chat)?)
-                };
-                MessageRecord {
-                    timestamp: old.timestamp,
-                    role: old.role,
-                    chat,
-                    usage: None,
-                }
             } else {
                 return Err(Error::Migration);
             };
             data.push(record);
         }
 
-        Ok(Self {
-            data,
-            writer: file,
-            path,
-        })
-    }
-
-    pub fn load_initial_prompt(&mut self, message: &str) -> Result<(), Error> {
-        let record = MessageRecord {
-            timestamp: 0,
-            role: Role::System,
-            chat: MessageRecordChat::Bare(message.to_string()),
-            usage: None,
-        };
-        if self.data.len() == 0 {
-            self.data.push(record);
-        } else {
-            self.data[0] = record;
-        }
-
-        self.writer = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&self.path)?;
-
-        for record in &self.data {
-            let json = serde_json::to_string(&record)?;
-            writeln!(self.writer, "{}", json)?;
-        }
-        self.writer.flush()?;
-
-        Ok(())
+        Ok(Self { data, writer: file })
     }
 
     pub fn append(&mut self, record: MessageRecord) -> Result<(), Error> {
@@ -169,7 +104,7 @@ impl MessageRepository {
         for i in 1..=self.data.len() {
             let record = &self.data[self.data.len() - i];
             let is_none = record.modality() == Modality::None;
-            let is_important = record.role == Role::System || record.modality() == Modality::Memory;
+            let is_important = record.modality() == Modality::Memory;
             if !is_none
                 && !(record.modality() == Modality::Tick && is_last_none)
                 && (is_important || normal_count < n)

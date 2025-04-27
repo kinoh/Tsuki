@@ -22,9 +22,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
-    chat::{Modality, TokenUsage},
+    chat::Modality,
     events::{self, Event, EventComponent},
-    messages::{self, MessageRecord, MessageRepository, Role},
+    messages::{self, MessageRecord, MessageRecordChat, MessageRepository},
 };
 
 #[derive(Error, Debug)]
@@ -138,12 +138,18 @@ async fn root() -> &'static str {
 }
 
 #[derive(Serialize)]
+enum Role {
+    Assistant,
+    User,
+}
+
+#[derive(Serialize)]
 struct ResponseMessage {
     modality: Modality,
     role: Role,
     user: String,
     chat: Value,
-    token_usage: Option<TokenUsage>,
+    token_usage: u32,
     timestamp: u64,
 }
 
@@ -165,17 +171,15 @@ async fn messages(
     };
     let response: Result<Vec<ResponseMessage>, serde_json::Error> = data
         .iter()
-        .filter(|m| m.role != crate::common::messages::Role::System)
         .map(|m| {
             Ok(ResponseMessage {
                 modality: m.modality(),
-                role: m.role,
-                user: m.user(),
-                chat: match m.chat {
-                    messages::MessageRecordChat::Bare(_) => serde_json::Value::from("N/A"),
-                    messages::MessageRecordChat::Input(ref chat) => serde_json::to_value(chat)?,
-                    messages::MessageRecordChat::Output(ref chat) => serde_json::to_value(chat)?,
+                role: match m.chat {
+                    MessageRecordChat::Input(_) => Role::User,
+                    MessageRecordChat::Output(_) => Role::Assistant,
                 },
+                user: m.user(),
+                chat: m.json_chat()?,
                 token_usage: m.usage.clone(),
                 timestamp: m.timestamp,
             })
