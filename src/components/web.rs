@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{env, net::SocketAddr, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use axum::{
@@ -22,9 +22,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
-    chat::Modality,
+    chat::{ChatInput, ChatInputMessage, ChatOutput, ChatOutputMessage, Modality},
     events::{self, Event, EventComponent},
-    message::{self, MessageRecord, MessageRecordChat},
+    message::{MessageRecord, MessageRecordChat, ASSISTANT_NAME, SYSTEM_USER_NAME},
     repository::Repository,
 };
 
@@ -266,15 +266,42 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                 }
             },
             event = broadcast.recv() => {
-                if let Some(text) = match event {
-                    Ok(Event::AssistantMessage { modality: _, message, usage: _ }) => {
-                        Some(message)
+                if let Some(response) = match event {
+                    Ok(Event::AssistantMessage { modality, message, usage }) => {
+                        Some(ResponseMessage {
+                            role: Role::Assistant,
+                            user: ASSISTANT_NAME.to_string(),
+                            token_usage: usage,
+                            chat: serde_json::to_value(vec![
+                                ChatOutput::Message(ChatOutputMessage { feeling: None, activity: None, modality, content: Some(message) })
+                            ]).unwrap_or(Value::String("<serialization failed>".to_string())),
+                            timestamp: SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+                        })
                     },
-                    Ok(Event::SystemMessage { modality: _, message }) => {
-                        Some(format!("[{}] {}", message::SYSTEM_USER_NAME, message))
+                    Ok(Event::SystemMessage { modality, message }) => {
+                        Some(ResponseMessage {
+                            role: Role::User,
+                            user: SYSTEM_USER_NAME.to_string(),
+                            token_usage: 0,
+                            chat: serde_json::to_value(vec![
+                                ChatInput::Message(ChatInputMessage { user: SYSTEM_USER_NAME.to_string(), modality, content: message })
+                            ]).unwrap_or(Value::String("<serialization failed>".to_string())),
+                            timestamp: SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+                        })
                     },
                     Ok(Event::TextMessage { user, message }) => {
-                        Some(format!("[{}] {}", user, message))
+                        Some(ResponseMessage {
+                            role: Role::User,
+                            user: user.clone(),
+                            token_usage: 0,
+                            chat: serde_json::to_value(vec![
+                                ChatInput::Message(ChatInputMessage { user: user.clone(), modality: Modality::Text, content: message })
+                            ]).unwrap_or(Value::String("<serialization failed>".to_string())),
+                            timestamp: SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+                        })
                     },
                     Err(e) => {
                         warn!("event recv error: {}", e);
@@ -282,7 +309,8 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                     },
                     _ => None,
                 } {
-                    if socket.send(Message::Text(Utf8Bytes::from(text))).await.is_err() {
+                    let response_json = serde_json::to_string(&response).unwrap_or("<serialization failed>".to_string());
+                    if socket.send(Message::Text(Utf8Bytes::from(response_json))).await.is_err() {
                         return;
                     }
                 }

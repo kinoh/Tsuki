@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use super::chat::{ChatInput, ChatOutput, Modality};
+use super::chat::{ChatInput, ChatOutput};
 
 #[derive(Error, Debug)]
 pub enum Error {
