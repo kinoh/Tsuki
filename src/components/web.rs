@@ -24,7 +24,8 @@ use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
     chat::Modality,
     events::{self, Event, EventComponent},
-    messages::{self, MessageRecord, MessageRecordChat, MessageRepository},
+    message::{self, MessageRecord, MessageRecordChat},
+    repository::Repository,
 };
 
 #[derive(Error, Debug)]
@@ -145,7 +146,6 @@ enum Role {
 
 #[derive(Serialize)]
 struct ResponseMessage {
-    modality: Modality,
     role: Role,
     user: String,
     chat: Value,
@@ -164,16 +164,11 @@ async fn messages(
     Query(params): Query<MessagesParams>,
 ) -> Result<Json<Vec<ResponseMessage>>, StatusCode> {
     let repo = state.repository.read().await;
-    let data: Vec<&MessageRecord> = if let Some(n) = params.n {
-        repo.get_latest_n(n, params.before)
-    } else {
-        repo.get_all().iter().map(|m| m).collect()
-    };
+    let data: Vec<&MessageRecord> = repo.messages(params.n, params.before);
     let response: Result<Vec<ResponseMessage>, serde_json::Error> = data
         .iter()
-        .map(|m| {
+        .map(|m: &&MessageRecord| {
             Ok(ResponseMessage {
-                modality: m.modality(),
                 role: match m.chat {
                     MessageRecordChat::Input(_) => Role::User,
                     MessageRecordChat::Output(_) => Role::Assistant,
@@ -276,7 +271,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                         Some(message)
                     },
                     Ok(Event::SystemMessage { modality: _, message }) => {
-                        Some(format!("[{}] {}", messages::SYSTEM_USER_NAME, message))
+                        Some(format!("[{}] {}", message::SYSTEM_USER_NAME, message))
                     },
                     Ok(Event::TextMessage { user, message }) => {
                         Some(format!("[{}] {}", user, message))
@@ -300,7 +295,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
 pub struct WebState {
     port: u16,
     broadcast: Option<IdentifiedBroadcast<Event>>,
-    repository: Arc<RwLock<MessageRepository>>,
+    repository: Arc<RwLock<Repository>>,
     auth_token: String,
     app_args: Value,
 }
@@ -309,7 +304,7 @@ type WebInterface = Arc<WebState>;
 
 impl WebState {
     pub fn new(
-        repository: Arc<RwLock<MessageRepository>>,
+        repository: Arc<RwLock<Repository>>,
         port: u16,
         app_args: Value,
     ) -> Result<WebInterface, Error> {

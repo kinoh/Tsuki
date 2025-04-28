@@ -6,9 +6,7 @@ mod components;
 use clap::Parser;
 use color_eyre::{eyre, Result};
 use common::{
-    events::EventSystem,
-    messages::{MessageRepository, ASSISTANT_NAME},
-    mumble::MumbleClient,
+    events::EventSystem, message::ASSISTANT_NAME, mumble::MumbleClient, repository::Repository,
 };
 use components::{
     core::{Model, OpenAiCore},
@@ -56,7 +54,7 @@ enum ApplicationError {
     #[error("events error: {0}")]
     Events(#[from] common::events::Error),
     #[error("repository error: {0}")]
-    Repository(#[from] common::messages::Error),
+    Repository(#[from] common::repository::Error),
     #[error("mumble error: {0}")]
     Mumble(#[from] common::mumble::Error),
     #[error("recognizer error: {0}")]
@@ -220,7 +218,8 @@ async fn app() -> Result<(), ApplicationError> {
         event_system.run(ticker);
     }
 
-    let repository = Arc::new(RwLock::new(MessageRepository::new(args.history)?));
+    let pretty_history = cfg!(debug_assertions);
+    let repository = Arc::new(RwLock::new(Repository::new(args.history, pretty_history)?));
 
     let model = if args.openai_model.is_empty() {
         Model::Echo

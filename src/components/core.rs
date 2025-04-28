@@ -1,16 +1,31 @@
 use crate::common::broadcast::{self, IdentifiedBroadcast};
-use crate::common::chat::{ChatInput, ChatOutput, Modality};
+use crate::common::chat::{
+    ChatInput, ChatInputFunctionCall, ChatInputMessage, ChatOutput, ChatOutputFunctionCall,
+    ChatOutputMessage, Modality,
+};
 use crate::common::events::{self, Event, EventComponent};
-use crate::common::messages::{self, MessageRecord, MessageRecordChat, MessageRepository};
+use crate::common::memory::MemoryRecord;
+use crate::common::message::{self, MessageRecord, MessageRecordChat};
+use crate::common::repository::{self, Repository};
 use async_trait::async_trait;
 use openai_dive::v1::api::Client;
-use openai_dive::v1::resources::response::request::{ResponseInput, ResponseParametersBuilder};
-use openai_dive::v1::resources::response::response::{OutputContent, ResponseOutput};
+use openai_dive::v1::resources::response::items::{FunctionToolCallOutput, InputItemStatus};
+use openai_dive::v1::resources::response::request::{
+    ContentInput, InputItem, InputMessage, ResponseInput, ResponseInputItem,
+    ResponseParametersBuilder,
+};
+use openai_dive::v1::resources::response::response::{
+    OutputContent, OutputMessage, ResponseOutput, Role,
+};
+use openai_dive::v1::resources::response::shared::{ResponseTool, ResponseToolChoice};
+use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 use std::time::SystemTime;
+use tera::{Context, Tera};
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -19,7 +34,7 @@ pub enum Error {
     #[error("serde json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("repository error: {0}")]
-    Repository(#[from] messages::Error),
+    Repository(#[from] repository::Error),
     #[error("broadcast error: {0}")]
     Broadcast(#[from] broadcast::Error),
     #[error("OpenAI API error: {0}")]
@@ -28,21 +43,27 @@ pub enum Error {
     ParameterBuilder(
         #[from] openai_dive::v1::resources::response::request::ResponseParametersBuilderError,
     ),
-    #[error("OpenAI response has multiple messages")]
-    MultipleResponseMessage,
-    #[error("OpenAI response has no messages")]
-    NoResponseMessage,
+    #[error("Tera error: {0}")]
+    Tera(#[from] tera::Error),
+    #[error("OpenAI response message has no content")]
+    NoMessageContent,
+    #[error("OpenAI response message has refusal")]
+    Refusal,
+    #[error("OpenAI response called unknown function")]
+    UnknownFunctionCall,
 }
+
+pub const TEMPLATE_NAME: &str = "instruction";
 
 pub enum Model {
     Echo,
     OpenAi(String),
 }
 
-fn to_event(output: &ChatOutput, usage: u32) -> Option<Event> {
-    if let Some(ref content) = output.content {
+fn to_event(message: &ChatOutputMessage, usage: u32) -> Option<Event> {
+    if let Some(ref content) = message.content {
         Some(Event::AssistantMessage {
-            modality: output.modality,
+            modality: message.modality,
             message: content.clone(),
             usage: usage,
         })
@@ -51,150 +72,273 @@ fn to_event(output: &ChatOutput, usage: u32) -> Option<Event> {
     }
 }
 
-fn get_response_text(outputs: Vec<ResponseOutput>) -> Result<String, Error> {
-    let texts = outputs
-        .iter()
-        .filter_map(|o| match o {
-            ResponseOutput::Message(message) => Some(
-                message
-                    .content
-                    .iter()
-                    .map(|c| match c {
-                        OutputContent::Refusal { refusal } => {
-                            warn!(message = refusal, "refusal");
-                            format!("[refusal {}]", refusal)
-                        }
-                        OutputContent::Text {
-                            text,
-                            annotations: _,
-                        } => text.clone(),
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n\n"),
-            ),
-            other => {
-                info!("additional output: {:?}", other);
-                None
-            }
-        })
-        .collect::<Vec<String>>();
-    if texts.len() > 1 {
-        Err(Error::MultipleResponseMessage)
-    } else {
-        texts.first().cloned().ok_or(Error::NoResponseMessage)
+fn parse_message(message: &OutputMessage) -> Result<ChatOutputMessage, Error> {
+    let content = message.content.first().ok_or(Error::NoMessageContent)?;
+
+    match *content {
+        OutputContent::Refusal { ref refusal } => {
+            warn!(message = refusal, "refusal");
+            Err(Error::Refusal)
+        }
+        OutputContent::Text {
+            ref text,
+            annotations: _,
+        } => Ok(serde_json::from_str(&text)?),
     }
 }
 
+fn get_timestamp() -> Result<u64, Error> {
+    Ok(SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)?
+        .as_secs())
+}
+
+#[derive(Deserialize)]
+struct MemorizeFunctionArguments {
+    items: Vec<String>,
+}
+
 pub struct OpenAiCore {
-    repository: Arc<RwLock<MessageRepository>>,
+    repository: Arc<RwLock<Repository>>,
     openai: Client,
     model: Model,
     max_tokens: u32,
-    initial_prompt: String,
+    initial_prompt: Tera,
 }
 
 impl OpenAiCore {
-    pub async fn new(
-        repository: Arc<RwLock<MessageRepository>>,
-        model: Model,
-    ) -> Result<Self, Error> {
+    pub async fn new(repository: Arc<RwLock<Repository>>, model: Model) -> Result<Self, Error> {
         let openai = Client::new_from_env();
+        let mut initial_prompt = Tera::default();
+        initial_prompt.add_raw_template(TEMPLATE_NAME, include_str!("../prompt/initial.txt"))?;
 
         Ok(Self {
             repository,
             openai,
             model,
             max_tokens: 1000,
-            initial_prompt: include_str!("../prompt/initial.txt").to_string(),
+            initial_prompt,
         })
     }
 
-    async fn receive(&mut self, input_chat: ChatInput) -> Result<Option<Event>, Error> {
+    async fn think_openai(
+        &self,
+        model: &String,
+        input_chats: Vec<ChatInput>,
+        previous_id: Option<&String>,
+    ) -> Result<(Vec<ChatOutput>, String, u32), Error> {
+        let tools = vec![ResponseTool::Function {
+            name: "memorize".to_string(),
+            description: Some("Save knowledge to memories section in instruction".to_string()),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "ultimately short summary of memory; stored to memories section in instruction"
+                        }
+                    }
+                },
+                "required": ["items"],
+                "additionalProperties": false
+            }),
+            strict: true,
+        }];
+
+        let inputs = input_chats
+            .iter()
+            .map(|c| {
+                Ok(match c {
+                    ChatInput::Message(message) => ResponseInputItem::Message(InputMessage {
+                        role: Role::User,
+                        content: ContentInput::Text(serde_json::to_string(message)?),
+                    }),
+                    ChatInput::FunctionCall(call) => ResponseInputItem::Item(
+                        InputItem::FunctionToolCallOutput(FunctionToolCallOutput {
+                            id: None,
+                            call_id: call.call_id.clone(),
+                            output: call.output.clone(),
+                            status: InputItemStatus::Completed,
+                        }),
+                    ),
+                })
+            })
+            .collect::<Result<Vec<ResponseInputItem>, Error>>()?;
+
+        let memories = self
+            .repository
+            .read()
+            .await
+            .memories()
+            .iter()
+            .flat_map(|r| r.content.clone())
+            .collect::<Vec<String>>();
+        let context = Context::from_value(json!({
+            "memories": memories,
+        }))?;
+
+        let mut parameters = ResponseParametersBuilder::default();
+        parameters
+            .model(model)
+            .instructions(self.initial_prompt.render(TEMPLATE_NAME, &context)?)
+            .input(ResponseInput::List(inputs))
+            .tools(tools)
+            .tool_choice(ResponseToolChoice::Auto)
+            .max_output_tokens(self.max_tokens);
+        if let Some(id) = previous_id {
+            parameters.previous_response_id(id);
+        }
+        let parameters = parameters.build()?;
+        debug!(
+            "responses API parameters: {}",
+            serde_json::to_string(&parameters)?
+        );
+
+        let response = self.openai.responses().create(parameters).await?;
+        let usage = response.usage;
+        info!("token usage: {:?}", &usage);
+
+        let output_chats = response
+            .output
+            .iter()
+            .map(|r| {
+                Ok(match r {
+                    ResponseOutput::Message(message) => {
+                        ChatOutput::Message(parse_message(&message)?)
+                    }
+                    ResponseOutput::FunctionToolCall(call) => {
+                        ChatOutput::FunctionCall(ChatOutputFunctionCall {
+                            call_id: call.call_id.clone(),
+                            name: call.name.clone(),
+                            args: call.arguments.clone(),
+                        })
+                    }
+                    output => ChatOutput::BuiltinToolCall(serde_json::to_value(output)?),
+                })
+            })
+            .collect::<Result<Vec<ChatOutput>, Error>>()?;
+
+        Ok((output_chats, response.id, usage.total_tokens))
+    }
+
+    fn think_echo(
+        &self,
+        input_chats: Vec<ChatInput>,
+    ) -> Result<(Vec<ChatOutput>, String, u32), Error> {
+        let chat = if let ChatInput::Message(ref message) = input_chats[0] {
+            if message.modality == Modality::Audio {
+                ChatOutputMessage {
+                    activity: None,
+                    feeling: None,
+                    modality: Modality::Audio,
+                    content: Some(message.content.clone()),
+                }
+            } else {
+                ChatOutputMessage {
+                    activity: None,
+                    feeling: None,
+                    modality: Modality::Text,
+                    content: Some(serde_json::to_string(&message)?),
+                }
+            }
+        } else {
+            ChatOutputMessage {
+                activity: None,
+                feeling: None,
+                modality: Modality::Text,
+                content: Some("no message".to_string()),
+            }
+        };
+        Ok((vec![ChatOutput::Message(chat)], "".to_string(), 0))
+    }
+
+    async fn think_and_save(
+        &mut self,
+        input_chats: Vec<ChatInput>,
+    ) -> Result<(Vec<ChatOutput>, u32), Error> {
         let user_record = MessageRecord {
-            timestamp: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_secs(),
-            chat: MessageRecordChat::Input(input_chat.clone()),
+            timestamp: get_timestamp()?,
+            chat: MessageRecordChat::Input(input_chats.clone()),
             response_id: None,
             usage: 0,
         };
-        self.repository.write().await.append(user_record)?;
+        self.repository.write().await.append_message(user_record)?;
 
-        let (output_chat_json, response_id, usage) = match &self.model {
+        let previous_id = self.repository.read().await.last_message_id().cloned();
+        let (outputs, response_id, usage) = match &self.model {
             Model::OpenAi(model) => {
-                let previous_id = self
-                    .repository
-                    .read()
+                self.think_openai(&model, input_chats, previous_id.as_ref())
                     .await
-                    .get_all()
-                    .iter()
-                    .rev()
-                    .find_map(|r| r.response_id.as_ref())
-                    .cloned();
-
-                let mut parameters = ResponseParametersBuilder::default();
-                parameters
-                    .model(model)
-                    .instructions(&self.initial_prompt)
-                    .input(ResponseInput::Text(serde_json::to_string(&input_chat)?))
-                    .max_output_tokens(self.max_tokens);
-                if let Some(id) = previous_id {
-                    parameters.previous_response_id(id);
-                }
-
-                let response = self.openai.responses().create(parameters.build()?).await?;
-                let usage = response.usage;
-                info!("token usage: {:?}", usage);
-
-                let text = get_response_text(response.output)?;
-
-                (text, Some(response.id), usage.total_tokens)
             }
-            Model::Echo => {
-                let chat = if input_chat.modality == Modality::Audio {
-                    ChatOutput {
-                        activity: None,
-                        feeling: None,
-                        modality: Modality::Audio,
-                        content: Some(input_chat.content),
-                    }
-                } else if let Some((a, b)) = input_chat.content.split_once(' ') {
-                    ChatOutput {
-                        activity: None,
-                        feeling: None,
-                        modality: match a {
-                            "Code" => Modality::Code,
-                            "Memory" => Modality::Memory,
-                            _ => Modality::Text,
-                        },
-                        content: Some(b.to_string()),
-                    }
-                } else {
-                    ChatOutput {
-                        activity: None,
-                        feeling: None,
-                        modality: Modality::Text,
-                        content: Some(serde_json::to_string(&input_chat)?),
-                    }
-                };
-                (serde_json::to_string(&chat)?, None, 0)
-            }
-        };
-
-        let output_chat: ChatOutput = serde_json::from_str(&output_chat_json)?;
-        let event = to_event(&output_chat, usage);
+            Model::Echo => self.think_echo(input_chats),
+        }?;
 
         let assistant_record = MessageRecord {
-            timestamp: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_secs(),
-            chat: MessageRecordChat::Output(output_chat),
-            response_id,
+            timestamp: get_timestamp()?,
+            chat: MessageRecordChat::Output(outputs.clone()),
+            response_id: Some(response_id),
             usage,
         };
-        self.repository.write().await.append(assistant_record)?;
+        self.repository
+            .write()
+            .await
+            .append_message(assistant_record)?;
 
-        Ok(event)
+        Ok((outputs, usage))
+    }
+
+    async fn do_call(&self, call: &ChatOutputFunctionCall) -> Result<ChatInputFunctionCall, Error> {
+        info!(name = &call.name, "function call");
+
+        let output = match &*call.name {
+            "memorize" => {
+                let args: MemorizeFunctionArguments = serde_json::from_str(&call.args)?;
+                self.repository.write().await.append_memory(MemoryRecord {
+                    content: args.items,
+                    timestamp: get_timestamp()?,
+                })?;
+                Ok("success".to_string())
+            }
+            _ => Err(Error::UnknownFunctionCall),
+        }?;
+
+        info!(output = &output, "function call finished");
+
+        Ok(ChatInputFunctionCall {
+            call_id: call.call_id.clone(),
+            output,
+        })
+    }
+
+    async fn receive(
+        &mut self,
+        broadcast: &IdentifiedBroadcast<Event>,
+        message: ChatInputMessage,
+    ) -> Result<(), Error> {
+        let mut inputs = vec![ChatInput::Message(message)];
+        loop {
+            let (outputs, usage) = self.think_and_save(inputs).await?;
+            let mut call_outputs = Vec::new();
+            for output in outputs {
+                match output {
+                    ChatOutput::FunctionCall(call) => {
+                        call_outputs.push(ChatInput::FunctionCall(self.do_call(&call).await?))
+                    }
+                    ChatOutput::Message(message) => {
+                        if let Some(event) = to_event(&message, usage) {
+                            broadcast.send(event)?;
+                        }
+                    }
+                    ChatOutput::BuiltinToolCall(_) => {}
+                }
+            }
+            if call_outputs.is_empty() {
+                break Ok(());
+            }
+            inputs = call_outputs;
+        }
     }
 
     async fn run_internal(
@@ -205,42 +349,41 @@ impl OpenAiCore {
 
         loop {
             let event = broadcast.recv().await?;
-            if let Some(response) = match event {
+            match event {
                 Event::RecognizedSpeech { user, message } => {
-                    self.receive(ChatInput {
-                        modality: Modality::Audio,
-                        user,
-                        content: message,
-                    })
+                    self.receive(
+                        &broadcast,
+                        ChatInputMessage {
+                            modality: Modality::Audio,
+                            user,
+                            content: message,
+                        },
+                    )
                     .await?
                 }
                 Event::SystemMessage { modality, message } => {
-                    self.receive(ChatInput {
-                        modality,
-                        user: messages::SYSTEM_USER_NAME.to_string(),
-                        content: message,
-                    })
+                    self.receive(
+                        &broadcast,
+                        ChatInputMessage {
+                            modality,
+                            user: message::SYSTEM_USER_NAME.to_string(),
+                            content: message,
+                        },
+                    )
                     .await?
                 }
                 Event::TextMessage { user, message } => {
-                    self.receive(ChatInput {
-                        modality: Modality::Text,
-                        user,
-                        content: message,
-                    })
+                    self.receive(
+                        &broadcast,
+                        ChatInputMessage {
+                            modality: Modality::Text,
+                            user,
+                            content: message,
+                        },
+                    )
                     .await?
                 }
-                Event::AssistantMessage {
-                    modality: Modality::Memory,
-                    message: _,
-                    usage: _,
-                } => Some(Event::SystemMessage {
-                    modality: Modality::Text,
-                    message: "memorized".to_string(),
-                }),
-                _ => None,
-            } {
-                broadcast.send(response)?;
+                _ => (),
             }
         }
     }
