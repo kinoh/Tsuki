@@ -8,7 +8,10 @@
   import { subscribeToTopic, getFCMToken, onPushNotificationOpened, getLatestNotificationData } from "@tauri-plugin-fcm-api";
   import { onMount } from 'svelte';
 
-  type Message = { role: string; chat: any; timestamp: number };
+  type ChatMessage = { modality: string, user: string, content: string };
+  type ChatFunctionCall = { name: string, args: string } | { output: string };
+  type ChatItem = { Message: ChatMessage } | { FunctionCall: ChatFunctionCall };
+  type Message = { role: string; user: string; chat: ChatItem[]; timestamp: number };
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let messages: Message[] = $state([]);
@@ -33,9 +36,9 @@
     })
       .then(response => response.json())
       .then(data => {
-        messages = data.toReversed().map((m: { role: string; user: string; chat: any; timestamp: number }) => {
+        messages = data.toReversed().map((m: Message) => {
           if (m.role === "User" && m.user !== config.user) {
-            return { role: "assistant", chat: { content: `[${m.user}] ${m.chat.content}`, timestamp: m.timestamp } };
+            return { role: "assistant", user: m.user, chat: m.chat };
           }
           return m;
         });
@@ -58,14 +61,11 @@
       connection = null;
     }
     connection.onmessage = function(event) {
-      if (event.data.startsWith(`[${config.user}] `)) {
-        return;
+      let message = JSON.parse(event.data) as Message;
+      console.log(message);
+      if (message.user !== config.user) {
+        messages.unshift(message);
       }
-      messages.unshift({
-        role: "assistant",
-        chat: { "content": event.data },
-        timestamp: Date.now() / 1000,
-      });
     };
   }
 
@@ -103,7 +103,12 @@
     if (connection !== null) {
       messages.unshift({
         role: "user",
-        chat: { "content": inputText },
+        user: config.user,
+        chat: [{Message: {
+          modality: "Text",
+          user: config.user,
+          content: inputText,
+        }}],
         timestamp: Date.now() / 1000,
       });
       connection.send(inputText);
@@ -253,9 +258,21 @@
           <img src="/icons/send.svg" alt="Send" />
         </button>
       </form>
-    	{#each messages as item, i}
+    	{#each messages as item}
         <div class="message {item.role.toLowerCase()}-message">
-          {item.chat.content}
+          {#each item.chat as chat}
+            {#if "Message" in chat}
+              {chat.Message.content}
+            {:else if "FunctionCall" in chat}
+              {#if "name" in chat.FunctionCall}
+                [call] {chat.FunctionCall.name} {chat.FunctionCall.args}
+              {:else if "output" in chat.FunctionCall}
+                [system] {chat.FunctionCall.output}
+              {/if}
+            {:else}
+              ?
+            {/if}
+          {/each}
         </div>
       {/each}
     </div>
