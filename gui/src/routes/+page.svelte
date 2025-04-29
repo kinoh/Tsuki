@@ -262,12 +262,12 @@
         <div class="message {item.role.toLowerCase()}-message">
           {#each item.chat as chat}
             {#if "Message" in chat}
-              {chat.Message.content}
+              <div>{chat.Message.content}</div>
             {:else if "FunctionCall" in chat}
               {#if "name" in chat.FunctionCall}
-                [call] {chat.FunctionCall.name} {chat.FunctionCall.args}
+                <div class="internal-message-content">[call] {chat.FunctionCall.name} {chat.FunctionCall.args}</div>
               {:else if "output" in chat.FunctionCall}
-                [system] {chat.FunctionCall.output}
+                <div class="internal-message-content">[system] {chat.FunctionCall.output}</div>
               {/if}
             {:else}
               ?
@@ -382,6 +382,9 @@
   border: none;
   border-radius: 5px;
   overflow-wrap: break-word;
+  display: flex;
+  flex-direction: column;
+  row-gap: 0.5rem;
 }
 
 .assistant-message {
@@ -395,6 +398,11 @@
   margin: 0.4rem 0 0.4rem 1.5rem;
   transition: border-color 0.25s;
   /* box-shadow: 0 0 5px gray; */
+}
+
+.internal-message-content {
+  font-size: small;
+  color: #555;
 }
 
 form {
