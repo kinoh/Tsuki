@@ -18,7 +18,7 @@ services:
     depends_on:
       - sandbox
   sandbox:
-    image: langgenius/dify-sandbox:0.2.10
+    image: tsuki-sandbox:0.2.10
     build: docker/dify-sandbox
     environment:
       API_KEY: ${DIFY_SANDBOX_API_KEY}
