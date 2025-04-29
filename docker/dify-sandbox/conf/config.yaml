@@ -24,7 +24,7 @@ allowed_syscalls: # please leave it empty if you have no idea how seccomp works
   - 13  # rt_sigaction
   - 14  # rt_sigprocmask
   - 15  # rt_sigreturn
-  # - 16  # ioctl
+  - 16  # ioctl
   - 17  # pread64
   - 18  # pwrite64
   - 19  # readv
@@ -32,7 +32,7 @@ allowed_syscalls: # please leave it empty if you have no idea how seccomp works
   - 21  # access
   - 22  # pipe
   - 23  # select
-  # - 24  # sched_yield
+  - 24  # sched_yield
   - 25  # mremap
   - 26  # msync
   - 27  # mincore
