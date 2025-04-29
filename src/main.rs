@@ -1,5 +1,6 @@
 #![feature(slice_pattern)]
 
+mod adapter;
 mod common;
 mod components;
 
@@ -11,7 +12,6 @@ use common::{
 use components::{
     core::{Model, OpenAiCore},
     eventlogger::EventLogger,
-    executor::CodeExecutor,
     interactive::{InteractiveProxy, Signal},
     notifier::Notifier,
     recognizer::SpeechRecognizer,
@@ -63,8 +63,6 @@ enum ApplicationError {
     Core(#[from] components::core::Error),
     #[error("web error: {0}")]
     Web(#[from] components::web::Error),
-    #[error("executor error: {0}")]
-    Executor(#[from] components::executor::Error),
     #[error("notifier error: {0}")]
     Notifier(#[from] components::notifier::Error),
 }
@@ -201,12 +199,6 @@ async fn app() -> Result<(), ApplicationError> {
         event_system.run(speaker);
     }
 
-    if !args.dify_host.is_empty() {
-        let executor = CodeExecutor::new(&args.dify_host)?;
-
-        event_system.run(executor);
-    }
-
     let notifier = Notifier::new().await?;
     event_system.run(notifier);
 
@@ -226,7 +218,12 @@ async fn app() -> Result<(), ApplicationError> {
     } else {
         Model::OpenAi(args.openai_model)
     };
-    let core = OpenAiCore::new(repository.clone(), model).await?;
+    let core = OpenAiCore::new(
+        repository.clone(),
+        model,
+        Some(args.dify_host).filter(|h| !h.is_empty()),
+    )
+    .await?;
     let mut interactive_app = if args.interactive {
         let (sender, receiver) = mpsc::channel(1);
         let core_interactive = InteractiveProxy::new(32, receiver, core);

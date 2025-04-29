@@ -1,6 +1,5 @@
 pub mod core;
 pub mod eventlogger;
-pub mod executor;
 pub mod interactive;
 pub mod notifier;
 pub mod recognizer;

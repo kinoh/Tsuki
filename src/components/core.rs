@@ -1,3 +1,4 @@
+use crate::adapter::dify::{self, CodeExecutor};
 use crate::common::broadcast::{self, IdentifiedBroadcast};
 use crate::common::chat::{
     ChatInput, ChatInputFunctionCall, ChatInputMessage, ChatOutput, ChatOutputFunctionCall,
@@ -37,6 +38,8 @@ pub enum Error {
     Repository(#[from] repository::Error),
     #[error("broadcast error: {0}")]
     Broadcast(#[from] broadcast::Error),
+    #[error("Dify error: {0}")]
+    Dify(#[from] dify::Error),
     #[error("OpenAI API error: {0}")]
     Api(#[from] openai_dive::v1::error::APIError),
     #[error("OpenAI response parameter builder error: {0}")]
@@ -93,42 +96,31 @@ fn get_timestamp() -> Result<u64, Error> {
         .as_secs())
 }
 
+#[async_trait]
+trait Function {
+    fn name(&self) -> &'static str;
+    fn definition(&self) -> ResponseTool;
+    async fn call(&self, args_json: &str) -> Result<String, Error>;
+}
+
 #[derive(Deserialize)]
 struct MemorizeFunctionArguments {
     items: Vec<String>,
 }
 
-pub struct OpenAiCore {
+struct MemorizeFunction {
     repository: Arc<RwLock<Repository>>,
-    openai: Client,
-    model: Model,
-    max_tokens: u32,
-    initial_prompt: Tera,
 }
 
-impl OpenAiCore {
-    pub async fn new(repository: Arc<RwLock<Repository>>, model: Model) -> Result<Self, Error> {
-        let openai = Client::new_from_env();
-        let mut initial_prompt = Tera::default();
-        initial_prompt.add_raw_template(TEMPLATE_NAME, include_str!("../prompt/initial.txt"))?;
-
-        Ok(Self {
-            repository,
-            openai,
-            model,
-            max_tokens: 1000,
-            initial_prompt,
-        })
+#[async_trait]
+impl Function for MemorizeFunction {
+    fn name(&self) -> &'static str {
+        "memorize"
     }
 
-    async fn think_openai(
-        &self,
-        model: &String,
-        input_chats: Vec<ChatInput>,
-        previous_id: Option<&String>,
-    ) -> Result<(Vec<ChatOutput>, String, u32), Error> {
-        let tools = vec![ResponseTool::Function {
-            name: "memorize".to_string(),
+    fn definition(&self) -> ResponseTool {
+        ResponseTool::Function {
+            name: self.name().to_string(),
             description: Some("Save knowledge to memories section in instruction".to_string()),
             parameters: serde_json::json!({
                 "type": "object",
@@ -145,7 +137,108 @@ impl OpenAiCore {
                 "additionalProperties": false
             }),
             strict: true,
-        }];
+        }
+    }
+
+    async fn call(&self, args_json: &str) -> Result<String, Error> {
+        let args: MemorizeFunctionArguments = serde_json::from_str(&args_json)?;
+        self.repository.write().await.append_memory(MemoryRecord {
+            content: args.items,
+            timestamp: get_timestamp()?,
+        })?;
+        Ok("success".to_string())
+    }
+}
+
+#[derive(Deserialize)]
+struct ExecuteCodeFunctionArguments {
+    code: String,
+}
+
+struct ExecuteCodeFunction {
+    client: CodeExecutor,
+}
+
+#[async_trait]
+impl Function for ExecuteCodeFunction {
+    fn name(&self) -> &'static str {
+        "execute_code"
+    }
+
+    fn definition(&self) -> ResponseTool {
+        ResponseTool::Function {
+            name: self.name().to_string(),
+            description: Some(
+                "Execute Python code. you must print() output; only stdout is returned. available packages: requests certifi beautifulsoup4 numpy scipy pandas scikit-learn matplotlib lxml pypdf".to_string(),
+            ),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "code to execute"
+                }
+                },
+                "required": ["code"],
+                "additionalProperties": false
+            }),
+            strict: true,
+        }
+    }
+
+    async fn call(&self, args_json: &str) -> Result<String, Error> {
+        let args: ExecuteCodeFunctionArguments = serde_json::from_str(&args_json)?;
+        Ok(self.client.execute(&args.code).await?)
+    }
+}
+
+pub struct OpenAiCore {
+    repository: Arc<RwLock<Repository>>,
+    openai: Client,
+    model: Model,
+    max_tokens: u32,
+    initial_prompt: Tera,
+    functions: Vec<Box<dyn Function + Send + Sync>>,
+}
+
+impl OpenAiCore {
+    pub async fn new(
+        repository: Arc<RwLock<Repository>>,
+        model: Model,
+        dify_host: Option<String>,
+    ) -> Result<Self, Error> {
+        let openai = Client::new_from_env();
+
+        let mut initial_prompt = Tera::default();
+        initial_prompt.add_raw_template(TEMPLATE_NAME, include_str!("../prompt/initial.txt"))?;
+
+        let mut functions: Vec<Box<dyn Function + Send + Sync>> =
+            vec![Box::new(MemorizeFunction {
+                repository: repository.clone(),
+            })];
+        if let Some(host) = dify_host {
+            functions.push(Box::new(ExecuteCodeFunction {
+                client: CodeExecutor::new(&host)?,
+            }));
+        }
+
+        Ok(Self {
+            repository,
+            openai,
+            model,
+            max_tokens: 1000,
+            initial_prompt,
+            functions,
+        })
+    }
+
+    async fn think_openai(
+        &self,
+        model: &String,
+        input_chats: Vec<ChatInput>,
+        previous_id: Option<&String>,
+    ) -> Result<(Vec<ChatOutput>, String, u32), Error> {
+        let tools: Vec<ResponseTool> = self.functions.iter().map(|f| f.definition()).collect();
 
         let inputs = input_chats
             .iter()
@@ -292,17 +385,15 @@ impl OpenAiCore {
     async fn do_call(&self, call: &ChatOutputFunctionCall) -> Result<ChatInputFunctionCall, Error> {
         info!(name = &call.name, "function call");
 
-        let output = match &*call.name {
-            "memorize" => {
-                let args: MemorizeFunctionArguments = serde_json::from_str(&call.args)?;
-                self.repository.write().await.append_memory(MemoryRecord {
-                    content: args.items,
-                    timestamp: get_timestamp()?,
-                })?;
-                Ok("success".to_string())
-            }
-            _ => Err(Error::UnknownFunctionCall),
-        }?;
+        let func = self
+            .functions
+            .iter()
+            .find(|f| f.name() == call.name)
+            .ok_or(Error::UnknownFunctionCall)?;
+        let output = func
+            .call(&call.args)
+            .await
+            .unwrap_or_else(|e| format!("error: {}", e));
 
         info!(output = &output, "function call finished");
 

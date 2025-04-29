@@ -1,11 +1,5 @@
 use std::env;
 
-use crate::common::{
-    broadcast::{self, IdentifiedBroadcast},
-    chat::Modality,
-    events::{self, Event, EventComponent},
-};
-use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
 use thiserror::Error;
@@ -23,8 +17,6 @@ pub enum Error {
     JsonParse(#[from] serde_json::Error),
     #[error("Request error: {0}")]
     Reqwest(#[from] reqwest::Error),
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
 }
 
 #[derive(Deserialize)]
@@ -54,7 +46,7 @@ impl CodeExecutor {
         })
     }
 
-    async fn execute(&self, code: &str) -> Result<String, Error> {
+    pub async fn execute(&self, code: &str) -> Result<String, Error> {
         info!(code = code, "execute");
 
         let json = serde_json::json!({
@@ -98,55 +90,5 @@ impl CodeExecutor {
             }
             None => Err(Error::CodeExecution(result.code, result.message, None)),
         }
-    }
-
-    async fn run_internal(
-        &mut self,
-        mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), Error> {
-        info!("start executor");
-
-        loop {
-            let event = broadcast.recv().await?;
-            match event {
-                Event::AssistantMessage {
-                    modality: Modality::Code,
-                    message,
-                    usage: _,
-                } => {
-                    let result = self.execute(&message).await;
-                    let message = match result {
-                        Err(Error::CodeExecution(_, _, Some(detail))) => {
-                            format!("[code error] {}", detail)
-                        }
-                        Err(Error::CodeExecution(code, _, None)) => {
-                            format!("[exit status {}]", code)
-                        }
-                        Err(e) => {
-                            format!("[error] {}", e)
-                        }
-                        Ok(output) => output,
-                    };
-                    let event = Event::SystemMessage {
-                        modality: Modality::Text,
-                        message,
-                    };
-                    let _ = broadcast.send(event)?;
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl EventComponent for CodeExecutor {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
-        self.run_internal(broadcast.participate())
-            .await
-            .map_err(|e| events::Error::Component(format!("executor: {}", e)))
     }
 }
