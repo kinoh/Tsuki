@@ -2,7 +2,9 @@ use crate::adapter::dify::{self, CodeExecutor};
 use crate::adapter::openai;
 use crate::adapter::openai::{Function, Thinker};
 use crate::common::broadcast::{self, IdentifiedBroadcast};
-use crate::common::chat::{ChatInput, ChatInputMessage, ChatOutput, ChatOutputMessage, Modality};
+use crate::common::chat::{
+    ChatInput, ChatInputMessage, ChatOutput, ChatOutputFunctionCall, ChatOutputMessage, Modality,
+};
 use crate::common::events::{self, Event, EventComponent};
 use crate::common::memory::MemoryRecord;
 use crate::common::message::{self, MessageRecord, MessageRecordChat};
@@ -36,15 +38,29 @@ pub enum Model {
     OpenAi(String),
 }
 
-fn to_event(message: &ChatOutputMessage, usage: u32) -> Option<Event> {
-    if let Some(ref content) = message.content {
-        Some(Event::AssistantMessage {
-            modality: message.modality,
-            message: content.clone(),
-            usage: usage,
-        })
-    } else {
-        None
+fn to_event(output: &ChatOutput, usage: u32) -> Option<Event> {
+    match output {
+        ChatOutput::Message(message) => {
+            if let Some(ref content) = message.content {
+                Some(Event::AssistantMessage {
+                    modality: message.modality,
+                    message: content.clone(),
+                    usage: usage,
+                })
+            } else {
+                None
+            }
+        }
+        ChatOutput::FunctionCall(call) => Some(Event::AssistantMessage {
+            modality: Modality::Text,
+            message: serde_json::to_string(call).unwrap_or("<serialization failed>".to_string()),
+            usage,
+        }),
+        ChatOutput::BuiltinToolCall(call) => Some(Event::AssistantMessage {
+            modality: Modality::Text,
+            message: serde_json::to_string(call).unwrap_or("<serialization failed>".to_string()),
+            usage,
+        }),
     }
 }
 
@@ -211,29 +227,36 @@ impl OpenAiCore {
     ) -> Result<(Vec<ChatOutput>, String, u32), Error> {
         let chat = if let ChatInput::Message(ref message) = input_chats[0] {
             if message.modality == Modality::Audio {
-                ChatOutputMessage {
+                ChatOutput::Message(ChatOutputMessage {
                     activity: None,
                     feeling: None,
                     modality: Modality::Audio,
                     content: Some(message.content.clone()),
-                }
+                })
+            } else if message.content.starts_with("call ") {
+                let parts: Vec<&str> = message.content.splitn(3, " ").collect();
+                ChatOutput::FunctionCall(ChatOutputFunctionCall {
+                    call_id: "call_xxx".to_string(),
+                    name: parts.get(1).unwrap_or(&"-").to_string(),
+                    args: parts.get(2).unwrap_or(&"-").to_string(),
+                })
             } else {
-                ChatOutputMessage {
+                ChatOutput::Message(ChatOutputMessage {
                     activity: None,
                     feeling: None,
                     modality: Modality::Text,
                     content: Some(serde_json::to_string(&message)?),
-                }
+                })
             }
         } else {
-            ChatOutputMessage {
+            ChatOutput::Message(ChatOutputMessage {
                 activity: None,
                 feeling: None,
                 modality: Modality::Text,
                 content: Some("no message".to_string()),
-            }
+            })
         };
-        Ok((vec![ChatOutput::Message(chat)], "".to_string(), 0))
+        Ok((vec![chat], "".to_string(), 0))
     }
 
     async fn think_and_save(
@@ -281,15 +304,11 @@ impl OpenAiCore {
             let (outputs, usage) = self.think_and_save(inputs).await?;
             let mut call_outputs = Vec::new();
             for output in outputs {
-                match output {
-                    ChatOutput::FunctionCall(call) => call_outputs
-                        .push(ChatInput::FunctionCall(self.thinker.do_call(&call).await)),
-                    ChatOutput::Message(message) => {
-                        if let Some(event) = to_event(&message, usage) {
-                            broadcast.send(event)?;
-                        }
-                    }
-                    ChatOutput::BuiltinToolCall(_) => {}
+                if let ChatOutput::FunctionCall(ref call) = output {
+                    call_outputs.push(ChatInput::FunctionCall(self.thinker.do_call(call).await));
+                }
+                if let Some(event) = to_event(&output, usage) {
+                    broadcast.send(event)?;
                 }
             }
             if call_outputs.is_empty() {
