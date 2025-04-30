@@ -3,9 +3,10 @@ use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use thiserror::Error;
 use tracing::info;
+use uuid::Uuid;
 
 use super::memory::MemoryRecord;
-use super::message::MessageRecord;
+use super::message::{MessageRecord, SessionId};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -17,6 +18,7 @@ pub enum Error {
 
 #[derive(Serialize, Deserialize, Default)]
 struct RepositoryData {
+    current_session: Option<SessionId>,
     messages: Vec<MessageRecord>,
     memories: Vec<MemoryRecord>,
 }
@@ -63,6 +65,26 @@ impl Repository {
         Ok(())
     }
 
+    pub fn get_or_create_session(&mut self) -> Result<SessionId, Error> {
+        if let Some(ref session) = self.data.current_session {
+            Ok(session.clone())
+        } else {
+            let session = Uuid::new_v4().simple().to_string();
+            self.data.current_session = Some(session.clone());
+            self.save()?;
+            Ok(session)
+        }
+    }
+
+    pub fn has_session(&self) -> bool {
+        self.data.current_session.is_some()
+    }
+
+    pub fn clear_session(&mut self) -> Result<(), Error> {
+        self.data.current_session = None;
+        self.save()
+    }
+
     pub fn append_message(&mut self, record: MessageRecord) -> Result<(), Error> {
         self.data.messages.push(record);
         self.save()
@@ -83,12 +105,17 @@ impl Repository {
         response
     }
 
-    pub fn last_message_id(&self) -> Option<&String> {
-        self.data
-            .messages
-            .iter()
-            .rev()
-            .find_map(|r| r.response_id.as_ref())
+    pub fn last_response_id(&self) -> Option<&String> {
+        if let Some(ref session) = self.data.current_session {
+            self.data
+                .messages
+                .iter()
+                .rev()
+                .filter(|r| r.session == *session)
+                .find_map(|r| r.response_id.as_ref())
+        } else {
+            None
+        }
     }
 
     pub fn append_memory(&mut self, record: MemoryRecord) -> Result<(), Error> {

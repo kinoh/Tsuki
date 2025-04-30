@@ -13,6 +13,8 @@ pub enum Error {
 pub const ASSISTANT_NAME: &str = "つき";
 pub const SYSTEM_USER_NAME: &str = "system";
 
+pub type SessionId = String;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum MessageRecordChat {
     Input(Vec<ChatInput>),
@@ -24,6 +26,7 @@ pub struct MessageRecord {
     pub timestamp: u64,
     pub chat: MessageRecordChat,
     pub response_id: Option<String>,
+    pub session: SessionId,
     pub usage: u32,
 }
 

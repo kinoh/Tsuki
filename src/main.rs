@@ -7,7 +7,10 @@ mod components;
 use clap::Parser;
 use color_eyre::{eyre, Result};
 use common::{
-    events::EventSystem, message::ASSISTANT_NAME, mumble::MumbleClient, repository::Repository,
+    events::{Event, EventSystem},
+    message::ASSISTANT_NAME,
+    mumble::MumbleClient,
+    repository::Repository,
 };
 use components::{
     core::{Model, OpenAiCore},
@@ -15,11 +18,11 @@ use components::{
     interactive::{InteractiveProxy, Signal},
     notifier::Notifier,
     recognizer::SpeechRecognizer,
+    scheduler::Scheduler,
     speak::SpeechEngine,
-    ticker::Ticker,
     web::WebState,
 };
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, KeyCode};
 use futures::future::select_all;
 use ratatui::{
     layout::{Constraint, Layout},
@@ -65,6 +68,8 @@ enum ApplicationError {
     Web(#[from] components::web::Error),
     #[error("notifier error: {0}")]
     Notifier(#[from] components::notifier::Error),
+    #[error("Scheduler error: {0}")]
+    Scheduler(#[from] components::scheduler::Error),
 }
 
 #[derive(Parser, Debug, Serialize)]
@@ -87,7 +92,7 @@ struct Args {
     #[arg(long, default_value_t = 2953u16)]
     port: u16,
     #[arg(long, default_value_t = 0u64)]
-    tick_interval_mins: u64,
+    scheduler_resolution_secs: u64,
     #[arg(long)]
     interactive: bool,
 }
@@ -104,7 +109,7 @@ impl InteractiveApp {
             terminal.draw(|frame| self.render(frame))?;
             if event::poll(Duration::from_millis(20))? {
                 match event::read()? {
-                    Event::Key(key) => match key.code {
+                    crossterm::event::Event::Key(key) => match key.code {
                         KeyCode::Esc => {
                             break Ok(());
                         }
@@ -205,9 +210,10 @@ async fn app() -> Result<(), ApplicationError> {
     let eventlogger = EventLogger::new();
     event_system.run(eventlogger);
 
-    if args.tick_interval_mins > 0 {
-        let ticker = Ticker::new(Duration::from_secs(args.tick_interval_mins * 60));
-        event_system.run(ticker);
+    if args.scheduler_resolution_secs > 0 {
+        let mut scheduler = Scheduler::new(Duration::from_secs(args.scheduler_resolution_secs));
+        scheduler.register("0 * * * * *", Event::FinishSession {})?;
+        event_system.run(scheduler);
     }
 
     let pretty_history = cfg!(debug_assertions);

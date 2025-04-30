@@ -263,15 +263,23 @@ impl OpenAiCore {
         &mut self,
         input_chats: Vec<ChatInput>,
     ) -> Result<(Vec<ChatOutput>, u32), Error> {
-        let user_record = MessageRecord {
-            timestamp: get_timestamp()?,
-            chat: MessageRecordChat::Input(input_chats.clone()),
-            response_id: None,
-            usage: 0,
-        };
-        self.repository.write().await.append_message(user_record)?;
+        let previous_id = {
+            let mut repo = self.repository.write().await;
 
-        let previous_id = self.repository.read().await.last_message_id().cloned();
+            let previous_id = repo.last_response_id().cloned();
+
+            let user_record = MessageRecord {
+                timestamp: get_timestamp()?,
+                chat: MessageRecordChat::Input(input_chats.clone()),
+                response_id: None,
+                session: repo.get_or_create_session()?,
+                usage: 0,
+            };
+            repo.append_message(user_record)?;
+
+            previous_id
+        };
+
         let (outputs, response_id, usage) = match &self.model {
             Model::OpenAi(model) => {
                 self.think_openai(&model, input_chats, previous_id.as_ref())
@@ -280,16 +288,17 @@ impl OpenAiCore {
             Model::Echo => self.think_echo(input_chats),
         }?;
 
-        let assistant_record = MessageRecord {
-            timestamp: get_timestamp()?,
-            chat: MessageRecordChat::Output(outputs.clone()),
-            response_id: Some(response_id),
-            usage,
-        };
-        self.repository
-            .write()
-            .await
-            .append_message(assistant_record)?;
+        {
+            let mut repo = self.repository.write().await;
+            let assistant_record = MessageRecord {
+                timestamp: get_timestamp()?,
+                chat: MessageRecordChat::Output(outputs.clone()),
+                response_id: Some(response_id),
+                session: repo.get_or_create_session()?,
+                usage,
+            };
+            repo.append_message(assistant_record)?;
+        }
 
         Ok((outputs, usage))
     }
@@ -312,10 +321,12 @@ impl OpenAiCore {
                 }
             }
             if call_outputs.is_empty() {
-                break Ok(());
+                break;
             }
             inputs = call_outputs;
         }
+
+        Ok(())
     }
 
     async fn run_internal(
@@ -338,17 +349,6 @@ impl OpenAiCore {
                     )
                     .await?
                 }
-                Event::SystemMessage { modality, message } => {
-                    self.receive(
-                        &broadcast,
-                        ChatInputMessage {
-                            modality,
-                            user: message::SYSTEM_USER_NAME.to_string(),
-                            content: message,
-                        },
-                    )
-                    .await?
-                }
                 Event::TextMessage { user, message } => {
                     self.receive(
                         &broadcast,
@@ -359,6 +359,20 @@ impl OpenAiCore {
                         },
                     )
                     .await?
+                }
+                Event::FinishSession => {
+                    if self.repository.read().await.has_session() {
+                        self.receive(
+                            &broadcast,
+                            ChatInputMessage {
+                                modality: Modality::Text,
+                                user: message::SYSTEM_USER_NAME.to_string(),
+                                content: "session finished".to_string(),
+                            },
+                        )
+                        .await?;
+                        self.repository.write().await.clear_session()?;
+                    }
                 }
                 _ => (),
             }

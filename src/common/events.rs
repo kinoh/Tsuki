@@ -13,10 +13,6 @@ pub enum Event {
         user: String,
         message: String,
     },
-    SystemMessage {
-        modality: Modality,
-        message: String,
-    },
     AssistantMessage {
         modality: Modality,
         message: String,
@@ -33,6 +29,7 @@ pub enum Event {
     Notify {
         content: String,
     },
+    FinishSession,
 }
 
 impl Display for Event {

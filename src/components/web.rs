@@ -24,7 +24,7 @@ use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
     chat::{ChatInput, ChatInputMessage, ChatOutput, ChatOutputMessage, Modality},
     events::{self, Event, EventComponent},
-    message::{MessageRecord, MessageRecordChat, ASSISTANT_NAME, SYSTEM_USER_NAME},
+    message::{MessageRecord, MessageRecordChat, ASSISTANT_NAME},
     repository::Repository,
 };
 
@@ -274,18 +274,6 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
                             token_usage: usage,
                             chat: serde_json::to_value(vec![
                                 ChatOutput::Message(ChatOutputMessage { feeling: None, activity: None, modality, content: Some(message) })
-                            ]).unwrap_or(Value::String("<serialization failed>".to_string())),
-                            timestamp: SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-                        })
-                    },
-                    Ok(Event::SystemMessage { modality, message }) => {
-                        Some(ResponseMessage {
-                            role: Role::User,
-                            user: SYSTEM_USER_NAME.to_string(),
-                            token_usage: 0,
-                            chat: serde_json::to_value(vec![
-                                ChatInput::Message(ChatInputMessage { user: SYSTEM_USER_NAME.to_string(), modality, content: message })
                             ]).unwrap_or(Value::String("<serialization failed>".to_string())),
                             timestamp: SystemTime::now()
                                 .duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
