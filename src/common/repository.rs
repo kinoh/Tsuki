@@ -30,8 +30,8 @@ pub struct Repository {
 }
 
 impl Repository {
-    pub fn new(path: String, pretty: bool) -> Result<Self, Error> {
-        let data = match File::open(&path) {
+    pub fn new(path: &str, pretty: bool) -> Result<Self, Error> {
+        let data = match File::open(path) {
             Err(e) => {
                 if e.kind() == ErrorKind::NotFound {
                     info!(path = path, "data file not found");
@@ -51,7 +51,11 @@ impl Repository {
             }
         };
 
-        Ok(Self { path, pretty, data })
+        Ok(Self {
+            path: path.to_string(),
+            pretty,
+            data,
+        })
     }
 
     fn save(&mut self) -> Result<(), Error> {

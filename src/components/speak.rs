@@ -52,10 +52,10 @@ pub struct SpeechEngine {
 }
 
 impl SpeechEngine {
-    pub fn new(endpoint: String, speaker: u16) -> Self {
+    pub fn new(endpoint: &str, speaker: u16) -> Self {
         Self {
             client: Client::new(),
-            endpoint,
+            endpoint: endpoint.to_string(),
             speaker,
         }
     }

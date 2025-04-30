@@ -91,7 +91,7 @@ pub struct SpeechRecognizer {
 impl SpeechRecognizer {
     pub fn new(
         mumble: mumble::MumbleClient,
-        vosk_model_path: String,
+        vosk_model_path: &str,
         monitor_interval: time::Duration,
         silence_timeout: time::Duration,
     ) -> Result<Self, Error> {

@@ -179,16 +179,18 @@ impl OpenAiCore {
     pub async fn new(
         repository: Arc<RwLock<Repository>>,
         model: Model,
-        dify_host: Option<String>,
+        openai_api_key: &str,
+        dify_sandbox_host: Option<&str>,
+        dify_sandbox_api_key: &str,
     ) -> Result<Self, Error> {
-        let mut thinker = Thinker::new()?;
+        let mut thinker = Thinker::new(openai_api_key)?;
 
         thinker.register_function(MemorizeFunction {
             repository: repository.clone(),
         });
-        if let Some(host) = dify_host {
+        if let Some(host) = dify_sandbox_host {
             thinker.register_function(ExecuteCodeFunction {
-                client: CodeExecutor::new(&host)?,
+                client: CodeExecutor::new(host, dify_sandbox_api_key)?,
             });
         }
 

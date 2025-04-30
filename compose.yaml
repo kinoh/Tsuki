@@ -7,8 +7,7 @@ services:
       context: .
       dockerfile: docker/app/Dockerfile
       target: final
-    command: --history /var/memory/history.jsonl --openai-model gpt-4o --dify-host ssrf-proxy:8194 --vosk-model /var/model/vosk-model-ja-0.22 --voicevox-endpoint http://voicevox-engine:50021 --mumble-host mumble-server
-    env_file: .env
+    command: --audio --notifier --scheduler
     ports:
       - "2953:2953"
     volumes:

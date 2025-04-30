@@ -190,11 +190,7 @@ pub struct MumbleClient {
 }
 
 impl MumbleClient {
-    pub async fn new(
-        server_host: String,
-        server_port: u16,
-        user_name: String,
-    ) -> Result<Self, Error> {
+    pub async fn new(server_host: &str, server_port: u16, user_name: &str) -> Result<Self, Error> {
         let server_addr = (server_host.as_ref(), server_port)
             .to_socket_addrs()?
             .next()
@@ -215,7 +211,7 @@ impl MumbleClient {
             .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
             .with_no_client_auth();
         let connector = TlsConnector::from(Arc::new(config));
-        let domain = server_host.try_into()?;
+        let domain = server_host.to_string().try_into()?;
         let tls_stream = connector.connect(domain, stream).await?;
 
         debug!("TLS connected..");
@@ -229,7 +225,7 @@ impl MumbleClient {
         write.send(ver_msg.into()).await?;
 
         let mut auth_msg = msgs::Authenticate::new();
-        auth_msg.set_username(user_name);
+        auth_msg.set_username(user_name.to_string());
         auth_msg.set_opus(true);
         write.send(auth_msg.into()).await?;
 

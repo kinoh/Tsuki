@@ -36,10 +36,10 @@ pub enum Error {
     Axum(#[from] axum::Error),
     #[error("invalid header value: {0}")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
-    #[error("envvar not set: {0}")]
-    EnvVar(&'static str),
     #[error("broadcast error: {0}")]
     Broadcast(#[from] broadcast::Error),
+    #[error("Auth token is empty")]
+    AuthTokenIsEmpty,
 }
 
 fn secure_eq(a: &str, b: &str) -> bool {
@@ -322,17 +322,17 @@ impl WebState {
     pub fn new(
         repository: Arc<RwLock<Repository>>,
         port: u16,
+        auth_token: &str,
         app_args: Value,
     ) -> Result<WebInterface, Error> {
-        let auth_token = env::var_os("WEB_AUTH_TOKEN")
-            .map(|t| t.to_string_lossy().to_string())
-            .and_then(|t| if t.is_empty() { None } else { Some(t) })
-            .ok_or(Error::EnvVar("WEB_AUTH_TOKEN"))?;
+        if auth_token.is_empty() {
+            return Err(Error::AuthTokenIsEmpty);
+        }
         Ok(Arc::new(Self {
             port,
             broadcast: None,
             repository,
-            auth_token,
+            auth_token: auth_token.to_string(),
             app_args,
         }))
     }

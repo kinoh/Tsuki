@@ -44,6 +44,8 @@ use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 enum ApplicationError {
     #[error("component stopped: {0}")]
     ComponentStopped(usize),
+    #[error("Numerical value conversion error: {0}")]
+    TryFromInt(#[from] std::num::TryFromIntError),
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
     #[error("tokio join error: {0}")]
@@ -72,29 +74,26 @@ enum ApplicationError {
     Scheduler(#[from] components::scheduler::Error),
 }
 
+#[cfg(debug_assertions)]
+static_toml::static_toml! {
+    static CONF = include_toml!("./conf/local.toml");
+}
+#[cfg(not(debug_assertions))]
+static_toml::static_toml! {
+    static CONF = include_toml!("./conf/default.toml");
+}
+
 #[derive(Parser, Debug, Serialize)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(long, default_value = "")]
-    mumble_host: String,
-    #[arg(long, default_value_t = 64738u16)]
-    mumble_port: u16,
-    #[arg(long, default_value = "")]
-    vosk_model: String,
     #[arg(long)]
-    history: String,
-    #[arg(long, default_value = "")]
-    openai_model: String,
-    #[arg(long, default_value = "")]
-    voicevox_endpoint: String,
-    #[arg(long, default_value = "")]
-    dify_host: String,
-    #[arg(long, default_value_t = 2953u16)]
-    port: u16,
-    #[arg(long, default_value_t = 0u64)]
-    scheduler_resolution_secs: u64,
+    audio: bool,
     #[arg(long)]
     interactive: bool,
+    #[arg(long)]
+    scheduler: bool,
+    #[arg(long)]
+    notifier: bool,
 }
 
 #[derive(Debug)]
@@ -180,54 +179,64 @@ async fn app() -> Result<(), ApplicationError> {
 
     let mut event_system = EventSystem::new(32);
 
-    if !args.mumble_host.is_empty() && !args.vosk_model.is_empty() {
+    if args.audio {
         let mumble_client = MumbleClient::new(
-            args.mumble_host,
-            args.mumble_port,
-            ASSISTANT_NAME.to_string(),
+            CONF.recognizer.mumble_host,
+            CONF.recognizer.mumble_port.try_into()?,
+            ASSISTANT_NAME,
         )
         .await?;
 
         let speech_recognizer = SpeechRecognizer::new(
             mumble_client,
-            args.vosk_model,
+            CONF.recognizer.vosk_model_path,
             Duration::from_millis(100),
             Duration::from_millis(500),
         )?;
 
         event_system.run(speech_recognizer);
-    }
 
-    if !args.voicevox_endpoint.is_empty() {
-        let speaker = SpeechEngine::new(args.voicevox_endpoint, 58);
+        let speaker = SpeechEngine::new(
+            CONF.speak.voicevox_endpoint,
+            CONF.speak.voicevox_speaker_index.try_into()?,
+        );
 
         event_system.run(speaker);
     }
 
-    let notifier = Notifier::new().await?;
-    event_system.run(notifier);
+    if args.notifier {
+        let notifier = Notifier::new().await?;
+        event_system.run(notifier);
+    }
+
+    if args.scheduler {
+        let mut scheduler = Scheduler::new(Duration::from_secs(
+            CONF.scheduler.resolution_secs.try_into()?,
+        ));
+        scheduler.register("0 0 19 * * *", Event::FinishSession {})?;
+        event_system.run(scheduler);
+    }
 
     let eventlogger = EventLogger::new();
     event_system.run(eventlogger);
 
-    if args.scheduler_resolution_secs > 0 {
-        let mut scheduler = Scheduler::new(Duration::from_secs(args.scheduler_resolution_secs));
-        scheduler.register("0 * * * * *", Event::FinishSession {})?;
-        event_system.run(scheduler);
-    }
-
     let pretty_history = cfg!(debug_assertions);
-    let repository = Arc::new(RwLock::new(Repository::new(args.history, pretty_history)?));
+    let repository = Arc::new(RwLock::new(Repository::new(
+        CONF.main.history_path,
+        pretty_history,
+    )?));
 
-    let model = if args.openai_model.is_empty() {
+    let model = if CONF.core.openai_model.is_empty() {
         Model::Echo
     } else {
-        Model::OpenAi(args.openai_model)
+        Model::OpenAi(CONF.core.openai_model.to_string())
     };
     let core = OpenAiCore::new(
         repository.clone(),
         model,
-        Some(args.dify_host).filter(|h| !h.is_empty()),
+        CONF.core.openai_api_key,
+        Some(CONF.core.dify_sandbox_host).filter(|h| !h.is_empty()),
+        CONF.core.dify_sandbox_api_key,
     )
     .await?;
     let mut interactive_app = if args.interactive {
@@ -244,7 +253,12 @@ async fn app() -> Result<(), ApplicationError> {
         None
     };
 
-    let web_interface = WebState::new(repository, args.port, args_json)?;
+    let web_interface = WebState::new(
+        repository,
+        CONF.web.port.try_into()?,
+        CONF.web.auth_token,
+        args_json,
+    )?;
     event_system.run(web_interface);
 
     let any_components = select_all(event_system.futures());

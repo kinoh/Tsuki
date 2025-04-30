@@ -52,8 +52,8 @@ pub struct Thinker {
 }
 
 impl Thinker {
-    pub fn new() -> Result<Self, Error> {
-        let client = Client::new_from_env();
+    pub fn new(api_key: &str) -> Result<Self, Error> {
+        let client = Client::new(api_key.to_string());
 
         let mut initial_prompt = Tera::default();
         initial_prompt.add_raw_template(TEMPLATE_NAME, include_str!("../prompt/initial.txt"))?;

@@ -1,5 +1,3 @@
-use std::env;
-
 use reqwest::Client;
 use serde::Deserialize;
 use thiserror::Error;
@@ -7,8 +5,6 @@ use tracing::{info, warn};
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("DIFY_SANDBOX_API_KEY not set")]
-    MissingApiKey,
     #[error("Invalid response: {0}")]
     HttpRequest(String),
     #[error("Code execution error: code={0}, message={1}, detail={2:?}")]
@@ -38,11 +34,10 @@ pub struct CodeExecutor {
 }
 
 impl CodeExecutor {
-    pub fn new(dify_sandbox_host: &str) -> Result<Self, Error> {
-        let api_key = env::var("DIFY_SANDBOX_API_KEY").map_err(|_| Error::MissingApiKey)?;
+    pub fn new(dify_sandbox_host: &str, api_key: &str) -> Result<Self, Error> {
         Ok(Self {
             endpoint: format!("http://{}/v1/sandbox/run", dify_sandbox_host),
-            api_key,
+            api_key: api_key.to_string(),
         })
     }
 

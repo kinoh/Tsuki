@@ -1,0 +1,28 @@
+[main]
+history_path = "/var/memory/history.json"
+
+[core]
+openai_model = "gpt-4o"
+openai_api_key = ""
+max_output_tokens = 10000
+dify_sandbox_host = "ssrf-proxy:8194"
+dify_sandbox_api_key = ""
+
+[scheduler]
+resolution_secs = 10
+session_reset_schedule = "0 0 0 * * *"
+
+[web]
+port = 2953
+auth_token = ""
+
+[recognizer]
+mumble_host = "mumble-server"
+mumble_port = 64738
+vosk_model_path = "/var/model/vosk-model-ja-0.22"
+monitor_interval_millisecs = 100
+silence_timeout_millisecs = 500
+
+[speak]
+voicevox_endpoint = "http://voicevox-engine:50021"
+voicevox_speaker_index = 1
