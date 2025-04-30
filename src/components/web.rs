@@ -110,6 +110,7 @@ async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
 
     let app = Router::new()
         .route("/", get(root))
+        .route("/metrics", get(metrics))
         .route("/metadata", get(metadata))
         .route("/messages", get(messages))
         .route("/notification/test", post(notification_test))
@@ -190,6 +191,19 @@ async fn metadata(State(state): State<Arc<WebState>>) -> Json<Value> {
     Json(json!({
         "revision": env!("GIT_HASH"),
         "args": state.app_args.clone(),
+    }))
+}
+
+async fn metrics(State(state): State<Arc<WebState>>) -> Json<Value> {
+    let repo = state.repository.read().await;
+    let messages = repo.messages(None, None);
+    let mut sessions: Vec<&String> = messages.iter().map(|r| &r.session).collect();
+    sessions.dedup();
+
+    Json(json!({
+        "total_usage": messages.iter().map(|r| r.usage).sum::<u32>(),
+        "total_messages": messages.len(),
+        "total_sessions": sessions.len(),
     }))
 }
 
