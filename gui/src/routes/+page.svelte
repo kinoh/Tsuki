@@ -1,4 +1,5 @@
 <script lang="ts">
+
   import { fetch } from '@tauri-apps/plugin-http';
   import {
     onResume,
@@ -7,6 +8,10 @@
   import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
   import { subscribeToTopic, getFCMToken, onPushNotificationOpened, getLatestNotificationData } from "@tauri-plugin-fcm-api";
   import { onMount } from 'svelte';
+
+  import Config from './Config.svelte';
+  import Note from './Note.svelte';
+  import Status from './Status.svelte';
 
   type ChatMessage = { modality: string, user: string, content: string };
   type ChatFunctionCall = { name: string, args: string } | { output: string };
@@ -220,6 +225,7 @@
     };
     notificationSetup();
   });
+
 </script>
 
 <main class="container">
@@ -276,9 +282,13 @@
         </div>
       {/each}
     </div>
-    <iframe class={["floating-window", overlay === "config" ? "shown" : "hidden"]} src="/config" title="config"></iframe>
-    <iframe class={["floating-window", overlay === "status" ? "shown" : "hidden"]} src="/status" title="status"></iframe>
-    <iframe class={["floating-window", overlay === "note" ? "shown" : "hidden"]} src="/note" title="note"></iframe>
+    <button aria-label="Close menu" class={["overlay-mask", overlay === null ? "hidden" : "shown"]} onclick={e => overlay = null}>
+    </button>
+    <div class="floating-window-container">
+      <div class={["floating-window", overlay === "config" ? "shown" : "hidden"]}><Config /></div>
+      <div class={["floating-window", overlay === "status" ? "shown" : "hidden"]}><Status /></div>
+      <div class={["floating-window", overlay === "note" ? "shown" : "hidden"]}><Note /></div>
+    </div>
   </div>
 </main>
 
@@ -338,14 +348,40 @@
   background-color: RGBA(187, 187, 220, 0.9);
 }
 
+.overlay-mask {
+  background-color: RGBA(0, 0, 0, 0);
+  border: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.overlay-mask.shown {
+  pointer-events: auto;
+}
+
+.floating-window-container {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .floating-window {
+  background: RGB(234, 210, 240);
   border: none;
   border-radius: 10px;
   width: 20rem;
-  height: 12rem;
-  position: absolute;
-  left: calc(50% - 10rem);
-  top: calc(50% - 6rem);
+  padding: 0.2rem 0.8rem 1rem;
+  margin-bottom: 2rem;
+  pointer-events: auto;
 }
 
 .message-list {

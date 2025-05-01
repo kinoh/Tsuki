@@ -1,5 +1,7 @@
 <script lang="ts">
 
+  import { fetch } from '@tauri-apps/plugin-http';
+
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let serverMetadata = $state("");
 
@@ -22,31 +24,19 @@
 
 </script>
 
-<div class="field">
-  <label for="serverMetadata">Server metadata</label>
-  <pre id="serverMetadata" class="license">{serverMetadata}</pre>
+<div class="status-box">
+  <div class="field">
+    <label for="serverMetadata">Server metadata</label>
+    <pre id="serverMetadata" class="metadata">{serverMetadata}</pre>
+  </div>
 </div>
 
 <style>
 
-@font-face {
-  font-display: block;
-  font-family: "SourceHanSans";
-  src: url("/fonts/SourceHanSans-VF.ttf");
-}
-
-:root {
-  background: RGB(234, 210, 240) !important;
-  font-family: "SourceHanSans", sans-serif;
-  font-size: 1rem;
+.status-box {
+  font-size: 0.8rem;
   font-weight: 400;
   line-height: 2rem;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100vh;
 }
 
 .field {
@@ -54,7 +44,7 @@
   flex-direction: column;
 }
 
-.license {
+.metadata {
   background-color: #eee;
   outline: none;
   border: none;
@@ -62,7 +52,7 @@
   line-height: 0.8rem;
   padding: 0.2rem;
   width: 98%;
-  height: 6rem;
+  height: 8.5rem;
   overflow: scroll;
   margin: 0;
 }

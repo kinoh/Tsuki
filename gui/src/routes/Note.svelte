@@ -13,31 +13,19 @@
 
 </script>
 
-<div class="field">
-  <label for="sourceHansSansLicense">Source Han Sans license</label>
-  <pre id="sourceHansSansLicense" class="license">{sourceHansSansLicense}</pre>
+<div class="note-box">
+  <div class="field">
+    <label for="sourceHansSansLicense">Source Han Sans license</label>
+    <pre id="sourceHansSansLicense" class="license">{sourceHansSansLicense}</pre>
+  </div>
 </div>
 
 <style>
 
-@font-face {
-  font-display: block;
-  font-family: "SourceHanSans";
-  src: url("/fonts/SourceHanSans-VF.ttf");
-}
-
-:root {
-  background: RGB(234, 210, 240) !important;
-  font-family: "SourceHanSans", sans-serif;
-  font-size: 1rem;
+.note-box {
+  font-size: 0.8rem;
   font-weight: 400;
   line-height: 2rem;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100vh;
 }
 
 .field {
@@ -53,7 +41,7 @@
   line-height: 0.8rem;
   padding: 0.2rem;
   width: 98%;
-  height: 6rem;
+  height: 10rem;
   overflow: scroll;
   margin: 0;
 }
