@@ -51,6 +51,13 @@ fn secure_eq(a: &str, b: &str) -> bool {
     unsafe { memsec::memeq(&a_bytes[0], &b_bytes[0], a_bytes.len()) }
 }
 
+fn is_local(req: &Request) -> bool {
+    req.headers()
+        .get("Host")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|h| h.starts_with("localhost:") || h.starts_with("127.0.0.1:"))
+}
+
 async fn logging_middleware(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request,
@@ -81,7 +88,7 @@ async fn auth_middleware(
 ) -> Result<Response, StatusCode> {
     // Websocket has its own authorization
     // CORS preflight request (using OPTIONS) must not restricted
-    let bypass = (req.uri() == "/ws") || (req.method() == Method::OPTIONS);
+    let bypass = (req.uri() == "/ws") || (req.method() == Method::OPTIONS) || is_local(&req);
     if !bypass {
         let auth_header = req.headers_mut().get(http::header::AUTHORIZATION);
         let auth_header = match auth_header {
