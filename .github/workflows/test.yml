@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Prepare included files
+      run: |
+        cp conf/default.toml.example conf/default.toml
+        touch src/service_account_key.json
+        touch src/prompt/initial.txt
     - name: Install dependencies
       run: sudo apt-get install -y cmake protobuf-compiler
     - name: Setup Rust
