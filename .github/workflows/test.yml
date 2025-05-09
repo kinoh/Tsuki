@@ -23,7 +23,7 @@ jobs:
       run: |
         curl -sSLf -o /tmp/vosk.zip https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-$(arch)-0.3.45.zip
         unzip -qj -d /tmp /tmp/vosk.zip vosk-linux-x86_64-0.3.45/libvosk.so
-        install /tmp/libvosk.so /usr/local/lib
+        sudo install /tmp/libvosk.so /usr/local/lib
         rm /tmp/vosk.zip /tmp/libvosk.so
     - name: Setup Rust
       run: rustup update nightly && rustup default nightly
