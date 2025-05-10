@@ -9,6 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  GIT_HASH: ${{ github.sha }}
   CARGO_TERM_COLOR: always
 
 jobs:

@@ -196,7 +196,7 @@ async fn messages(
 
 async fn metadata(State(state): State<Arc<WebState>>) -> Json<Value> {
     Json(json!({
-        "revision": env!("GIT_HASH"),
+        "revision": std::env::var("GIT_HASH").unwrap_or(String::from("-")),
         "args": state.app_args.clone(),
     }))
 }

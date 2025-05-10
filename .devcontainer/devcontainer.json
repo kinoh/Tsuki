@@ -3,5 +3,8 @@
 	"name": "Rust",
 	"workspaceFolder": "/workspace",
     "dockerComposeFile": ["../compose.yaml", "./compose.yaml"],
-    "service": "app"
+    "service": "app",
+    "containerEnv": {
+        "GIT_HASH": "current"
+    }
 }
