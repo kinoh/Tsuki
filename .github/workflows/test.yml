@@ -32,10 +32,6 @@ jobs:
     - name: Setup Rust
       run: rustup update nightly && rustup default nightly
     - name: Build
-      env:
-        OPENAI_API_KEY: xxx
-        WEB_AUTH_TOKEN: xxx
-        DIFY_SANDBOX_API_KEY: xxx
       run: cargo build --verbose
     - name: Run tests
       env:

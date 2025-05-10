@@ -31,7 +31,7 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 use serde::Serialize;
-use std::{sync::Arc, time::Duration};
+use std::{env, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::{
     select,
@@ -72,6 +72,8 @@ enum ApplicationError {
     Notifier(#[from] components::notifier::Error),
     #[error("Scheduler error: {0}")]
     Scheduler(#[from] components::scheduler::Error),
+    #[error("Invalid environment value: {0}")]
+    EnvVar(&'static str),
 }
 
 #[cfg(debug_assertions)]
@@ -172,6 +174,13 @@ fn setup_logging(interactive: bool) -> Result<(), ApplicationError> {
     Ok(())
 }
 
+fn get_envvar(name: &'static str) -> Result<String, ApplicationError> {
+    match env::var(name) {
+        Ok(v) if !v.is_empty() => Ok(v),
+        _ => Err(ApplicationError::EnvVar(name)),
+    }
+}
+
 async fn app() -> Result<(), ApplicationError> {
     let args = Args::parse();
     setup_logging(args.interactive)?;
@@ -234,9 +243,9 @@ async fn app() -> Result<(), ApplicationError> {
     let core = OpenAiCore::new(
         repository.clone(),
         model,
-        env!("OPENAI_API_KEY"),
+        &get_envvar("OPENAI_API_KEY")?,
         Some(CONF.core.dify_sandbox_host).filter(|h| !h.is_empty()),
-        env!("DIFY_SANDBOX_API_KEY"),
+        &get_envvar("DIFY_SANDBOX_API_KEY")?,
     )
     .await?;
     let mut interactive_app = if args.interactive {
@@ -256,7 +265,7 @@ async fn app() -> Result<(), ApplicationError> {
     let web_interface = WebState::new(
         repository,
         CONF.web.port.try_into()?,
-        env!("WEB_AUTH_TOKEN"),
+        &get_envvar("WEB_AUTH_TOKEN")?,
         args_json,
     )?;
     event_system.run(web_interface);

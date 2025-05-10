@@ -8,6 +8,10 @@ services:
       dockerfile: docker/app/Dockerfile
       target: final
     command: --audio --notifier --scheduler
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN}
+      DIFY_SANDBOX_API_KEY: ${DIFY_SANDBOX_API_KEY}
     ports:
       - "2953:2953"
     volumes:
