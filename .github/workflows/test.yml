@@ -2,7 +2,11 @@ name: Test
 
 on:
   push:
+    paths-ignore:
+      - 'gui/**'
   pull_request:
+    paths-ignore:
+      - 'gui/**'
 
 concurrency:
   group: ${{ github.ref }}
