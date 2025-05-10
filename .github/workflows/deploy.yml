@@ -26,6 +26,7 @@ jobs:
         sudo mkdir -p /var/secrets/
         echo $PROMPT_PRIVATE_KEY | sudo tee /var/secrets/prompt_key
         echo $SERVICE_ACCOUNT_KEY > src/service_account_key.json
+        ls -l /var/secrets/prompt_key src/service_account_key.json
     - name: Decrypt prompt
       run: |
         age -d -i /var/secrets/prompt_key src/prompt/initial.txt.age > src/prompt/initial.txt
