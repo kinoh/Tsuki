@@ -46,7 +46,7 @@ tasks:
     vars:
       SERVICE: '{{index .MATCH 0}}'
     cmds:
-      - docker compose logs {{.SERVICE}}
+      - docker compose logs --tail=100 {{.SERVICE}}
   download_model:
     desc: Download Vosk model
     cmds:
