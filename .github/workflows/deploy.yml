@@ -18,6 +18,11 @@ jobs:
         touch src/service_account_key.json
     - name: Install dependencies
       run: sudo apt-get install -y cmake protobuf-compiler age
+    - name: Install Task
+      uses: arduino/setup-task@v2
+      with:
+        version: 3.x
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Store secrets
       env:
         PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
@@ -27,8 +32,9 @@ jobs:
         printf %s "$PROMPT_PRIVATE_KEY" | sudo tee /var/secrets/prompt_key
         printf %s "$SERVICE_ACCOUNT_KEY" > src/service_account_key.json
     - name: Decrypt prompt
-      run: |
-        age -d -i /var/secrets/prompt_key src/prompt/initial.txt.age > src/prompt/initial.txt
+      env:
+        PROMPT_PRIVATE_KEY_PATH: /var/secrets/prompt_key
+      run: task decrypt_prompt
     - name: Install SSH key
       env:
         PRIVATE_KEY: ${{ secrets.DOCKER_HOST_PRIVATE_KEY }}
@@ -41,7 +47,8 @@ jobs:
         ssh-keyscan -H $(echo ${{ secrets.DOCKER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts
     - name: Build and deploy
       env:
+        DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
         DIFY_SANDBOX_API_KEY: ${{ secrets.DIFY_SANDBOX_API_KEY }}
-      run: docker compose up --build --detach
+      run: task deploy
