@@ -1,4 +1,4 @@
-FROM rustlang/rust:nightly as build
+FROM rustlang/rust:nightly AS build
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ cargo build --locked --release
 cp ./target/release/tsuki /bin/
 EOF
 
-FROM debian:stable-slim as final
+FROM debian:stable-slim AS final
 
 RUN apt-get update \
     && apt-get install -y ca-certificates \
