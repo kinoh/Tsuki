@@ -17,7 +17,7 @@ jobs:
       run: |
         touch src/service_account_key.json
     - name: Install dependencies
-      run: sudo apt-get install -y cmake protobuf-compiler
+      run: sudo apt-get install -y cmake protobuf-compiler age
     - name: Store secrets
       env:
         PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
