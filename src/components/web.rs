@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, sync::Arc, time::SystemTime};
+use std::{net::SocketAddr, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use axum::{
