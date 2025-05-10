@@ -178,12 +178,13 @@ pub struct OpenAiCore {
 impl OpenAiCore {
     pub async fn new(
         repository: Arc<RwLock<Repository>>,
+        prompt_key: &str,
         model: Model,
         openai_api_key: &str,
         dify_sandbox_host: Option<&str>,
         dify_sandbox_api_key: &str,
     ) -> Result<Self, Error> {
-        let mut thinker = Thinker::new(openai_api_key)?;
+        let mut thinker = Thinker::new(prompt_key, openai_api_key)?;
 
         thinker.register_function(MemorizeFunction {
             repository: repository.clone(),

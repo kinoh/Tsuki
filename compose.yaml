@@ -9,6 +9,7 @@ services:
       target: final
     command: --audio --notifier --scheduler
     environment:
+      PROMPT_PRIVATE_KEY: ${PROMPT_PRIVATE_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN}
       DIFY_SANDBOX_API_KEY: ${DIFY_SANDBOX_API_KEY}

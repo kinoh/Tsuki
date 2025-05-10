@@ -242,6 +242,7 @@ async fn app() -> Result<(), ApplicationError> {
     };
     let core = OpenAiCore::new(
         repository.clone(),
+        &get_envvar("PROMPT_PRIVATE_KEY")?,
         model,
         &get_envvar("OPENAI_API_KEY")?,
         Some(CONF.core.dify_sandbox_host).filter(|h| !h.is_empty()),

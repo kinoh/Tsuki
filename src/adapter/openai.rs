@@ -1,6 +1,9 @@
+use std::io::BufReader;
+
 use crate::common::chat::{
     ChatInput, ChatInputFunctionCall, ChatOutput, ChatOutputFunctionCall, ChatOutputMessage,
 };
+use age::ssh::Identity;
 use async_trait::async_trait;
 use openai_dive::v1::api::Client;
 use openai_dive::v1::resources::response::items::{FunctionToolCallOutput, InputItemStatus};
@@ -19,6 +22,10 @@ use tracing::{debug, info, warn};
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("UTF-8 error: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
     #[error("serde json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("Tera error: {0}")]
@@ -29,6 +36,8 @@ pub enum Error {
     ParameterBuilder(
         #[from] openai_dive::v1::resources::response::request::ResponseParametersBuilderError,
     ),
+    #[error("age decryption error: {0}")]
+    Age(#[from] age::DecryptError),
     #[error("OpenAI response message has no content")]
     NoMessageContent,
     #[error("OpenAI response message has refusal")]
@@ -36,6 +45,16 @@ pub enum Error {
 }
 
 pub const TEMPLATE_NAME: &str = "instruction";
+
+fn decrypt_prompt(private_key: &str) -> Result<String, Error> {
+    let encrypted = include_bytes!("../prompt/initial.txt.age");
+
+    let buf = BufReader::new(private_key.as_bytes());
+    let identity = Identity::from_buffer(buf, None)?;
+    let decrypted = age::decrypt(&identity, encrypted)?;
+
+    Ok(str::from_utf8(&decrypted)?.to_string())
+}
 
 #[async_trait]
 pub trait Function {
@@ -52,11 +71,11 @@ pub struct Thinker {
 }
 
 impl Thinker {
-    pub fn new(api_key: &str) -> Result<Self, Error> {
+    pub fn new(prompt_key: &str, api_key: &str) -> Result<Self, Error> {
         let client = Client::new(api_key.to_string());
 
         let mut initial_prompt = Tera::default();
-        initial_prompt.add_raw_template(TEMPLATE_NAME, include_str!("../prompt/initial.txt"))?;
+        initial_prompt.add_raw_template(TEMPLATE_NAME, &decrypt_prompt(prompt_key)?)?;
 
         Ok(Self {
             client,
