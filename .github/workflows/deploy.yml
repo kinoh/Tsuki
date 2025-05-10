@@ -24,20 +24,17 @@ jobs:
         SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
       run: |
         sudo mkdir -p /var/secrets/
-        echo $PROMPT_PRIVATE_KEY | sudo tee /var/secrets/prompt_key
-        echo $SERVICE_ACCOUNT_KEY > src/service_account_key.json
+        printf %s "$PROMPT_PRIVATE_KEY" | sudo tee /var/secrets/prompt_key
+        printf %s "$SERVICE_ACCOUNT_KEY" > src/service_account_key.json
     - name: Decrypt prompt
       run: |
-        ls -l /var/secrets/prompt_key src/service_account_key.json
-        sha1sum /var/secrets/prompt_key
-        age --version
         age -d -i /var/secrets/prompt_key src/prompt/initial.txt.age > src/prompt/initial.txt
     - name: Install SSH key
       env:
         PRIVATE_KEY: ${{ secrets.DOCKER_HOST_PRIVATE_KEY }}
       run: |
         mkdir -p ~/.ssh
-        echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
+        printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
         chmod 700 ~/.ssh/id_rsa
         eval $(ssh-agent -s)
         ssh-add ~/.ssh/id_rsa
