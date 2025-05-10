@@ -1,5 +1,16 @@
 ## Tsuki: Kawaii chat agent
 
+### Features
+
+- Event-driven architecture
+  - See src/common/events.rs
+- Layered architecture
+  - components -> adapter -> common
+- GUI client for PC and Android
+  - Built with [tauri](https://tauri.app/)
+  - See gui/
+- Code execution in [dify-sandbox](https://github.com/langgenius/dify-sandbox)
+
 ### License
 
 This software includes modified versions of the following components:
