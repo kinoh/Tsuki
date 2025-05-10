@@ -23,6 +23,7 @@ jobs:
         PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
         SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
       run: |
+        sudo mkdir -p /var/secrets/
         echo $PROMPT_PRIVATE_KEY | sudo tee /var/secrets/prompt_key
         echo $SERVICE_ACCOUNT_KEY > src/service_account_key.json
     - name: Decrypt prompt
