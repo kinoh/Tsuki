@@ -2,7 +2,7 @@
 .env.local
 .vscode
 
-conf/*.toml
+conf/local.toml
 src/prompt/*.txt
 src/service_account_key.json
 .pnpm-store

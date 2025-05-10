@@ -234,9 +234,9 @@ async fn app() -> Result<(), ApplicationError> {
     let core = OpenAiCore::new(
         repository.clone(),
         model,
-        CONF.core.openai_api_key,
+        env!("OPENAI_API_KEY"),
         Some(CONF.core.dify_sandbox_host).filter(|h| !h.is_empty()),
-        CONF.core.dify_sandbox_api_key,
+        env!("DIFY_SANDBOX_API_KEY"),
     )
     .await?;
     let mut interactive_app = if args.interactive {
@@ -256,7 +256,7 @@ async fn app() -> Result<(), ApplicationError> {
     let web_interface = WebState::new(
         repository,
         CONF.web.port.try_into()?,
-        CONF.web.auth_token,
+        env!("WEB_AUTH_TOKEN"),
         args_json,
     )?;
     event_system.run(web_interface);
