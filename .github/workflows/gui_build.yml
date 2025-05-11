@@ -38,6 +38,7 @@ jobs:
     - name: Install SSH key
       env:
         PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      shell: bash
       run: |
         mkdir -p ~/.ssh
         printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
