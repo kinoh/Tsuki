@@ -42,7 +42,7 @@ jobs:
         mkdir -p ~/.ssh
         printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
         chmod 700 ~/.ssh/id_rsa
-        eval $(ssh-agent -s)
+        Start-SshAgent
         ssh-add ~/.ssh/id_rsa
         ssh-keyscan -H $(echo ${{ secrets.SERVER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts 2> /dev/null
     - name: Upload
