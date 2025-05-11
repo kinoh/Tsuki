@@ -70,9 +70,9 @@ jobs:
           java-version: "21"
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
-    - name: Install NDK
-      run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
-    - name: Install dependencies
+      with:
+        packages: "build-tools;36.0.0 ndk;${{ env.NDK_VERSION }} tools platform-tools platforms;android-35"
+    - name: Install Node.js dependencies
       run: pnpm install
     - name: Setup Android signing
       run: |
@@ -81,10 +81,12 @@ jobs:
         echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
         base64 -d <<< "${{ secrets.ANDROID_KEY_BASE64 }}" > $RUNNER_TEMP/keystore.jks
         echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
+    - name: Setup Android Environment
+      run: |
+        echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/" > $GITHUB_ENV
+      # ANDROID_HOME is set by android-actions/setup-android
     - name: Build
       env:
-        ANDROID_HOME: /home/runner/.android/sdk
-        NDK_HOME: /home/runner/.android/sdk/ndk/${{ env.NDK_VERSION }}
         FCM_APPLICATION_ID: ${{ secrets.FCM_APPLICATION_ID }}
         FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
         FCM_API_KEY: ${{ secrets.FCM_API_KEY }}
