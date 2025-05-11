@@ -81,10 +81,10 @@ jobs:
         echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
     - name: Setup Android Environment
       run: |
-        echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/" > $GITHUB_ENV
-        echo "FCM_APPLICATION_ID=${{ secrets.FCM_APPLICATION_ID }}" > $GITHUB_ENV
-        echo "FCM_PROJECT_ID=${{ secrets.FCM_PROJECT_ID }}" > $GITHUB_ENV
-        echo "FCM_API_KEY=${{ secrets.FCM_API_KEY }}" > $GITHUB_ENV
+        echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}/" >> $GITHUB_ENV
+        echo "FCM_APPLICATION_ID=${{ secrets.FCM_APPLICATION_ID }}" >> $GITHUB_ENV
+        echo "FCM_PROJECT_ID=${{ secrets.FCM_PROJECT_ID }}" >> $GITHUB_ENV
+        echo "FCM_API_KEY=${{ secrets.FCM_API_KEY }}" >> $GITHUB_ENV
       # ANDROID_HOME is set by android-actions/setup-android
     - name: Build
       run: pnpm tauri android build --ci
