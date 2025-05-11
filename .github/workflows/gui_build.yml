@@ -42,12 +42,10 @@ jobs:
         mkdir -p ~/.ssh
         printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
         chmod 700 ~/.ssh/id_rsa
-        Start-SshAgent
-        ssh-add ~/.ssh/id_rsa
         ssh-keyscan -H $(echo ${{ secrets.SERVER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts 2> /dev/null
     - name: Upload
       run: |
-        scp src-tauri/target/release/bundle/msi/*.msi ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.msi
+        scp -i ~/.ssh/id_rsa src-tauri/target/release/bundle/msi/*.msi ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.msi
 
   android:
     runs-on: ubuntu-22.04
