@@ -1,31 +1,55 @@
 <script lang="ts">
+
   import { fetch } from '@tauri-apps/plugin-http';
   import {
     onResume,
     onPause,
   } from "tauri-plugin-app-events-api";
+  import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+  import { subscribeToTopic, getFCMToken, onPushNotificationOpened, getLatestNotificationData } from "@tauri-plugin-fcm-api";
+  import { onMount } from 'svelte';
+
+  import Config from './Config.svelte';
+  import Note from './Note.svelte';
+  import Status from './Status.svelte';
+
+  type ChatMessage = { modality: string, user: string, content: string };
+  type ChatFunctionCall = { name: string, args: string } | { output: string };
+  type ChatItem = { Message: ChatMessage } | { FunctionCall: ChatFunctionCall };
+  type Message = { role: string; user: string; chat: ChatItem[]; timestamp: number };
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
-  let messages: { role: string; chat: any }[] = $state([]);
+  let messages: Message[] = $state([]);
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
   let avatarExpression: "default" | "blink" = $state("default");
-  let showConfig: boolean = $state(false);
+  let overlay: "config" | "status" | "note" | null = $state(null);
   let connection: WebSocket | null = null;
   let intervalId: number | null = null;
+  let loadingMore: boolean = false;
+  let compositioning: boolean = false;
+
+  function secure(): "s" | "" {
+    return ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
+  }
 
   function connect() {
-    fetch(`https://${config.endpoint}/messages`, {
+    fetch(`http${secure()}://${config.endpoint}/messages?n=20`, {
       headers: {
         "Authorization": `Bearer ${config.token}`,
       }
     })
       .then(response => response.json())
       .then(data => {
-        messages = [...data.toReversed(), ...messages];
+        messages = data.toReversed().map((m: Message) => {
+          if (m.role === "User" && m.user !== config.user) {
+            return { role: "assistant", user: m.user, chat: m.chat };
+          }
+          return m;
+        });
       });
 
-    connection = new WebSocket(`wss://${config.endpoint}/ws`);
+    connection = new WebSocket(`ws${secure()}://${config.endpoint}/ws`);
 
     connection.onopen = function(event) {
       inputPlaceholder = "";
@@ -35,13 +59,45 @@
     }
     connection.onclose = function(event) {
       inputPlaceholder = "Connection closed!";
+      connection = null;
+    }
+    connection.onerror = function(event) {
+      inputPlaceholder = "Connection error";
+      connection = null;
     }
     connection.onmessage = function(event) {
-      messages.unshift({
-        "role": "assistant",
-        "chat": { "content": event.data },
-      });
+      let message = JSON.parse(event.data) as Message;
+      console.log(message);
+      if (message.user !== config.user) {
+        messages.unshift(message);
+      }
     };
+  }
+
+  function loadMore() {
+    if (loadingMore) return;
+
+    loadingMore = true;
+
+    let lastMessage = messages[messages.length - 1];
+    fetch(`http${secure()}://${config.endpoint}/messages?n=20&before=${lastMessage.timestamp}`, {
+      headers: {
+        "Authorization": `Bearer ${config.token}`,
+      }
+    })
+      .then(response => response.json())
+      .then(data => {
+        let more = data.toReversed().map((m: { role: string; user: string; chat: any }) => {
+          if (m.role === "User" && m.user !== config.user) {
+            return { role: "assistant", chat: { content: `[${m.user}] ${m.chat.content}` } };
+          }
+          return m;
+        });
+        messages.push(...more);
+      })
+      .finally(() => {
+        loadingMore = false;
+      });
   }
 
   function handleSubmit(event: Event) {
@@ -51,8 +107,14 @@
     }
     if (connection !== null) {
       messages.unshift({
-        "role": "user",
-        "chat": { "content": inputText },
+        role: "user",
+        user: config.user,
+        chat: [{Message: {
+          modality: "Text",
+          user: config.user,
+          content: inputText,
+        }}],
+        timestamp: Date.now() / 1000,
       });
       connection.send(inputText);
       inputText = "";
@@ -60,7 +122,58 @@
   }
 
   function handleConfigClick() {
-    showConfig = !showConfig;
+    if (overlay === "config") {
+      overlay = null;
+    } else {
+      overlay = "config";
+    }
+  }
+
+  function handleStatusClick() {
+    if (overlay === "status") {
+      overlay = null;
+    } else {
+      overlay = "status";
+    }
+  }
+
+  function handleNoteClick() {
+    if (overlay === "note") {
+      overlay = null;
+    } else {
+      overlay = "note";
+    }
+  }
+
+  function handleMessageInputFocus() {
+    if (connection === null) {
+      connect();
+    }
+  }
+
+  function handleMessageInputKeyDown(event: KeyboardEvent) {
+    if (event.code === "Enter" && !event.shiftKey && !compositioning) {
+      handleSubmit(event);
+    }
+  }
+
+  function handleMessageInputCompositionStart() {
+    compositioning = true;
+  }
+
+  function handleMessageInputCompositionEnd() {
+    compositioning = false;
+  }
+
+  function handleMessageListScroll(event: Event) {
+    let lastMessage = document.querySelector(".message-list>.message:last-child");
+    if (lastMessage !== null && lastMessage.getBoundingClientRect().y > 0) {
+      loadMore();
+    }
+  }
+
+  function handleSendClick(event: Event) {
+    handleSubmit(event);
   }
 
   function blink() {
@@ -98,6 +211,21 @@
       connect();
     }
   });
+  onMount(() => {
+    let notificationSetup = async () => {
+      let permissionGranted = await isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await requestPermission();
+        permissionGranted = permission === "granted";
+      }
+      if (permissionGranted) {
+        // sendNotification({ title: "Tsuki", body: "届いてるかな～？" });
+        subscribeToTopic("message");
+      }
+    };
+    notificationSetup();
+  });
+
 </script>
 
 <main class="container">
@@ -106,7 +234,17 @@
       <div class="menu">
         <div class="menu-item">
           <button onclick={handleConfigClick}>
-            <img src="/src/assets/icons/config.svg" alt="Config" />
+            <img src="/icons/config.svg" alt="Config" />
+          </button>
+        </div>
+        <div class="menu-item">
+          <button onclick={handleStatusClick}>
+            <img src="/icons/status.svg" alt="Status" />
+          </button>
+        </div>
+        <div class="menu-item">
+          <button onclick={handleNoteClick}>
+            <img src="/icons/note.svg" alt="Note" />
           </button>
         </div>
       </div>
@@ -114,19 +252,43 @@
         <img data-tauri-drag-region alt="tsuki avatar" class={["avatar", avatarExpression == item ? "shown" : "hidden"]} src={`tsuki_${item}.png`} />
       {/each}
     </div>
-    <div class="message-list">
+    <div class="message-list" onscroll={handleMessageListScroll}>
       <form onsubmit={handleSubmit}>
-        <input class="message user-message" type="text" bind:value={inputText} placeholder={inputPlaceholder} />
+        <textarea class="message user-message" bind:value={inputText} placeholder={inputPlaceholder}
+          onfocus={handleMessageInputFocus}
+          onkeydown={handleMessageInputKeyDown}
+          oncompositionstart={handleMessageInputCompositionStart}
+          oncompositionend={handleMessageInputCompositionEnd}>
+        </textarea>
+        <button class="message-send" onclick={handleSendClick}>
+          <img src="/icons/send.svg" alt="Send" />
+        </button>
       </form>
-    	{#each messages as item, i}
-        {#if i < 10}
-          <div class="message {item.role.toLowerCase()}-message">
-            {item.chat.content}
-          </div>
-        {/if}
+    	{#each messages as item}
+        <div class="message {item.role.toLowerCase()}-message">
+          {#each item.chat as chat}
+            {#if "Message" in chat}
+              <div>{chat.Message.content}</div>
+            {:else if "FunctionCall" in chat}
+              {#if "name" in chat.FunctionCall}
+                <div class="internal-message-content">[call] {chat.FunctionCall.name} {chat.FunctionCall.args}</div>
+              {:else if "output" in chat.FunctionCall}
+                <div class="internal-message-content">[system] {chat.FunctionCall.output}</div>
+              {/if}
+            {:else}
+              ?
+            {/if}
+          {/each}
+        </div>
       {/each}
     </div>
-    <iframe class={["floating-window", showConfig ? "shown" : "hidden"]} src="/config" title="config"></iframe>
+    <button aria-label="Close menu" class={["overlay-mask", overlay === null ? "hidden" : "shown"]} onclick={e => overlay = null}>
+    </button>
+    <div class="floating-window-container">
+      <div class={["floating-window", overlay === "config" ? "shown" : "hidden"]}><Config /></div>
+      <div class={["floating-window", overlay === "status" ? "shown" : "hidden"]}><Status /></div>
+      <div class={["floating-window", overlay === "note" ? "shown" : "hidden"]}><Note /></div>
+    </div>
   </div>
 </main>
 
@@ -135,7 +297,7 @@
 @font-face {
   font-display: block;
   font-family: "SourceHanSans";
-  src: url("/src/assets/fonts/SourceHanSans-VF.ttf");
+  src: url("/fonts/SourceHanSans-VF.ttf");
 }
 
 :root {
@@ -170,6 +332,7 @@
   display: flex;
   flex-direction: column;
   margin-top: 0.5rem;
+  gap: 0.4rem;
 }
 
 .menu-item button {
@@ -178,20 +341,47 @@
   border-radius: 5px;
   width: 2rem;
   height: 2rem;
+  padding: 0.4rem;
 }
 
 .menu-item button:hover {
   background-color: RGBA(187, 187, 220, 0.9);
 }
 
+.overlay-mask {
+  background-color: RGBA(0, 0, 0, 0);
+  border: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.overlay-mask.shown {
+  pointer-events: auto;
+}
+
+.floating-window-container {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .floating-window {
+  background: RGB(234, 210, 240);
   border: none;
   border-radius: 10px;
   width: 20rem;
-  height: 12rem;
-  position: absolute;
-  left: calc(50% - 10rem);
-  top: calc(50% - 6rem);
+  padding: 0.2rem 0.8rem 1rem;
+  margin-bottom: 2rem;
+  pointer-events: auto;
 }
 
 .message-list {
@@ -202,6 +392,9 @@
   min-width: 0;
   padding: 0 2vw;
   mask-image: linear-gradient(to bottom, transparent 0%, #000 10%, #000 100%);
+}
+.message-list:hover {
+  overflow-y: scroll;
 }
 
 .avatar-box {
@@ -225,6 +418,9 @@
   border: none;
   border-radius: 5px;
   overflow-wrap: break-word;
+  display: flex;
+  flex-direction: column;
+  row-gap: 0.5rem;
 }
 
 .assistant-message {
@@ -240,10 +436,16 @@
   /* box-shadow: 0 0 5px gray; */
 }
 
+.internal-message-content {
+  font-size: small;
+  color: #555;
+}
+
 form {
   margin-bottom: 1rem;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .row {
@@ -251,9 +453,28 @@ form {
   justify-content: center;
 }
 
-input {
+textarea {
   outline: none;
+  font-family: "SourceHanSans", sans-serif;
   font-size: 1rem;
+  min-height: 1.6rem;
+  field-sizing: content;
+  resize: none;
+}
+
+.message-send {
+  background-color: RGBA(0, 0, 0, 0);
+  opacity: 0.5;
+  border: none;
+  border-radius: 1rem;
+  width: 2rem;
+  height: 2rem;
+  position: absolute;
+  right: 0.5rem;
+  bottom: 1rem;
+}
+.message-send:hover {
+  opacity: 1;
 }
 
 .shown {
@@ -291,8 +512,17 @@ input {
     max-width: 12rem;
   }
 
+  .message-list {
+    overflow-y: scroll;
+  }
+
   form {
     margin-bottom: 0;
+  }
+
+  .message-send {
+    right: 0.5rem;
+    bottom: 1rem;
   }
 }
 

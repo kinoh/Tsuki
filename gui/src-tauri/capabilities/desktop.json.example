@@ -8,7 +8,7 @@
   "platforms": ["windows", "macOS", "linux"],
   "remote": {
     "urls": [
-      "https://localhost/*",
+      "http://localhost:2953/*",
       "https://TSUKI_HOST/*"
     ]
   },
@@ -17,9 +17,14 @@
     "opener:default",
     "core:window:default",
     "core:window:allow-start-dragging",
+    "notification:allow-is-permission-granted",
+    "notification:default",
     {
       "identifier": "http:default",
-      "allow": [{ "url": "https://TSUKI_HOST" }],
+      "allow": [
+        { "url": "http://localhost:2953" },
+        { "url": "https://TSUKI_HOST" }
+      ],
       "deny": []
     }
   ]
