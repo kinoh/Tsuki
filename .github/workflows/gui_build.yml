@@ -35,6 +35,19 @@ jobs:
       run: pnpm install
     - name: Build
       run: pnpm tauri build
+    - name: Install SSH key
+      env:
+        PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      run: |
+        mkdir -p ~/.ssh
+        printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
+        chmod 700 ~/.ssh/id_rsa
+        eval $(ssh-agent -s)
+        ssh-add ~/.ssh/id_rsa
+        ssh-keyscan -H $(echo ${{ secrets.SERVER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts 2> /dev/null
+    - name: Upload
+      run: |
+        scp src-tauri/target/release/bundle/msi/*.msi ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.msi
 
   android:
     runs-on: ubuntu-22.04
@@ -70,9 +83,22 @@ jobs:
         echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
     - name: Build
       env:
-        ANDROID_HOME: $HOME/.android/sdk
-        NDK_HOME: $HOME/.android/sdk/ndk/${{ env.NDK_VERSION }}
+        ANDROID_HOME: /home/runner/.android/sdk
+        NDK_HOME: /home/runner/.android/sdk/ndk/${{ env.NDK_VERSION }}
         FCM_APPLICATION_ID: ${{ secrets.FCM_APPLICATION_ID }}
         FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
         FCM_API_KEY: ${{ secrets.FCM_API_KEY }}
       run: pnpm tauri android build
+    - name: Install SSH key
+      env:
+        PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      run: |
+        mkdir -p ~/.ssh
+        printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
+        chmod 700 ~/.ssh/id_rsa
+        eval $(ssh-agent -s)
+        ssh-add ~/.ssh/id_rsa
+        ssh-keyscan -H $(echo ${{ secrets.SERVER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts 2> /dev/null
+    - name: Upload
+      run: |
+        scp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.apk
