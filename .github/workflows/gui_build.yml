@@ -18,33 +18,6 @@ defaults:
     working-directory: ./gui
 
 jobs:
-  windows:
-    runs-on: windows-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Setup Rust
-      run: rustup update stable && rustup default stable
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        version: 10
-    - name: Install dependencies
-      run: pnpm install
-    - name: Build
-      run: pnpm tauri build --ci
-    - name: Install SSH key
-      env:
-        PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      shell: bash
-      run: |
-        mkdir -p ~/.ssh
-        printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
-        chmod 700 ~/.ssh/id_rsa
-        ssh-keyscan -H $(echo ${{ secrets.SERVER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts 2> /dev/null
-    - name: Upload
-      run: |
-        scp -i ~/.ssh/id_rsa src-tauri/target/release/bundle/msi/*.msi ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.msi
-
   android:
     runs-on: ubuntu-22.04
     steps:
