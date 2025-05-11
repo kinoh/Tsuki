@@ -34,7 +34,7 @@ jobs:
     - name: Install dependencies
       run: pnpm install
     - name: Build
-      run: pnpm tauri build
+      run: pnpm tauri build --ci
     - name: Install SSH key
       env:
         PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -88,7 +88,7 @@ jobs:
         FCM_APPLICATION_ID: ${{ secrets.FCM_APPLICATION_ID }}
         FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
         FCM_API_KEY: ${{ secrets.FCM_API_KEY }}
-      run: pnpm tauri android build
+      run: pnpm tauri android build --ci
     - name: Install SSH key
       env:
         PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
