@@ -2,9 +2,8 @@ name: GUI build
 
 on:
   push:
-    paths:
-      - 'gui/**'
-  pull_request:
+    branches:
+      - main
     paths:
       - 'gui/**'
 
