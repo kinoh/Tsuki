@@ -2,11 +2,11 @@ name: GUI build
 
 on:
   push:
-  #   paths:
-  #     - 'gui/**'
-  # pull_request:
-  #   paths:
-  #     - 'gui/**'
+    paths:
+      - 'gui/**'
+  pull_request:
+    paths:
+      - 'gui/**'
 
 concurrency:
   group: ${{ github.ref }}
