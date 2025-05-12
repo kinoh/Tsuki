@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - ".*"
+      - "*.md"
+      - "Taskdile.yaml"
+      - "gui/**"
 
 env:
   CARGO_TERM_COLOR: always
