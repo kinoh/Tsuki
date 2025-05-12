@@ -22,6 +22,7 @@
   let messages: Message[] = $state([]);
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
+  let errorToast: string = $state("");
   let avatarExpression: "default" | "blink" = $state("default");
   let overlay: "config" | "status" | "note" | null = $state(null);
   let connection: WebSocket | null = null;
@@ -47,6 +48,9 @@
           }
           return m;
         });
+      })
+      .catch(error => {
+        errorToast = error.toString();
       });
 
     connection = new WebSocket(`ws${secure()}://${config.endpoint}/ws`);
@@ -94,6 +98,9 @@
           return m;
         });
         messages.push(...more);
+      })
+      .catch(error => {
+        errorToast = error.toString();
       })
       .finally(() => {
         loadingMore = false;
@@ -264,6 +271,11 @@
           <img src="/icons/send.svg" alt="Send" />
         </button>
       </form>
+      {#if errorToast !== ""}
+        <button class="error-toast" onclick={e => errorToast = ""}>
+          {errorToast}
+        </button>
+      {/if}
     	{#each messages as item}
         <div class="message {item.role.toLowerCase()}-message">
           {#each item.chat as chat}
@@ -475,6 +487,17 @@ textarea {
 }
 .message-send:hover {
   opacity: 1;
+}
+
+.error-toast {
+  background-color: #fdd;
+  color: #f00;
+  padding: 0.8rem 1.2rem;
+  border: none;
+  border-radius: 5px;
+  overflow-wrap: break-word;
+  margin: 0.5rem 0;
+  text-align: left;
 }
 
 .shown {
