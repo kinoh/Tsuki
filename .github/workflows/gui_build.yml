@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'gui/**'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
