@@ -47,7 +47,7 @@ jobs:
         ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
     - name: Build and deploy
       env:
-        DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
+        DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
         PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}

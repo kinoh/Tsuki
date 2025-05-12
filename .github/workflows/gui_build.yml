@@ -50,7 +50,7 @@ jobs:
         ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
     - name: Upload
       run: |
-        scp -i ~/.ssh/id_rsa src-tauri/target/release/bundle/msi/*.msi ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.msi
+        scp -i ~/.ssh/id_rsa src-tauri/target/release/bundle/msi/*.msi ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.msi
 
   android:
     runs-on: ubuntu-latest
@@ -111,4 +111,4 @@ jobs:
         ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
     - name: Upload
       run: |
-        scp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.apk
+        scp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.apk
