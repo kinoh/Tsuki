@@ -24,6 +24,10 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Write capabilities
+      working-directory: gui/src-tauri/capabilities
+      run: |
+        <desktop.json.example sed "s/TSUKI_HOST/${{ secrets.SERVER_HOST }}/" > desktop.json
     - name: Setup Rust
       run: rustup update stable && rustup default stable
     - name: Setup pnpm
@@ -42,7 +46,7 @@ jobs:
         mkdir -p ~/.ssh
         printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
         chmod 700 ~/.ssh/id_rsa
-        ssh-keyscan -H $(echo ${{ secrets.SERVER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts 2> /dev/null
+        ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
     - name: Upload
       run: |
         scp -i ~/.ssh/id_rsa src-tauri/target/release/bundle/msi/*.msi ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.msi
@@ -51,6 +55,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Write capabilities
+      working-directory: gui/src-tauri/capabilities
+      run: |
+        <mobile.json.example sed "s/TSUKI_HOST/${{ secrets.SERVER_HOST }}/" > mobile.json
     - name: Setup Rust
       run: rustup update stable && rustup default stable
     - name: Setup Rust targets
@@ -99,7 +107,7 @@ jobs:
         chmod 700 ~/.ssh/id_rsa
         eval $(ssh-agent -s)
         ssh-add ~/.ssh/id_rsa
-        ssh-keyscan -H $(echo ${{ secrets.SERVER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts 2> /dev/null
+        ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
     - name: Upload
       run: |
         scp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk ${{ secrets.SERVER_HOST }}:/var/tsuki/upload/${{ github.sha }}.apk

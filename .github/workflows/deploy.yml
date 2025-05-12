@@ -38,10 +38,10 @@ jobs:
         chmod 700 ~/.ssh/id_rsa
         eval $(ssh-agent -s)
         ssh-add ~/.ssh/id_rsa
-        ssh-keyscan -H $(echo ${{ secrets.SERVER_HOST }} | cut -d@ -f2) >> ~/.ssh/known_hosts 2> /dev/null
+        ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
     - name: Build and deploy
       env:
-        DOCKER_HOST: ssh://${{ secrets.SERVER_HOST }}
+        DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
         PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
