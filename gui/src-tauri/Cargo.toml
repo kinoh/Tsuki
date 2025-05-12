@@ -25,7 +25,7 @@ serde_json = "1"
 tauri-plugin-positioner = "2.2"
 tauri-plugin-http = "2"
 tauri-plugin-notification = "2.2"
-tauri-plugin-fcm = { git = "https://github.com/kinoh/tauri-plugin-fcm.git", rev = "5d66eb89e43aaa406844baf20923f11d71f6e580" }
+tauri-plugin-fcm = { git = "https://github.com/kinoh/tauri-plugin-fcm.git", rev = "25e6d8562bc2e1a64e64534828e93393af3c0dbf" }
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-app-events = "0.2"
