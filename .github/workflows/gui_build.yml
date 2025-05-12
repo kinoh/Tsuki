@@ -42,7 +42,7 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        packages: "build-tools;36.0.0 ndk;${{ env.NDK_VERSION }} tools platform-tools platforms;android-35"
+        packages: "build-tools;36.0.0 ndk;${{ env.NDK_VERSION }} platform-tools platforms;android-35"
     - name: Install Node.js dependencies
       run: pnpm install
     - name: Setup Android signing
