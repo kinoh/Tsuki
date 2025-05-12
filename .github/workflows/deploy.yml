@@ -45,6 +45,9 @@ jobs:
         eval $(ssh-agent -s)
         ssh-add ~/.ssh/id_rsa
         ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: server
     - name: Build and deploy
       env:
         DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}

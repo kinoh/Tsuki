@@ -36,6 +36,9 @@ jobs:
         rm /tmp/vosk.zip /tmp/libvosk.so
     - name: Setup Rust
       run: rustup update nightly && rustup default nightly
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: server
     - name: Build
       run: cargo build --verbose
     - name: Run tests

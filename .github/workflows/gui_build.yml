@@ -38,6 +38,11 @@ jobs:
         version: 10
     - name: Install dependencies
       run: pnpm install
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: gui-windows
+        workspaces: |
+          gui -> target
     - name: Build
       run: pnpm tauri build --ci
     - name: Install SSH key
@@ -97,6 +102,11 @@ jobs:
         echo "FCM_PROJECT_ID=${{ secrets.FCM_PROJECT_ID }}" >> $GITHUB_ENV
         echo "FCM_API_KEY=${{ secrets.FCM_API_KEY }}" >> $GITHUB_ENV
       # ANDROID_HOME is set by android-actions/setup-android
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: gui-android
+        workspaces: |
+          gui -> target
     - name: Build
       run: pnpm tauri android build --ci
     - name: Install SSH key
