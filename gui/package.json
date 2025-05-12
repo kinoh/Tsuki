@@ -18,7 +18,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "tauri-plugin-app-events-api": "^0.2.0",
     "@tauri-apps/plugin-notification": "^2.2.2",
-    "@tauri-plugin-fcm-api": "git@github.com:kinoh/tauri-plugin-fcm.git#5d66eb89e43aaa406844baf20923f11d71f6e580"
+    "@tauri-plugin-fcm-api": "git@github.com:kinoh/tauri-plugin-fcm.git#25e6d8562bc2e1a64e64534828e93393af3c0dbf"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

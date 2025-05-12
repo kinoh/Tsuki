@@ -3943,7 +3943,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-fcm"
 version = "0.0.0"
-source = "git+https://github.com/kinoh/tauri-plugin-fcm.git?rev=5d66eb89e43aaa406844baf20923f11d71f6e580#5d66eb89e43aaa406844baf20923f11d71f6e580"
+source = "git+https://github.com/kinoh/tauri-plugin-fcm.git?rev=25e6d8562bc2e1a64e64534828e93393af3c0dbf#25e6d8562bc2e1a64e64534828e93393af3c0dbf"
 dependencies = [
  "serde",
  "tauri",
