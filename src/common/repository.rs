@@ -5,8 +5,10 @@ use thiserror::Error;
 use tracing::info;
 use uuid::Uuid;
 
+use super::events::Event;
 use super::memory::MemoryRecord;
 use super::message::{MessageRecord, SessionId};
+use super::schedule::ScheduleRecord;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -18,9 +20,14 @@ pub enum Error {
 
 #[derive(Serialize, Deserialize, Default)]
 struct RepositoryData {
+    #[serde(default)]
     current_session: Option<SessionId>,
+    #[serde(default)]
     messages: Vec<MessageRecord>,
+    #[serde(default)]
     memories: Vec<MemoryRecord>,
+    #[serde(default)]
+    schedules: Vec<ScheduleRecord>,
 }
 
 pub struct Repository {
@@ -129,5 +136,16 @@ impl Repository {
 
     pub fn memories(&self) -> Vec<&MemoryRecord> {
         self.data.memories.iter().map(|m| m).collect()
+    }
+
+    pub fn append_schedule(&mut self, expression: String, event: Event) -> Result<(), Error> {
+        self.data
+            .schedules
+            .push(ScheduleRecord { expression, event });
+        self.save()
+    }
+
+    pub fn schedules(&self) -> Vec<&ScheduleRecord> {
+        self.data.schedules.iter().map(|s| s).collect()
     }
 }

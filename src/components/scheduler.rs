@@ -1,15 +1,16 @@
-use std::{str::FromStr, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
 use cron::Schedule;
 use thiserror::Error;
-use tokio::time;
+use tokio::{sync::RwLock, time};
 use tracing::info;
 
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
     events::{self, Event, EventComponent},
+    repository::Repository,
 };
 
 #[derive(Error, Debug)]
@@ -20,6 +21,8 @@ pub enum Error {
     Cron(#[from] cron::error::Error),
     #[error("chrono out of range: {0}")]
     ChronoOutOfRange(#[from] chrono::OutOfRangeError),
+    #[error("Repository error: {0}")]
+    Repository(#[from] crate::common::repository::Error),
 }
 
 struct EventSchedule {
@@ -29,25 +32,55 @@ struct EventSchedule {
 }
 
 pub struct Scheduler {
+    repository: Arc<RwLock<Repository>>,
     schedules: Vec<EventSchedule>,
     resolution: Duration,
 }
 
 impl Scheduler {
-    pub fn new(resolution: Duration) -> Self {
-        Self {
+    pub async fn new(
+        repository: Arc<RwLock<Repository>>,
+        resolution: Duration,
+    ) -> Result<Self, Error> {
+        let mut scheduler = Self {
+            repository,
             schedules: Vec::new(),
             resolution,
-        }
+        };
+        scheduler.load().await?;
+        Ok(scheduler)
     }
 
-    pub fn register(&mut self, expression: &str, event: Event) -> Result<(), Error> {
-        let schedule = Schedule::from_str(expression)?;
+    async fn load(&mut self) -> Result<(), Error> {
+        let data: Result<Vec<EventSchedule>, Error> = self
+            .repository
+            .read()
+            .await
+            .schedules()
+            .iter()
+            .map(|r| {
+                Ok(EventSchedule {
+                    schedule: Schedule::from_str(&r.expression)?,
+                    event: r.event.clone(),
+                    last_sent: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
+                })
+            })
+            .collect();
+        self.schedules = data?;
+        Ok(())
+    }
+
+    pub async fn register(&mut self, expression: String, event: Event) -> Result<(), Error> {
+        let schedule = Schedule::from_str(&expression)?;
         self.schedules.push(EventSchedule {
             schedule,
-            event,
+            event: event.clone(),
             last_sent: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
         });
+        self.repository
+            .write()
+            .await
+            .append_schedule(String::from(expression), event)?;
         Ok(())
     }
 
@@ -138,11 +171,15 @@ mod mock_chrono {
 mod tests {
     use super::*;
 
-    #[test]
-    fn daily() {
-        let mut scheduler = Scheduler::new(Duration::from_secs(60));
+    #[tokio::test]
+    async fn daily() {
+        let repo = Repository::new("/tmp/tsuki_test_scheduler.json", false).unwrap();
+        let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
+            .await
+            .unwrap();
         scheduler
-            .register("0 30 19 * * *", Event::FinishSession {})
+            .register(String::from("0 30 19 * * *"), Event::FinishSession {})
+            .await
             .unwrap();
         mock_chrono::set_timestamp(19, 29, 0);
         assert_eq!(scheduler.event_ready().unwrap().is_some(), false);
@@ -156,11 +193,15 @@ mod tests {
         assert_eq!(scheduler.event_ready().unwrap().is_some(), false);
     }
 
-    #[test]
-    fn no_duplicate() {
-        let mut scheduler = Scheduler::new(Duration::from_secs(60));
+    #[tokio::test]
+    async fn no_duplicate() {
+        let repo = Repository::new("/tmp/tsuki_test_scheduler.json", false).unwrap();
+        let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
+            .await
+            .unwrap();
         scheduler
-            .register("0 0 20,21 * * *", Event::FinishSession {})
+            .register(String::from("0 0 20,21 * * *"), Event::FinishSession {})
+            .await
             .unwrap();
         mock_chrono::set_timestamp(20, 0, 0);
         let ready = scheduler.event_ready().unwrap();

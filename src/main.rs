@@ -188,6 +188,15 @@ async fn app() -> Result<(), ApplicationError> {
 
     let mut event_system = EventSystem::new(32);
 
+    let eventlogger = EventLogger::new();
+    event_system.run(eventlogger);
+
+    let pretty_history = cfg!(debug_assertions);
+    let repository = Arc::new(RwLock::new(Repository::new(
+        CONF.main.history_path,
+        pretty_history,
+    )?));
+
     if args.audio {
         let mumble_client = MumbleClient::new(
             CONF.recognizer.mumble_host,
@@ -219,21 +228,18 @@ async fn app() -> Result<(), ApplicationError> {
     }
 
     if args.scheduler {
-        let mut scheduler = Scheduler::new(Duration::from_secs(
-            CONF.scheduler.resolution_secs.try_into()?,
-        ));
-        scheduler.register("0 0 19 * * *", Event::FinishSession {})?;
+        let mut scheduler = Scheduler::new(
+            repository.clone(),
+            Duration::from_secs(CONF.scheduler.resolution_secs.try_into()?),
+        )
+        .await?;
+        if repository.read().await.schedules().is_empty() {
+            scheduler
+                .register(String::from("0 0 19 * * *"), Event::FinishSession {})
+                .await?;
+        }
         event_system.run(scheduler);
     }
-
-    let eventlogger = EventLogger::new();
-    event_system.run(eventlogger);
-
-    let pretty_history = cfg!(debug_assertions);
-    let repository = Arc::new(RwLock::new(Repository::new(
-        CONF.main.history_path,
-        pretty_history,
-    )?));
 
     let model = if CONF.core.openai_model.is_empty() {
         Model::Echo

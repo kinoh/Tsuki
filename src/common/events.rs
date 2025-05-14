@@ -1,13 +1,14 @@
 use std::{any::type_name, fmt::Display};
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::task::{self, JoinHandle};
 use tracing::error;
 
 use super::{broadcast::IdentifiedBroadcast, chat::Modality};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Event {
     TextMessage {
         user: String,
