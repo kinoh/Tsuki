@@ -212,14 +212,14 @@ impl Function for ManageScheduleFunction {
                 },
                 "expression": {
                     "type": "string",
-                    "description": "cron expression to specify times to send; required for \"add\" or \"remove\""
+                    "description": "cron expression to specify times to send; required for \"add\" or \"remove\"; empty for \"list\""
                 },
                 "message": {
                     "type": "string",
-                    "description": "message sent by system user; required for \"add\" or \"remove\""
+                    "description": "message sent by system user; required for \"add\" or \"remove\"; empty for \"list\""
                 }
             },
-            "required": ["operation"],
+            "required": ["operation", "expression", "message"],
             "additionalProperties": false
         })
     }
