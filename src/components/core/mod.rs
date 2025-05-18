@@ -1,22 +1,27 @@
-use crate::adapter::dify::{self, CodeExecutor};
-use crate::adapter::openai;
-use crate::adapter::openai::{Function, Thinker};
-use crate::common::broadcast::{self, IdentifiedBroadcast};
+mod execute_code_function;
+mod manage_schedule_function;
+mod memorize_function;
+
+use crate::adapter::dify::CodeExecutor;
+use crate::adapter::openai::Thinker;
+use crate::common::broadcast::IdentifiedBroadcast;
 use crate::common::chat::{
     ChatInput, ChatInputMessage, ChatOutput, ChatOutputFunctionCall, ChatOutputMessage, Modality,
 };
 use crate::common::events::{self, Event, EventComponent};
-use crate::common::memory::MemoryRecord;
 use crate::common::message::{MessageRecord, MessageRecordChat, SYSTEM_USER_NAME};
-use crate::common::repository::{self, Repository};
+use crate::common::repository::Repository;
 use async_trait::async_trait;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, SystemTimeError};
-use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{error, info};
+
+use execute_code_function::ExecuteCodeFunction;
+use manage_schedule_function::ManageScheduleFunction;
+use memorize_function::MemorizeFunction;
+
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -25,13 +30,13 @@ pub enum Error {
     #[error("serde json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("Dify error: {0}")]
-    Dify(#[from] dify::Error),
+    Dify(#[from] crate::adapter::dify::Error),
     #[error("repository error: {0}")]
-    Repository(#[from] repository::Error),
+    Repository(#[from] crate::common::repository::Error),
     #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
+    Broadcast(#[from] crate::common::broadcast::Error),
     #[error("OpenAI error: {0}")]
-    OpenAi(#[from] openai::Error),
+    OpenAi(#[from] crate::adapter::openai::Error),
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -48,6 +53,12 @@ impl ToString for DefinedMessage {
 pub enum Model {
     Echo,
     OpenAi(String),
+}
+
+fn get_timestamp() -> Result<u64, std::time::SystemTimeError> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs())
 }
 
 fn to_event(output: &ChatOutput, usage: u32) -> Option<Event> {
@@ -73,210 +84,6 @@ fn to_event(output: &ChatOutput, usage: u32) -> Option<Event> {
             message: serde_json::to_string(call).unwrap_or("<serialization failed>".to_string()),
             usage,
         }),
-    }
-}
-
-fn get_timestamp() -> Result<u64, SystemTimeError> {
-    Ok(SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)?
-        .as_secs())
-}
-
-#[derive(Deserialize)]
-struct MemorizeFunctionArguments {
-    items: Vec<String>,
-}
-
-struct MemorizeFunction {
-    repository: Arc<RwLock<Repository>>,
-}
-
-#[async_trait]
-impl Function for MemorizeFunction {
-    fn name(&self) -> &'static str {
-        "memorize"
-    }
-
-    fn description(&self) -> &'static str {
-        "Save knowledge to memories section in instruction"
-    }
-
-    fn args_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "description": "ultimately short summary of memory; stored to memories section in instruction"
-                    }
-                }
-            },
-            "required": ["items"],
-            "additionalProperties": false
-        })
-    }
-
-    async fn call(&self, args_json: &str) -> Result<String, String> {
-        let args: MemorizeFunctionArguments =
-            serde_json::from_str(&args_json).map_err(|_| "invalid arguments".to_string())?;
-        let timestamp = get_timestamp().unwrap_or_else(|e| {
-            error!("timestamp error: {:?}", e);
-            0
-        });
-        self.repository
-            .write()
-            .await
-            .append_memory(MemoryRecord {
-                content: args.items,
-                timestamp,
-            })
-            .map_err(|e| e.to_string())?;
-        Ok("success".to_string())
-    }
-}
-
-#[derive(Deserialize)]
-struct ExecuteCodeFunctionArguments {
-    code: String,
-}
-
-struct ExecuteCodeFunction {
-    client: CodeExecutor,
-}
-
-#[async_trait]
-impl Function for ExecuteCodeFunction {
-    fn name(&self) -> &'static str {
-        "execute_code"
-    }
-
-    fn description(&self) -> &'static str {
-        "Execute Python code. you must print() output; only stdout is returned. available packages: requests certifi beautifulsoup4 numpy scipy pandas scikit-learn matplotlib lxml pypdf"
-    }
-
-    fn args_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "description": "code to execute"
-            }
-            },
-            "required": ["code"],
-            "additionalProperties": false
-        })
-    }
-
-    async fn call(&self, args_json: &str) -> Result<String, String> {
-        let args: ExecuteCodeFunctionArguments =
-            serde_json::from_str(&args_json).map_err(|_| "invalid arguments".to_string())?;
-        self.client
-            .execute(&args.code)
-            .await
-            .map_err(|e| e.to_string())
-    }
-}
-
-#[derive(Deserialize)]
-struct ManageScheduleFunctionArguments {
-    operation: String,
-    expression: Option<String>,
-    message: Option<String>,
-}
-
-struct ManageScheduleFunction {
-    repository: Arc<RwLock<Repository>>,
-    broadcast: IdentifiedBroadcast<Event>,
-}
-
-#[async_trait]
-impl Function for ManageScheduleFunction {
-    fn name(&self) -> &'static str {
-        "manage_schedule"
-    }
-
-    fn description(&self) -> &'static str {
-        "Manage schedules that send system message (Text modality message sent by system user) at specified times using cron expression"
-    }
-
-    fn args_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "operation": {
-                    "type": "string",
-                    "description": "\"add\" or \"remove\" or \"list\""
-                },
-                "expression": {
-                    "type": "string",
-                    "description": "cron expression to specify times to send; required for \"add\" or \"remove\"; empty for \"list\""
-                },
-                "message": {
-                    "type": "string",
-                    "description": "message sent by system user; required for \"add\" or \"remove\"; empty for \"list\""
-                }
-            },
-            "required": ["operation", "expression", "message"],
-            "additionalProperties": false
-        })
-    }
-
-    async fn call(&self, args_json: &str) -> Result<String, String> {
-        let args: ManageScheduleFunctionArguments =
-            serde_json::from_str(&args_json).map_err(|_| "invalid arguments".to_string())?;
-        match args.operation.as_str() {
-            "add" => {
-                if let (Some(expression), Some(message)) = (args.expression, args.message) {
-                    self.repository
-                        .write()
-                        .await
-                        .append_schedule(expression, message)
-                        .map_err(|e| e.to_string())?;
-                    if let Err(e) = self.broadcast.send(Event::SchedulesUpdated) {
-                        error!("send error in function call: {}", e);
-                    };
-                    Ok(String::from("success"))
-                } else {
-                    Err(String::from("expression and message required for \"add\""))
-                }
-            }
-            "remove" => {
-                if let (Some(expression), Some(message)) = (args.expression, args.message) {
-                    self.repository
-                        .write()
-                        .await
-                        .remove_schedule(expression, message)
-                        .map_err(|e| e.to_string())?;
-                    if let Err(e) = self.broadcast.send(Event::SchedulesUpdated) {
-                        error!("send error in function call: {}", e);
-                    };
-                    Ok(String::from("success"))
-                } else {
-                    Err(String::from(
-                        "expression and message required for \"remove\"",
-                    ))
-                }
-            }
-            "list" => Ok(self
-                .repository
-                .read()
-                .await
-                .schedules()
-                .iter()
-                .map(|s| {
-                    format!(
-                        "<schedule><expression>{}</expression><message>{}</message></schedule>",
-                        s.schedule.source(),
-                        s.message
-                    )
-                })
-                .collect::<Vec<String>>()
-                .concat()),
-            _ => Err(String::from("unexpected operation")),
-        }
     }
 }
 
@@ -368,7 +175,7 @@ impl OpenAiCore {
                     activity: None,
                     feeling: None,
                     modality: Modality::Text,
-                    content: Some(serde_json::to_string(&message)?),
+                    content: Some(serde_json::to_string(&message).unwrap()),
                 })
             }
         } else {
