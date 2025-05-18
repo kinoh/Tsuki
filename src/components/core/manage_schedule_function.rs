@@ -40,7 +40,7 @@ impl Function for ManageScheduleFunction {
                 },
                 "expression": {
                     "type": "string",
-                    "description": "cron expression to specify times to send; required for \"add\" or \"remove\"; empty for \"list\""
+                    "description": "cron expression to specify times to send; required for \"add\" or \"remove\"; empty for \"list\"; it must have 7 fields (sec, min, hour, day of month, month, day of week, year)"
                 },
                 "message": {
                     "type": "string",
