@@ -269,7 +269,8 @@ impl Function for ManageScheduleFunction {
                 .map(|s| {
                     format!(
                         "<schedule><expression>{}</expression><message>{}</message></schedule>",
-                        s.expression, s.message
+                        s.schedule.source(),
+                        s.message
                     )
                 })
                 .collect::<Vec<String>>()

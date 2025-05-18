@@ -35,6 +35,9 @@ ratatui = "0.29"
 tui-logger = { version = "0.17", features = ["tracing-support"] }
 openai_dive = { git = "https://github.com/kinoh/openai-client.git", rev = "dd15949ea3aecad86f6012d7e4f19324ef2b2b1e", default-features = false, features = ["rustls-tls"] }
 tera = { version = "1.20", default-features = false }
-cron = "0.15"
+cron = { version = "0.15", features = ["serde"] }
 static-toml = "1.3"
 age = { version = "0.11", features = ["ssh"] }
+
+[dev-dependencies]
+tempfile = "3.20"

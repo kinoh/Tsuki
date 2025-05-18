@@ -1,8 +1,7 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
-use cron::Schedule;
 use thiserror::Error;
 use tokio::{select, sync::RwLock, time};
 use tracing::info;
@@ -12,6 +11,7 @@ use crate::common::{
     events::{self, Event, EventComponent},
     message::SYSTEM_USER_NAME,
     repository::Repository,
+    schedule::ScheduleRecord,
 };
 
 #[derive(Error, Debug)]
@@ -34,16 +34,9 @@ fn now() -> DateTime<Utc> {
     t
 }
 
-#[derive(Debug, PartialEq)]
-struct EventSchedule {
-    schedule: Schedule,
-    message: String,
-    last_sent: DateTime<Utc>,
-}
-
 pub struct Scheduler {
     repository: Arc<RwLock<Repository>>,
-    schedules: Vec<EventSchedule>,
+    last_sent: HashMap<ScheduleRecord, DateTime<Utc>>,
     resolution: Duration,
 }
 
@@ -52,33 +45,12 @@ impl Scheduler {
         repository: Arc<RwLock<Repository>>,
         resolution: Duration,
     ) -> Result<Self, Error> {
-        let mut scheduler = Self {
+        let scheduler = Self {
             repository,
-            schedules: Vec::new(),
+            last_sent: HashMap::new(),
             resolution,
         };
-        scheduler.load().await?;
         Ok(scheduler)
-    }
-
-    async fn load(&mut self) -> Result<(), Error> {
-        let mut data = self
-            .repository
-            .read()
-            .await
-            .schedules()
-            .iter()
-            .map(|r| {
-                Ok(EventSchedule {
-                    schedule: Schedule::from_str(&r.expression)?,
-                    message: r.message.clone(),
-                    last_sent: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
-                })
-            })
-            .collect::<Result<Vec<EventSchedule>, Error>>()?;
-        self.schedules.clear();
-        self.schedules.append(&mut data);
-        Ok(())
     }
 
     pub async fn register(&mut self, expression: String, message: String) -> Result<(), Error> {
@@ -86,36 +58,35 @@ impl Scheduler {
             .write()
             .await
             .append_schedule(expression, message)?;
-        self.load().await?;
         Ok(())
     }
 
-    fn next(&mut self, now: DateTime<Utc>) -> Option<(usize, &EventSchedule, DateTime<Utc>)> {
-        self.schedules
+    async fn next(&mut self, now: DateTime<Utc>) -> Option<(ScheduleRecord, DateTime<Utc>)> {
+        self.repository
+            .read()
+            .await
+            .schedules()
             .iter()
-            .enumerate()
-            .filter_map(|(i, s)| s.schedule.after(&now).next().map(|u| (i, s, u)))
-            .filter(|(_i, s, u)| s.last_sent < *u)
-            .min_by_key(|(_i, _s, u)| *u)
+            .filter_map(|r| r.schedule.after(&now).next().map(|t| (*r, t)))
+            .filter(|(r, next)| self.last_sent.get(*r).is_none_or(|last| *last < *next))
+            .min_by_key(|(_, t)| *t)
+            .map(|(r, t)| (r.clone(), t))
     }
 
-    fn event_ready(&mut self) -> Result<Option<(usize, DateTime<Utc>)>, Error> {
+    async fn event_ready(&mut self) -> Result<Option<(ScheduleRecord, DateTime<Utc>)>, Error> {
         let resolution = TimeDelta::from_std(self.resolution)?;
 
         let now = now();
 
-        if let Some((index, _, time)) = self.next(now - resolution) {
+        if let Some((record, time)) = self.next(now - resolution).await {
             if time < now + resolution {
-                return Ok(Some((index, time)));
+                return Ok(Some((record, time)));
             }
         }
         Ok(None)
     }
 
-    async fn run_internal(
-        &mut self,
-        mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), Error> {
+    async fn run_internal(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<(), Error> {
         info!("start scheduler");
 
         let mut interval = time::interval(self.resolution);
@@ -123,27 +94,19 @@ impl Scheduler {
         loop {
             select! {
                 _ = interval.tick() => {
-                    if let Some((index, time)) = self.event_ready()? {
+                    if let Some((record, time)) = self.event_ready().await? {
                         info!("schedule triggered: {}", time);
                         broadcast.send(Event::TextMessage {
                             user: String::from(SYSTEM_USER_NAME),
-                            message: self.schedules[index].message.clone(),
+                            message: record.message.clone(),
                         })?;
 
                         let now = now();
-                        if self.schedules[index].schedule.after(&now).next().is_none() {
-                            self.schedules.remove(index);
+                        if record.schedule.after(&now).next().is_none() {
+                            self.repository.write().await.remove_schedule(record.schedule.to_string(), record.message)?;
                         } else {
-                            self.schedules[index].last_sent = time;
+                            self.last_sent.insert(record, time);
                         }
-                    }
-                }
-                event = broadcast.recv() => {
-                    match event? {
-                        Event::SchedulesUpdated => {
-                            self.load().await?;
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -196,31 +159,13 @@ mod mock_chrono {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct TemporaryPath {
-        path: String,
-    }
-
-    impl TemporaryPath {
-        fn new() -> Self {
-            Self {
-                path: String::from("/tmp/tsuki_test_scheduler.json"),
-            }
-        }
-    }
-
-    impl Drop for TemporaryPath {
-        fn drop(&mut self) {
-            if std::path::Path::new(&self.path).exists() {
-                std::fs::remove_file(&self.path).unwrap();
-            }
-        }
-    }
+    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn daily() {
-        let path = TemporaryPath::new();
-        let repo = Repository::new(&path.path, false).unwrap();
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        let repo = Repository::new(path, false).unwrap();
         let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
             .await
             .unwrap();
@@ -229,21 +174,22 @@ mod tests {
             .await
             .unwrap();
         mock_chrono::set_timestamp(19, 29, 0);
-        assert_eq!(scheduler.event_ready().unwrap().is_some(), false);
+        assert_eq!(scheduler.event_ready().await.unwrap().is_some(), false);
         mock_chrono::set_timestamp(19, 29, 1);
-        assert_eq!(scheduler.event_ready().unwrap().is_some(), true);
+        assert_eq!(scheduler.event_ready().await.unwrap().is_some(), true);
         mock_chrono::set_timestamp(19, 30, 0);
-        assert_eq!(scheduler.event_ready().unwrap().is_some(), true);
+        assert_eq!(scheduler.event_ready().await.unwrap().is_some(), true);
         mock_chrono::set_timestamp(19, 30, 59);
-        assert_eq!(scheduler.event_ready().unwrap().is_some(), true);
+        assert_eq!(scheduler.event_ready().await.unwrap().is_some(), true);
         mock_chrono::set_timestamp(19, 31, 0);
-        assert_eq!(scheduler.event_ready().unwrap().is_some(), false);
+        assert_eq!(scheduler.event_ready().await.unwrap().is_some(), false);
     }
 
     #[tokio::test]
     async fn no_duplicate() {
-        let path = TemporaryPath::new();
-        let repo = Repository::new(&path.path, false).unwrap();
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        let repo = Repository::new(path, false).unwrap();
         let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
             .await
             .unwrap();
@@ -252,13 +198,14 @@ mod tests {
             .await
             .unwrap();
         mock_chrono::set_timestamp(20, 0, 0);
-        let ready = scheduler.event_ready().unwrap();
+        let ready = scheduler.event_ready().await.unwrap();
         assert_eq!(ready.is_some(), true);
-        scheduler.schedules[0].last_sent = ready.unwrap().1;
-        assert_eq!(scheduler.event_ready().unwrap().is_some(), false);
+        let ready = ready.unwrap();
+        scheduler.last_sent.insert(ready.0, ready.1);
+        assert_eq!(scheduler.event_ready().await.unwrap().is_some(), false);
         mock_chrono::set_timestamp(20, 59, 0);
-        assert_eq!(scheduler.event_ready().unwrap().is_some(), false);
+        assert_eq!(scheduler.event_ready().await.unwrap().is_some(), false);
         mock_chrono::set_timestamp(21, 00, 0);
-        assert_eq!(scheduler.event_ready().unwrap().is_some(), true);
+        assert_eq!(scheduler.event_ready().await.unwrap().is_some(), true);
     }
 }

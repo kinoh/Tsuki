@@ -1,6 +1,8 @@
+use cron::Schedule;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
+use std::str::FromStr;
 use thiserror::Error;
 use tracing::info;
 use uuid::Uuid;
@@ -15,6 +17,8 @@ pub enum Error {
     StdIo(#[from] std::io::Error),
     #[error("stserde_json error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("cron error: {0}")]
+    Cron(#[from] cron::error::Error),
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -138,29 +142,54 @@ impl Repository {
     }
 
     pub fn append_schedule(&mut self, expression: String, message: String) -> Result<(), Error> {
-        self.data.schedules.push(ScheduleRecord {
-            expression,
-            message,
-        });
+        let schedule = Schedule::from_str(&expression)?;
+        self.data
+            .schedules
+            .push(ScheduleRecord { schedule, message });
         self.save()
     }
 
     pub fn remove_schedule(&mut self, expression: String, message: String) -> Result<usize, Error> {
+        let schedule = Schedule::from_str(&expression)?;
         let indices = self
             .data
             .schedules
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.expression == expression && s.message == message)
+            .filter(|(_, s)| s.schedule == schedule && s.message == message)
             .map(|(i, _)| i)
             .collect::<Vec<usize>>();
         for i in &indices {
-            self.schedules().remove(*i);
+            self.data.schedules.remove(*i);
         }
         Ok(indices.len())
     }
 
     pub fn schedules(&self) -> Vec<&ScheduleRecord> {
         self.data.schedules.iter().map(|s| s).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn remove_schedule() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        let mut repo = Repository::new(path, false).unwrap();
+        let expr = "0 5 * * * *".to_string();
+        let msg = "test message".to_string();
+
+        repo.append_schedule(expr.clone(), msg.clone()).unwrap();
+        assert_eq!(repo.schedules().len(), 1);
+        assert_eq!(repo.schedules()[0].message, msg);
+        assert_eq!(repo.schedules()[0].schedule.to_string(), expr);
+
+        let removed = repo.remove_schedule(expr.clone(), msg.clone()).unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(repo.schedules().len(), 0);
     }
 }
