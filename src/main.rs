@@ -7,13 +7,10 @@ mod components;
 use clap::Parser;
 use color_eyre::{eyre, Result};
 use common::{
-    events::{Event, EventSystem},
-    message::ASSISTANT_NAME,
-    mumble::MumbleClient,
-    repository::Repository,
+    events::EventSystem, message::ASSISTANT_NAME, mumble::MumbleClient, repository::Repository,
 };
 use components::{
-    core::{Model, OpenAiCore},
+    core::{DefinedMessage, Model, OpenAiCore},
     eventlogger::EventLogger,
     interactive::{InteractiveProxy, Signal},
     notifier::Notifier,
@@ -235,7 +232,10 @@ async fn app() -> Result<(), ApplicationError> {
         .await?;
         if repository.read().await.schedules().is_empty() {
             scheduler
-                .register(String::from("0 0 19 * * *"), Event::FinishSession {})
+                .register(
+                    String::from("0 0 19 * * *"),
+                    DefinedMessage::FinishSession.to_string(),
+                )
                 .await?;
         }
         event_system.run(scheduler);

@@ -7,10 +7,11 @@ use crate::common::chat::{
 };
 use crate::common::events::{self, Event, EventComponent};
 use crate::common::memory::MemoryRecord;
-use crate::common::message::{self, MessageRecord, MessageRecordChat};
+use crate::common::message::{MessageRecord, MessageRecordChat, SYSTEM_USER_NAME};
 use crate::common::repository::{self, Repository};
 use async_trait::async_trait;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, SystemTimeError};
 use thiserror::Error;
@@ -31,6 +32,17 @@ pub enum Error {
     Broadcast(#[from] broadcast::Error),
     #[error("OpenAI error: {0}")]
     OpenAi(#[from] openai::Error),
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+pub enum DefinedMessage {
+    FinishSession,
+}
+
+impl ToString for DefinedMessage {
+    fn to_string(&self) -> String {
+        String::from("session finished")
+    }
 }
 
 pub enum Model {
@@ -172,6 +184,7 @@ pub struct OpenAiCore {
     repository: Arc<RwLock<Repository>>,
     thinker: Thinker,
     model: Model,
+    defined_messages: HashMap<DefinedMessage, String>,
     max_tokens: u32,
 }
 
@@ -195,10 +208,17 @@ impl OpenAiCore {
             });
         }
 
+        let mut defined_messages = HashMap::new();
+        for m in vec![DefinedMessage::FinishSession] {
+            let s = m.to_string();
+            defined_messages.insert(m, s);
+        }
+
         Ok(Self {
             repository,
             thinker,
             model,
+            defined_messages,
             max_tokens: 1000,
         })
     }
@@ -332,6 +352,30 @@ impl OpenAiCore {
         Ok(())
     }
 
+    async fn receive_defined(
+        &mut self,
+        broadcast: &IdentifiedBroadcast<Event>,
+        message: DefinedMessage,
+    ) -> Result<(), Error> {
+        match message {
+            DefinedMessage::FinishSession => {
+                if self.repository.read().await.has_session() {
+                    self.receive(
+                        &broadcast,
+                        ChatInputMessage {
+                            modality: Modality::Text,
+                            user: SYSTEM_USER_NAME.to_string(),
+                            content: self.defined_messages.get(&message).unwrap().to_string(),
+                        },
+                    )
+                    .await?;
+                    self.repository.write().await.clear_session()?;
+                }
+                Ok(())
+            }
+        }
+    }
+
     async fn run_internal(
         &mut self,
         mut broadcast: IdentifiedBroadcast<Event>,
@@ -353,6 +397,18 @@ impl OpenAiCore {
                     .await?
                 }
                 Event::TextMessage { user, message } => {
+                    if user == SYSTEM_USER_NAME {
+                        if let Some(m) = self
+                            .defined_messages
+                            .iter()
+                            .find(|(_, s)| **s == message)
+                            .map(|(m, _)| m)
+                            .cloned()
+                        {
+                            self.receive_defined(&broadcast, m).await?;
+                            continue;
+                        }
+                    }
                     self.receive(
                         &broadcast,
                         ChatInputMessage {
@@ -362,20 +418,6 @@ impl OpenAiCore {
                         },
                     )
                     .await?
-                }
-                Event::FinishSession => {
-                    if self.repository.read().await.has_session() {
-                        self.receive(
-                            &broadcast,
-                            ChatInputMessage {
-                                modality: Modality::Text,
-                                user: message::SYSTEM_USER_NAME.to_string(),
-                                content: "session finished".to_string(),
-                            },
-                        )
-                        .await?;
-                        self.repository.write().await.clear_session()?;
-                    }
                 }
                 _ => (),
             }

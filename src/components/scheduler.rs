@@ -10,6 +10,7 @@ use tracing::info;
 use crate::common::{
     broadcast::{self, IdentifiedBroadcast},
     events::{self, Event, EventComponent},
+    message::SYSTEM_USER_NAME,
     repository::Repository,
 };
 
@@ -27,7 +28,7 @@ pub enum Error {
 
 struct EventSchedule {
     schedule: Schedule,
-    event: Event,
+    message: String,
     last_sent: DateTime<Utc>,
 }
 
@@ -61,7 +62,7 @@ impl Scheduler {
             .map(|r| {
                 Ok(EventSchedule {
                     schedule: Schedule::from_str(&r.expression)?,
-                    event: r.event.clone(),
+                    message: r.message.clone(),
                     last_sent: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
                 })
             })
@@ -70,17 +71,11 @@ impl Scheduler {
         Ok(())
     }
 
-    pub async fn register(&mut self, expression: String, event: Event) -> Result<(), Error> {
-        let schedule = Schedule::from_str(&expression)?;
-        self.schedules.push(EventSchedule {
-            schedule,
-            event: event.clone(),
-            last_sent: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
-        });
+    pub async fn register(&mut self, expression: String, message: String) -> Result<(), Error> {
         self.repository
             .write()
             .await
-            .append_schedule(String::from(expression), event)?;
+            .append_schedule(expression, message)?;
         Ok(())
     }
 
@@ -118,7 +113,10 @@ impl Scheduler {
 
             if let Some((schedule, time)) = self.event_ready()? {
                 info!("schedule triggered: {}", time);
-                broadcast.send(schedule.event.clone())?;
+                broadcast.send(Event::TextMessage {
+                    user: SYSTEM_USER_NAME.to_string(),
+                    message: schedule.message.clone(),
+                })?;
                 schedule.last_sent = time;
             }
         }
@@ -178,7 +176,7 @@ mod tests {
             .await
             .unwrap();
         scheduler
-            .register(String::from("0 30 19 * * *"), Event::FinishSession {})
+            .register(String::from("0 30 19 * * *"), String::from("foo"))
             .await
             .unwrap();
         mock_chrono::set_timestamp(19, 29, 0);
@@ -200,7 +198,7 @@ mod tests {
             .await
             .unwrap();
         scheduler
-            .register(String::from("0 0 20,21 * * *"), Event::FinishSession {})
+            .register(String::from("0 0 20,21 * * *"), String::from("foo"))
             .await
             .unwrap();
         mock_chrono::set_timestamp(20, 0, 0);

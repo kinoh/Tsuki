@@ -5,7 +5,6 @@ use thiserror::Error;
 use tracing::info;
 use uuid::Uuid;
 
-use super::events::Event;
 use super::memory::MemoryRecord;
 use super::message::{MessageRecord, SessionId};
 use super::schedule::ScheduleRecord;
@@ -138,10 +137,11 @@ impl Repository {
         self.data.memories.iter().map(|m| m).collect()
     }
 
-    pub fn append_schedule(&mut self, expression: String, event: Event) -> Result<(), Error> {
-        self.data
-            .schedules
-            .push(ScheduleRecord { expression, event });
+    pub fn append_schedule(&mut self, expression: String, message: String) -> Result<(), Error> {
+        self.data.schedules.push(ScheduleRecord {
+            expression,
+            message,
+        });
         self.save()
     }
 

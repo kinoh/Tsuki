@@ -1,14 +1,13 @@
 use std::{any::type_name, fmt::Display};
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::task::{self, JoinHandle};
 use tracing::error;
 
 use super::{broadcast::IdentifiedBroadcast, chat::Modality};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum Event {
     TextMessage {
         user: String,
@@ -30,7 +29,6 @@ pub enum Event {
     Notify {
         content: String,
     },
-    FinishSession,
 }
 
 impl Display for Event {
