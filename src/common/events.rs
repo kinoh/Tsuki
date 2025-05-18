@@ -29,6 +29,7 @@ pub enum Event {
     Notify {
         content: String,
     },
+    SchedulesUpdated,
 }
 
 impl Display for Event {

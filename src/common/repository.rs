@@ -145,6 +145,21 @@ impl Repository {
         self.save()
     }
 
+    pub fn remove_schedule(&mut self, expression: String, message: String) -> Result<usize, Error> {
+        let indices = self
+            .data
+            .schedules
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.expression == expression && s.message == message)
+            .map(|(i, _)| i)
+            .collect::<Vec<usize>>();
+        for i in &indices {
+            self.schedules().remove(*i);
+        }
+        Ok(indices.len())
+    }
+
     pub fn schedules(&self) -> Vec<&ScheduleRecord> {
         self.data.schedules.iter().map(|s| s).collect()
     }

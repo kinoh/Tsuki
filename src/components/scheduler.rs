@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
 use cron::Schedule;
 use thiserror::Error;
-use tokio::{sync::RwLock, time};
+use tokio::{select, sync::RwLock, time};
 use tracing::info;
 
 use crate::common::{
@@ -26,6 +26,15 @@ pub enum Error {
     Repository(#[from] crate::common::repository::Error),
 }
 
+fn now() -> DateTime<Utc> {
+    #[cfg(test)]
+    let t = mock_chrono::Utc::now();
+    #[cfg(not(test))]
+    let t = Utc::now();
+    t
+}
+
+#[derive(Debug, PartialEq)]
 struct EventSchedule {
     schedule: Schedule,
     message: String,
@@ -53,7 +62,7 @@ impl Scheduler {
     }
 
     async fn load(&mut self) -> Result<(), Error> {
-        let data: Result<Vec<EventSchedule>, Error> = self
+        let mut data = self
             .repository
             .read()
             .await
@@ -66,8 +75,9 @@ impl Scheduler {
                     last_sent: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
                 })
             })
-            .collect();
-        self.schedules = data?;
+            .collect::<Result<Vec<EventSchedule>, Error>>()?;
+        self.schedules.clear();
+        self.schedules.append(&mut data);
         Ok(())
     }
 
@@ -80,45 +90,62 @@ impl Scheduler {
         Ok(())
     }
 
-    fn next(&mut self, now: DateTime<Utc>) -> Option<(&mut EventSchedule, DateTime<Utc>)> {
+    fn next(&mut self, now: DateTime<Utc>) -> Option<(usize, &EventSchedule, DateTime<Utc>)> {
         self.schedules
-            .iter_mut()
-            .filter_map(|s| s.schedule.after(&now).next().map(|u| (s, u)))
-            .filter(|(s, u)| s.last_sent < *u)
-            .min_by_key(|(_s, u)| *u)
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.schedule.after(&now).next().map(|u| (i, s, u)))
+            .filter(|(_i, s, u)| s.last_sent < *u)
+            .min_by_key(|(_i, _s, u)| *u)
     }
 
-    fn event_ready(&mut self) -> Result<Option<(&mut EventSchedule, DateTime<Utc>)>, Error> {
+    fn event_ready(&mut self) -> Result<Option<(usize, DateTime<Utc>)>, Error> {
         let resolution = TimeDelta::from_std(self.resolution)?;
 
-        #[cfg(test)]
-        let now = mock_chrono::Utc::now();
-        #[cfg(not(test))]
-        let now = Utc::now();
+        let now = now();
 
-        if let Some((event_schedule, time)) = self.next(now - resolution) {
+        if let Some((index, _, time)) = self.next(now - resolution) {
             if time < now + resolution {
-                return Ok(Some((event_schedule, time)));
+                return Ok(Some((index, time)));
             }
         }
         Ok(None)
     }
 
-    async fn run_internal(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<(), Error> {
+    async fn run_internal(
+        &mut self,
+        mut broadcast: IdentifiedBroadcast<Event>,
+    ) -> Result<(), Error> {
         info!("start scheduler");
 
         let mut interval = time::interval(self.resolution);
 
         loop {
-            interval.tick().await;
+            select! {
+                _ = interval.tick() => {
+                    if let Some((index, time)) = self.event_ready()? {
+                        info!("schedule triggered: {}", time);
+                        broadcast.send(Event::TextMessage {
+                            user: String::from(SYSTEM_USER_NAME),
+                            message: self.schedules[index].message.clone(),
+                        })?;
 
-            if let Some((schedule, time)) = self.event_ready()? {
-                info!("schedule triggered: {}", time);
-                broadcast.send(Event::TextMessage {
-                    user: SYSTEM_USER_NAME.to_string(),
-                    message: schedule.message.clone(),
-                })?;
-                schedule.last_sent = time;
+                        let now = now();
+                        if self.schedules[index].schedule.after(&now).next().is_none() {
+                            self.schedules.remove(index);
+                        } else {
+                            self.schedules[index].last_sent = time;
+                        }
+                    }
+                }
+                event = broadcast.recv() => {
+                    match event? {
+                        Event::SchedulesUpdated => {
+                            self.load().await?;
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
     }
