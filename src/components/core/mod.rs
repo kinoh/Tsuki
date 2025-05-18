@@ -18,7 +18,6 @@ use tokio::sync::RwLock;
 use tracing::{error, info};
 
 use execute_code_function::ExecuteCodeFunction;
-use manage_schedule_function::ManageScheduleFunction;
 use memorize_function::MemorizeFunction;
 
 use thiserror::Error;
@@ -289,10 +288,10 @@ impl OpenAiCore {
     ) -> Result<(), Error> {
         info!("start core");
 
-        self.thinker.register_function(ManageScheduleFunction {
-            repository: self.repository.clone(),
-            broadcast: broadcast.clone(),
-        });
+        // self.thinker.register_function(ManageScheduleFunction {
+        //     repository: self.repository.clone(),
+        //     broadcast: broadcast.clone(),
+        // });
 
         loop {
             let event = broadcast.recv().await?;
