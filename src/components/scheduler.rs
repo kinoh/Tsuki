@@ -76,6 +76,7 @@ impl Scheduler {
             .write()
             .await
             .append_schedule(expression, message)?;
+        self.load().await?;
         Ok(())
     }
 
@@ -169,9 +170,30 @@ mod mock_chrono {
 mod tests {
     use super::*;
 
+    struct TemporaryPath {
+        path: String,
+    }
+
+    impl TemporaryPath {
+        fn new() -> Self {
+            Self {
+                path: String::from("/tmp/tsuki_test_scheduler.json"),
+            }
+        }
+    }
+
+    impl Drop for TemporaryPath {
+        fn drop(&mut self) {
+            if std::path::Path::new(&self.path).exists() {
+                std::fs::remove_file(&self.path).unwrap();
+            }
+        }
+    }
+
     #[tokio::test]
     async fn daily() {
-        let repo = Repository::new("/tmp/tsuki_test_scheduler.json", false).unwrap();
+        let path = TemporaryPath::new();
+        let repo = Repository::new(&path.path, false).unwrap();
         let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
             .await
             .unwrap();
@@ -193,7 +215,8 @@ mod tests {
 
     #[tokio::test]
     async fn no_duplicate() {
-        let repo = Repository::new("/tmp/tsuki_test_scheduler.json", false).unwrap();
+        let path = TemporaryPath::new();
+        let repo = Repository::new(&path.path, false).unwrap();
         let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
             .await
             .unwrap();
