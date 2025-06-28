@@ -33,7 +33,7 @@ color-eyre = "0.6"
 crossterm = "0.28"
 ratatui = "0.29"
 tui-logger = { version = "0.17", features = ["tracing-support"] }
-openai_dive = { git = "https://github.com/kinoh/openai-client.git", rev = "dd15949ea3aecad86f6012d7e4f19324ef2b2b1e", default-features = false, features = ["rustls-tls"] }
+openai_dive = { version = "1.2.2", default-features = false, features = ["rustls-tls"] }
 tera = { version = "1.20", default-features = false }
 cron = { version = "0.15", features = ["serde"] }
 static-toml = "1.3"
