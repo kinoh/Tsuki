@@ -1,0 +1,11 @@
+{
+  "contextFileName": ".gemini/GEMINI.md",
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ]
+    }
+  }
+}
