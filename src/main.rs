@@ -189,10 +189,9 @@ async fn app() -> Result<(), ApplicationError> {
     event_system.run(eventlogger);
 
     let pretty_history = cfg!(debug_assertions);
-    let repository: Arc<RwLock<dyn Repository>> = Arc::new(RwLock::new(FileRepository::new(
-        CONF.main.history_path,
-        pretty_history,
-    )?));
+    let repository: Arc<RwLock<dyn Repository>> = Arc::new(RwLock::new(
+        FileRepository::new(CONF.main.history_path, pretty_history).await?,
+    ));
 
     if args.audio {
         let mumble_client = MumbleClient::new(
@@ -230,7 +229,7 @@ async fn app() -> Result<(), ApplicationError> {
             Duration::from_secs(CONF.scheduler.resolution_secs.try_into()?),
         )
         .await?;
-        if repository.read().await.schedules().is_empty() {
+        if repository.read().await.schedules().await?.is_empty() {
             scheduler
                 .register(
                     String::from("0 0 19 * * *"),

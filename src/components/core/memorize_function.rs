@@ -59,6 +59,7 @@ impl Function for MemorizeFunction {
                 content: args.items,
                 timestamp,
             })
+            .await
             .map_err(|e| e.to_string())?;
         Ok("success".to_string())
     }

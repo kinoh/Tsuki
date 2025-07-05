@@ -139,7 +139,8 @@ impl OpenAiCore {
             .repository
             .read()
             .await
-            .memories()
+            .memories("") // TODO: pass query
+            .await?
             .iter()
             .flat_map(|r| r.content.clone())
             .collect::<Vec<String>>();
@@ -193,18 +194,18 @@ impl OpenAiCore {
         input_chats: Vec<ChatInput>,
     ) -> Result<(Vec<ChatOutput>, u32), Error> {
         let previous_id = {
-            let mut repo = self.repository.write().await;
+            let repo = self.repository.write().await;
 
-            let previous_id = repo.last_response_id().cloned();
+            let previous_id = repo.last_response_id().await?;
 
             let user_record = MessageRecord {
                 timestamp: get_timestamp()?,
                 chat: MessageRecordChat::Input(input_chats.clone()),
                 response_id: None,
-                session: repo.get_or_create_session()?,
+                session: repo.get_or_create_session().await?,
                 usage: 0,
             };
-            repo.append_message(user_record)?;
+            repo.append_message(user_record).await?;
 
             previous_id
         };
@@ -218,15 +219,15 @@ impl OpenAiCore {
         }?;
 
         {
-            let mut repo = self.repository.write().await;
+            let repo = self.repository.write().await;
             let assistant_record = MessageRecord {
                 timestamp: get_timestamp()?,
                 chat: MessageRecordChat::Output(outputs.clone()),
                 response_id: Some(response_id),
-                session: repo.get_or_create_session()?,
+                session: repo.get_or_create_session().await?,
                 usage,
             };
-            repo.append_message(assistant_record)?;
+            repo.append_message(assistant_record).await?;
         }
 
         Ok((outputs, usage))
@@ -265,7 +266,7 @@ impl OpenAiCore {
     ) -> Result<(), Error> {
         match message {
             DefinedMessage::FinishSession => {
-                if self.repository.read().await.has_session() {
+                if self.repository.read().await.has_session().await {
                     self.receive(
                         &broadcast,
                         ChatInputMessage {
@@ -275,7 +276,7 @@ impl OpenAiCore {
                         },
                     )
                     .await?;
-                    self.repository.write().await.clear_session()?;
+                    self.repository.write().await.clear_session().await?;
                 }
                 Ok(())
             }

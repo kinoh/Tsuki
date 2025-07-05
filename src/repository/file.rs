@@ -1,8 +1,9 @@
+use async_trait::async_trait;
 use cron::Schedule;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::{ErrorKind, Read, Write};
 use std::str::FromStr;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ErrorKind};
 use tracing::info;
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 struct RepositoryData {
     #[serde(default)]
     current_session: Option<SessionId>,
@@ -42,12 +43,12 @@ struct RepositoryData {
 pub struct FileRepository {
     path: String,
     pretty: bool,
-    data: RepositoryData,
+    data: tokio::sync::RwLock<RepositoryData>,
 }
 
 impl FileRepository {
-    pub fn new(path: &str, pretty: bool) -> Result<Self, Error> {
-        let data = match File::open(path) {
+    pub async fn new(path: &str, pretty: bool) -> Result<Self, Error> {
+        let data = match File::open(path).await {
             Err(e) => {
                 if e.kind() == ErrorKind::NotFound {
                     info!(path = path, "data file not found");
@@ -58,7 +59,7 @@ impl FileRepository {
             }
             Ok(mut file) => {
                 let mut buf = String::new();
-                file.read_to_string(&mut buf).wrap()?;
+                file.read_to_string(&mut buf).await.wrap()?;
                 if buf.is_empty() {
                     RepositoryData::default()
                 } else {
@@ -70,112 +71,120 @@ impl FileRepository {
         Ok(Self {
             path: path.to_string(),
             pretty,
-            data,
+            data: tokio::sync::RwLock::new(data),
         })
     }
 
-    fn save(&mut self) -> Result<(), Error> {
+    async fn save(&self, data: &RepositoryData) -> Result<(), Error> {
         let json = if self.pretty {
-            serde_json::to_string_pretty(&self.data)
+            serde_json::to_string_pretty(data)
         } else {
-            serde_json::to_string(&self.data)
+            serde_json::to_string(data)
         }
         .wrap()?;
-        let mut file = File::create(self.path.clone()).wrap()?;
-        file.write_all(json.as_bytes()).wrap()?;
+        let mut file = File::create(self.path.clone()).await.wrap()?;
+        file.write_all(json.as_bytes()).await.wrap()?;
         Ok(())
     }
 }
 
+#[async_trait]
 impl Repository for FileRepository {
-    fn get_or_create_session(&mut self) -> Result<SessionId, Error> {
-        if let Some(ref session) = self.data.current_session {
+    async fn get_or_create_session(&self) -> Result<SessionId, Error> {
+        let mut data = self.data.write().await;
+        if let Some(ref session) = data.current_session {
             Ok(session.clone())
         } else {
             let session = Uuid::new_v4().simple().to_string();
-            self.data.current_session = Some(session.clone());
-            self.save()?;
+            data.current_session = Some(session.clone());
+            self.save(&data).await?;
             Ok(session)
         }
     }
 
-    fn has_session(&self) -> bool {
-        self.data.current_session.is_some()
+    async fn has_session(&self) -> bool {
+        self.data.read().await.current_session.is_some()
     }
 
-    fn clear_session(&mut self) -> Result<(), Error> {
-        self.data.current_session = None;
-        self.save()
+    async fn clear_session(&self) -> Result<(), Error> {
+        let mut data = self.data.write().await;
+        data.current_session = None;
+        self.save(&data).await
     }
 
-    fn append_message(&mut self, record: MessageRecord) -> Result<(), Error> {
-        self.data.messages.push(record);
-        self.save()
+    async fn append_message(&self, record: MessageRecord) -> Result<(), Error> {
+        let mut data = self.data.write().await;
+        data.messages.push(record);
+        self.save(&data).await
     }
 
-    fn messages(&self, latest_n: Option<usize>, before: Option<u64>) -> Vec<&MessageRecord> {
-        let total = self.data.messages.len();
+    async fn messages(
+        &self,
+        latest_n: Option<usize>,
+        before: Option<u64>,
+    ) -> Result<Vec<MessageRecord>, Error> {
+        let data = self.data.read().await;
+        let total = data.messages.len();
         let mut response = Vec::with_capacity(latest_n.unwrap_or(total));
         for i in 1..=total {
-            let record = &self.data.messages[total - i];
-            if latest_n.is_none_or(|n| response.len() < n)
-                && before.is_none_or(|t| record.timestamp < t)
-            {
-                response.push(record);
+            let record = &data.messages[total - i];
+            if latest_n.is_none() || response.len() < latest_n.unwrap() {
+                if before.is_none() || record.timestamp < before.unwrap() {
+                    response.push(record.clone());
+                }
             }
         }
         response.reverse();
-        response
+        Ok(response)
     }
 
-    fn last_response_id(&self) -> Option<&String> {
-        if let Some(ref session) = self.data.current_session {
-            self.data
-                .messages
+    async fn last_response_id(&self) -> Result<Option<String>, Error> {
+        let data = self.data.read().await;
+        let response = if let Some(ref _session) = data.current_session {
+            data.messages
                 .iter()
                 .rev()
-                .filter(|r| r.session == *session)
-                .find_map(|r| r.response_id.as_ref())
+                .find_map(|r| r.response_id.clone())
         } else {
             None
-        }
+        };
+        Ok(response)
     }
 
-    fn append_memory(&mut self, record: MemoryRecord) -> Result<(), Error> {
-        self.data.memories.push(record);
-        self.save()
+    async fn append_memory(&self, record: MemoryRecord) -> Result<(), Error> {
+        let mut data = self.data.write().await;
+        data.memories.push(record);
+        self.save(&data).await
     }
 
-    fn memories(&self) -> Vec<&MemoryRecord> {
-        self.data.memories.iter().map(|m| m).collect()
+    async fn memories(&self, _query: &str) -> Result<Vec<MemoryRecord>, Error> {
+        let data = self.data.read().await;
+        Ok(data.memories.clone())
     }
 
-    fn append_schedule(&mut self, expression: String, message: String) -> Result<(), Error> {
+    async fn append_schedule(&self, expression: String, message: String) -> Result<(), Error> {
         let schedule = Schedule::from_str(&expression).wrap()?;
-        self.data
-            .schedules
-            .push(ScheduleRecord { schedule, message });
-        self.save()
+        let mut data = self.data.write().await;
+        data.schedules.push(ScheduleRecord { schedule, message });
+        self.save(&data).await
     }
 
-    fn remove_schedule(&mut self, expression: String, message: String) -> Result<usize, Error> {
+    async fn remove_schedule(&self, expression: String, message: String) -> Result<usize, Error> {
         let schedule = Schedule::from_str(&expression).wrap()?;
-        let indices = self
-            .data
-            .schedules
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.schedule == schedule && s.message == message)
-            .map(|(i, _)| i)
-            .collect::<Vec<usize>>();
-        for i in &indices {
-            self.data.schedules.remove(*i);
+        let mut data = self.data.write().await;
+        let initial_len = data.schedules.len();
+        data.schedules
+            .retain(|s| !(s.schedule == schedule && s.message == message));
+        let removed_count = initial_len - data.schedules.len();
+        if removed_count > 0 {
+            self.save(&data).await?;
         }
-        Ok(indices.len())
+        Ok(removed_count)
     }
 
-    fn schedules(&self) -> Vec<&ScheduleRecord> {
-        self.data.schedules.iter().map(|s| s).collect()
+    async fn schedules(&self) -> Result<Vec<ScheduleRecord>, Error> {
+        let data = self.data.read().await;
+        Ok(data.schedules.clone())
     }
 }
 
@@ -184,21 +193,27 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
-    #[test]
-    fn remove_schedule() {
+    #[tokio::test]
+    async fn remove_schedule() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let mut repo = FileRepository::new(path, false).unwrap();
+        let repo = FileRepository::new(path, false).await.unwrap();
         let expr = "0 5 * * * *".to_string();
         let msg = "test message".to_string();
 
-        repo.append_schedule(expr.clone(), msg.clone()).unwrap();
-        assert_eq!(repo.schedules().len(), 1);
-        assert_eq!(repo.schedules()[0].message, msg);
-        assert_eq!(repo.schedules()[0].schedule.to_string(), expr);
+        repo.append_schedule(expr.clone(), msg.clone())
+            .await
+            .unwrap();
+        let schedules = repo.schedules().await.unwrap();
+        assert_eq!(schedules.len(), 1);
+        assert_eq!(schedules[0].message, msg);
+        assert_eq!(schedules[0].schedule.to_string(), expr);
 
-        let removed = repo.remove_schedule(expr.clone(), msg.clone()).unwrap();
+        let removed = repo
+            .remove_schedule(expr.clone(), msg.clone())
+            .await
+            .unwrap();
         assert_eq!(removed, 1);
-        assert_eq!(repo.schedules().len(), 0);
+        assert_eq!(repo.schedules().await.unwrap().len(), 0);
     }
 }

@@ -172,10 +172,13 @@ async fn messages(
     Query(params): Query<MessagesParams>,
 ) -> Result<Json<Vec<ResponseMessage>>, StatusCode> {
     let repo = state.repository.read().await;
-    let data: Vec<&MessageRecord> = repo.messages(params.n, params.before);
+    let data = repo.messages(params.n, params.before).await.map_err(|e| {
+        error!("repository error: {}", e);
+        StatusCode::from_u16(500).unwrap()
+    })?;
     let response: Result<Vec<ResponseMessage>, serde_json::Error> = data
         .iter()
-        .map(|m: &&MessageRecord| {
+        .map(|m: &MessageRecord| {
             Ok(ResponseMessage {
                 role: match m.chat {
                     MessageRecordChat::Input(_) => Role::User,
@@ -201,17 +204,20 @@ async fn metadata(State(state): State<Arc<WebState>>) -> Json<Value> {
     }))
 }
 
-async fn metrics(State(state): State<Arc<WebState>>) -> Json<Value> {
+async fn metrics(State(state): State<Arc<WebState>>) ->  Result<Json<Value>, StatusCode> {
     let repo = state.repository.read().await;
-    let messages = repo.messages(None, None);
-    let mut sessions: Vec<&String> = messages.iter().map(|r| &r.session).collect();
+    let messages = repo.messages(None, None).await.map_err(|e| {
+        error!("repository error: {}", e);
+        StatusCode::from_u16(500).unwrap()
+    })?;
+    let mut sessions: Vec<String> = messages.iter().map(|r| r.session.clone()).collect();
     sessions.dedup();
 
-    Json(json!({
+    Ok(Json(json!({
         "total_usage": messages.iter().map(|r| r.usage).sum::<u32>(),
         "total_messages": messages.len(),
         "total_sessions": sessions.len(),
-    }))
+    })))
 }
 
 async fn notification_test(State(state): State<Arc<WebState>>) -> Result<String, StatusCode> {

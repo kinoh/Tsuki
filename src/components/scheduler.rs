@@ -55,7 +55,8 @@ impl Scheduler {
         self.repository
             .write()
             .await
-            .append_schedule(expression, message)?;
+            .append_schedule(expression, message)
+            .await?;
         Ok(())
     }
 
@@ -64,9 +65,11 @@ impl Scheduler {
             .read()
             .await
             .schedules()
+            .await
+            .ok()?
             .iter()
-            .filter_map(|r| r.schedule.after(&now).next().map(|t| (*r, t)))
-            .filter(|(r, next)| self.last_sent.get(*r).is_none_or(|last| *last < *next))
+            .filter_map(|r| r.schedule.after(&now).next().map(|t| (r.clone(), t)))
+            .filter(|(r, next)| self.last_sent.get(r).is_none_or(|last| *last < *next))
             .min_by_key(|(_, t)| *t)
             .map(|(r, t)| (r.clone(), t))
     }
@@ -101,7 +104,7 @@ impl Scheduler {
 
                         let now = now();
                         if record.schedule.after(&now).next().is_none() {
-                            self.repository.write().await.remove_schedule(record.schedule.to_string(), record.message)?;
+                            self.repository.write().await.remove_schedule(record.schedule.to_string(), record.message).await?;
                         } else {
                             self.last_sent.insert(record, time);
                         }
@@ -163,7 +166,7 @@ mod tests {
     async fn daily() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let repo = FileRepository::new(path, false).unwrap();
+        let repo = FileRepository::new(path, false).await.unwrap();
         let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
             .await
             .unwrap();
@@ -187,7 +190,7 @@ mod tests {
     async fn no_duplicate() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let repo = FileRepository::new(path, false).unwrap();
+        let repo = FileRepository::new(path, false).await.unwrap();
         let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
             .await
             .unwrap();

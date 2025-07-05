@@ -1,4 +1,4 @@
-pub mod file;
+mod file;
 
 use crate::common::memory::MemoryRecord;
 use crate::common::message::{MessageRecord, SessionId};
@@ -14,16 +14,23 @@ pub struct Error {
     source: Box<dyn std::error::Error + Send + Sync + 'static>,
 }
 
+use async_trait::async_trait;
+
+#[async_trait]
 pub trait Repository: Send + Sync {
-    fn get_or_create_session(&mut self) -> Result<SessionId, Error>;
-    fn has_session(&self) -> bool;
-    fn clear_session(&mut self) -> Result<(), Error>;
-    fn append_message(&mut self, record: MessageRecord) -> Result<(), Error>;
-    fn messages(&self, latest_n: Option<usize>, before: Option<u64>) -> Vec<&MessageRecord>;
-    fn last_response_id(&self) -> Option<&String>;
-    fn append_memory(&mut self, record: MemoryRecord) -> Result<(), Error>;
-    fn memories(&self) -> Vec<&MemoryRecord>;
-    fn append_schedule(&mut self, expression: String, message: String) -> Result<(), Error>;
-    fn remove_schedule(&mut self, expression: String, message: String) -> Result<usize, Error>;
-    fn schedules(&self) -> Vec<&ScheduleRecord>;
+    async fn get_or_create_session(&self) -> Result<SessionId, Error>;
+    async fn has_session(&self) -> bool;
+    async fn clear_session(&self) -> Result<(), Error>;
+    async fn append_message(&self, record: MessageRecord) -> Result<(), Error>;
+    async fn messages(
+        &self,
+        latest_n: Option<usize>,
+        before: Option<u64>,
+    ) -> Result<Vec<MessageRecord>, Error>;
+    async fn last_response_id(&self) -> Result<Option<String>, Error>;
+    async fn append_memory(&self, record: MemoryRecord) -> Result<(), Error>;
+    async fn memories(&self, query: &str) -> Result<Vec<MemoryRecord>, Error>;
+    async fn append_schedule(&self, expression: String, message: String) -> Result<(), Error>;
+    async fn remove_schedule(&self, expression: String, message: String) -> Result<usize, Error>;
+    async fn schedules(&self) -> Result<Vec<ScheduleRecord>, Error>;
 }

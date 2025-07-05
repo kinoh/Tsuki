@@ -62,6 +62,7 @@ impl Function for ManageScheduleFunction {
                         .write()
                         .await
                         .append_schedule(expression, message)
+                        .await
                         .map_err(|e| e.to_string())?;
                     if let Err(e) = self.broadcast.send(Event::SchedulesUpdated) {
                         error!("send error in function call: {}", e);
@@ -77,6 +78,7 @@ impl Function for ManageScheduleFunction {
                         .write()
                         .await
                         .remove_schedule(expression, message)
+                        .await
                         .map_err(|e| e.to_string())?;
                     if let Err(e) = self.broadcast.send(Event::SchedulesUpdated) {
                         error!("send error in function call: {}", e);
@@ -93,6 +95,8 @@ impl Function for ManageScheduleFunction {
                 .read()
                 .await
                 .schedules()
+                .await
+                .map_err(|e| e.to_string())?
                 .iter()
                 .map(|s| {
                     format!(
