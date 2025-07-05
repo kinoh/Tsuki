@@ -1,7 +1,7 @@
 use crate::adapter::openai::Function;
 use crate::common::broadcast::IdentifiedBroadcast;
 use crate::common::events::Event;
-use crate::common::repository::Repository;
+use crate::repository::Repository;
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ pub struct ManageScheduleFunctionArguments {
 }
 
 pub struct ManageScheduleFunction {
-    pub repository: Arc<RwLock<Repository>>,
+    pub repository: Arc<RwLock<dyn Repository>>,
     pub broadcast: IdentifiedBroadcast<Event>,
 }
 

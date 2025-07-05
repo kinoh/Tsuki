@@ -3,12 +3,11 @@
 mod adapter;
 mod common;
 mod components;
+mod repository;
 
 use clap::Parser;
 use color_eyre::{eyre, Result};
-use common::{
-    events::EventSystem, message::ASSISTANT_NAME, mumble::MumbleClient, repository::Repository,
-};
+use common::{events::EventSystem, message::ASSISTANT_NAME, mumble::MumbleClient};
 use components::{
     core::{DefinedMessage, Model, OpenAiCore},
     eventlogger::EventLogger,
@@ -27,6 +26,7 @@ use ratatui::{
     text::{Line, Span},
     DefaultTerminal, Frame,
 };
+use repository::{FileRepository, Repository};
 use serde::Serialize;
 use std::{env, sync::Arc, time::Duration};
 use thiserror::Error;
@@ -56,7 +56,7 @@ enum ApplicationError {
     #[error("events error: {0}")]
     Events(#[from] common::events::Error),
     #[error("repository error: {0}")]
-    Repository(#[from] common::repository::Error),
+    Repository(#[from] repository::Error),
     #[error("mumble error: {0}")]
     Mumble(#[from] common::mumble::Error),
     #[error("recognizer error: {0}")]
@@ -189,7 +189,7 @@ async fn app() -> Result<(), ApplicationError> {
     event_system.run(eventlogger);
 
     let pretty_history = cfg!(debug_assertions);
-    let repository = Arc::new(RwLock::new(Repository::new(
+    let repository: Arc<RwLock<dyn Repository>> = Arc::new(RwLock::new(FileRepository::new(
         CONF.main.history_path,
         pretty_history,
     )?));

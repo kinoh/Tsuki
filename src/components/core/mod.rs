@@ -10,7 +10,7 @@ use crate::common::chat::{
 };
 use crate::common::events::{self, Event, EventComponent};
 use crate::common::message::{MessageRecord, MessageRecordChat, SYSTEM_USER_NAME};
-use crate::common::repository::Repository;
+use crate::repository::Repository;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ pub enum Error {
     #[error("Dify error: {0}")]
     Dify(#[from] crate::adapter::dify::Error),
     #[error("repository error: {0}")]
-    Repository(#[from] crate::common::repository::Error),
+    Repository(#[from] crate::repository::Error),
     #[error("broadcast error: {0}")]
     Broadcast(#[from] crate::common::broadcast::Error),
     #[error("OpenAI error: {0}")]
@@ -87,7 +87,7 @@ fn to_event(output: &ChatOutput, usage: u32) -> Option<Event> {
 }
 
 pub struct OpenAiCore {
-    repository: Arc<RwLock<Repository>>,
+    repository: Arc<RwLock<dyn Repository>>,
     thinker: Thinker,
     model: Model,
     defined_messages: HashMap<DefinedMessage, String>,
@@ -96,7 +96,7 @@ pub struct OpenAiCore {
 
 impl OpenAiCore {
     pub async fn new(
-        repository: Arc<RwLock<Repository>>,
+        repository: Arc<RwLock<dyn Repository>>,
         prompt_key: &str,
         model: Model,
         openai_api_key: &str,

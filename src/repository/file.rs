@@ -3,22 +3,28 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::str::FromStr;
-use thiserror::Error;
 use tracing::info;
 use uuid::Uuid;
 
-use super::memory::MemoryRecord;
-use super::message::{MessageRecord, SessionId};
-use super::schedule::ScheduleRecord;
+use super::{Error, Repository};
+use crate::common::memory::MemoryRecord;
+use crate::common::message::{MessageRecord, SessionId};
+use crate::common::schedule::ScheduleRecord;
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("std::io error: {0}")]
-    StdIo(#[from] std::io::Error),
-    #[error("stserde_json error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
-    #[error("cron error: {0}")]
-    Cron(#[from] cron::error::Error),
+pub trait WrapErrorExt<T> {
+    fn wrap(self) -> Result<T, Error>;
+}
+
+impl<T, E> WrapErrorExt<T> for Result<T, E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn wrap(self) -> Result<T, Error> {
+        self.map_err(|e| Error {
+            component: String::from("file"),
+            source: Box::new(e),
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -33,13 +39,13 @@ struct RepositoryData {
     schedules: Vec<ScheduleRecord>,
 }
 
-pub struct Repository {
+pub struct FileRepository {
     path: String,
     pretty: bool,
     data: RepositoryData,
 }
 
-impl Repository {
+impl FileRepository {
     pub fn new(path: &str, pretty: bool) -> Result<Self, Error> {
         let data = match File::open(path) {
             Err(e) => {
@@ -47,16 +53,16 @@ impl Repository {
                     info!(path = path, "data file not found");
                     RepositoryData::default()
                 } else {
-                    return Err(e.into());
+                    return Err(e).wrap();
                 }
             }
             Ok(mut file) => {
                 let mut buf = String::new();
-                file.read_to_string(&mut buf)?;
+                file.read_to_string(&mut buf).wrap()?;
                 if buf.is_empty() {
                     RepositoryData::default()
                 } else {
-                    serde_json::from_str(&buf)?
+                    serde_json::from_str(&buf).wrap()?
                 }
             }
         };
@@ -73,13 +79,16 @@ impl Repository {
             serde_json::to_string_pretty(&self.data)
         } else {
             serde_json::to_string(&self.data)
-        }?;
-        let mut file = File::create(self.path.clone())?;
-        file.write_all(json.as_bytes())?;
+        }
+        .wrap()?;
+        let mut file = File::create(self.path.clone()).wrap()?;
+        file.write_all(json.as_bytes()).wrap()?;
         Ok(())
     }
+}
 
-    pub fn get_or_create_session(&mut self) -> Result<SessionId, Error> {
+impl Repository for FileRepository {
+    fn get_or_create_session(&mut self) -> Result<SessionId, Error> {
         if let Some(ref session) = self.data.current_session {
             Ok(session.clone())
         } else {
@@ -90,21 +99,21 @@ impl Repository {
         }
     }
 
-    pub fn has_session(&self) -> bool {
+    fn has_session(&self) -> bool {
         self.data.current_session.is_some()
     }
 
-    pub fn clear_session(&mut self) -> Result<(), Error> {
+    fn clear_session(&mut self) -> Result<(), Error> {
         self.data.current_session = None;
         self.save()
     }
 
-    pub fn append_message(&mut self, record: MessageRecord) -> Result<(), Error> {
+    fn append_message(&mut self, record: MessageRecord) -> Result<(), Error> {
         self.data.messages.push(record);
         self.save()
     }
 
-    pub fn messages(&self, latest_n: Option<usize>, before: Option<u64>) -> Vec<&MessageRecord> {
+    fn messages(&self, latest_n: Option<usize>, before: Option<u64>) -> Vec<&MessageRecord> {
         let total = self.data.messages.len();
         let mut response = Vec::with_capacity(latest_n.unwrap_or(total));
         for i in 1..=total {
@@ -119,7 +128,7 @@ impl Repository {
         response
     }
 
-    pub fn last_response_id(&self) -> Option<&String> {
+    fn last_response_id(&self) -> Option<&String> {
         if let Some(ref session) = self.data.current_session {
             self.data
                 .messages
@@ -132,25 +141,25 @@ impl Repository {
         }
     }
 
-    pub fn append_memory(&mut self, record: MemoryRecord) -> Result<(), Error> {
+    fn append_memory(&mut self, record: MemoryRecord) -> Result<(), Error> {
         self.data.memories.push(record);
         self.save()
     }
 
-    pub fn memories(&self) -> Vec<&MemoryRecord> {
+    fn memories(&self) -> Vec<&MemoryRecord> {
         self.data.memories.iter().map(|m| m).collect()
     }
 
-    pub fn append_schedule(&mut self, expression: String, message: String) -> Result<(), Error> {
-        let schedule = Schedule::from_str(&expression)?;
+    fn append_schedule(&mut self, expression: String, message: String) -> Result<(), Error> {
+        let schedule = Schedule::from_str(&expression).wrap()?;
         self.data
             .schedules
             .push(ScheduleRecord { schedule, message });
         self.save()
     }
 
-    pub fn remove_schedule(&mut self, expression: String, message: String) -> Result<usize, Error> {
-        let schedule = Schedule::from_str(&expression)?;
+    fn remove_schedule(&mut self, expression: String, message: String) -> Result<usize, Error> {
+        let schedule = Schedule::from_str(&expression).wrap()?;
         let indices = self
             .data
             .schedules
@@ -165,7 +174,7 @@ impl Repository {
         Ok(indices.len())
     }
 
-    pub fn schedules(&self) -> Vec<&ScheduleRecord> {
+    fn schedules(&self) -> Vec<&ScheduleRecord> {
         self.data.schedules.iter().map(|s| s).collect()
     }
 }
@@ -179,7 +188,7 @@ mod tests {
     fn remove_schedule() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let mut repo = Repository::new(path, false).unwrap();
+        let mut repo = FileRepository::new(path, false).unwrap();
         let expr = "0 5 * * * *".to_string();
         let msg = "test message".to_string();
 

@@ -6,13 +6,11 @@ use thiserror::Error;
 use tokio::{select, sync::RwLock, time};
 use tracing::info;
 
-use crate::common::{
-    broadcast::{self, IdentifiedBroadcast},
-    events::{self, Event, EventComponent},
-    message::SYSTEM_USER_NAME,
-    repository::Repository,
-    schedule::ScheduleRecord,
-};
+use crate::common::broadcast::{self, IdentifiedBroadcast};
+use crate::common::events::{self, Event, EventComponent};
+use crate::common::message::SYSTEM_USER_NAME;
+use crate::common::schedule::ScheduleRecord;
+use crate::repository::{FileRepository, Repository};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -23,7 +21,7 @@ pub enum Error {
     #[error("chrono out of range: {0}")]
     ChronoOutOfRange(#[from] chrono::OutOfRangeError),
     #[error("Repository error: {0}")]
-    Repository(#[from] crate::common::repository::Error),
+    Repository(#[from] crate::repository::Error),
 }
 
 fn now() -> DateTime<Utc> {
@@ -35,14 +33,14 @@ fn now() -> DateTime<Utc> {
 }
 
 pub struct Scheduler {
-    repository: Arc<RwLock<Repository>>,
+    repository: Arc<RwLock<dyn Repository>>,
     last_sent: HashMap<ScheduleRecord, DateTime<Utc>>,
     resolution: Duration,
 }
 
 impl Scheduler {
     pub async fn new(
-        repository: Arc<RwLock<Repository>>,
+        repository: Arc<RwLock<dyn Repository>>,
         resolution: Duration,
     ) -> Result<Self, Error> {
         let scheduler = Self {
@@ -165,7 +163,7 @@ mod tests {
     async fn daily() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let repo = Repository::new(path, false).unwrap();
+        let repo = FileRepository::new(path, false).unwrap();
         let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
             .await
             .unwrap();
@@ -189,7 +187,7 @@ mod tests {
     async fn no_duplicate() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let repo = Repository::new(path, false).unwrap();
+        let repo = FileRepository::new(path, false).unwrap();
         let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
             .await
             .unwrap();

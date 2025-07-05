@@ -25,8 +25,8 @@ use crate::common::{
     chat::{ChatInput, ChatInputMessage, ChatOutput, ChatOutputMessage, Modality},
     events::{self, Event, EventComponent},
     message::{MessageRecord, MessageRecordChat, ASSISTANT_NAME},
-    repository::Repository,
 };
+use crate::repository::Repository;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -332,7 +332,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<WebState>) {
 pub struct WebState {
     port: u16,
     broadcast: Option<IdentifiedBroadcast<Event>>,
-    repository: Arc<RwLock<Repository>>,
+    repository: Arc<RwLock<dyn Repository>>,
     auth_token: String,
     app_args: Value,
 }
@@ -341,7 +341,7 @@ type WebInterface = Arc<WebState>;
 
 impl WebState {
     pub fn new(
-        repository: Arc<RwLock<Repository>>,
+        repository: Arc<RwLock<dyn Repository>>,
         port: u16,
         auth_token: &str,
         app_args: Value,
