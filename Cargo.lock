@@ -3830,6 +3830,7 @@ name = "tsuki"
 version = "0.1.0"
 dependencies = [
  "age",
+ "anyhow",
  "async-trait",
  "axum",
  "bytes",
@@ -3853,7 +3854,6 @@ dependencies = [
  "static-toml",
  "tempfile",
  "tera",
- "thiserror 2.0.12",
  "tokio",
  "tokio-rustls",
  "tokio-util",

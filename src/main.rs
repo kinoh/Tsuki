@@ -1,12 +1,12 @@
 #![feature(slice_pattern)]
 
+use anyhow::Result;
 mod adapter;
 mod common;
 mod components;
 mod repository;
 
 use clap::Parser;
-use color_eyre::{eyre, Result};
 use common::{events::EventSystem, message::ASSISTANT_NAME, mumble::MumbleClient};
 use components::{
     core::{DefinedMessage, Model, OpenAiCore},
@@ -29,49 +29,12 @@ use ratatui::{
 use repository::{FileRepository, Repository};
 use serde::Serialize;
 use std::{env, sync::Arc, time::Duration};
-use thiserror::Error;
 use tokio::{
     select,
     sync::{mpsc, RwLock},
     task::{yield_now, JoinHandle},
 };
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
-
-#[derive(Error, Debug)]
-enum ApplicationError {
-    #[error("component stopped: {0}")]
-    ComponentStopped(usize),
-    #[error("Numerical value conversion error: {0}")]
-    TryFromInt(#[from] std::num::TryFromIntError),
-    #[error("IO error: {0}")]
-    IO(#[from] std::io::Error),
-    #[error("tokio join error: {0}")]
-    TokioJoin(#[from] tokio::task::JoinError),
-    #[error("Failed to send signal: {0}")]
-    SendSignal(#[from] tokio::sync::mpsc::error::SendError<Signal>),
-    #[error("eyre error: {0}")]
-    EyreReport(#[from] eyre::Report),
-    #[error("tui-logger error: {0}")]
-    TuiLogger(#[from] tui_logger::TuiLoggerError),
-    #[error("events error: {0}")]
-    Events(#[from] common::events::Error),
-    #[error("repository error: {0}")]
-    Repository(#[from] repository::Error),
-    #[error("mumble error: {0}")]
-    Mumble(#[from] common::mumble::Error),
-    #[error("recognizer error: {0}")]
-    Recognizer(#[from] components::recognizer::Error),
-    #[error("core error: {0}")]
-    Core(#[from] components::core::Error),
-    #[error("web error: {0}")]
-    Web(#[from] components::web::Error),
-    #[error("notifier error: {0}")]
-    Notifier(#[from] components::notifier::Error),
-    #[error("Scheduler error: {0}")]
-    Scheduler(#[from] components::scheduler::Error),
-    #[error("Invalid environment value: {0}")]
-    EnvVar(&'static str),
-}
 
 #[cfg(debug_assertions)]
 static_toml::static_toml! {
@@ -102,7 +65,7 @@ struct InteractiveApp {
 }
 
 impl InteractiveApp {
-    pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<(), ApplicationError> {
+    pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         loop {
             terminal.draw(|frame| self.render(frame))?;
             if event::poll(Duration::from_millis(20))? {
@@ -146,15 +109,13 @@ impl InteractiveApp {
     }
 }
 
-async fn wait_components(
-    futs: futures::future::SelectAll<JoinHandle<Result<(), common::events::Error>>>,
-) -> Result<(), ApplicationError> {
+async fn wait_components(futs: futures::future::SelectAll<JoinHandle<Result<()>>>) -> Result<()> {
     let (result, index, _) = futs.await;
     result??;
-    Err(ApplicationError::ComponentStopped(index))
+    anyhow::bail!("component stopped: {}", index)
 }
 
-fn setup_logging(interactive: bool) -> Result<(), ApplicationError> {
+fn setup_logging(interactive: bool) -> Result<()> {
     let filter = filter::Targets::new()
         .with_default(tracing::Level::WARN)
         .with_target("tsuki", tracing::Level::DEBUG);
@@ -171,14 +132,14 @@ fn setup_logging(interactive: bool) -> Result<(), ApplicationError> {
     Ok(())
 }
 
-fn get_envvar(name: &'static str) -> Result<String, ApplicationError> {
+fn get_envvar(name: &'static str) -> Result<String> {
     match env::var(name) {
         Ok(v) if !v.is_empty() => Ok(v),
-        _ => Err(ApplicationError::EnvVar(name)),
+        _ => anyhow::bail!("Invalid environment value: {}", name),
     }
 }
 
-async fn app() -> Result<(), ApplicationError> {
+async fn app() -> Result<()> {
     let args = Args::parse();
     setup_logging(args.interactive)?;
     let args_json = serde_json::to_value(&args).unwrap();
@@ -279,7 +240,7 @@ async fn app() -> Result<(), ApplicationError> {
     let any_components = select_all(event_system.futures());
 
     if let Some(ref mut app) = interactive_app {
-        color_eyre::install()?;
+        color_eyre::install().map_err(|e| anyhow::anyhow!("color_eyre install error: {}", e))?;
         let mut terminal = ratatui::init();
         let result = select! {
             r = app.run(&mut terminal) => r,
@@ -296,6 +257,6 @@ async fn app() -> Result<(), ApplicationError> {
 async fn main() {
     match app().await {
         Ok(_) => (),
-        Err(e) => panic!("Error: {}", e),
+        Err(e) => panic!("Error: {}", e.to_string()),
     }
 }

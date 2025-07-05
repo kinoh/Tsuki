@@ -1,14 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use thiserror::Error;
+
 
 use super::chat::{ChatInput, ChatOutput};
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("stserde_json error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
-}
+
 
 pub const ASSISTANT_NAME: &str = "つき";
 pub const SYSTEM_USER_NAME: &str = "system";

@@ -1,42 +1,14 @@
-use crate::common::broadcast::{self, IdentifiedBroadcast};
-use crate::common::events::{self, Event, EventComponent};
-use crate::common::mumble::{self, Voice};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::time::{Duration, SystemTime};
-use thiserror::Error;
-use tokio::task::JoinError;
 use tokio::{select, sync::mpsc, time};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use voice_activity_detector::VoiceActivityDetector;
 use vosk::{Model, Recognizer};
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("vosk error: {0}")]
-    Vosk(#[from] vosk::AcceptWaveformError),
-    #[error("opus error: {0}")]
-    Opus(#[from] opus::Error),
-    #[error("system time error: {0}")]
-    SystemTime(#[from] std::time::SystemTimeError),
-    #[error("failed to send voice: {0}")]
-    SendVoice(#[from] mpsc::error::SendError<Voice>),
-    #[error("voice_activity_detector error: {0}")]
-    Vad(#[from] voice_activity_detector::Error),
-    #[error("join error: {0}")]
-    Join(#[from] JoinError),
-    #[error("mumble error: {0}")]
-    Mumble(#[from] mumble::Error),
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
-    #[error("failed to load model")]
-    LoadModel,
-    #[error("failed to create recognizer")]
-    CreateRecognizer,
-    #[error("duplicate run")]
-    DuplicateRun,
-    #[error("mumble client finished")]
-    MumbleFinished,
-}
+use crate::common::broadcast::IdentifiedBroadcast;
+use crate::common::events::{Event, EventComponent};
+use crate::common::mumble::{self, Voice};
 
 const VAD_THREASHOLD: f32 = 0.7;
 const VAD_REQUIRED_COUNT: u32 = 3;
@@ -49,7 +21,7 @@ pub struct BufferingVad {
 }
 
 impl BufferingVad {
-    pub fn new(buffer_size: Duration) -> Result<Self, Error> {
+    pub fn new(buffer_size: Duration) -> Result<Self> {
         let sample_rate = mumble::SAMPLE_RATE;
         let chunk_size = (buffer_size.as_secs_f32() * (sample_rate as f32)) as usize;
         let vad = VoiceActivityDetector::builder()
@@ -94,10 +66,11 @@ impl SpeechRecognizer {
         vosk_model_path: &str,
         monitor_interval: time::Duration,
         silence_timeout: time::Duration,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         vosk::set_log_level(vosk::LogLevel::Warn);
-        let model = Model::new(vosk_model_path).ok_or(Error::LoadModel)?;
-        let recognizer = Recognizer::new(&model, 48000f32).ok_or(Error::CreateRecognizer)?;
+        let model = Model::new(vosk_model_path).context("failed to load model")?;
+        let recognizer =
+            Recognizer::new(&model, 48000f32).context("failed to create recognizer")?;
         let buffering_vad = BufferingVad::new(Duration::from_millis(500))?;
         Ok(Self {
             mumble: Some(mumble),
@@ -108,14 +81,11 @@ impl SpeechRecognizer {
         })
     }
 
-    async fn run_internal(
-        &mut self,
-        mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), Error> {
+    async fn run_internal(&mut self, mut broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         let (hear_sender, mut hear_receiver) = mpsc::channel(32);
         let (speak_sender, mut speak_receiver) = mpsc::channel(32);
 
-        let mut mumble_client = std::mem::take(&mut self.mumble).ok_or(Error::DuplicateRun)?;
+        let mut mumble_client = std::mem::take(&mut self.mumble).context("duplicate run")?;
         let mut mumble =
             tokio::spawn(async move { mumble_client.run(hear_sender, &mut speak_receiver).await });
 
@@ -193,8 +163,7 @@ impl SpeechRecognizer {
                     }
                 }
                 result = &mut mumble => {
-                    result??;
-                    return Err(Error::MumbleFinished);
+                    result??; anyhow::bail!("mumble client finished");
                 }
             }
         }
@@ -203,12 +172,9 @@ impl SpeechRecognizer {
 
 #[async_trait]
 impl EventComponent for SpeechRecognizer {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| events::Error::Component(format!("recognizer: {}", e)))
+            .map_err(|e| anyhow::anyhow!("recognizer: {}", e))
     }
 }

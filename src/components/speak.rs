@@ -1,3 +1,4 @@
+use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use hound;
@@ -6,26 +7,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Cursor;
-use thiserror::Error;
 use tracing::{debug, info};
 
 use crate::common::{
-    broadcast::{self, IdentifiedBroadcast},
+    broadcast::IdentifiedBroadcast,
     chat::Modality,
-    events::{self, Event, EventComponent},
+    events::{Event, EventComponent},
 };
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("reqwest error: {0}")]
-    Reqwest(#[from] reqwest::Error),
-    #[error("serde_json error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
-    #[error("hound error: {0}")]
-    Hound(#[from] hound::Error),
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -60,7 +48,7 @@ impl SpeechEngine {
         }
     }
 
-    pub async fn query(&self, text: &str) -> Result<AudioQuery, Error> {
+    pub async fn query(&self, text: &str) -> Result<AudioQuery> {
         let mut params = HashMap::new();
         let speaker = self.speaker.to_string();
         params.insert("speaker", speaker.as_ref());
@@ -79,7 +67,7 @@ impl SpeechEngine {
         Ok(serde_json::from_str(&response)?)
     }
 
-    pub async fn synthesis(&self, query: AudioQuery) -> Result<Bytes, Error> {
+    pub async fn synthesis(&self, query: AudioQuery) -> Result<Bytes> {
         let response = self
             .client
             .post(format!(
@@ -95,10 +83,7 @@ impl SpeechEngine {
         Ok(response)
     }
 
-    async fn run_internal(
-        &mut self,
-        mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), Error> {
+    async fn run_internal(&mut self, mut broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         info!("start speech");
 
         loop {
@@ -133,12 +118,9 @@ impl SpeechEngine {
 
 #[async_trait]
 impl EventComponent for SpeechEngine {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| events::Error::Component(format!("speech: {}", e)))
+            .map_err(|e| anyhow::anyhow!("speech: {}", e))
     }
 }

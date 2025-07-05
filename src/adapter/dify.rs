@@ -1,19 +1,7 @@
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use thiserror::Error;
 use tracing::{info, warn};
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Invalid response: {0}")]
-    HttpRequest(String),
-    #[error("Code execution error: code={0}, message={1}, detail={2:?}")]
-    CodeExecution(i32, String, Option<String>),
-    #[error("JSON parse error: {0}")]
-    JsonParse(#[from] serde_json::Error),
-    #[error("Request error: {0}")]
-    Reqwest(#[from] reqwest::Error),
-}
 
 #[derive(Deserialize)]
 struct SandboxRunResultData {
@@ -34,14 +22,14 @@ pub struct CodeExecutor {
 }
 
 impl CodeExecutor {
-    pub fn new(dify_sandbox_host: &str, api_key: &str) -> Result<Self, Error> {
+    pub fn new(dify_sandbox_host: &str, api_key: &str) -> Result<Self> {
         Ok(Self {
             endpoint: format!("http://{}/v1/sandbox/run", dify_sandbox_host),
             api_key: api_key.to_string(),
         })
     }
 
-    pub async fn execute(&self, code: &str) -> Result<String, Error> {
+    pub async fn execute(&self, code: &str) -> Result<String> {
         info!(code = code, "execute");
 
         let json = serde_json::json!({
@@ -58,15 +46,15 @@ impl CodeExecutor {
             .json(&json)
             .send()
             .await
-            .map_err(|e| Error::HttpRequest(e.to_string()))?;
+            .context("HTTP request failed")?;
 
         let status = response.status();
         if !status.is_success() {
             warn!(status = status.as_str(), "request failed");
-            return Err(Error::HttpRequest(format!("response code={}", status)));
+            anyhow::bail!("HTTP request failed with status: {}", status);
         }
 
-        let body = response.text().await?;
+        let body: String = response.text().await?;
         info!(body = body, "response");
 
         let result: SandboxRunResult = serde_json::from_str(&body)?;
@@ -76,14 +64,19 @@ impl CodeExecutor {
                 if data.error.is_empty() {
                     Ok(data.stdout)
                 } else {
-                    Err(Error::CodeExecution(
+                    anyhow::bail!(
+                        "Code execution error: code={}, message={}, detail={:?}",
                         result.code,
                         result.message,
-                        Some(data.error),
-                    ))
+                        data.error
+                    );
                 }
             }
-            None => Err(Error::CodeExecution(result.code, result.message, None)),
+            None => anyhow::bail!(
+                "Code execution error: code={}, message={}",
+                result.code,
+                result.message
+            ),
         }
     }
 }

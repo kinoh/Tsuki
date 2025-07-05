@@ -1,28 +1,15 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
+use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
-use thiserror::Error;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{select, sync::RwLock, time};
 use tracing::info;
 
-use crate::common::broadcast::{self, IdentifiedBroadcast};
-use crate::common::events::{self, Event, EventComponent};
+use crate::common::broadcast::IdentifiedBroadcast;
+use crate::common::events::{Event, EventComponent};
 use crate::common::message::SYSTEM_USER_NAME;
 use crate::common::schedule::ScheduleRecord;
-use crate::repository::{FileRepository, Repository};
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
-    #[error("cron error: {0}")]
-    Cron(#[from] cron::error::Error),
-    #[error("chrono out of range: {0}")]
-    ChronoOutOfRange(#[from] chrono::OutOfRangeError),
-    #[error("Repository error: {0}")]
-    Repository(#[from] crate::repository::Error),
-}
+use crate::repository::Repository;
 
 fn now() -> DateTime<Utc> {
     #[cfg(test)]
@@ -42,7 +29,7 @@ impl Scheduler {
     pub async fn new(
         repository: Arc<RwLock<dyn Repository>>,
         resolution: Duration,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         let scheduler = Self {
             repository,
             last_sent: HashMap::new(),
@@ -51,7 +38,7 @@ impl Scheduler {
         Ok(scheduler)
     }
 
-    pub async fn register(&mut self, expression: String, message: String) -> Result<(), Error> {
+    pub async fn register(&mut self, expression: String, message: String) -> Result<()> {
         self.repository
             .write()
             .await
@@ -74,7 +61,7 @@ impl Scheduler {
             .map(|(r, t)| (r.clone(), t))
     }
 
-    async fn event_ready(&mut self) -> Result<Option<(ScheduleRecord, DateTime<Utc>)>, Error> {
+    async fn event_ready(&mut self) -> Result<Option<(ScheduleRecord, DateTime<Utc>)>> {
         let resolution = TimeDelta::from_std(self.resolution)?;
 
         let now = now();
@@ -87,7 +74,7 @@ impl Scheduler {
         Ok(None)
     }
 
-    async fn run_internal(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<(), Error> {
+    async fn run_internal(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         info!("start scheduler");
 
         let mut interval = time::interval(self.resolution);
@@ -117,13 +104,10 @@ impl Scheduler {
 
 #[async_trait]
 impl EventComponent for Scheduler {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| events::Error::Component(format!("scheduler: {}", e)))
+            .map_err(|e| anyhow::anyhow!("scheduler: {}", e))
     }
 }
 
@@ -160,6 +144,7 @@ mod mock_chrono {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repository::FileRepository;
     use tempfile::NamedTempFile;
 
     #[tokio::test]

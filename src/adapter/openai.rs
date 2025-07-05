@@ -1,9 +1,5 @@
-use std::io::BufReader;
-
-use crate::common::chat::{
-    ChatInput, ChatInputFunctionCall, ChatOutput, ChatOutputFunctionCall, ChatOutputMessage,
-};
 use age::ssh::Identity;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use openai_dive::v1::api::Client;
 use openai_dive::v1::resources::response::items::{FunctionToolCallOutput, InputItemStatus};
@@ -16,37 +12,17 @@ use openai_dive::v1::resources::response::response::{
 };
 use openai_dive::v1::resources::response::shared::{ResponseTool, ResponseToolChoice};
 use serde_json::json;
-use tera::{Context, Tera};
-use thiserror::Error;
+use std::io::BufReader;
+use tera::{Context as TeraContext, Tera};
 use tracing::{debug, info, warn};
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("UTF-8 error: {0}")]
-    Utf8(#[from] std::str::Utf8Error),
-    #[error("serde json error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
-    #[error("Tera error: {0}")]
-    Tera(#[from] tera::Error),
-    #[error("OpenAI API error: {0}")]
-    Api(#[from] openai_dive::v1::error::APIError),
-    #[error("OpenAI response parameter builder error: {0}")]
-    ParameterBuilder(
-        #[from] openai_dive::v1::resources::response::request::ResponseParametersBuilderError,
-    ),
-    #[error("age decryption error: {0}")]
-    Age(#[from] age::DecryptError),
-    #[error("OpenAI response message has no content")]
-    NoMessageContent,
-    #[error("OpenAI response message has refusal")]
-    Refusal,
-}
+use crate::common::chat::{
+    ChatInput, ChatInputFunctionCall, ChatOutput, ChatOutputFunctionCall, ChatOutputMessage,
+};
 
 pub const TEMPLATE_NAME: &str = "instruction";
 
-fn decrypt_prompt(private_key: &str) -> Result<String, Error> {
+fn decrypt_prompt(private_key: &str) -> Result<String> {
     let encrypted = include_bytes!("../prompt/initial.txt.age");
 
     let buf = BufReader::new(private_key.as_bytes());
@@ -71,7 +47,7 @@ pub struct Thinker {
 }
 
 impl Thinker {
-    pub fn new(prompt_key: &str, api_key: &str) -> Result<Self, Error> {
+    pub fn new(prompt_key: &str, api_key: &str) -> Result<Self> {
         let client = Client::new(api_key.to_string());
 
         let mut initial_prompt = Tera::default();
@@ -95,7 +71,7 @@ impl Thinker {
         max_tokens: u32,
         input_chats: Vec<ChatInput>,
         previous_id: Option<&String>,
-    ) -> Result<(Vec<ChatOutput>, String, u32), Error> {
+    ) -> Result<(Vec<ChatOutput>, String, u32)> {
         let tools: Vec<ResponseTool> = self
             .functions
             .iter()
@@ -125,9 +101,9 @@ impl Thinker {
                     ),
                 })
             })
-            .collect::<Result<Vec<ResponseInputItem>, Error>>()?;
+            .collect::<Result<Vec<ResponseInputItem>, anyhow::Error>>()?;
 
-        let context = Context::from_value(json!({
+        let context = TeraContext::from_value(json!({
             "memories": memories,
         }))?;
 
@@ -168,7 +144,7 @@ impl Thinker {
                     output => ChatOutput::BuiltinToolCall(serde_json::to_value(output)?),
                 })
             })
-            .collect::<Result<Vec<ChatOutput>, Error>>()?;
+            .collect::<Result<Vec<ChatOutput>, anyhow::Error>>()?;
 
         Ok((output_chats, response.id, usage.total_tokens))
     }
@@ -195,13 +171,16 @@ impl Thinker {
     }
 }
 
-fn parse_message(message: &OutputMessage) -> Result<ChatOutputMessage, Error> {
-    let content = message.content.first().ok_or(Error::NoMessageContent)?;
+fn parse_message(message: &OutputMessage) -> Result<ChatOutputMessage, anyhow::Error> {
+    let content = message
+        .content
+        .first()
+        .context("OpenAI response message has no content")?;
 
     match *content {
         OutputContent::Refusal { ref refusal } => {
             warn!(message = refusal, "refusal");
-            Err(Error::Refusal)
+            anyhow::bail!("OpenAI response message has refusal");
         }
         OutputContent::Text {
             ref text,

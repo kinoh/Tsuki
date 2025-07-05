@@ -1,9 +1,8 @@
-use std::{any::type_name, fmt::Display};
-
 use async_trait::async_trait;
-use thiserror::Error;
+use std::{any::type_name, fmt::Display};
 use tokio::task::{self, JoinHandle};
 use tracing::error;
+use anyhow::Result;
 
 use super::{broadcast::IdentifiedBroadcast, chat::Modality};
 
@@ -50,20 +49,14 @@ impl Display for Event {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("component error: {0}")]
-    Component(String),
-}
-
 #[async_trait]
 pub trait EventComponent {
-    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<(), Error>;
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()>;
 }
 
 pub struct EventSystem {
     broadcast: IdentifiedBroadcast<Event>,
-    futures: Vec<Option<JoinHandle<Result<(), Error>>>>,
+    futures: Vec<Option<JoinHandle<Result<(), anyhow::Error>>>>,
 }
 
 impl EventSystem {
@@ -74,7 +67,7 @@ impl EventSystem {
         }
     }
 
-    pub fn futures(&mut self) -> Vec<JoinHandle<Result<(), Error>>> {
+    pub fn futures(&mut self) -> Vec<JoinHandle<Result<(), anyhow::Error>>> {
         self.futures
             .drain(..)
             .filter_map(|ref mut f| f.take())

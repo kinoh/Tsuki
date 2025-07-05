@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use cron::Schedule;
 use serde::{Deserialize, Serialize};
@@ -7,26 +8,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, ErrorKind};
 use tracing::info;
 use uuid::Uuid;
 
-use super::{Error, Repository};
+use super::Repository;
 use crate::common::memory::MemoryRecord;
 use crate::common::message::{MessageRecord, SessionId};
 use crate::common::schedule::ScheduleRecord;
-
-pub trait WrapErrorExt<T> {
-    fn wrap(self) -> Result<T, Error>;
-}
-
-impl<T, E> WrapErrorExt<T> for Result<T, E>
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn wrap(self) -> Result<T, Error> {
-        self.map_err(|e| Error {
-            component: String::from("file"),
-            source: Box::new(e),
-        })
-    }
-}
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct RepositoryData {
@@ -47,23 +32,23 @@ pub struct FileRepository {
 }
 
 impl FileRepository {
-    pub async fn new(path: &str, pretty: bool) -> Result<Self, Error> {
+    pub async fn new(path: &str, pretty: bool) -> Result<Self> {
         let data = match File::open(path).await {
             Err(e) => {
                 if e.kind() == ErrorKind::NotFound {
                     info!(path = path, "data file not found");
                     RepositoryData::default()
                 } else {
-                    return Err(e).wrap();
+                    return Err(anyhow::anyhow!(e));
                 }
             }
             Ok(mut file) => {
                 let mut buf = String::new();
-                file.read_to_string(&mut buf).await.wrap()?;
+                file.read_to_string(&mut buf).await?;
                 if buf.is_empty() {
                     RepositoryData::default()
                 } else {
-                    serde_json::from_str(&buf).wrap()?
+                    serde_json::from_str(&buf)?
                 }
             }
         };
@@ -75,22 +60,25 @@ impl FileRepository {
         })
     }
 
-    async fn save(&self, data: &RepositoryData) -> Result<(), Error> {
+    async fn save(&self, data: &RepositoryData) -> Result<()> {
         let json = if self.pretty {
             serde_json::to_string_pretty(data)
         } else {
             serde_json::to_string(data)
-        }
-        .wrap()?;
-        let mut file = File::create(self.path.clone()).await.wrap()?;
-        file.write_all(json.as_bytes()).await.wrap()?;
+        }?;
+        let mut file = File::create(self.path.clone())
+            .await
+            .context("failed to create file")?;
+        file.write_all(json.as_bytes())
+            .await
+            .context("failed to write json")?;
         Ok(())
     }
 }
 
 #[async_trait]
 impl Repository for FileRepository {
-    async fn get_or_create_session(&self) -> Result<SessionId, Error> {
+    async fn get_or_create_session(&self) -> Result<SessionId> {
         let mut data = self.data.write().await;
         if let Some(ref session) = data.current_session {
             Ok(session.clone())
@@ -106,13 +94,13 @@ impl Repository for FileRepository {
         self.data.read().await.current_session.is_some()
     }
 
-    async fn clear_session(&self) -> Result<(), Error> {
+    async fn clear_session(&self) -> Result<()> {
         let mut data = self.data.write().await;
         data.current_session = None;
         self.save(&data).await
     }
 
-    async fn append_message(&self, record: MessageRecord) -> Result<(), Error> {
+    async fn append_message(&self, record: MessageRecord) -> Result<()> {
         let mut data = self.data.write().await;
         data.messages.push(record);
         self.save(&data).await
@@ -122,7 +110,7 @@ impl Repository for FileRepository {
         &self,
         latest_n: Option<usize>,
         before: Option<u64>,
-    ) -> Result<Vec<MessageRecord>, Error> {
+    ) -> Result<Vec<MessageRecord>> {
         let data = self.data.read().await;
         let total = data.messages.len();
         let mut response = Vec::with_capacity(latest_n.unwrap_or(total));
@@ -138,7 +126,7 @@ impl Repository for FileRepository {
         Ok(response)
     }
 
-    async fn last_response_id(&self) -> Result<Option<String>, Error> {
+    async fn last_response_id(&self) -> Result<Option<String>> {
         let data = self.data.read().await;
         let response = if let Some(ref _session) = data.current_session {
             data.messages
@@ -151,26 +139,34 @@ impl Repository for FileRepository {
         Ok(response)
     }
 
-    async fn append_memory(&self, record: MemoryRecord) -> Result<(), Error> {
+    async fn append_memory(&self, record: MemoryRecord) -> Result<()> {
         let mut data = self.data.write().await;
         data.memories.push(record);
         self.save(&data).await
     }
 
-    async fn memories(&self, _query: &str) -> Result<Vec<MemoryRecord>, Error> {
+    async fn memories(&self, _query: &str) -> Result<Vec<MemoryRecord>> {
         let data = self.data.read().await;
         Ok(data.memories.clone())
     }
 
-    async fn append_schedule(&self, expression: String, message: String) -> Result<(), Error> {
-        let schedule = Schedule::from_str(&expression).wrap()?;
+    async fn append_schedule(
+        &self,
+        expression: String,
+        message: String,
+    ) -> Result<()> {
+        let schedule = Schedule::from_str(&expression).context("failed to parse schedule")?;
         let mut data = self.data.write().await;
         data.schedules.push(ScheduleRecord { schedule, message });
         self.save(&data).await
     }
 
-    async fn remove_schedule(&self, expression: String, message: String) -> Result<usize, Error> {
-        let schedule = Schedule::from_str(&expression).wrap()?;
+    async fn remove_schedule(
+        &self,
+        expression: String,
+        message: String,
+    ) -> Result<usize> {
+        let schedule = Schedule::from_str(&expression).context("failed to parse schedule")?;
         let mut data = self.data.write().await;
         let initial_len = data.schedules.len();
         data.schedules
@@ -182,7 +178,7 @@ impl Repository for FileRepository {
         Ok(removed_count)
     }
 
-    async fn schedules(&self) -> Result<Vec<ScheduleRecord>, Error> {
+    async fn schedules(&self) -> Result<Vec<ScheduleRecord>> {
         let data = self.data.read().await;
         Ok(data.schedules.clone())
     }

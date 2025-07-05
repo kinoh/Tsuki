@@ -2,35 +2,15 @@ use fcm::{
     message::{Message, Notification, Target},
     FcmClient,
 };
-use thiserror::Error;
+use anyhow::Result;
 use tracing::debug;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Request error status: {0}")]
-    HttpRequest(u16),
-    #[error("FCM error {0}")]
-    Fcm(String),
-}
-
-impl From<fcm::FcmClientError> for Error {
-    fn from(value: fcm::FcmClientError) -> Self {
-        Error::Fcm(format!("client: {:?}", value))
-    }
-}
-
-impl From<fcm::response::FcmResponseError> for Error {
-    fn from(value: fcm::response::FcmResponseError) -> Self {
-        Error::Fcm(format!("response: {:?}", value))
-    }
-}
 
 pub struct MessageSender {
     client: FcmClient,
 }
 
 impl MessageSender {
-    pub async fn new() -> Result<Self, Error> {
+    pub async fn new() -> Result<Self> {
         let client = FcmClient::builder()
             // Comment to use GOOGLE_APPLICATION_CREDENTIALS environment
             // variable. The variable can also be defined in .env file.
@@ -40,7 +20,7 @@ impl MessageSender {
         Ok(Self { client })
     }
 
-    pub async fn send(&self, title: &str, topic: &str, content: &str) -> Result<(), Error> {
+    pub async fn send(&self, title: &str, topic: &str, content: &str) -> Result<()> {
         let message = Message {
             data: None,
             notification: Some(Notification {
@@ -61,12 +41,11 @@ impl MessageSender {
 
         let status = response.http_status_code();
         if status >= 400 {
-            return Err(Error::HttpRequest(status));
+            anyhow::bail!("Request error status: {}", status);
         }
 
         if let Some(error) = response.error() {
-            let error = error.into();
-            return Err(error);
+            anyhow::bail!("FCM error: {:?}", error);
         }
 
         Ok(())

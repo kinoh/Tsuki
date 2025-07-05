@@ -1,37 +1,27 @@
-use std::fmt::Debug;
-
 use async_trait::async_trait;
-use thiserror::Error;
 use tracing::{debug, info};
+use anyhow::Result;
 
 use crate::{
     adapter::fcm::MessageSender,
     common::{
-        broadcast::{self, IdentifiedBroadcast},
+        broadcast::IdentifiedBroadcast,
         chat::Modality,
-        events::{self, Event, EventComponent},
+        events::{Event, EventComponent},
     },
 };
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("FCM error: {0}")]
-    Fcm(#[from] crate::adapter::fcm::Error),
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
-}
 
 pub struct Notifier {
     client: MessageSender,
 }
 
 impl Notifier {
-    pub async fn new() -> Result<Self, Error> {
+    pub async fn new() -> Result<Self> {
         let client = MessageSender::new().await?;
         Ok(Self { client })
     }
 
-    async fn notify(&self, content: &str) -> Result<(), Error> {
+    async fn notify(&self, content: &str) -> Result<()> {
         debug!(message = content, "notify");
         self.client.send("New message", "message", content).await?;
         Ok(())
@@ -40,7 +30,7 @@ impl Notifier {
     async fn run_internal(
         &mut self,
         mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         info!("start notifier");
 
         loop {
@@ -64,12 +54,9 @@ impl Notifier {
 
 #[async_trait]
 impl EventComponent for Notifier {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| events::Error::Component(format!("notifier: {}", e)))
+            .map_err(|e| anyhow::anyhow!("notifier: {}", e))
     }
 }

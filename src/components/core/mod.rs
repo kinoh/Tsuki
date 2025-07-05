@@ -2,41 +2,24 @@ mod execute_code_function;
 mod manage_schedule_function;
 mod memorize_function;
 
+use anyhow::Result;
+use async_trait::async_trait;
+use execute_code_function::ExecuteCodeFunction;
+use memorize_function::MemorizeFunction;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::info;
+
 use crate::adapter::dify::CodeExecutor;
 use crate::adapter::openai::Thinker;
 use crate::common::broadcast::IdentifiedBroadcast;
 use crate::common::chat::{
     ChatInput, ChatInputMessage, ChatOutput, ChatOutputFunctionCall, ChatOutputMessage, Modality,
 };
-use crate::common::events::{self, Event, EventComponent};
+use crate::common::events::{Event, EventComponent};
 use crate::common::message::{MessageRecord, MessageRecordChat, SYSTEM_USER_NAME};
 use crate::repository::Repository;
-use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{error, info};
-
-use execute_code_function::ExecuteCodeFunction;
-use memorize_function::MemorizeFunction;
-
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("system time error: {0}")]
-    SystemTime(#[from] std::time::SystemTimeError),
-    #[error("serde json error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
-    #[error("Dify error: {0}")]
-    Dify(#[from] crate::adapter::dify::Error),
-    #[error("repository error: {0}")]
-    Repository(#[from] crate::repository::Error),
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] crate::common::broadcast::Error),
-    #[error("OpenAI error: {0}")]
-    OpenAi(#[from] crate::adapter::openai::Error),
-}
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub enum DefinedMessage {
@@ -102,7 +85,7 @@ impl OpenAiCore {
         openai_api_key: &str,
         dify_sandbox_host: Option<&str>,
         dify_sandbox_api_key: &str,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         let mut thinker = Thinker::new(prompt_key, openai_api_key)?;
 
         thinker.register_function(MemorizeFunction {
@@ -134,7 +117,7 @@ impl OpenAiCore {
         model: &String,
         input_chats: Vec<ChatInput>,
         previous_id: Option<&String>,
-    ) -> Result<(Vec<ChatOutput>, String, u32), Error> {
+    ) -> Result<(Vec<ChatOutput>, String, u32)> {
         let memories = self
             .repository
             .read()
@@ -151,10 +134,7 @@ impl OpenAiCore {
             .await?)
     }
 
-    fn think_echo(
-        &self,
-        input_chats: Vec<ChatInput>,
-    ) -> Result<(Vec<ChatOutput>, String, u32), Error> {
+    fn think_echo(&self, input_chats: Vec<ChatInput>) -> Result<(Vec<ChatOutput>, String, u32)> {
         let chat = if let ChatInput::Message(ref message) = input_chats[0] {
             if message.modality == Modality::Audio {
                 ChatOutput::Message(ChatOutputMessage {
@@ -192,7 +172,7 @@ impl OpenAiCore {
     async fn think_and_save(
         &mut self,
         input_chats: Vec<ChatInput>,
-    ) -> Result<(Vec<ChatOutput>, u32), Error> {
+    ) -> Result<(Vec<ChatOutput>, u32)> {
         let previous_id = {
             let repo = self.repository.write().await;
 
@@ -237,7 +217,7 @@ impl OpenAiCore {
         &mut self,
         broadcast: &IdentifiedBroadcast<Event>,
         message: ChatInputMessage,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let mut inputs = vec![ChatInput::Message(message)];
         loop {
             let (outputs, usage) = self.think_and_save(inputs).await?;
@@ -263,7 +243,7 @@ impl OpenAiCore {
         &mut self,
         broadcast: &IdentifiedBroadcast<Event>,
         message: DefinedMessage,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         match message {
             DefinedMessage::FinishSession => {
                 if self.repository.read().await.has_session().await {
@@ -283,10 +263,7 @@ impl OpenAiCore {
         }
     }
 
-    async fn run_internal(
-        &mut self,
-        mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), Error> {
+    async fn run_internal(&mut self, mut broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         info!("start core");
 
         // self.thinker.register_function(ManageScheduleFunction {
@@ -339,12 +316,9 @@ impl OpenAiCore {
 
 #[async_trait]
 impl EventComponent for OpenAiCore {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| events::Error::Component(format!("core: {}", e)))
+            .map_err(|e| anyhow::anyhow!("core: {}", e))
     }
 }

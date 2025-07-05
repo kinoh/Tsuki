@@ -1,3 +1,5 @@
+use anyhow::Context;
+use anyhow::Result;
 use bytes::Bytes;
 use core::slice::SlicePattern;
 use futures::stream::{SplitSink, SplitStream};
@@ -11,7 +13,6 @@ use std::marker::PhantomData;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::time::SystemTime;
-use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -24,23 +25,7 @@ use tokio_rustls::rustls::{
 };
 use tokio_rustls::TlsConnector;
 use tokio_util::codec::{Decoder, Framed};
-use tracing::{debug, error, info, warn};
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("tokio io error: {0}")]
-    Io(#[from] tokio::io::Error),
-    #[error("tokio mpsc send error: {0}")]
-    MpscSend(#[from] mpsc::error::TrySendError<Voice>),
-    #[error("invalid dns name error: {0}")]
-    InvalidDnsName(#[from] tokio_rustls::rustls::pki_types::InvalidDnsNameError),
-    #[error("opus error: {0}")]
-    Opus(#[from] opus::Error),
-    #[error("failed to resolve address")]
-    AddressResolution,
-    #[error("connection closed")]
-    ConnectionClosed,
-}
+use tracing::{debug, info, warn};
 
 #[derive(Debug)]
 struct NoCertificateVerification;
@@ -125,7 +110,7 @@ struct AudioEncoder {
 }
 
 impl AudioEncoder {
-    fn new(sample_rate: u32) -> Result<Self, Error> {
+    fn new(sample_rate: u32) -> Result<Self> {
         let packet_duration = AUDIO_PAYLOAD_UNIT_MILLISEC * AUDIO_PAYLOAD_N;
         let packet_samples = (sample_rate * packet_duration / 1000) as usize;
         Ok(Self {
@@ -150,7 +135,7 @@ impl AudioEncoder {
         self.send_buffer.extend_from_slice(data);
     }
 
-    fn next_packet(&mut self) -> Result<ControlPacket<Serverbound>, Error> {
+    fn next_packet(&mut self) -> Result<ControlPacket<Serverbound>> {
         if self.send_buffer.len() < self.packet_samples {
             self.send_buffer.resize(self.packet_samples, 0);
         }
@@ -190,11 +175,11 @@ pub struct MumbleClient {
 }
 
 impl MumbleClient {
-    pub async fn new(server_host: &str, server_port: u16, user_name: &str) -> Result<Self, Error> {
+    pub async fn new(server_host: &str, server_port: u16, user_name: &str) -> Result<Self> {
         let server_addr = (server_host.as_ref(), server_port)
             .to_socket_addrs()?
             .next()
-            .ok_or(Error::AddressResolution)?;
+            .context("failed to resolve address")?;
 
         // let (crypt_state_sender, crypt_state_receiver) = oneshot::channel::<ClientCryptState>();
 
@@ -243,7 +228,7 @@ impl MumbleClient {
         session_id: u32,
         seq_num: u64,
         payload: VoicePacketPayload,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         debug!(session_id = session_id, seq_num = seq_num, "receive audio");
         let mut decoder = opus::Decoder::new(SAMPLE_RATE, CHANNEL_COUNT)?;
         const BUFFER_SIZE: usize =
@@ -266,13 +251,7 @@ impl MumbleClient {
                         sample_rate: SAMPLE_RATE,
                         audio: output[..size].to_vec(),
                     })
-                    .or_else(|e| match e {
-                        mpsc::error::TrySendError::Full(_) => {
-                            warn!("voice queue is full");
-                            Ok(())
-                        }
-                        e => Err(e),
-                    })?;
+                    .context("failed to send voice")?;
             }
             _ => {
                 warn!("unsupported voice packet");
@@ -285,7 +264,7 @@ impl MumbleClient {
         &mut self,
         sender: mpsc::Sender<Voice>,
         receiver: &mut mpsc::Receiver<Voice>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let mut encoder = AudioEncoder::new(24000)?;
 
         let mut ping_interval = time::interval(time::Duration::from_secs(20));
@@ -352,7 +331,7 @@ impl MumbleClient {
                             };
                         }
                         None => {
-                            return Err(Error::ConnectionClosed);
+                            anyhow::bail!("connection closed");
                         }
                     }
                 }

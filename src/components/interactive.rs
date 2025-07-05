@@ -1,26 +1,13 @@
-use std::sync::Arc;
-
+use anyhow::{Context, Result};
 use async_trait::async_trait;
-use thiserror::Error;
+use std::sync::Arc;
 use tokio::select;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::common::broadcast::{self, IdentifiedBroadcast};
-use crate::common::events::{self, Event, EventComponent};
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Signal channel closed")]
-    SignalChannelClosed,
-    #[error("Component error: {0}")]
-    Component(String),
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
-}
+use crate::common::broadcast::IdentifiedBroadcast;
+use crate::common::events::{Event, EventComponent};
 
 pub enum Signal {
     Continue,
@@ -47,10 +34,7 @@ impl<T: EventComponent + Send + 'static> InteractiveProxy<T> {
         self.is_waiting.clone()
     }
 
-    async fn run_internal(
-        &mut self,
-        mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), Error> {
+    async fn run_internal(&mut self, mut broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         info!("start interactive adapter");
 
         let mut internal_broadcast = IdentifiedBroadcast::new(self.capacity);
@@ -62,7 +46,7 @@ impl<T: EventComponent + Send + 'static> InteractiveProxy<T> {
                     let event = event?;
                     info!("Waiting for signal...");
                     *(self.is_waiting.write().await) = true;
-                    self.receiver.recv().await.ok_or(Error::SignalChannelClosed)?;
+                    self.receiver.recv().await.context("Signal channel closed")?;
                     *(self.is_waiting.write().await) = false;
                     internal_broadcast.send(event)?;
                 }
@@ -70,7 +54,7 @@ impl<T: EventComponent + Send + 'static> InteractiveProxy<T> {
                     broadcast.send(output?)?;
                 }
                 result = &mut fut_component => {
-                    return result.map_err(|e| Error::Component(e.to_string()));
+                    return result.context("Component error");
                 }
             }
         }
@@ -79,12 +63,9 @@ impl<T: EventComponent + Send + 'static> InteractiveProxy<T> {
 
 #[async_trait]
 impl<T: EventComponent + Send + 'static> EventComponent for InteractiveProxy<T> {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| events::Error::Component(format!("interactive adapter: {}", e)))
+            .map_err(|e| anyhow::anyhow!("interactive adapter: {}", e))
     }
 }

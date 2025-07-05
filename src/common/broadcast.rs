@@ -1,16 +1,6 @@
-use thiserror::Error;
+use anyhow::Result;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use uuid::Uuid;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Failed to receive event: Closed")]
-    ReceiveClosed,
-    #[error("Failed to receive event: Lagged {0}")]
-    ReceiveLagged(u64),
-    #[error("Failed to send event: No active receivers")]
-    Send,
-}
 
 #[derive(Clone, Debug)]
 struct Envelope<T> {
@@ -46,23 +36,27 @@ impl<T: Clone> IdentifiedBroadcast<T> {
         }
     }
 
-    pub fn send(&self, payload: T) -> Result<(), Error> {
+    pub fn send(&self, payload: T) -> Result<()> {
         match self.sender.send(Envelope {
             sender_id: self.id,
             payload,
         }) {
             Ok(_) => Ok(()),
-            Err(_) => Err(Error::Send),
+            Err(_) => anyhow::bail!("Failed to send event: No active receivers"),
         }
     }
 
-    pub async fn recv(&mut self) -> Result<T, Error> {
+    pub async fn recv(&mut self) -> Result<T> {
         loop {
             match self.receiver.recv().await {
                 Ok(env) if env.sender_id != self.id => return Ok(env.payload),
                 Ok(_) => continue,
-                Err(broadcast::error::RecvError::Closed) => return Err(Error::ReceiveClosed),
-                Err(broadcast::error::RecvError::Lagged(n)) => return Err(Error::ReceiveLagged(n)),
+                Err(broadcast::error::RecvError::Closed) => {
+                    anyhow::bail!("Failed to receive event: Closed")
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    anyhow::bail!("Failed to receive event: Lagged {}", n)
+                }
             }
         }
     }

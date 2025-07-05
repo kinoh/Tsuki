@@ -1,5 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, time::SystemTime};
-
+use anyhow::Result;
 use async_trait::async_trait;
 use axum::{
     extract::{
@@ -12,35 +11,21 @@ use axum::{
     routing::{any, get, post},
     Json, Router,
 };
-use reqwest::{header::InvalidHeaderValue, Method};
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use thiserror::Error;
+use std::{net::SocketAddr, sync::Arc, time::SystemTime};
 use tokio::{select, sync::RwLock};
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, warn};
 
 use crate::common::{
-    broadcast::{self, IdentifiedBroadcast},
+    broadcast::IdentifiedBroadcast,
     chat::{ChatInput, ChatInputMessage, ChatOutput, ChatOutputMessage, Modality},
-    events::{self, Event, EventComponent},
+    events::{Event, EventComponent},
     message::{MessageRecord, MessageRecordChat, ASSISTANT_NAME},
 };
 use crate::repository::Repository;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("std::io error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Axum error: {0}")]
-    Axum(#[from] axum::Error),
-    #[error("invalid header value: {0}")]
-    InvalidHeaderValue(#[from] InvalidHeaderValue),
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
-    #[error("Auth token is empty")]
-    AuthTokenIsEmpty,
-}
 
 fn secure_eq(a: &str, b: &str) -> bool {
     let a_bytes: Vec<u8> = a.bytes().collect();
@@ -107,7 +92,7 @@ async fn auth_middleware(
     Ok(next.run(req).await)
 }
 
-async fn serve(state: Arc<WebState>, port: u16) -> Result<(), Error> {
+async fn serve(state: Arc<WebState>, port: u16) -> Result<()> {
     let cors = if cfg!(debug_assertions) {
         info!("Permissive CORS policy for development");
         CorsLayer::permissive()
@@ -204,7 +189,7 @@ async fn metadata(State(state): State<Arc<WebState>>) -> Json<Value> {
     }))
 }
 
-async fn metrics(State(state): State<Arc<WebState>>) ->  Result<Json<Value>, StatusCode> {
+async fn metrics(State(state): State<Arc<WebState>>) -> Result<Json<Value>, StatusCode> {
     let repo = state.repository.read().await;
     let messages = repo.messages(None, None).await.map_err(|e| {
         error!("repository error: {}", e);
@@ -351,9 +336,9 @@ impl WebState {
         port: u16,
         auth_token: &str,
         app_args: Value,
-    ) -> Result<WebInterface, Error> {
+    ) -> Result<WebInterface> {
         if auth_token.is_empty() {
-            return Err(Error::AuthTokenIsEmpty);
+            anyhow::bail!("Auth token is empty");
         }
         Ok(Arc::new(Self {
             port,
@@ -367,13 +352,10 @@ impl WebState {
 
 #[async_trait]
 impl EventComponent for WebInterface {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         Arc::get_mut(self).map(|c| c.broadcast = Some(broadcast.participate()));
         serve(Arc::clone(self), self.port)
             .await
-            .map_err(|e| events::Error::Component(format!("http: {}", e)))
+            .map_err(|e| anyhow::anyhow!("http: {}", e))
     }
 }

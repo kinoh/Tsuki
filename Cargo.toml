@@ -10,7 +10,7 @@ bytes = "1.0"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec", "net"] }
 tokio-rustls = "0.26"
-thiserror = "2.0"
+anyhow = "1.0"
 opus = "0.3"
 vosk = "0.3"
 serde = "1.0"

@@ -1,17 +1,11 @@
 use async_trait::async_trait;
-use thiserror::Error;
 use tracing::info;
+use anyhow::Result;
 
 use crate::common::{
-    broadcast::{self, IdentifiedBroadcast},
-    events::{self, Event, EventComponent},
+    broadcast::IdentifiedBroadcast,
+    events::{Event, EventComponent},
 };
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("broadcast error: {0}")]
-    Broadcast(#[from] broadcast::Error),
-}
 
 pub struct EventLogger {}
 
@@ -23,7 +17,7 @@ impl EventLogger {
     async fn run_internal(
         &mut self,
         mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         info!("start event logger");
 
         loop {
@@ -36,12 +30,9 @@ impl EventLogger {
 
 #[async_trait]
 impl EventComponent for EventLogger {
-    async fn run(
-        &mut self,
-        broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<(), crate::common::events::Error> {
+    async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| events::Error::Component(format!("event logger: {}", e)))
+            .map_err(|e| anyhow::anyhow!("event logger: {}", e))
     }
 }
