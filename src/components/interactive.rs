@@ -66,6 +66,6 @@ impl<T: EventComponent + Send + 'static> EventComponent for InteractiveProxy<T> 
     async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| anyhow::anyhow!("interactive adapter: {}", e))
+            .context("interactive adapter")
     }
 }

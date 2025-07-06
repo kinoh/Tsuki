@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use hound;
@@ -121,6 +121,6 @@ impl EventComponent for SpeechEngine {
     async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| anyhow::anyhow!("speech: {}", e))
+            .context("speech")
     }
 }

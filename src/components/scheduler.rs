@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -107,7 +107,7 @@ impl EventComponent for Scheduler {
     async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| anyhow::anyhow!("scheduler: {}", e))
+            .context("scheduler")
     }
 }
 

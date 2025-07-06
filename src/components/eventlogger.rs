@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use tracing::info;
-use anyhow::Result;
 
 use crate::common::{
     broadcast::IdentifiedBroadcast,
@@ -14,10 +14,7 @@ impl EventLogger {
         Self {}
     }
 
-    async fn run_internal(
-        &mut self,
-        mut broadcast: IdentifiedBroadcast<Event>,
-    ) -> Result<()> {
+    async fn run_internal(&mut self, mut broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         info!("start event logger");
 
         loop {
@@ -33,6 +30,6 @@ impl EventComponent for EventLogger {
     async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| anyhow::anyhow!("event logger: {}", e))
+            .context("event logger")
     }
 }

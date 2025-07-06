@@ -175,6 +175,6 @@ impl EventComponent for SpeechRecognizer {
     async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| anyhow::anyhow!("recognizer: {}", e))
+            .context("recognizer")
     }
 }

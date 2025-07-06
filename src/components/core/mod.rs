@@ -2,7 +2,7 @@ mod execute_code_function;
 mod manage_schedule_function;
 mod memorize_function;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use execute_code_function::ExecuteCodeFunction;
 use memorize_function::MemorizeFunction;
@@ -319,6 +319,6 @@ impl EventComponent for OpenAiCore {
     async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         self.run_internal(broadcast.participate())
             .await
-            .map_err(|e| anyhow::anyhow!("core: {}", e))
+            .context("core")
     }
 }

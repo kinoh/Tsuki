@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use axum::{
     extract::{
@@ -354,8 +354,6 @@ impl WebState {
 impl EventComponent for WebInterface {
     async fn run(&mut self, broadcast: IdentifiedBroadcast<Event>) -> Result<()> {
         Arc::get_mut(self).map(|c| c.broadcast = Some(broadcast.participate()));
-        serve(Arc::clone(self), self.port)
-            .await
-            .map_err(|e| anyhow::anyhow!("http: {}", e))
+        serve(Arc::clone(self), self.port).await.context("http")
     }
 }
