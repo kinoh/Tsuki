@@ -20,14 +20,14 @@ fn now() -> DateTime<Utc> {
 }
 
 pub struct Scheduler {
-    repository: Arc<RwLock<dyn Repository>>,
+    repository: Arc<RwLock<Box<dyn Repository>>>,
     last_sent: HashMap<ScheduleRecord, DateTime<Utc>>,
     resolution: Duration,
 }
 
 impl Scheduler {
     pub async fn new(
-        repository: Arc<RwLock<dyn Repository>>,
+        repository: Arc<RwLock<Box<dyn Repository>>>,
         resolution: Duration,
     ) -> Result<Self> {
         let scheduler = Self {
@@ -144,17 +144,15 @@ mod mock_chrono {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::FileRepository;
+    use crate::repository;
     use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn daily() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let repo = FileRepository::new(path, false).await.unwrap();
-        let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
-            .await
-            .unwrap();
+        let repo = repository::generate("file", path).await.unwrap();
+        let mut scheduler = Scheduler::new(repo, Duration::from_secs(60)).await.unwrap();
         scheduler
             .register(String::from("0 30 19 * * *"), String::from("foo"))
             .await
@@ -175,10 +173,8 @@ mod tests {
     async fn no_duplicate() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let repo = FileRepository::new(path, false).await.unwrap();
-        let mut scheduler = Scheduler::new(Arc::new(RwLock::new(repo)), Duration::from_secs(60))
-            .await
-            .unwrap();
+        let repo = repository::generate("file", path).await.unwrap();
+        let mut scheduler = Scheduler::new(repo, Duration::from_secs(60)).await.unwrap();
         scheduler
             .register(String::from("0 0 20,21 * * *"), String::from("foo"))
             .await

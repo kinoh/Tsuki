@@ -1,5 +1,6 @@
 [main]
-history_path = "/var/memory/history.json"
+database_type = "file"
+database_url = "/var/memory/history.json"
 
 [core]
 openai_model = "gpt-4o"
