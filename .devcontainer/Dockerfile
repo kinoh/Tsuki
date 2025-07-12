@@ -27,6 +27,9 @@ RUN apt-get update \
         $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
         tee /etc/apt/sources.list.d/docker.list > /dev/null \
     && apt-get update \
-    && apt-get -y install docker-ce-cli docker-compose-plugin protobuf-compiler cmake age nodejs \
+    && apt-get -y install docker-ce-cli docker-compose-plugin protobuf-compiler cmake age nodejs npm \
         libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xdg-utils \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force
