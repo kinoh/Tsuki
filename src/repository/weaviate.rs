@@ -2,8 +2,6 @@ use anyhow::{Context, Error, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::warn;
 use uuid::Uuid;
 use weaviate_community::collections::objects::Object;
@@ -52,7 +50,6 @@ impl std::str::FromStr for Role {
 
 pub struct WeaviateRepository {
     client: WeaviateClient,
-    session_id: Arc<RwLock<Option<SessionId>>>,
 }
 
 impl WeaviateRepository {
@@ -141,7 +138,6 @@ impl WeaviateRepository {
 
         Ok(Self {
             client,
-            session_id: Arc::new(RwLock::new(None)),
         })
     }
 }
@@ -149,11 +145,29 @@ impl WeaviateRepository {
 #[async_trait]
 impl Repository for WeaviateRepository {
     async fn get_or_create_session(&self) -> Result<SessionId> {
-        let mut session_id = self.session_id.write().await;
-        if let Some(id) = &*session_id {
-            return Ok(id.clone());
+        // Check if there's already a session by querying the latest one
+        let query = GetQuery::builder(CLASS_SESSION, vec!["_additional { id }"])
+            .with_sort("createdAt:desc")
+            .with_limit(1)
+            .build();
+        
+        let result = self
+            .client
+            .query
+            .get(query)
+            .await
+            .context("Failed to query sessions")?;
+
+        // If a session exists, return it
+        if let Some(sessions) = extract_objects(&result, CLASS_SESSION) {
+            if let Some(session) = sessions.first() {
+                if let Some(id) = extract_additional_id(session) {
+                    return Ok(id.to_string());
+                }
+            }
         }
 
+        // Create a new session if none exists
         let new_object = Object::builder(
             CLASS_SESSION,
             json!({
@@ -169,65 +183,86 @@ impl Repository for WeaviateRepository {
             .context("Failed to create session")?;
 
         let new_id = new_session.id.unwrap().to_string();
-        *session_id = Some(new_id.clone());
         Ok(new_id)
     }
 
     async fn has_session(&self) -> bool {
-        self.session_id.read().await.is_some()
+        let query = GetQuery::builder(CLASS_SESSION, vec!["_additional { id }"])
+            .with_limit(1)
+            .build();
+        
+        if let Ok(result) = self.client.query.get(query).await {
+            if let Some(sessions) = extract_objects(&result, CLASS_SESSION) {
+                return !sessions.is_empty();
+            }
+        }
+        false
     }
 
     async fn clear_session(&self) -> Result<()> {
-        let mut session_id = self.session_id.write().await;
-        if let Some(id) = session_id.take() {
-            // Delete messages of the session
-            let query = GetQuery::builder(CLASS_MESSAGE, vec!["_additional { id }"])
-                .with_where(
-                    &json!({
-                        "path": ["session", CLASS_SESSION, "id"],
-                        "operator": "Equal",
-                        "valueString": id,
-                    })
-                    .to_string(),
-                )
-                .build();
-            let messages = self
-                .client
-                .query
-                .get(query)
-                .await
-                .context("Failed to get messages of session")?;
-            if let Some(messages) = extract_objects(&messages, CLASS_MESSAGE) {
-                for message in messages {
-                    if let Some(id) = extract_additional_id(message) {
-                        self.client
-                            .objects
-                            .delete(CLASS_MESSAGE, &id, None, None)
-                            .await
-                            .context("Failed to delete message")?;
+        // Get the latest session
+        let query = GetQuery::builder(CLASS_SESSION, vec!["_additional { id }"])
+            .with_sort("createdAt:desc")
+            .with_limit(1)
+            .build();
+        
+        let result = self
+            .client
+            .query
+            .get(query)
+            .await
+            .context("Failed to query sessions")?;
+
+        if let Some(sessions) = extract_objects(&result, CLASS_SESSION) {
+            if let Some(session) = sessions.first() {
+                if let Some(id) = extract_additional_id(session) {
+                    // Delete messages of the session
+                    let query = GetQuery::builder(CLASS_MESSAGE, vec!["_additional { id }"])
+                        .with_where(
+                            &json!({
+                                "path": ["session"],
+                                "operator": "Equal",
+                                "valueString": id,
+                            })
+                            .to_string(),
+                        )
+                        .build();
+                    let messages = self
+                        .client
+                        .query
+                        .get(query)
+                        .await
+                        .context("Failed to get messages of session")?;
+                    if let Some(messages) = extract_objects(&messages, CLASS_MESSAGE) {
+                        for message in messages {
+                            if let Some(msg_id) = extract_additional_id(message) {
+                                self.client
+                                    .objects
+                                    .delete(CLASS_MESSAGE, &msg_id, None, None)
+                                    .await
+                                    .context("Failed to delete message")?;
+                            }
+                        }
                     }
+
+                    let uuid = Uuid::parse_str(&id.to_string()).context("Invalid UUID format")?;
+
+                    // Delete the session
+                    self.client
+                        .objects
+                        .delete(CLASS_SESSION, &uuid, None, None)
+                        .await
+                        .context("Failed to delete session")?;
                 }
             }
-
-            let uuid = Uuid::parse_str(&id).context("Invalid UUID format")?;
-
-            // Delete the session
-            self.client
-                .objects
-                .delete(CLASS_SESSION, &uuid, None, None)
-                .await
-                .context("Failed to delete session")?;
         }
         Ok(())
     }
 
     async fn append_message(&self, record: MessageRecord) -> Result<()> {
-        let session_id = self.session_id.read().await;
-        let session_id = session_id.as_ref().context("Session not started")?;
-
         let new_message = Object::builder(
             CLASS_MESSAGE,
-            serde_json::to_value(&record).context("Failed to serizalize record")?,
+            serde_json::to_value(&record).context("Failed to serialize record")?,
         )
         .build();
 
@@ -244,36 +279,28 @@ impl Repository for WeaviateRepository {
         latest_n: Option<usize>,
         before: Option<u64>,
     ) -> Result<Vec<MessageRecord>> {
-        let session_id = self.session_id.read().await;
-        let session_id = session_id.as_ref().context("Session not started")?;
-
         let mut query_builder = GetQuery::builder(
             CLASS_MESSAGE,
-            vec!["role", "content", "timestamp", "responseId"],
+            vec!["role", "content", "timestamp", "responseId", "session", "usage"],
         );
+        
         if let Some(limit) = latest_n {
             query_builder = query_builder.with_limit(limit as u32);
         }
-        let mut where_conditions = vec![json!({
-            "path": ["session", CLASS_SESSION, "id"],
-            "operator": "Equal",
-            "valueString": session_id,
-        })];
+        
         if let Some(b) = before {
-            where_conditions.push(json!({
-                "path": ["timestamp"],
-                "operator": "LessThan",
-                "valueNumber": b,
-            }));
-        }
-        let query = query_builder
-            .with_where(
+            query_builder = query_builder.with_where(
                 &json!({
-                    "operator": "And",
-                    "operands": where_conditions,
+                    "path": ["timestamp"],
+                    "operator": "LessThan",
+                    "valueNumber": b,
                 })
                 .to_string(),
-            )
+            );
+        }
+        
+        let query = query_builder
+            .with_sort("timestamp:asc")
             .build();
 
         let result = self
@@ -300,25 +327,12 @@ impl Repository for WeaviateRepository {
     }
 
     async fn last_response_id(&self) -> Result<Option<String>> {
-        let session_id = self.session_id.read().await;
-        let session_id = session_id.as_ref().context("Session not started")?;
-
         let query = GetQuery::builder(CLASS_MESSAGE, vec!["responseId", "timestamp"])
             .with_where(
                 &json!({
-                    "operator": "And",
-                    "operands": [
-                        {
-                            "path": ["session", CLASS_SESSION, "id"],
-                            "operator": "Equal",
-                            "valueString": session_id,
-                        },
-                        {
-                            "path": ["role"],
-                            "operator": "Equal",
-                            "valueString": "assistant",
-                        }
-                    ]
+                    "path": ["role"],
+                    "operator": "Equal",
+                    "valueString": "assistant",
                 })
                 .to_string(),
             )
