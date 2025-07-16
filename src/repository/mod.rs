@@ -30,14 +30,22 @@ pub trait Repository: Send + Sync {
     async fn schedules(&self) -> Result<Vec<ScheduleRecord>>;
 }
 
-pub async fn generate(name: &str, url: &str) -> Result<Arc<RwLock<Box<dyn Repository>>>> {
+pub async fn generate(
+    name: &str, 
+    url: &str, 
+    embedding_service: Option<Arc<crate::adapter::embedding::EmbeddingService>>
+) -> Result<Arc<RwLock<Box<dyn Repository>>>> {
     match name {
         "file" => Ok(Arc::new(RwLock::new(Box::new(
             file::FileRepository::new(url, cfg!(debug_assertions)).await?,
         )))),
-        "qdrant" => Ok(Arc::new(RwLock::new(Box::new(
-            qdrant::QdrantRepository::new(url).await?,
-        )))),
+        "qdrant" => {
+            let embedding_service = embedding_service
+                .ok_or_else(|| anyhow::anyhow!("EmbeddingService required for Qdrant"))?;
+            Ok(Arc::new(RwLock::new(Box::new(
+                qdrant::QdrantRepository::new(url, embedding_service).await?,
+            ))))
+        },
         _ => bail!("Unrecognized repository type"),
     }
 }
