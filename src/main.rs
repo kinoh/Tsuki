@@ -148,16 +148,10 @@ async fn app() -> Result<()> {
     let eventlogger = EventLogger::new();
     event_system.run(eventlogger);
 
-    // Create EmbeddingService if using Qdrant
-    let embedding_service = if CONF.main.database_type == "qdrant" {
-        Some(std::sync::Arc::new(
-            adapter::embedding::EmbeddingService::new(&get_envvar("OPENAI_API_KEY")?).await?
-        ))
-    } else {
-        None
-    };
-    
-    let repository = repository::generate(CONF.main.database_type, CONF.main.database_url, embedding_service).await?;
+    let repository = repository::RepositoryFactory::new()
+        .with_openai_key(get_envvar("OPENAI_API_KEY")?)
+        .create(CONF.main.database_type, CONF.main.database_url)
+        .await?;
 
     if args.audio {
         let mumble_client = MumbleClient::new(

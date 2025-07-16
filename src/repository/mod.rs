@@ -30,6 +30,43 @@ pub trait Repository: Send + Sync {
     async fn schedules(&self) -> Result<Vec<ScheduleRecord>>;
 }
 
+pub struct RepositoryFactory {
+    openai_api_key: Option<String>,
+}
+
+impl RepositoryFactory {
+    pub fn new() -> Self {
+        Self {
+            openai_api_key: None,
+        }
+    }
+    
+    pub fn with_openai_key(mut self, api_key: String) -> Self {
+        self.openai_api_key = Some(api_key);
+        self
+    }
+    
+    pub async fn create(&self, database_type: &str, database_url: &str) -> Result<Arc<RwLock<Box<dyn Repository>>>> {
+        match database_type {
+            "file" => Ok(Arc::new(RwLock::new(Box::new(
+                file::FileRepository::new(database_url, cfg!(debug_assertions)).await?,
+            )))),
+            "qdrant" => {
+                let api_key = self.openai_api_key.as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("OpenAI API key required for Qdrant repository"))?;
+                let embedding_service = Arc::new(
+                    crate::adapter::embedding::EmbeddingService::new(api_key).await?
+                );
+                Ok(Arc::new(RwLock::new(Box::new(
+                    qdrant::QdrantRepository::new(database_url, embedding_service).await?,
+                ))))
+            },
+            _ => bail!("Unrecognized repository type: {}", database_type),
+        }
+    }
+}
+
+// Legacy function for backward compatibility (deprecated)
 pub async fn generate(
     name: &str, 
     url: &str, 
