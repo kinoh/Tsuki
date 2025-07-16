@@ -15,7 +15,7 @@ pub struct MemorizeFunctionArguments {
 }
 
 pub struct MemorizeFunction {
-    pub repository: Arc<RwLock<Box<dyn Repository>>>,
+    pub repository: Arc<RwLock<dyn Repository>>,
 }
 
 #[async_trait]

@@ -70,7 +70,7 @@ fn to_event(output: &ChatOutput, usage: u32) -> Option<Event> {
 }
 
 pub struct OpenAiCore {
-    repository: Arc<RwLock<Box<dyn Repository>>>,
+    repository: Arc<RwLock<dyn Repository>>,
     thinker: Thinker,
     model: Model,
     defined_messages: HashMap<DefinedMessage, String>,
@@ -79,7 +79,7 @@ pub struct OpenAiCore {
 
 impl OpenAiCore {
     pub async fn new(
-        repository: Arc<RwLock<Box<dyn Repository>>>,
+        repository: Arc<RwLock<dyn Repository>>,
         prompt_key: &str,
         model: Model,
         openai_api_key: &str,

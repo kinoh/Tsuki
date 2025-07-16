@@ -16,7 +16,7 @@ pub struct ManageScheduleFunctionArguments {
 }
 
 pub struct ManageScheduleFunction {
-    pub repository: Arc<RwLock<Box<dyn Repository>>>,
+    pub repository: Arc<RwLock<dyn Repository>>,
     pub broadcast: IdentifiedBroadcast<Event>,
 }
 

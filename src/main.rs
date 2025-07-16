@@ -26,7 +26,7 @@ use ratatui::{
     text::{Line, Span},
     DefaultTerminal, Frame,
 };
-use repository::Repository;
+use repository::{FileRepository, Repository};
 use serde::Serialize;
 use std::{env, sync::Arc, time::Duration};
 use tokio::{
@@ -149,7 +149,10 @@ async fn app() -> Result<()> {
     let eventlogger = EventLogger::new();
     event_system.run(eventlogger);
 
-    let repository = repository::generate(CONF.main.database_type, CONF.main.database_url).await?;
+    let pretty_history = cfg!(debug_assertions);
+    let repository: Arc<RwLock<dyn Repository>> = Arc::new(RwLock::new(
+        FileRepository::new(CONF.main.history_path, pretty_history).await?,
+    ));
 
     if args.audio {
         let mumble_client = MumbleClient::new(
