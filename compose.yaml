@@ -23,6 +23,7 @@ services:
     restart: always
     depends_on:
       - sandbox
+      - qdrant
   sandbox:
     image: tsuki-sandbox:0.2.10
     build: docker/dify-sandbox
@@ -68,11 +69,22 @@ services:
     ports:
       - "50021:50021"
     restart: always
+  qdrant:
+    image: qdrant/qdrant:v1.14.1
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: always
 
 volumes:
   memory-data:
   model-data:
   mumble-data:
+  qdrant-data:
 
 networks:
   ssrf_proxy_network:

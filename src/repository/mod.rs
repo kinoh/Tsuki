@@ -1,4 +1,5 @@
 mod file;
+mod qdrant;
 
 use std::sync::Arc;
 
@@ -33,6 +34,9 @@ pub async fn generate(name: &str, url: &str) -> Result<Arc<RwLock<Box<dyn Reposi
     match name {
         "file" => Ok(Arc::new(RwLock::new(Box::new(
             file::FileRepository::new(url, cfg!(debug_assertions)).await?,
+        )))),
+        "qdrant" => Ok(Arc::new(RwLock::new(Box::new(
+            qdrant::QdrantRepository::new(url).await?,
         )))),
         _ => bail!("Unrecognized repository type"),
     }
