@@ -1,13 +1,14 @@
 mod file;
 
+use std::sync::Arc;
+
+use anyhow::{bail, Result};
+use async_trait::async_trait;
+use tokio::sync::RwLock;
+
 use crate::common::memory::MemoryRecord;
 use crate::common::message::{MessageRecord, SessionId};
 use crate::common::schedule::ScheduleRecord;
-
-use anyhow::Result;
-pub use file::FileRepository;
-
-use async_trait::async_trait;
 
 #[async_trait]
 pub trait Repository: Send + Sync {
@@ -26,4 +27,13 @@ pub trait Repository: Send + Sync {
     async fn append_schedule(&self, expression: String, message: String) -> Result<()>;
     async fn remove_schedule(&self, expression: String, message: String) -> Result<usize>;
     async fn schedules(&self) -> Result<Vec<ScheduleRecord>>;
+}
+
+pub async fn generate(name: &str, url: &str) -> Result<Arc<RwLock<Box<dyn Repository>>>> {
+    match name {
+        "file" => Ok(Arc::new(RwLock::new(Box::new(
+            file::FileRepository::new(url, cfg!(debug_assertions)).await?,
+        )))),
+        _ => bail!("Unrecognized repository type"),
+    }
 }
