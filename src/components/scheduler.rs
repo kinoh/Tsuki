@@ -151,7 +151,10 @@ mod tests {
     async fn daily() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let repo = repository::generate("file", path).await.unwrap();
+        let repo = repository::RepositoryFactory::new()
+            .create("file", path)
+            .await
+            .unwrap();
         let mut scheduler = Scheduler::new(repo, Duration::from_secs(60)).await.unwrap();
         scheduler
             .register(String::from("0 30 19 * * *"), String::from("foo"))
@@ -173,7 +176,10 @@ mod tests {
     async fn no_duplicate() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
-        let repo = repository::generate("file", path).await.unwrap();
+        let repo = repository::RepositoryFactory::new()
+            .create("file", path)
+            .await
+            .unwrap();
         let mut scheduler = Scheduler::new(repo, Duration::from_secs(60)).await.unwrap();
         scheduler
             .register(String::from("0 0 20,21 * * *"), String::from("foo"))
