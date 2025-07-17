@@ -3,10 +3,9 @@ use async_trait::async_trait;
 use qdrant_client::qdrant::value::Kind;
 use qdrant_client::qdrant::{
     CreateCollectionBuilder, DeletePointsBuilder, Distance, PointStruct, QueryPointsBuilder,
-    SearchParamsBuilder, UpsertPointsBuilder, VectorParamsBuilder, SearchPointsBuilder,
+    SearchParamsBuilder, SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
 };
 use qdrant_client::{Payload, Qdrant};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
 use uuid::Uuid;
@@ -19,6 +18,7 @@ use crate::common::schedule::ScheduleRecord;
 
 const COLLECTION_SESSION: &str = "session";
 const COLLECTION_MEMORIES: &str = "memories";
+const COLLECTION_MESSAGES: &str = "messages";
 
 pub struct QdrantRepository {
     client: Qdrant,
@@ -28,7 +28,10 @@ pub struct QdrantRepository {
 impl QdrantRepository {
     pub async fn new(url: &str, embedding_service: Arc<EmbeddingService>) -> Result<Self> {
         let client = Qdrant::from_url(url).build()?;
-        let repo = Self { client, embedding_service };
+        let repo = Self {
+            client,
+            embedding_service,
+        };
         repo.initialize().await?;
         Ok(repo)
     }
@@ -51,65 +54,49 @@ impl QdrantRepository {
         if !names.iter().any(|n| *n == COLLECTION_MEMORIES) {
             self.client
                 .create_collection(
-                    CreateCollectionBuilder::new(COLLECTION_MEMORIES)
-                        .vectors_config(VectorParamsBuilder::new(
+                    CreateCollectionBuilder::new(COLLECTION_MEMORIES).vectors_config(
+                        VectorParamsBuilder::new(
                             self.embedding_service.dimensions() as u64,
-                            Distance::Cosine
-                        )),
+                            Distance::Cosine,
+                        ),
+                    ),
+                )
+                .await?;
+        }
+
+        // Initialize messages collection
+        if !names.iter().any(|n| *n == COLLECTION_MESSAGES) {
+            self.client
+                .create_collection(
+                    CreateCollectionBuilder::new(COLLECTION_MESSAGES)
+                        .vectors_config(VectorParamsBuilder::new(1, Distance::Cosine)),
                 )
                 .await?;
         }
 
         Ok(())
     }
-    
+
     async fn get_all_memories(&self) -> Result<Vec<MemoryRecord>> {
-        let response = self.client
+        let response = self
+            .client
             .query(
                 QueryPointsBuilder::new(COLLECTION_MEMORIES)
                     .with_payload(true)
                     .limit(100), // Limit to 100 memories
             )
             .await?;
-        
+
         let mut memories = Vec::new();
         for point in response.result {
-            if let Some(memory) = self.point_to_memory_record(point.payload.into())? {
-                memories.push(memory);
-            }
+            let payload: Payload = point.payload.into();
+            let memory: MemoryRecord = serde_json::from_value(payload.into())?;
+            memories.push(memory);
         }
-        
+
         // Sort by timestamp (oldest first)
         memories.sort_by_key(|m| m.timestamp);
         Ok(memories)
-    }
-    
-    fn point_to_memory_record(&self, payload: HashMap<String, qdrant_client::qdrant::Value>) -> Result<Option<MemoryRecord>> {
-        let timestamp = match payload.get("timestamp") {
-            Some(value) => match &value.kind {
-                Some(Kind::IntegerValue(i)) => *i as u64,
-                _ => return Ok(None),
-            },
-            None => return Ok(None),
-        };
-        
-        let content = match payload.get("content") {
-            Some(value) => match &value.kind {
-                Some(Kind::ListValue(list)) => {
-                    let mut strings = Vec::new();
-                    for item in &list.values {
-                        if let Some(Kind::StringValue(s)) = &item.kind {
-                            strings.push(s.clone());
-                        }
-                    }
-                    strings
-                },
-                _ => return Ok(None),
-            },
-            None => return Ok(None),
-        };
-        
-        Ok(Some(MemoryRecord { timestamp, content }))
     }
 }
 
@@ -172,40 +159,88 @@ impl Repository for QdrantRepository {
         Ok(())
     }
 
-    async fn append_message(&self, _record: MessageRecord) -> Result<()> {
-        todo!("append_message not implemented for QdrantRepository")
+    async fn append_message(&self, record: MessageRecord) -> Result<()> {
+        let payload = Payload::try_from(serde_json::to_value(&record)?)?;
+        let point = PointStruct::new(record.timestamp, vec![0.0], payload);
+        self.client
+            .upsert_points(UpsertPointsBuilder::new(COLLECTION_MESSAGES, vec![point]))
+            .await?;
+
+        Ok(())
     }
 
     async fn messages(
         &self,
-        _latest_n: Option<usize>,
-        _before: Option<u64>,
+        latest_n: Option<usize>,
+        before: Option<u64>,
     ) -> Result<Vec<MessageRecord>> {
-        todo!("messages not implemented for QdrantRepository")
+        let response = self
+            .client
+            .query(
+                QueryPointsBuilder::new(COLLECTION_MESSAGES)
+                    .with_payload(true)
+                    .limit(1000), // Limit to 1000 messages
+            )
+            .await?;
+
+        let mut messages = Vec::new();
+        for point in response.result {
+            let payload: Payload = point.payload.into();
+            let message: MessageRecord = serde_json::from_value(payload.into())?;
+            // Filter by before timestamp
+            if let Some(before_ts) = before {
+                if message.timestamp >= before_ts {
+                    continue;
+                }
+            }
+            messages.push(message);
+        }
+
+        // Sort by timestamp (descending - newest first)
+        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        // Apply latest_n limit
+        if let Some(n) = latest_n {
+            messages.truncate(n);
+        }
+
+        // Reverse to get chronological order (oldest first)
+        messages.reverse();
+        Ok(messages)
     }
 
     async fn last_response_id(&self) -> Result<Option<String>> {
-        todo!("last_response_id not implemented for QdrantRepository")
+        // Get current session
+        let current_session = match self.get_or_create_session().await {
+            Ok(session) => session,
+            Err(_) => return Ok(None),
+        };
+
+        // Get recent messages and find the latest response_id for current session
+        let messages = self.messages(Some(50), None).await?; // Get latest 50 messages
+
+        for message in messages.iter().rev() {
+            if message.session == current_session && message.response_id.is_some() {
+                return Ok(message.response_id.clone());
+            }
+        }
+
+        Ok(None)
     }
 
     async fn append_memory(&self, record: MemoryRecord) -> Result<()> {
         // Generate embedding for the memory content
         let embedding = self.embedding_service.embed_memory(&record).await?;
-        
+
         // Create payload with memory data
-        let mut payload = Payload::new();
-        payload.insert("timestamp", record.timestamp as i64);
-        payload.insert("content", record.content.clone());
-        
+        let payload = Payload::try_from(serde_json::to_value(&record)?)?;
+
         // Create and upsert point
         let point = PointStruct::new(record.timestamp, embedding, payload);
         self.client
-            .upsert_points(UpsertPointsBuilder::new(
-                COLLECTION_MEMORIES,
-                vec![point],
-            ))
+            .upsert_points(UpsertPointsBuilder::new(COLLECTION_MEMORIES, vec![point]))
             .await?;
-        
+
         Ok(())
     }
 
@@ -214,12 +249,13 @@ impl Repository for QdrantRepository {
             // If query is empty, return all memories ordered by timestamp
             return self.get_all_memories().await;
         }
-        
+
         // Generate embedding for the query
         let query_embedding = self.embedding_service.embed_text(query).await?;
-        
+
         // Perform vector search
-        let response = self.client
+        let response = self
+            .client
             .search_points(
                 SearchPointsBuilder::new(COLLECTION_MEMORIES, query_embedding, 10)
                     .limit(10)
@@ -227,15 +263,15 @@ impl Repository for QdrantRepository {
                     .score_threshold(0.5),
             )
             .await?;
-        
+
         // Convert results to MemoryRecord
         let mut memories = Vec::new();
         for scored_point in response.result {
-            if let Some(memory) = self.point_to_memory_record(scored_point.payload)? {
-                memories.push(memory);
-            }
+            let payload: Payload = scored_point.payload.into();
+            let memory: MemoryRecord = serde_json::from_value(payload.into())?;
+            memories.push(memory);
         }
-        
+
         Ok(memories)
     }
 
