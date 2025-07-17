@@ -9,7 +9,7 @@ services:
       target: final
       args:
         GIT_HASH: ${GIT_HASH}
-    command: --audio --notifier --scheduler
+    command: --audio --notifier
     environment:
       PROMPT_PRIVATE_KEY: ${PROMPT_PRIVATE_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}

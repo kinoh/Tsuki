@@ -6,10 +6,6 @@ openai_model = "gpt-4o"
 max_output_tokens = 10000
 dify_sandbox_host = "ssrf-proxy:8194"
 
-[scheduler]
-resolution_secs = 10
-session_reset_schedule = "0 0 19 * * *"
-
 [web]
 port = 2953
 

@@ -14,7 +14,6 @@ use super::Repository;
 use crate::adapter::embedding::EmbeddingService;
 use crate::common::memory::MemoryRecord;
 use crate::common::message::{MessageRecord, SessionId};
-use crate::common::schedule::ScheduleRecord;
 
 const COLLECTION_SESSION: &str = "session";
 const COLLECTION_MEMORIES: &str = "memories";
@@ -275,15 +274,4 @@ impl Repository for QdrantRepository {
         Ok(memories)
     }
 
-    async fn append_schedule(&self, _expression: String, _message: String) -> Result<()> {
-        todo!("append_schedule not implemented for QdrantRepository")
-    }
-
-    async fn remove_schedule(&self, _expression: String, _message: String) -> Result<usize> {
-        todo!("remove_schedule not implemented for QdrantRepository")
-    }
-
-    async fn schedules(&self) -> Result<Vec<ScheduleRecord>> {
-        todo!("schedules not implemented for QdrantRepository")
-    }
 }

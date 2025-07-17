@@ -1,5 +1,4 @@
 mod execute_code_function;
-mod manage_schedule_function;
 mod memorize_function;
 
 use anyhow::{Context, Result};

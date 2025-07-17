@@ -1,8 +1,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use cron::Schedule;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ErrorKind};
 use tracing::info;
@@ -11,7 +9,6 @@ use uuid::Uuid;
 use super::Repository;
 use crate::common::memory::MemoryRecord;
 use crate::common::message::{MessageRecord, SessionId};
-use crate::common::schedule::ScheduleRecord;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct RepositoryData {
@@ -21,8 +18,6 @@ struct RepositoryData {
     messages: Vec<MessageRecord>,
     #[serde(default)]
     memories: Vec<MemoryRecord>,
-    #[serde(default)]
-    schedules: Vec<ScheduleRecord>,
 }
 
 pub struct FileRepository {
@@ -150,66 +145,5 @@ impl Repository for FileRepository {
         Ok(data.memories.clone())
     }
 
-    async fn append_schedule(
-        &self,
-        expression: String,
-        message: String,
-    ) -> Result<()> {
-        let schedule = Schedule::from_str(&expression).context("failed to parse schedule")?;
-        let mut data = self.data.write().await;
-        data.schedules.push(ScheduleRecord { schedule, message });
-        self.save(&data).await
-    }
-
-    async fn remove_schedule(
-        &self,
-        expression: String,
-        message: String,
-    ) -> Result<usize> {
-        let schedule = Schedule::from_str(&expression).context("failed to parse schedule")?;
-        let mut data = self.data.write().await;
-        let initial_len = data.schedules.len();
-        data.schedules
-            .retain(|s| !(s.schedule == schedule && s.message == message));
-        let removed_count = initial_len - data.schedules.len();
-        if removed_count > 0 {
-            self.save(&data).await?;
-        }
-        Ok(removed_count)
-    }
-
-    async fn schedules(&self) -> Result<Vec<ScheduleRecord>> {
-        let data = self.data.read().await;
-        Ok(data.schedules.clone())
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::NamedTempFile;
-
-    #[tokio::test]
-    async fn remove_schedule() {
-        let tmp = NamedTempFile::new().unwrap();
-        let path = tmp.path().to_str().unwrap();
-        let repo = FileRepository::new(path, false).await.unwrap();
-        let expr = "0 5 * * * *".to_string();
-        let msg = "test message".to_string();
-
-        repo.append_schedule(expr.clone(), msg.clone())
-            .await
-            .unwrap();
-        let schedules = repo.schedules().await.unwrap();
-        assert_eq!(schedules.len(), 1);
-        assert_eq!(schedules[0].message, msg);
-        assert_eq!(schedules[0].schedule.to_string(), expr);
-
-        let removed = repo
-            .remove_schedule(expr.clone(), msg.clone())
-            .await
-            .unwrap();
-        assert_eq!(removed, 1);
-        assert_eq!(repo.schedules().await.unwrap().len(), 0);
-    }
-}

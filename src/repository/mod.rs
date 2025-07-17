@@ -9,7 +9,6 @@ use tokio::sync::RwLock;
 
 use crate::common::memory::MemoryRecord;
 use crate::common::message::{MessageRecord, SessionId};
-use crate::common::schedule::ScheduleRecord;
 
 #[async_trait]
 pub trait Repository: Send + Sync {
@@ -25,9 +24,6 @@ pub trait Repository: Send + Sync {
     async fn last_response_id(&self) -> Result<Option<String>>;
     async fn append_memory(&self, record: MemoryRecord) -> Result<()>;
     async fn memories(&self, query: &str) -> Result<Vec<MemoryRecord>>;
-    async fn append_schedule(&self, expression: String, message: String) -> Result<()>;
-    async fn remove_schedule(&self, expression: String, message: String) -> Result<usize>;
-    async fn schedules(&self) -> Result<Vec<ScheduleRecord>>;
 }
 
 pub struct RepositoryFactory {

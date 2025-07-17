@@ -9,12 +9,11 @@ mod repository;
 use clap::Parser;
 use common::{events::EventSystem, message::ASSISTANT_NAME, mumble::MumbleClient};
 use components::{
-    core::{DefinedMessage, Model, OpenAiCore},
+    core::{Model, OpenAiCore},
     eventlogger::EventLogger,
     interactive::{InteractiveProxy, Signal},
     notifier::Notifier,
     recognizer::SpeechRecognizer,
-    scheduler::Scheduler,
     speak::SpeechEngine,
     web::WebState,
 };
@@ -51,8 +50,6 @@ struct Args {
     audio: bool,
     #[arg(long)]
     interactive: bool,
-    #[arg(long)]
-    scheduler: bool,
     #[arg(long)]
     notifier: bool,
 }
@@ -183,22 +180,6 @@ async fn app() -> Result<()> {
         event_system.run(notifier);
     }
 
-    if args.scheduler {
-        let mut scheduler = Scheduler::new(
-            repository.clone(),
-            Duration::from_secs(CONF.scheduler.resolution_secs.try_into()?),
-        )
-        .await?;
-        if repository.read().await.schedules().await?.is_empty() {
-            scheduler
-                .register(
-                    String::from("0 0 19 * * *"),
-                    DefinedMessage::FinishSession.to_string(),
-                )
-                .await?;
-        }
-        event_system.run(scheduler);
-    }
 
     let model = if CONF.core.openai_model.is_empty() {
         Model::Echo
