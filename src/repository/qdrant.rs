@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use qdrant_client::qdrant::value::Kind;
 use qdrant_client::qdrant::{
     CreateCollectionBuilder, DeletePointsBuilder, Distance, PointStruct, QueryPointsBuilder,
-    SearchParamsBuilder, SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
+    SearchParamsBuilder, SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder, PointId,
 };
 use qdrant_client::{Payload, Qdrant};
 use std::sync::Arc;
@@ -160,7 +160,9 @@ impl Repository for QdrantRepository {
 
     async fn append_message(&self, record: MessageRecord) -> Result<()> {
         let payload = Payload::try_from(serde_json::to_value(&record)?)?;
-        let point = PointStruct::new(record.timestamp, vec![0.0], payload);
+        // Use UUID for unique point ID, store timestamp in payload
+        let point_id = PointId::from(Uuid::new_v4().to_string());
+        let point = PointStruct::new(point_id, vec![0.0], payload);
         self.client
             .upsert_points(UpsertPointsBuilder::new(COLLECTION_MESSAGES, vec![point]))
             .await?;
@@ -234,8 +236,9 @@ impl Repository for QdrantRepository {
         // Create payload with memory data
         let payload = Payload::try_from(serde_json::to_value(&record)?)?;
 
-        // Create and upsert point
-        let point = PointStruct::new(record.timestamp, embedding, payload);
+        // Create and upsert point with UUID
+        let point_id = PointId::from(Uuid::new_v4().to_string());
+        let point = PointStruct::new(point_id, embedding, payload);
         self.client
             .upsert_points(UpsertPointsBuilder::new(COLLECTION_MEMORIES, vec![point]))
             .await?;
