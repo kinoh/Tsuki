@@ -1,10 +1,10 @@
 # Qdrant Repository Implementation
 
 ## Overview
-Implementation of a memory system with semantic search functionality using QdrantRepository and EmbeddingService.
+Implementation of a memory and message system with semantic search functionality using QdrantRepository and EmbeddingService. Schedule functionality was deliberately omitted in favor of MCP-based implementation to avoid LLM difficulties with time calculations.
 
-## Implementation Date
-July 16, 2025
+## Implementation Period
+July 16-17, 2025
 
 ## Implementation Details
 
@@ -85,7 +85,12 @@ let memory: MemoryRecord = serde_json::from_value(payload.into())?;
 - **Content**: Legacy generate() function removal, complete API unification, test code migration
 
 ### Phase 6: Message Functionality with JSON Serialization
+- **Commit**: `d6519db` - feat: Implement message functionality with JSON serialization in QdrantRepository
 - **Content**: Message storage and retrieval, type-safe JSON serialization pattern
+
+### Phase 7: Schedule Functionality Removal
+- **Commit**: `ce0cac4` - refactor: Remove schedule functionality for MCP-based implementation
+- **Content**: Complete removal of schedule functionality, architecture simplification for MCP-based approach
 
 ## Design Principles
 
@@ -121,6 +126,11 @@ let memory: MemoryRecord = serde_json::from_value(payload.into())?;
 - Importance scoring
 - Creator information
 
+### 4. Schedule Functionality
+- **Recommended**: Implement as MCP plugin
+- **Rationale**: Avoids LLM challenges with time calculations and cron expressions
+- **Benefits**: Better separation of concerns, easier maintenance, external extensibility
+
 ## Lessons Learned
 
 ### 1. Power of Factory Pattern
@@ -142,6 +152,12 @@ let memory: MemoryRecord = serde_json::from_value(payload.into())?;
 - Type-safe payload handling
 - Cleaner code without manual field extraction
 - Better maintainability with serde
+
+### 5. Architecture Simplification
+- Schedule functionality deliberately omitted for MCP-based implementation
+- Avoids LLM difficulties with time calculations and cron expressions
+- Cleaner separation of concerns between core agent and scheduling
+- MCP plugins provide better extensibility for time-based features
 
 ## Reference Materials
 - [Qdrant Documentation](https://qdrant.tech/documentation/)

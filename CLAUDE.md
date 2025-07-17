@@ -11,7 +11,6 @@ Tsuki is a kawaii chat agent built with Rust that provides:
 - Code execution capabilities via dify-sandbox
 - Cross-platform GUI client (desktop and Android) built with Tauri + Svelte
 - Voice recognition and synthesis via Vosk and VoiceVox
-- Scheduling system with cron expressions
 - Memory persistence and chat history
 
 ## Development Commands
@@ -24,9 +23,8 @@ cargo build --release
 # Run with different modes
 cargo run -- --audio                    # Enable audio/voice features
 cargo run -- --interactive              # Enable TUI interface
-cargo run -- --scheduler                # Enable scheduling system
 cargo run -- --notifier                 # Enable notifications
-cargo run -- --audio --notifier --scheduler  # Combined modes
+cargo run -- --audio --notifier         # Combined modes
 
 # Run tests
 cargo test
@@ -58,6 +56,21 @@ task log-app         # View logs for app service
 
 # Direct docker compose
 docker compose up --build --detach
+
+# Check running services
+docker ps            # List running containers
+docker compose ps    # List compose services
+
+# Execute commands in containers
+docker compose exec app cargo build                    # Build in container
+docker compose exec app cargo test                     # Run tests in container
+docker compose exec -w /workspace app cargo run        # Run application in container
+docker compose exec app bash                           # Interactive shell in app container
+
+# Service-specific operations
+docker compose logs app                                 # View app logs
+docker compose restart app                             # Restart app service
+docker compose exec qdrant curl http://localhost:6333/collections  # Check Qdrant collections
 ```
 
 ### Voice Model Setup
@@ -89,13 +102,13 @@ The application uses an event-driven architecture (`src/common/events.rs`):
 - **Core** (`src/components/core/`): Main AI chat engine with OpenAI integration
 - **Recognizer** (`src/components/recognizer.rs`): Speech recognition via Vosk
 - **Speak** (`src/components/speak.rs`): Text-to-speech via VoiceVox
-- **Scheduler** (`src/components/scheduler.rs`): Cron-based task scheduling
 - **Notifier** (`src/components/notifier.rs`): Push notifications via FCM
 - **Web** (`src/components/web.rs`): Web interface and API
 - **Interactive** (`src/components/interactive.rs`): TUI interface with ratatui
 
 ### Key Adapters
 - **OpenAI** (`src/adapter/openai.rs`): Chat completion and function calling
+- **EmbeddingService** (`src/adapter/embedding.rs`): OpenAI text embeddings for vector search
 - **Dify** (`src/adapter/dify.rs`): Code execution in sandbox
 - **FCM** (`src/adapter/fcm.rs`): Firebase Cloud Messaging
 
@@ -104,16 +117,30 @@ The application uses an event-driven architecture (`src/common/events.rs`):
 - Development config: `conf/local.toml` (if exists)
 - Environment variables: `PROMPT_PRIVATE_KEY`, `OPENAI_API_KEY`, `WEB_AUTH_TOKEN`, `DIFY_SANDBOX_API_KEY`
 
+### Docker Services
+The application runs with multiple services via Docker Compose:
+- **app**: Main Rust application (tsuki)
+- **qdrant**: Vector database for semantic search (port 6333-6334)
+- **ssrf-proxy**: Secure proxy for dify-sandbox (port 3128, 8194)
+- **sandbox**: Code execution environment (dify-sandbox)
+- **mumble-server**: Voice chat server (port 64738)
+- **voicevox-engine**: Text-to-speech engine (port 50021)
+
 ### Function Calling
 The AI core supports function calling for:
-- `memorize_function`: Store and retrieve memories
+- `memorize_function`: Store and retrieve memories with vector search
 - `execute_code_function`: Run code in dify-sandbox
-- `manage_schedule_function`: Manage cron schedules
 
 ### Data Persistence
-- Chat history: `/var/memory/history.json`
-- Memories: Stored in repository
-- Schedules: Persisted in repository
+- Chat history and messages: Stored in repository (file or Qdrant)
+- Memories: Stored in repository with vector embeddings for semantic search
+- Vector database: Qdrant with OpenAI embeddings (optional)
+
+### Repository System
+- **FileRepository**: JSON-based persistence for development
+- **QdrantRepository**: Vector database with semantic search capabilities
+- **RepositoryFactory**: Clean dependency injection with automatic EmbeddingService setup
+- **Design**: Schedule functionality omitted in favor of MCP plugin implementation
 
 ## Testing
 
@@ -133,7 +160,25 @@ cargo test -- --nocapture
 - `src/main.rs`: Application entry point and component orchestration
 - `src/common/events.rs`: Event system implementation
 - `src/components/core/mod.rs`: AI chat engine
-- `src/common/repository.rs`: Data persistence layer
+- `src/repository/mod.rs`: Repository trait and RepositoryFactory
+- `src/repository/qdrant.rs`: Vector database implementation with semantic search
+- `src/repository/file.rs`: JSON-based file repository for development
+- `src/adapter/embedding.rs`: OpenAI embedding service for vector search
 - `gui/src/routes/+page.svelte`: Main GUI interface
 - `compose.yaml`: Docker service definitions
 - `Taskfile.yaml`: Development and deployment tasks
+- `doc/qdrant_repository_implementation.md`: Detailed implementation documentation
+
+## Schedule Functionality
+
+**Note**: Schedule functionality has been intentionally omitted from the core system. 
+
+**Rationale**: 
+- LLM difficulties with time calculations and cron expressions
+- Better separation of concerns
+- Improved maintainability
+
+**Recommended Approach**: 
+- Implement scheduling as MCP (Model Context Protocol) plugin
+- External scheduling systems can integrate via MCP interface
+- Allows specialized time management without core complexity
