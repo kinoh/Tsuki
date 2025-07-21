@@ -10,10 +10,10 @@ interface WebSocketClient {
 
 export class WebSocketManager {
   private clients = new Map<WebSocket, WebSocketClient>()
-  private agent: Agent
+  private agent: Agent<string, any, any>
   private conversation: ConversationManager
 
-  constructor(agent: Agent) {
+  constructor(agent: Agent<string, any, any>) {
     this.agent = agent
     const memory = agent.getMemory()
     if (!memory) {
