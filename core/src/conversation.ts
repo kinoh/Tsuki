@@ -9,7 +9,7 @@ export class ConversationManager {
   }
 
   private generateThreadId(userId: string, date: Date): string {
-    const dateStr = date.toISOString().split('T')[0] // YYYY-MM-DD形式
+    const dateStr = date.toISOString().split('T')[0].replace(/-/g, '') // YYYYMMDD format
     return `${userId}-${dateStr}`
   }
 

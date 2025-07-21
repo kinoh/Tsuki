@@ -37,7 +37,7 @@ core/
 Handles intelligent thread management with automatic continuation logic.
 
 **Key Features:**
-- **Thread ID Generation**: Creates user-specific thread IDs in format `${userId}-YYYY-MM-DD`
+- **Thread ID Generation**: Creates user-specific thread IDs in format `${userId}-YYYYMMDD`
 - **Smart Continuation**: Continues previous day's thread if updated within 1 hour threshold
 - **Memory Integration**: Works with MastraMemory for message retrieval
 
@@ -52,7 +52,7 @@ class ConversationManager {
 ```
 
 **Thread Continuation Logic:**
-1. Generate today's thread ID: `${userId}-YYYY-MM-DD`
+1. Generate today's thread ID: `${userId}-YYYYMMDD`
 2. Check if previous day's thread exists
 3. If exists, get last message timestamp
 4. If updated within 1 hour → continue previous thread
@@ -139,6 +139,7 @@ List threads for a user.
 
 #### `GET /threads/:id?user=userId`
 Get messages from a specific thread in unified ResponseMessage format.
+(Thread ID format: `userId-YYYYMMDD`, e.g., `user123-20240115`)
 ```json
 // Response
 { 
@@ -225,7 +226,7 @@ ws.onmessage = (event) => {
 ### HTTP Client
 ```javascript
 // Get thread messages
-const response = await fetch('/threads/user123-2024-01-15?user=user123')
+const response = await fetch('/threads/user123-20240115?user=user123')
 const { messages } = await response.json()
 
 messages.forEach(msg => {
