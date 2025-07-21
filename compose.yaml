@@ -1,6 +1,31 @@
 name: tsuki
 
 services:
+  # TypeScript/Mastra-based backend (replacing Rust app)
+  core:
+    image: tsuki-core:${GIT_HASH}
+    build:
+      context: .
+      dockerfile: docker/core/Dockerfile
+      target: runtime
+      args:
+        GIT_HASH: ${GIT_HASH}
+    environment:
+      NODE_ENV: production
+      WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      AGENT_NAME: tsuki
+    ports:
+      - "3000:3000"
+    restart: always
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').request({port: 3000, path: '/'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1)).end()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Legacy Rust implementation (will be phased out)
   app:
     image: tsuki:${GIT_HASH}
     build:
@@ -24,6 +49,8 @@ services:
     depends_on:
       - sandbox
       - qdrant
+    profiles:
+      - legacy  # Enable with --profile legacy
   sandbox:
     image: tsuki-sandbox:0.2.10
     build: docker/dify-sandbox
