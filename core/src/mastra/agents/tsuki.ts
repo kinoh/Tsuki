@@ -4,9 +4,14 @@ import { Memory } from '@mastra/memory'
 
 export const tsuki = new Agent({
   name: 'Tsuki',
-  instructions: `
-    You are a chatting agent.
-`,
+  instructions: ({ runtimeContext }): string => {
+    const instructions = runtimeContext.get('instructions')
+    if (instructions === null || instructions === undefined || instructions === '') {
+      console.warn('Instructions not found in runtime context, using default instructions')
+      return 'You are a helpful chatting agent.'
+    }
+    return instructions as string
+  },
   model: openai('gpt-4o-mini'),
   memory: new Memory(),
 })

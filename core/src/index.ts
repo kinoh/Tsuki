@@ -2,10 +2,31 @@ import express from 'express'
 import morgan from 'morgan'
 import http from 'http'
 import WebSocket from 'ws'
+import { RuntimeContext } from '@mastra/core/di'
 import { mastra } from './mastra/index'
 import { WebSocketManager } from './websocket'
 import { ResponseMessage, createResponseMessage } from './message'
 import { MastraMessageV1 } from '@mastra/core'
+import { loadPromptFromEnv } from './prompt'
+
+type AppRuntimeContext = {
+  instructions: string
+}
+
+// Function to create runtime context with encrypted prompt
+async function createRuntimeContext(): Promise<RuntimeContext<AppRuntimeContext>> {
+  const runtimeContext = new RuntimeContext<AppRuntimeContext>()
+  
+  try {
+    const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
+    runtimeContext.set('instructions', instructions)
+  } catch (error) {
+    console.warn('Failed to load encrypted prompt, using fallback:', error)
+    runtimeContext.set('instructions', 'You are a helpful chatting agent.')
+  }
+
+  return runtimeContext
+}
 
 const agent = mastra.getAgent('tsuki')
 const agentMemory = agent.getMemory()
@@ -111,54 +132,60 @@ interface GetMessagesRequestBody {
   message: string
 }
 
-app.post('/messages', (req, res) => {
-  const body = req.body as GetMessagesRequestBody
 
-  if (body === null) {
-    return res.status(400).json({})
-  }
+// Main function to start server with runtime context
+async function startServer(): Promise<void> {
+  // Create runtime context with encrypted prompt
+  const runtimeContext = await createRuntimeContext()
 
-  const userId = body.user
-  const threadId = body.thread
-  const message = body.message
+  const server = http.createServer(app)
+  const wss = new WebSocket.Server({ server })
+  const wsmanager = new WebSocketManager(agent, runtimeContext)
 
-  if (!userId || !threadId || !message) {
-    return res.status(400).json({})
-  }
+  wss.on('connection', (ws, req) => {
+    wsmanager.handleConnection(ws, req)
+  })
 
-  res.json(agent.generate([
-    { role: 'user', content: message },
-  ], {
-    memory: {
-      resource: userId,
-      thread: {
-        id: threadId,
-        metadata: {
-          'date': new Date().toISOString().slice(0, 10),
-          'foo': 'bar',
+  app.post('/messages', (req, res) => {
+    const body = req.body as GetMessagesRequestBody
+
+    if (body === null) {
+      return res.status(400).json({})
+    }
+
+    const userId = body.user
+    const threadId = body.thread
+    const message = body.message
+
+    if (!userId || !threadId || !message) {
+      return res.status(400).json({})
+    }
+
+    res.json(agent.generate([
+      { role: 'user', content: message },
+    ], {
+      memory: {
+        resource: userId,
+        thread: {
+          id: threadId,
+          metadata: {
+            'date': new Date().toISOString().slice(0, 10),
+            'foo': 'bar',
+          },
+        },
+        options: {
+          lastMessages: 20,
         },
       },
-      options: {
-        lastMessages: 20,
-      },
-    },
-  }))
-})
+      runtimeContext,
+    }))
+  })
 
-// WebSocket
-
-const server = http.createServer(app)
-const wss = new WebSocket.Server({ server })
-const wsmanager = new WebSocketManager(agent)
-
-wss.on('connection', (ws, req) => {
-  wsmanager.handleConnection(ws, req)
-})
-
-// Run
-
-server.listen(3000, () =>
-  console.log(`
+  server.listen(3000, () =>
+    console.log(`
 🚀 Server ready at: http://localhost:3000
 `),
-)
+  )
+}
+
+startServer().catch(console.error)

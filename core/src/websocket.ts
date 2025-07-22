@@ -1,5 +1,6 @@
 import { IncomingMessage } from 'http'
 import { Agent, MastraMessageV1 } from '@mastra/core'
+import { RuntimeContext } from '@mastra/core/di'
 import { WebSocket } from 'ws'
 import { ConversationManager } from './conversation'
 import { createResponseMessage } from './message'
@@ -12,9 +13,11 @@ export class WebSocketManager {
   private clients = new Map<WebSocket, WebSocketClient>()
   private agent: Agent<string, any, any>
   private conversation: ConversationManager
+  private runtimeContext: RuntimeContext<any>
 
-  constructor(agent: Agent<string, any, any>) {
+  constructor(agent: Agent<string, any, any>, runtimeContext: RuntimeContext<any>) {
     this.agent = agent
+    this.runtimeContext = runtimeContext
     const memory = agent.getMemory()
     if (!memory) {
       throw new Error('Agent must have memory configured for WebSocket functionality')
@@ -27,11 +30,16 @@ export class WebSocketManager {
 
     ws.on('message', (data) => {
       void (async (): Promise<void> => {
-        if (typeof data !== 'string') {
-          console.warn('WebSocket error: non-string message')
+        let message: string
+        if (typeof data === 'string') {
+          message = data
+        } else if (Buffer.isBuffer(data)) {
+          message = data.toString('utf8')
+        } else {
+          console.warn('WebSocket error: unsupported message type')
           return
         }
-        await this.handleMessage(ws, data)
+        await this.handleMessage(ws, message)
       })()
     })
     ws.on('close', () => {
@@ -88,6 +96,7 @@ export class WebSocketManager {
             lastMessages: 20,
           },
         },
+        runtimeContext: this.runtimeContext,
       })
 
       console.log(`response id: ${response.response.id}`)
