@@ -35,7 +35,7 @@ core/
 - **Multi-protocol Communication**: WebSocket and HTTP REST APIs
 - **Smart Thread Management**: Automatic thread continuation based on recent activity
 - **Unified Message Format**: Consistent response format across all interfaces
-- **Memory Management**: Persistent conversation history using Mastra Memory
+- **Memory Management**: Persistent conversation history using Mastra Memory with cross-thread semantic recall
 - **Encrypted Prompts**: Secure agent instruction storage using Age encryption
 - **MCP-first Tool Strategy**: Minimal built-in tools, leveraging MCP for extensibility
 
@@ -214,6 +214,26 @@ OPENAI_API_KEY=your-openai-key
 ```
 
 **Note:** Mastra handles database storage internally and doesn't require external database configuration.
+
+## Memory Configuration
+
+The Tsuki agent uses resource-scoped semantic recall, enabling the agent to remember and retrieve information from previous conversations across different thread sessions:
+
+```typescript
+// core/src/mastra/agents/tsuki.ts
+memory: new Memory({
+  options: {
+    semanticRecall: {
+      scope: 'resource', // Enable cross-thread semantic recall
+    },
+  },
+}),
+```
+
+This configuration allows the agent to:
+- Remember user preferences and information across different conversation sessions
+- Maintain context even when switching between different daily threads
+- Provide continuity in long-term interactions with users
 
 ## Usage Examples
 
