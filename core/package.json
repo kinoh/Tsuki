@@ -23,6 +23,7 @@
     "@mastra/libsql": "^0.11.0",
     "@mastra/loggers": "^0.10.3",
     "@mastra/memory": "^0.11.3",
+    "age-encryption": "^0.2.4",
     "express": "^5.1.0",
     "morgan": "^1.10.1",
     "zod": "^3.25.76"
