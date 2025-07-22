@@ -14,12 +14,20 @@ core/
 │   ├── conversation.ts    # Thread management with smart continuation logic
 │   ├── index.ts          # Express server with REST API endpoints
 │   ├── message.ts        # Message formatting utilities
+│   ├── prompt.ts         # Age encryption for secure prompt loading
 │   ├── websocket.ts      # WebSocket server for real-time communication
-│   └── mastra/
-│       ├── index.ts      # Mastra configuration and agent setup
-│       ├── agents/       # Agent definitions
-│       ├── tools/        # Tool implementations
-│       └── workflows/    # Workflow definitions
+│   ├── mastra/
+│   │   ├── index.ts      # Mastra configuration and agent setup
+│   │   ├── agents/       # Agent definitions
+│   │   ├── tools/        # Tool implementations
+│   │   └── workflows/    # Workflow definitions
+│   └── prompts/
+│       └── initial.txt.encrypted  # Encrypted agent instructions
+├── scripts/
+│   ├── encrypt_prompt.js  # Age encryption script
+│   ├── decrypt_prompt.js  # Age decryption script
+│   ├── generate_key.js    # X25519 key pair generation
+│   └── ws_client.js       # WebSocket test client
 ```
 
 ### Key Features
@@ -28,6 +36,7 @@ core/
 - **Smart Thread Management**: Automatic thread continuation based on recent activity
 - **Unified Message Format**: Consistent response format across all interfaces
 - **Memory Management**: Persistent conversation history using Mastra Memory
+- **Encrypted Prompts**: Secure agent instruction storage using Age encryption
 - **MCP-first Tool Strategy**: Minimal built-in tools, leveraging MCP for extensibility
 
 ## Core Modules
@@ -192,17 +201,19 @@ WEB_AUTH_TOKEN=your-secret-token
 
 # Agent Configuration
 AGENT_NAME=tsuki
+
+# Encrypted Prompts (JWK format)
+PROMPT_PRIVATE_KEY='{"kty":"OKP","crv":"X25519","d":"...","x":"...","key_ops":["deriveBits"],"ext":true}'
 ```
 
 **Optional Variables:**
 ```bash
-# Database (if using persistent storage)
-DATABASE_URL=file:./mastra.db
-
 # API Keys for tools
 OPENAI_API_KEY=your-openai-key
 # ... other service keys
 ```
+
+**Note:** Mastra handles database storage internally and doesn't require external database configuration.
 
 ## Usage Examples
 
@@ -240,7 +251,7 @@ messages.forEach(msg => {
 ```bash
 cd core/
 npm install
-npm run dev
+npm start
 ```
 
 ### Build
@@ -250,7 +261,19 @@ npm run build
 
 ### Testing WebSocket
 ```bash
-node websocket-test-client.js
+node scripts/ws_client.js
+```
+
+### Encryption Scripts
+```bash
+# Generate X25519 key pair
+node scripts/generate_key.js
+
+# Encrypt prompts (add PROMPT_PRIVATE_KEY to .env first)
+node --env-file .env scripts/encrypt_prompt.js
+
+# Decrypt prompts (verification)
+node --env-file .env scripts/decrypt_prompt.js
 ```
 
 ## Integration with Main System
@@ -259,7 +282,7 @@ The Mastra backend is designed to replace the main Rust-based Tsuki system:
 
 - **Complete Replacement**: Core system replaces Rust server implementation
 - **Function Calling Migration**: Moves from Rust-based OpenAI function calling to MCP-standardized interfaces
-- **Shared Database**: Can use same Qdrant instance for memory storage during transition
+- **Internal Storage**: Mastra handles all database operations internally
 - **API Compatibility**: Maintains similar message formats and thread management
 - **MCP-first Architecture**: Leverages MCP ecosystem instead of custom Rust tool implementations
 
@@ -285,3 +308,7 @@ The Mastra backend is designed to replace the main Rust-based Tsuki system:
 - **Metrics**: Performance and usage monitoring
 - **MCP Plugin System**: Dynamic MCP server discovery and integration
 - **Tool Registry**: MCP-based tool marketplace and management
+
+## Related Documentation
+
+- **[Encrypted Prompt System](./encrypted-prompt-system.md)**: Detailed guide to Age encryption implementation
