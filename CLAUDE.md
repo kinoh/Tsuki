@@ -4,33 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Tsuki is a kawaii chat agent built with Rust that provides:
-- Event-driven architecture with an actor-like component system
-- Multi-modal interaction (text, audio, notifications)
-- AI-powered chat using OpenAI API with function calling
+Tsuki is a kawaii chat agent built with TypeScript/Mastra that provides:
+- WebSocket and HTTP API server for real-time communication
+- AI-powered chat using Mastra agents with MCP tool integration
 - Code execution capabilities via dify-sandbox
 - Cross-platform GUI client (desktop and Android) built with Tauri + Svelte
-- Voice recognition and synthesis via Vosk and VoiceVox
-- Memory persistence and chat history
+- Intelligent thread management with conversation continuity
+- Encrypted prompt system using Age encryption
+- Cross-thread semantic recall for persistent memory
 
 ## Development Commands
 
-### Main Application (Rust)
+### Main Application (TypeScript/Mastra)
 ```bash
-# Build the application
-cargo build --release
+cd core/
+npm install              # Install dependencies
+npm start                # Start development server
+npm run build            # Build for production
+npm run dev              # Development with auto-reload
 
-# Run with different modes
-cargo run -- --audio                    # Enable audio/voice features
-cargo run -- --interactive              # Enable TUI interface
-cargo run -- --notifier                 # Enable notifications
-cargo run -- --audio --notifier         # Combined modes
-
-# Run tests
-cargo test
-
-# Development with local config
-cargo run   # Uses conf/local.toml in debug mode
+# Test WebSocket connection
+node scripts/ws_client.js
 ```
 
 ### GUI Client
@@ -47,12 +41,12 @@ npm run tauri build  # Build Tauri app
 ```bash
 # Using Taskfile (task runner)
 task deploy          # Deploy all services
-task deploy-app      # Deploy only the app
+task deploy-core     # Deploy only the core service
 task up              # Start services
 task down            # Stop services
 task build           # Build all images
-task build-app       # Build specific service
-task log-app         # View logs for app service
+task build-core      # Build core service
+task log-core        # View logs for core service
 
 # Direct docker compose
 docker compose up --build --detach
@@ -62,123 +56,122 @@ docker ps            # List running containers
 docker compose ps    # List compose services
 
 # Execute commands in containers
-docker compose exec app cargo build                    # Build in container
-docker compose exec app cargo test                     # Run tests in container
-docker compose exec -w /workspace app cargo run        # Run application in container
-docker compose exec app bash                           # Interactive shell in app container
+docker compose exec core npm run build                 # Build in container
+docker compose exec core npm test                      # Run tests in container
+docker compose exec core npm start                     # Run application in container
+docker compose exec core bash                          # Interactive shell in core container
 
 # Service-specific operations
-docker compose logs app                                 # View app logs
-docker compose restart app                             # Restart app service
-docker compose exec qdrant curl http://localhost:6333/collections  # Check Qdrant collections
+docker compose logs core                                # View core logs
+docker compose restart core                            # Restart core service
 ```
 
-### Voice Model Setup
-```bash
-task download_model  # Download Japanese Vosk model
-```
 
 ### Prompt Management (Encrypted)
 ```bash
 task decrypt_prompt  # Decrypt prompt file for editing
 task encrypt_prompt  # Encrypt prompt file after editing
 task diff_prompt     # Compare encrypted vs current
+
+# Manual encryption (from core/ directory)
+node --env-file .env scripts/decrypt_prompt.js
+node --env-file .env scripts/encrypt_prompt.js
+node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
 ```
 
 ## Architecture
 
-### Layered Architecture
-- **Components** (`src/components/`): High-level application components
-- **Adapter** (`src/adapter/`): External service integrations
-- **Common** (`src/common/`): Shared utilities and data structures
-
-### Event System
-The application uses an event-driven architecture (`src/common/events.rs`):
-- `EventSystem`: Central event bus that coordinates all components
-- `EventComponent`: Trait that all components implement
-- Components communicate through events: `TextMessage`, `AssistantMessage`, `RecognizedSpeech`, `PlayAudio`, `Notify`
+### Core Structure
+- **Core Application** (`core/src/`): TypeScript/Node.js backend with Mastra
+- **GUI Client** (`gui/`): Cross-platform Tauri + Svelte frontend
+- **Docker Services**: Microservices for external integrations
 
 ### Core Components
-- **Core** (`src/components/core/`): Main AI chat engine with OpenAI integration
-- **Recognizer** (`src/components/recognizer.rs`): Speech recognition via Vosk
-- **Speak** (`src/components/speak.rs`): Text-to-speech via VoiceVox
-- **Notifier** (`src/components/notifier.rs`): Push notifications via FCM
-- **Web** (`src/components/web.rs`): Web interface and API
-- **Interactive** (`src/components/interactive.rs`): TUI interface with ratatui
+- **WebSocket Server** (`core/src/websocket.ts`): Real-time communication
+- **HTTP API** (`core/src/index.ts`): RESTful endpoints for thread/message management
+- **Conversation Manager** (`core/src/conversation.ts`): Smart thread continuation logic
+- **Mastra Agent** (`core/src/mastra/agents/tsuki.ts`): AI chat agent with semantic memory
+- **Encrypted Prompts** (`core/src/prompt.ts`): Age encryption for secure prompt storage
 
-### Key Adapters
-- **OpenAI** (`src/adapter/openai.rs`): Chat completion and function calling
-- **EmbeddingService** (`src/adapter/embedding.rs`): OpenAI text embeddings for vector search
-- **Dify** (`src/adapter/dify.rs`): Code execution in sandbox
-- **FCM** (`src/adapter/fcm.rs`): Firebase Cloud Messaging
+### Communication Protocols
+- **WebSocket**: Real-time bidirectional communication with authentication
+- **HTTP REST API**: Thread management and message history retrieval
+- **Unified Message Format**: Consistent ResponseMessage format across interfaces
 
 ### Configuration
-- Production config: `conf/default.toml`
-- Development config: `conf/local.toml` (if exists)
-- Environment variables: `PROMPT_PRIVATE_KEY`, `OPENAI_API_KEY`, `WEB_AUTH_TOKEN`, `DIFY_SANDBOX_API_KEY`
+- Environment variables: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY` (JWK format)
+- Configuration files: `conf/default.toml`, `conf/local.toml` (legacy, for GUI client)
+- Mastra handles internal database configuration automatically
 
 ### Docker Services
 The application runs with multiple services via Docker Compose:
-- **app**: Main Rust application (tsuki)
-- **qdrant**: Vector database for semantic search (port 6333-6334)
+- **core**: TypeScript/Mastra backend (port 3000)
 - **ssrf-proxy**: Secure proxy for dify-sandbox (port 3128, 8194)
 - **sandbox**: Code execution environment (dify-sandbox)
 - **mumble-server**: Voice chat server (port 64738)
 - **voicevox-engine**: Text-to-speech engine (port 50021)
 
-### Function Calling
-The AI core supports function calling for:
-- `memorize_function`: Store and retrieve memories with vector search
-- `execute_code_function`: Run code in dify-sandbox
+### Tool Integration
+The AI agent uses MCP (Model Context Protocol) for tool integration:
+- **Minimal Built-in Tools**: Core implements only essential functionality
+- **MCP-first Strategy**: External tools provided via MCP plugins
+- **Extensible Architecture**: New capabilities added through MCP rather than core modifications
 
 ### Data Persistence
-- Chat history and messages: Stored in repository (file or Qdrant)
-- Memories: Stored in repository with vector embeddings for semantic search
-- Vector database: Qdrant with OpenAI embeddings (optional)
-
-### Repository System
-- **FileRepository**: JSON-based persistence for development
-- **QdrantRepository**: Vector database with semantic search capabilities
-- **RepositoryFactory**: Clean dependency injection with automatic EmbeddingService setup
-- **Design**: Schedule functionality omitted in favor of MCP plugin implementation
+- **Mastra Memory**: Built-in conversation history and semantic recall
+- **Cross-thread Memory**: Resource-scoped semantic recall across different conversation sessions
+- **Thread Management**: Daily thread IDs with smart continuation logic
+- **Message Storage**: Unified message format with timestamp and user tracking
 
 ## Testing
 
 ```bash
-# Run all tests
-cargo test
+# Core application tests
+cd core/
+npm test                 # Run test suite
+npm run test:watch       # Run tests in watch mode
 
-# Run specific test
-cargo test test_name
+# WebSocket testing
+node scripts/ws_client.js
 
-# Run with output
-cargo test -- --nocapture
+# GUI client tests
+cd gui/
+npm run check            # Type checking
+npm run test             # Run tests
 ```
 
 ## Key Files to Understand
 
-- `src/main.rs`: Application entry point and component orchestration
-- `src/common/events.rs`: Event system implementation
-- `src/components/core/mod.rs`: AI chat engine
-- `src/repository/mod.rs`: Repository trait and RepositoryFactory
-- `src/repository/qdrant.rs`: Vector database implementation with semantic search
-- `src/repository/file.rs`: JSON-based file repository for development
-- `src/adapter/embedding.rs`: OpenAI embedding service for vector search
+- `core/src/index.ts`: HTTP API server and application entry point
+- `core/src/websocket.ts`: WebSocket server for real-time communication
+- `core/src/conversation.ts`: Thread management with smart continuation
+- `core/src/mastra/agents/tsuki.ts`: Main AI agent with semantic memory
+- `core/src/message.ts`: Unified message formatting utilities
+- `core/src/prompt.ts`: Age encryption for secure prompts
 - `gui/src/routes/+page.svelte`: Main GUI interface
 - `compose.yaml`: Docker service definitions
 - `Taskfile.yaml`: Development and deployment tasks
-- `doc/qdrant_repository_implementation.md`: Detailed implementation documentation
+- `doc/mastra-backend-implementation.md`: Detailed implementation documentation
 
-## Schedule Functionality
+## MCP Integration
 
-**Note**: Schedule functionality has been intentionally omitted from the core system. 
+**Tool Strategy**: The system uses MCP (Model Context Protocol) for extensibility.
 
-**Rationale**: 
-- LLM difficulties with time calculations and cron expressions
-- Better separation of concerns
-- Improved maintainability
+**Built-in Capabilities**: 
+- Core conversation management
+- Message formatting and threading
+- Encrypted prompt handling
+- Basic agent functionality
 
-**Recommended Approach**: 
-- Implement scheduling as MCP (Model Context Protocol) plugin
-- External scheduling systems can integrate via MCP interface
-- Allows specialized time management without core complexity
+**External Tools via MCP**: 
+- Scheduling and time management
+- Code execution (via dify-sandbox)
+- File operations
+- API integrations
+- Custom business logic
+
+**Benefits**: 
+- Clean separation of concerns
+- Easy tool discovery and integration
+- Standardized tool interfaces
+- No core modifications needed for new functionality

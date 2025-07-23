@@ -298,20 +298,21 @@ node --env-file .env scripts/decrypt_prompt.js
 
 ## Integration with Main System
 
-The Mastra backend is designed to replace the main Rust-based Tsuki system:
+The Mastra backend has completely replaced the original Rust-based Tsuki system:
 
-- **Complete Replacement**: Core system replaces Rust server implementation
-- **Function Calling Migration**: Moves from Rust-based OpenAI function calling to MCP-standardized interfaces
-- **Internal Storage**: Mastra handles all database operations internally
-- **API Compatibility**: Maintains similar message formats and thread management
-- **MCP-first Architecture**: Leverages MCP ecosystem instead of custom Rust tool implementations
+- **Complete Migration**: Core system fully migrated from Rust to TypeScript/Mastra
+- **Tool Integration**: Uses MCP (Model Context Protocol) for extensible tool ecosystem
+- **Internal Storage**: Mastra handles all database operations internally with built-in memory
+- **Simplified Architecture**: Eliminates external vector database dependencies
+- **Cross-platform GUI**: Maintained Tauri + Svelte GUI client for desktop and mobile
 
 ## Performance Considerations
 
-- **Memory Management**: Uses lazy loading for message history
+- **Memory Management**: Uses lazy loading for message history with Mastra's built-in optimization
 - **Connection Pooling**: Efficient WebSocket connection management
 - **Thread Optimization**: Smart thread continuation reduces memory overhead
 - **Message Batching**: Optimized message processing pipeline
+- **Simplified Stack**: Eliminates external vector database overhead
 
 ## Security
 

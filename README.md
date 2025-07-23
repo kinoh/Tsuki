@@ -2,14 +2,38 @@
 
 ### Features
 
-- Event-driven architecture
-  - See src/common/events.rs
-- Layered architecture
-  - components -> adapter -> common
-- GUI client for PC and Android
-  - Built with [tauri](https://tauri.app/)
-  - See gui/
-- Code execution in [dify-sandbox](https://github.com/langgenius/dify-sandbox)
+- **TypeScript/Mastra Backend**: Modern AI agent framework with built-in memory
+- **WebSocket & HTTP APIs**: Real-time communication and RESTful endpoints
+- **Smart Thread Management**: Automatic conversation continuation with daily thread IDs
+- **Cross-thread Semantic Recall**: Persistent memory across conversation sessions
+- **Encrypted Prompts**: Secure agent instruction storage using Age encryption
+- **MCP Tool Integration**: Extensible tool system via Model Context Protocol
+- **GUI Client**: Cross-platform desktop and Android app built with [Tauri](https://tauri.app/) + Svelte
+- **Code Execution**: Sandboxed code execution via [dify-sandbox](https://github.com/langgenius/dify-sandbox)
+
+### Quick Start
+
+```bash
+# Start the backend
+cd core/
+npm install
+npm start
+
+# Start the GUI client (separate terminal)
+cd gui/
+npm run tauri dev
+
+# Or deploy with Docker
+task deploy  # or docker compose up --build --detach
+```
+
+### Architecture
+
+- **Core Backend** (`core/`): TypeScript/Node.js server with Mastra agents
+- **GUI Client** (`gui/`): Tauri + Svelte cross-platform application
+- **Docker Services**: Microservices for sandboxing, voice, and other integrations
+
+See [CLAUDE.md](CLAUDE.md) for detailed development documentation.
 
 ### License
 

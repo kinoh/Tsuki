@@ -11,10 +11,10 @@ tasks:
     desc: Deploy to production
     cmds:
       - docker compose up --build --detach
-  deploy-app:
-    desc: Deploy to production
+  deploy-core:
+    desc: Deploy core service
     cmds:
-      - docker compose up app --build --detach
+      - docker compose up core --build --detach
   up:
     desc: Start production
     cmds:
@@ -56,14 +56,12 @@ tasks:
   decrypt_prompt:
     desc: Decrypt prompt file
     cmds:
-      - age -d -i $PROMPT_PRIVATE_KEY_PATH src/prompt/initial.txt.age > src/prompt/initial.txt
+      - cd core && node --env-file .env scripts/decrypt_prompt.js
   encrypt_prompt:
     desc: Encrypt prompt file
     cmds:
-      - age -R $PROMPT_PUBLIC_KEY_PATH src/prompt/initial.txt > src/prompt/initial.txt.age
+      - cd core && node --env-file .env scripts/encrypt_prompt.js
   diff_prompt:
-    desc: Decrypt prompt file
+    desc: Compare encrypted vs current prompt
     cmds:
-      - age -d -i $PROMPT_PRIVATE_KEY_PATH src/prompt/initial.txt.age > src/prompt/initial.tmp.txt
-      - diff src/prompt/initial.tmp.txt src/prompt/initial.txt
-      - rm src/prompt/initial.tmp.txt
+      - cd core && node --env-file .env scripts/diff_prompt.js

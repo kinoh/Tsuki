@@ -132,7 +132,6 @@ interface GetMessagesRequestBody {
   message: string
 }
 
-
 // Main function to start server with runtime context
 async function startServer(): Promise<void> {
   // Create runtime context with encrypted prompt
@@ -181,9 +180,9 @@ async function startServer(): Promise<void> {
     }))
   })
 
-  server.listen(3000, () =>
+  server.listen(2953, () =>
     console.log(`
-🚀 Server ready at: http://localhost:3000
+🚀 Server ready at: http://localhost:2953
 `),
   )
 }

@@ -16,41 +16,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       AGENT_NAME: tsuki
     ports:
-      - "3000:3000"
+      - "2953:2953"
     restart: always
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').request({port: 3000, path: '/'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1)).end()"]
+      test: ["CMD", "node", "-e", "require('http').request({port: 2953, path: '/'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1)).end()"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  # Legacy Rust implementation (will be phased out)
-  app:
-    image: tsuki:${GIT_HASH}
-    build:
-      context: .
-      dockerfile: docker/app/Dockerfile
-      target: final
-      args:
-        GIT_HASH: ${GIT_HASH}
-    command: --audio --notifier
-    environment:
-      PROMPT_PRIVATE_KEY: ${PROMPT_PRIVATE_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN}
-      DIFY_SANDBOX_API_KEY: ${DIFY_SANDBOX_API_KEY}
-    ports:
-      - "2953:2953"
-    volumes:
-      - memory-data:/var/memory
-      - model-data:/var/model
-    restart: always
-    depends_on:
-      - sandbox
-      - qdrant
-    profiles:
-      - legacy  # Enable with --profile legacy
   sandbox:
     image: tsuki-sandbox:0.2.10
     build: docker/dify-sandbox
@@ -96,22 +70,9 @@ services:
     ports:
       - "50021:50021"
     restart: always
-  qdrant:
-    image: qdrant/qdrant:v1.14.1
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: 6334
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant-data:/qdrant/storage
-    restart: always
 
 volumes:
-  memory-data:
-  model-data:
   mumble-data:
-  qdrant-data:
 
 networks:
   ssrf_proxy_network:
