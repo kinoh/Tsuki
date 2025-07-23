@@ -19,9 +19,9 @@ Tsuki is a kawaii chat agent built with TypeScript/Mastra that provides:
 ```bash
 cd core/
 npm install              # Install dependencies
-npm start                # Start development server
-npm run build            # Build for production
-npm run dev              # Development with auto-reload
+npm start                # Start development server with tsx
+npm run start:prod       # Start production server with tsx
+npm run build            # No build needed - using tsx in production
 
 # Test WebSocket connection
 node scripts/ws_client.js
@@ -105,7 +105,7 @@ node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
 
 ### Docker Services
 The application runs with multiple services via Docker Compose:
-- **core**: TypeScript/Mastra backend (port 2953)
+- **core**: TypeScript/Mastra backend with tsx runtime (port 2953)
 - **ssrf-proxy**: Secure proxy for dify-sandbox (port 3128, 8194)
 - **sandbox**: Code execution environment (dify-sandbox)
 - **mumble-server**: Voice chat server (port 64738)
@@ -114,8 +114,14 @@ The application runs with multiple services via Docker Compose:
 ### Tool Integration
 The AI agent uses MCP (Model Context Protocol) for tool integration:
 - **Minimal Built-in Tools**: Core implements only essential functionality
-- **MCP-first Strategy**: External tools provided via MCP plugins
+- **MCP-first Strategy**: External tools provided via MCP plugins (e.g., rss-mcp-lite)
 - **Extensible Architecture**: New capabilities added through MCP rather than core modifications
+
+### Runtime Environment
+- **Development**: tsx with watch mode for hot reload
+- **Production**: tsx direct TypeScript execution (no transpilation required)
+- **Docker**: Alpine Linux with native build tools for MCP dependencies
+- **Unified Runtime**: Consistent tsx-based execution across all environments
 
 ### Data Persistence
 - **Mastra Memory**: Built-in conversation history and semantic recall

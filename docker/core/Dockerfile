@@ -1,36 +1,26 @@
-# Build stage
-FROM node:22-alpine AS build
-
-WORKDIR /app
-
-# Copy package files first for better caching
-COPY core/package*.json ./
-
-# Install all dependencies (including devDependencies for build)
-RUN npm ci
-
-# Copy source code
-COPY core/ ./
-
-# Build TypeScript to JavaScript
-RUN npm run build
-
 # Production stage
 FROM node:22-alpine AS runtime
 
 WORKDIR /app
+
+# Install build dependencies for native modules
+RUN apk add --no-cache python3 make g++ sqlite
 
 # Create non-root user for security first
 ARG UID=10001
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S tsuki -u "${UID}" -G nodejs
 
-# Install only production dependencies with correct ownership
+# Install production dependencies with correct ownership
 COPY --chown=tsuki:nodejs core/package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
-# Copy built application from build stage with correct ownership
-COPY --chown=tsuki:nodejs --from=build /app/dist ./dist
+# Copy source code with correct ownership
+COPY --chown=tsuki:nodejs core/src ./src
+COPY --chown=tsuki:nodejs core/tsconfig.json ./
+
+# Create data directory with correct ownership
+RUN mkdir -p /data && chown -R tsuki:nodejs /data
 
 # Switch to non-root user
 USER tsuki
@@ -50,5 +40,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE 2953
 
-# Start the application
-CMD ["node", "dist/index.js"]
+# Start the application with tsx
+CMD ["npm", "run", "start:prod"]

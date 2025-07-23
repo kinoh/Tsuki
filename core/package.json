@@ -7,7 +7,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "tsx watch --env-file .env ./src/index.ts",
-    "build": "tsc",
+    "start:prod": "tsx ./src/index.ts",
+    "build": "echo 'No build needed - using tsx in production'",
     "mastra-dev": "mastra dev",
     "mastra-build": "mastra build",
     "mastra-start": "mastra start"
@@ -23,10 +24,14 @@
     "@mastra/core": "^0.10.15",
     "@mastra/libsql": "^0.11.0",
     "@mastra/loggers": "^0.10.3",
+    "@mastra/mcp": "^0.10.7",
     "@mastra/memory": "^0.11.3",
     "age-encryption": "^0.2.4",
     "express": "^5.1.0",
     "morgan": "^1.10.1",
+    "rss-mcp-lite": "^1.0.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -36,8 +41,7 @@
     "@types/node": "^24.0.15",
     "eslint": "^9.31.0",
     "mastra": "^0.10.13",
-    "tsx": "^4.20.3",
-    "typescript": "^5.8.3",
+    "tsup": "^8.5.0",
     "typescript-eslint": "^8.37.0"
   }
 }
