@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-const WebSocket = require('ws');
-const readline = require('readline');
+import { WebSocket } from 'ws';
+import * as readline from 'readline';
 
 const WS_URL = process.env.WS_URL || 'ws://localhost:2953/';
 const AUTH_TOKEN = process.env.WEB_AUTH_TOKEN || 'test-token';

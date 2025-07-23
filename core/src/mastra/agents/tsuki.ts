@@ -2,6 +2,7 @@ import { openai } from '@ai-sdk/openai'
 import { Agent } from '@mastra/core/agent'
 import { Memory } from '@mastra/memory'
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql'
+import { mcp } from '../mcp'
 
 export const tsuki = new Agent({
   name: 'Tsuki',
@@ -31,4 +32,5 @@ export const tsuki = new Agent({
       },
     },
   }),
+  tools: await mcp.getTools(),
 })

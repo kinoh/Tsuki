@@ -1,7 +1,7 @@
 import express from 'express'
 import morgan from 'morgan'
 import http from 'http'
-import WebSocket from 'ws'
+import { WebSocketServer } from 'ws'
 import { RuntimeContext } from '@mastra/core/di'
 import { mastra } from './mastra/index'
 import { WebSocketManager } from './websocket'
@@ -252,7 +252,7 @@ async function startServer(): Promise<void> {
   const runtimeContext = await createRuntimeContext()
 
   const server = http.createServer(app)
-  const wss = new WebSocket.Server({ server })
+  const wss = new WebSocketServer({ server })
   const wsmanager = new WebSocketManager(agent, runtimeContext)
 
   wss.on('connection', (ws, req) => {
