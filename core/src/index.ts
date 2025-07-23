@@ -237,6 +237,8 @@ app.get('/messages', authMiddleware, async (req, res) => {
     // Return first n messages
     const responseMessages = messages.slice(0, n)
 
+    responseMessages.reverse()
+
     res.json({ messages: responseMessages })
   } catch (error) {
     console.error('Error fetching messages:', error)
