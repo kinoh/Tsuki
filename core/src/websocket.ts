@@ -86,8 +86,14 @@ export class WebSocketManager {
 
   private async processMessage(ws: WebSocket, client: WebSocketClient, message: string): Promise<void> {
     try {
+      const formattedMessage = JSON.stringify({
+        modality: 'Text',
+        user: client.user,
+        content: message,
+      })
+      
       const response = await this.agent.generate([
-        { role: 'user', content: message },
+        { role: 'user', content: formattedMessage },
       ], {
         memory: {
           resource: client.user,
