@@ -246,12 +246,6 @@ app.get('/messages', authMiddleware, async (req, res) => {
   }
 })
 
-interface GetMessagesRequestBody {
-  user: string
-  thread: string
-  message: string
-}
-
 // Main function to start server with runtime context
 async function startServer(): Promise<void> {
   // Create runtime context with encrypted prompt
@@ -263,37 +257,6 @@ async function startServer(): Promise<void> {
 
   wss.on('connection', (ws, req) => {
     wsmanager.handleConnection(ws, req)
-  })
-
-  app.post('/messages', (req, res) => {
-    const body = req.body as GetMessagesRequestBody
-
-    if (body === null) {
-      return res.status(400).json({})
-    }
-
-    const userId = body.user
-    const threadId = body.thread
-    const message = body.message
-
-    if (!userId || !threadId || !message) {
-      return res.status(400).json({})
-    }
-
-    res.json(agent.generate([
-      { role: 'user', content: message },
-    ], {
-      memory: {
-        resource: userId,
-        thread: {
-          id: threadId,
-        },
-        options: {
-          lastMessages: 20,
-        },
-      },
-      runtimeContext,
-    }))
   })
 
   server.listen(2953, () =>
