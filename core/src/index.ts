@@ -53,6 +53,42 @@ app.use(morgan((tokens, req, res) => {
 
 app.use(express.json())
 
+// Authentication middleware
+function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void | express.Response {
+  const authHeader = req.headers.authorization
+
+  if (typeof authHeader !== 'string' || authHeader.trim() === '') {
+    return res.status(401).json({ error: 'Authorization header required' })
+  }
+
+  // Parse "username:token" format from Authorization header
+  // Expected format: "username:token" (not "Bearer token")
+  const credentials = authHeader
+  const colonIndex = credentials.indexOf(':')
+  
+  if (colonIndex === -1) {
+    return res.status(401).json({ error: 'Invalid authorization format. Expected "username:token"' })
+  }
+
+  const username = credentials.substring(0, colonIndex)
+  const token = credentials.substring(colonIndex + 1)
+  
+  // Get expected token from environment
+  const expectedToken = process.env.WEB_AUTH_TOKEN
+  if (typeof expectedToken !== 'string' || expectedToken.trim() === '') {
+    return res.status(500).json({ error: 'Server authentication not configured' })
+  }
+
+  // Verify token
+  if (token !== expectedToken) {
+    return res.status(401).json({ error: 'Invalid token' })
+  }
+
+  // Inject user into res.locals
+  res.locals.user = username
+  next()
+}
+
 // Routes
 
 app.get('/', (req, res) => {
@@ -61,24 +97,14 @@ app.get('/', (req, res) => {
   })
 })
 
-interface GetThreadsRequestBody {
-  user: string
-}
+app.get('/threads', authMiddleware, async (req, res) => {
+  const userId = res.locals.user as string
 
-app.get('/threads', async (req, res) => {
-  const body = req.body as GetThreadsRequestBody
-
-  if (body === null) {
-    return res.status(400).json({})
-  }
-
-  const userId = body.user
-
-  if (!userId) {
-    return res.status(400).json({})
+  if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+    return res.status(400).json({ error: 'User not authenticated' })
   }
   if (agentMemory === undefined) {
-    return res.status(404).json({})
+    return res.status(500).json({ error: 'Agent memory not available' })
   }
 
   res.json({
@@ -86,17 +112,13 @@ app.get('/threads', async (req, res) => {
   })
 })
 
-interface GetThreadMessagesQuery {
-  user?: string
-}
-
-app.get('/threads/:id', async (req, res) => {
+app.get('/threads/:id', authMiddleware, async (req, res) => {
   try {
-    const userId = (req.body as GetThreadMessagesQuery).user
+    const userId = res.locals.user as string
     const threadId = req.params.id
 
-    if (userId === undefined) {
-      return res.status(400).json({ error: 'Missing user parameter' })
+    if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+      return res.status(400).json({ error: 'User not authenticated' })
     }
 
     // Check if thread exists
@@ -116,12 +138,108 @@ app.get('/threads/:id', async (req, res) => {
     // Convert to ResponseMessage format
     const messages: ResponseMessage[] = result.messages.map(message => {
       const mastraMessage = message as MastraMessageV1
-      return createResponseMessage(mastraMessage, agent.name, userId)
+      return createResponseMessage(mastraMessage, agent.name as string, userId)
     })
 
     res.json({ messages })
   } catch (error) {
     console.error('Error fetching thread messages:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+interface GetMessagesQuery {
+  n?: string
+  before?: string
+}
+
+app.get('/messages', authMiddleware, async (req, res) => {
+  try {
+    const userId = res.locals.user as string
+    const query = req.query as GetMessagesQuery
+    
+    if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+      return res.status(400).json({ error: 'User not authenticated' })
+    }
+    
+    if (agentMemory === undefined) {
+      return res.status(500).json({ error: 'Agent memory not available' })
+    }
+
+    // Parse parameters
+    const n = (typeof query.n === 'string' && query.n.trim() !== '') ? parseInt(query.n, 10) : 20
+    const before = (typeof query.before === 'string' && query.before.trim() !== '') ? parseInt(query.before, 10) : undefined
+
+    if (isNaN(n) || n <= 0) {
+      return res.status(400).json({ error: 'Invalid n parameter' })
+    }
+
+    if (before !== undefined && (isNaN(before) || before <= 0)) {
+      return res.status(400).json({ error: 'Invalid before parameter' })
+    }
+
+    // Get all threads for user
+    const threads = await agentMemory.getThreadsByResourceId({ resourceId: userId })
+    
+    // Filter threads by userId prefix and sort by date part (descending)
+    const userThreads = threads
+      .filter(thread => thread.id.startsWith(`${userId}-`))
+      .sort((a, b) => {
+        // Extract YYYYMMDD part and compare (descending)
+        const dateA = a.id.substring(userId.length + 1)
+        const dateB = b.id.substring(userId.length + 1)
+        return dateB.localeCompare(dateA)
+      })
+
+    // Filter threads by before parameter if specified
+    let filteredThreads = userThreads
+    if (before !== undefined) {
+      const beforeDate = new Date(before * 1000).toISOString().split('T')[0].replace(/-/g, '')
+      
+      filteredThreads = userThreads.filter(thread => {
+        const threadDate = thread.id.substring(userId.length + 1)
+        return threadDate <= beforeDate
+      })
+    }
+
+    // Collect messages from threads until we have enough
+    const messages: ResponseMessage[] = []
+    let remainingCount = n
+
+    for (const thread of filteredThreads) {
+      if (messages.length >= n) {
+        break
+      }
+
+      const result = await agentMemory.query({
+        threadId: thread.id,
+        selectBy: {
+          last: before === undefined ? remainingCount : 1000, // TODO: Fix "before" handling
+        },
+      })
+
+      // Convert to ResponseMessage format and add to collection
+      let threadMessages: ResponseMessage[] = result.messages.map(message => {
+        const mastraMessage = message as MastraMessageV1
+        return createResponseMessage(mastraMessage, agent.name as string, userId)
+      })
+
+      if (before !== undefined) {
+        threadMessages = threadMessages.filter(message => message.timestamp < before)
+      }
+
+      threadMessages.reverse()
+
+      messages.push(...threadMessages)
+      remainingCount = n - messages.length
+    }
+
+    // Return first n messages
+    const responseMessages = messages.slice(0, n)
+
+    res.json({ messages: responseMessages })
+  } catch (error) {
+    console.error('Error fetching messages:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -167,10 +285,6 @@ async function startServer(): Promise<void> {
         resource: userId,
         thread: {
           id: threadId,
-          metadata: {
-            'date': new Date().toISOString().slice(0, 10),
-            'foo': 'bar',
-          },
         },
         options: {
           lastMessages: 20,
