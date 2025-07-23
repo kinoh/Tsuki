@@ -105,7 +105,7 @@ node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
 
 ### Docker Services
 The application runs with multiple services via Docker Compose:
-- **core**: TypeScript/Mastra backend (port 3000)
+- **core**: TypeScript/Mastra backend (port 2953)
 - **ssrf-proxy**: Secure proxy for dify-sandbox (port 3128, 8194)
 - **sandbox**: Code execution environment (dify-sandbox)
 - **mumble-server**: Voice chat server (port 64738)

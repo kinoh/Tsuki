@@ -239,7 +239,7 @@ This configuration allows the agent to:
 
 ### WebSocket Client
 ```javascript
-const ws = new WebSocket('ws://localhost:3000')
+const ws = new WebSocket('ws://localhost:2953')
 
 // Authenticate
 ws.send('user123:your-secret-token')
