@@ -423,6 +423,8 @@
   display: flex;
   flex-direction: column;
   row-gap: 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .assistant-message {
