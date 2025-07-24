@@ -3,18 +3,18 @@ name: tsuki
 services:
   # TypeScript/Mastra-based backend (replacing Rust app)
   core:
-    image: tsuki-core:${GIT_HASH}
+    image: tsuki-core:${GIT_HASH:?}
     build:
       context: .
       dockerfile: docker/core/Dockerfile
       target: runtime
       args:
-        GIT_HASH: ${GIT_HASH}
+        GIT_HASH: ${GIT_HASH:?}
     environment:
       NODE_ENV: production
-      WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      PROMPT_PRIVATE_KEY: ${PROMPT_PRIVATE_KEY}
+      WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN:?}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?}
+      PROMPT_PRIVATE_KEY: ${PROMPT_PRIVATE_KEY:?}
       DATA_DIR: /data
       AGENT_NAME: tsuki
     volumes:
@@ -29,57 +29,5 @@ services:
       retries: 3
       start_period: 40s
 
-  sandbox:
-    image: tsuki-sandbox:0.2.10
-    build: docker/dify-sandbox
-    environment:
-      API_KEY: ${DIFY_SANDBOX_API_KEY}
-      GIN_MODE: release
-      WORKER_TIMEOUT: 10
-      ENABLE_NETWORK: true
-      HTTP_PROXY: http://ssrf-proxy:3128
-      HTTPS_PROXY: http://ssrf-proxy:3128
-      SANDBOX_PORT: 8194
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8194/health" ]
-    networks:
-      - ssrf_proxy_network
-    restart: always
-  ssrf-proxy:
-    image: ssrf-proxy:6.6-24.04_beta
-    build: docker/ssrf-proxy
-    environment:
-      HTTP_PORT: 3128
-      COREDUMP_DIR: /var/spool/squid
-      REVERSE_PROXY_PORT: 8194
-      SANDBOX_HOST: sandbox
-      SANDBOX_PORT: 8194
-    ports:
-      - "3128:3128"
-      - "8194:8194"
-    networks:
-      - ssrf_proxy_network
-      - default
-    restart: always
-  mumble-server:
-    image: mumblevoip/mumble-server:v1.5.735-2
-    ports:
-      - "64738:64738"
-      - "64738:64738/udp"
-    volumes:
-      - mumble-data:/data
-    restart: always
-  voicevox-engine:
-    image: voicevox/voicevox_engine:cpu-0.24.0-dev
-    ports:
-      - "50021:50021"
-    restart: always
-
 volumes:
   core-data:
-  mumble-data:
-
-networks:
-  ssrf_proxy_network:
-    driver: bridge
-    internal: true
