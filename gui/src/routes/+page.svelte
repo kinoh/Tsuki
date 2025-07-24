@@ -13,9 +13,9 @@
   import Note from './Note.svelte';
   import Status from './Status.svelte';
 
-  type ChatMessage = { modality: string, user: string, content: string };
-  type ChatFunctionCall = { name: string, args: string } | { output: string };
-  type ChatItem = { Message: ChatMessage } | { FunctionCall: ChatFunctionCall };
+  type UserChat = { modality: string, user: string, content: string };
+  type AssistantChat = { modality: string, content: string, feeling: number, activity: number };
+  type ChatItem = string | UserChat | AssistantChat;
   type Message = { role: string; user: string; chat: ChatItem[]; timestamp: number };
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
@@ -34,20 +34,25 @@
     return ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
   }
 
+  function convertMessage(m: Message): Message {
+    m.chat = m.chat.map(c => {
+      if (typeof c === "string" && c.startsWith("{")) {
+        return JSON.parse(c);
+      }
+      return c;
+    });
+    return m;
+  }
+
   function connect() {
     fetch(`http${secure()}://${config.endpoint}/messages?n=20`, {
       headers: {
-        "Authorization": `Bearer ${config.token}`,
+        "Authorization": `${config.user}:${config.token}`,
       }
     })
       .then(response => response.json())
       .then(data => {
-        messages = data.toReversed().map((m: Message) => {
-          if (m.role === "User" && m.user !== config.user) {
-            return { role: "assistant", user: m.user, chat: m.chat };
-          }
-          return m;
-        });
+        messages = data.messages.toReversed().map(convertMessage);
       })
       .catch(error => {
         errorToast = error.toString();
@@ -73,7 +78,7 @@
       let message = JSON.parse(event.data) as Message;
       console.log(message);
       if (message.user !== config.user) {
-        messages.unshift(message);
+        messages.unshift(convertMessage(message));
       }
     };
   }
@@ -86,17 +91,12 @@
     let lastMessage = messages[messages.length - 1];
     fetch(`http${secure()}://${config.endpoint}/messages?n=20&before=${lastMessage.timestamp}`, {
       headers: {
-        "Authorization": `Bearer ${config.token}`,
+        "Authorization": `${config.user}:${config.token}`,
       }
     })
       .then(response => response.json())
       .then(data => {
-        let more = data.toReversed().map((m: { role: string; user: string; chat: any }) => {
-          if (m.role === "User" && m.user !== config.user) {
-            return { role: "assistant", chat: { content: `[${m.user}] ${m.chat.content}` } };
-          }
-          return m;
-        });
+        let more = data.messages.toReversed().map(convertMessage);
         messages.push(...more);
       })
       .catch(error => {
@@ -116,11 +116,7 @@
       messages.unshift({
         role: "user",
         user: config.user,
-        chat: [{Message: {
-          modality: "Text",
-          user: config.user,
-          content: inputText,
-        }}],
+        chat: [inputText],
         timestamp: Date.now() / 1000,
       });
       connection.send(inputText);
@@ -279,16 +275,10 @@
     	{#each messages as item}
         <div class="message {item.role.toLowerCase()}-message">
           {#each item.chat as chat}
-            {#if "Message" in chat}
-              <div>{chat.Message.content}</div>
-            {:else if "FunctionCall" in chat}
-              {#if "name" in chat.FunctionCall}
-                <div class="internal-message-content">[call] {chat.FunctionCall.name} {chat.FunctionCall.args}</div>
-              {:else if "output" in chat.FunctionCall}
-                <div class="internal-message-content">[system] {chat.FunctionCall.output}</div>
-              {/if}
+            {#if typeof chat === "string"}
+              <div>{chat}</div>
             {:else}
-              ?
+              <div>{chat.content}</div>
             {/if}
           {/each}
         </div>
