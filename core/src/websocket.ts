@@ -11,10 +11,13 @@ interface WebSocketClient {
 
 export class WebSocketManager {
   private clients = new Map<WebSocket, WebSocketClient>()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private agent: Agent<string, any, any>
   private conversation: ConversationManager
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private runtimeContext: RuntimeContext<any>
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(agent: Agent<string, any, any>, runtimeContext: RuntimeContext<any>) {
     this.agent = agent
     this.runtimeContext = runtimeContext
