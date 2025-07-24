@@ -1,4 +1,6 @@
-import { MastraMessageV1 } from '@mastra/core'
+import { MastraMessageV2 } from '@mastra/core'
+import { MastraMessageContentV2 } from '@mastra/core/agent'
+import type { TextUIPart, ReasoningUIPart, ToolInvocationUIPart, SourceUIPart, FileUIPart, StepStartUIPart } from '@ai-sdk/ui-utils'
 
 export interface ResponseMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -7,69 +9,53 @@ export interface ResponseMessage {
   timestamp: number
 }
 
-type MessageContentPart =
-  { type: 'text', text: string } |
-  { type: 'image' } |
-  { type: 'file', filename?: string } |
-  { type: 'reasoning', text: string } |
-  { type: 'redacted-reasoning', data: string } |
-  { type: 'tool-call', toolName: string } |
-  { type: 'tool-result', toolName: string }
+type MessageContentPart = TextUIPart | ReasoningUIPart | ToolInvocationUIPart | SourceUIPart | FileUIPart | StepStartUIPart
 
-function extractTextPart(part: MessageContentPart): string {
-  if (part.type === 'text') {
-    return part.text
-  }
-
-  // For non-text types, use [type] text format
-  const typeLabel = `[${part.type}]`
-
-  if ('text' in part) {
-    return `${typeLabel} ${part.text}`
-  }
-
-  // Special handling for parts without text property
+function extractTextPart(part: MessageContentPart): string | null {
   switch (part.type) {
-    case 'redacted-reasoning':
-      return `${typeLabel} ${part.data}`
+    case 'text':
+      return part.text
 
-    case 'tool-call':
-    case 'tool-result':
-      return `${typeLabel} ${part.toolName}`
+    case 'reasoning': {
+      // Extract main reasoning text and any text details
+      const reasoningTexts = [part.reasoning]
+      const detailTexts = part.details
+        .filter(detail => detail.type === 'text')
+        .map(detail => detail.text)
+      return [...reasoningTexts, ...detailTexts].join('\n')
+    }
+
+    case 'tool-invocation':
+      return `[tool-invocation] ${part.toolInvocation.toolName}`
 
     case 'file':
-      return part.filename !== undefined ? `${typeLabel} ${part.filename}` : typeLabel
+      return `[file] ${part.mimeType}`
 
-    default:
-      return typeLabel
+    case 'source':
+      return `[source] ${part.source.sourceType}`
+
+    case 'step-start':
+      return null
+
+    default: {
+      return '[unknown]'
+    }
   }
 }
 
-function extractTextContent(content: string | MessageContentPart[]): string {
-  if (typeof content === 'string') {
-    return content
-  }
-
-  // Extract text parts from array
-  if (Array.isArray(content)) {
-    return content
-      .map(extractTextPart)
-      .join('\n\n')
-  }
-
-  // Fallback: JSON stringify
-  return JSON.stringify(content)
+function extractTextContent(content: MastraMessageContentV2): string[] {
+  return content.parts.map(extractTextPart).filter(part => part !== null)
 }
 
 export function createResponseMessage(
-  message: MastraMessageV1,
+  message: MastraMessageV2,
   agentName: string,
   userIdentifier: string,
 ): ResponseMessage {
   return {
     role: message.role,
     user: message.role === 'user' ? userIdentifier : agentName,
-    chat: [extractTextContent(message.content)],
+    chat: extractTextContent(message.content),
     timestamp: Math.floor(message.createdAt.getTime() / 1000),
   }
 }
