@@ -11,7 +11,7 @@
 
   fetch(`http${secure()}://${config.endpoint}/metadata`, {
       headers: {
-        "Authorization": `Bearer ${config.token}`,
+        "Authorization": `${config.user}:${config.token}`,
       }
     })
     .then(response => response.json())
