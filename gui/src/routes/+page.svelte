@@ -276,7 +276,11 @@
         <div class="message {item.role.toLowerCase()}-message">
           {#each item.chat as chat}
             {#if typeof chat === "string"}
-              <div>{chat}</div>
+              {#if chat[0] === "["}
+                <div class="internal-message-content">{chat}</div>
+              {:else}
+                <div>{chat}</div>
+              {/if}
             {:else}
               <div>{chat.content}</div>
             {/if}
