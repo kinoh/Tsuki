@@ -1,9 +1,9 @@
 import { IncomingMessage } from 'http'
-import { Agent, MastraMessageV1 } from '@mastra/core'
+import { Agent } from '@mastra/core'
 import { RuntimeContext } from '@mastra/core/di'
 import { WebSocket } from 'ws'
 import { ConversationManager } from './conversation'
-import { createResponseMessage } from './message'
+import { ResponseMessage } from './message'
 
 interface WebSocketClient {
   user: string
@@ -68,18 +68,14 @@ export class WebSocketManager {
       return
     }
 
-    const timestamp = new Date()
-    const userMessage: MastraMessageV1 = {
-      id: `dummy-${timestamp.getTime()}`,
-      content: message,
+    const userResponse: ResponseMessage = {
       role: 'user',
-      createdAt: timestamp,
-      threadId: await this.conversation.currentThread(client.user),
-      resourceId: client.user,
-      type: 'text',
+      user: client.user,
+      chat: [message],
+      timestamp: Math.floor(Date.now() / 1000),
     }
 
-    this.sendToClient(ws, client, userMessage)
+    this.sendToClient(ws, userResponse)
 
     await this.processMessage(ws, client, message)
   }
@@ -108,40 +104,30 @@ export class WebSocketManager {
       console.log(`response id: ${response.response.id}`)
       console.log(`usage: ${JSON.stringify(response.usage)}`)
 
-      const timestamp = new Date()
-      const assistantMessage: MastraMessageV1 = {
-        id: `dummy-${timestamp.getTime()}`,
-        content: response.text,
+      const assistantResponse: ResponseMessage = {
         role: 'assistant',
-        createdAt: timestamp,
-        threadId: await this.conversation.currentThread(client.user),
-        resourceId: client.user,
-        type: 'text',
+        user: this.agent.name,
+        chat: [response.text],
+        timestamp: Math.floor(Date.now() / 1000),
       }
 
-      this.sendToClient(ws, client, assistantMessage)
+      this.sendToClient(ws, assistantResponse)
 
     } catch (error) {
       console.error('Message processing error:', error)
 
-      const timestamp = new Date()
-      const errorMessage: MastraMessageV1 = {
-        id: `dummy-${timestamp.getTime()}`,
-        content: 'Internal error!',
+      const errorResponse: ResponseMessage = {
         role: 'assistant',
-        createdAt: timestamp,
-        threadId: await this.conversation.currentThread(client.user),
-        resourceId: client.user,
-        type: 'text',
+        user: this.agent.name,
+        chat: ['Internal error!'],
+        timestamp: Math.floor(Date.now() / 1000),
       }
 
-      this.sendToClient(ws, client, errorMessage)
+      this.sendToClient(ws, errorResponse)
     }
   }
 
-  private sendToClient(ws: WebSocket, client: WebSocketClient, message: MastraMessageV1): void {
-    const response = createResponseMessage(message, this.agent.name, client.user)
-
+  private sendToClient(ws: WebSocket, response: ResponseMessage): void {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(response))
     }
