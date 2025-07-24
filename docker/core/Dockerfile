@@ -18,12 +18,16 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
 COPY --chown=tsuki:nodejs core/tsconfig.json ./
+COPY --chown=tsuki:nodejs core/scripts/generate_opml.js ./scripts/
 
 # Create data directory with correct ownership
 RUN mkdir -p /data && chown -R tsuki:nodejs /data
 
 # Switch to non-root user
 USER tsuki
+
+# Generate OPML file during build
+RUN node scripts/generate_opml.js /data/rss_feeds.opml
 
 # Set environment variables
 ENV NODE_ENV=production
