@@ -12,8 +12,9 @@ This document describes the Mastra-based backend implementation (`core/` directo
 core/
 ├── src/
 │   ├── conversation.ts    # Thread management with smart continuation logic
-│   ├── index.ts          # Express server with REST API endpoints
-│   ├── message.ts        # Message formatting utilities
+│   ├── index.ts          # Application entry point and runtime context creation
+│   ├── server.ts         # Express server with REST API endpoints and WebSocket server
+│   ├── message.ts        # Message formatting utilities (MastraMessageV2 support)
 │   ├── prompt.ts         # Age encryption for secure prompt loading
 │   ├── websocket.ts      # WebSocket server for real-time communication
 │   ├── mastra/
@@ -69,7 +70,7 @@ class ConversationManager {
 
 ### 2. Message Utilities (`src/message.ts`)
 
-Provides unified message formatting across WebSocket and HTTP interfaces.
+Provides unified message formatting across WebSocket and HTTP interfaces with modernized MastraMessageV2 support.
 
 **Types:**
 ```typescript
@@ -80,31 +81,31 @@ interface ResponseMessage {
   timestamp: number
 }
 
-type MessageContentPart = 
-  | { type: 'text', text: string }
-  | { type: 'reasoning', text: string }
-  | { type: 'tool-call', toolName: string }
-  // ... other content types
+type MessageContentPart = TextUIPart | ReasoningUIPart | ToolInvocationUIPart | 
+                         SourceUIPart | FileUIPart | StepStartUIPart
 ```
 
 **Functions:**
 ```typescript
-// Convert multi-modal content to plain text
-extractTextContent(content: string | MessageContentPart[]): string
+// Extract text content from MastraMessageV2 content parts
+extractTextContent(content: MastraMessageContentV2): string[]
 
 // Create unified response message format
 createResponseMessage(
-  message: MastraMessageV1,
+  message: MastraMessageV2,
   agentName: string,
   userIdentifier: string
 ): ResponseMessage
 ```
 
-**Content Processing:**
-- **Text content**: Returned as-is
-- **Other types**: Formatted as `[type] content` (e.g., `[tool-call] weatherTool`)
-- **Arrays**: Joined with double newlines
-- **Multi-modal Content**: Handles text, reasoning, tool calls, files, and images uniformly
+**Content Processing (MastraMessageV2):**
+- **Text parts**: Direct text extraction from `part.text`
+- **Reasoning parts**: Combines reasoning text with detail texts
+- **Tool invocations**: Formatted as `[tool-invocation] toolName`
+- **File parts**: Shows MIME type information
+- **Source parts**: Displays source type metadata
+- **Multi-modal Content**: Enhanced type safety with exhaustive content type checking
+- **UI Parts Integration**: Full compatibility with AI SDK UI utilities
 
 ### 3. WebSocket Server (`src/websocket.ts`)
 
@@ -130,9 +131,28 @@ class WebSocketManager {
 }
 ```
 
-### 4. HTTP API Server (`src/index.ts`)
+### 4. Application Entry Point (`src/index.ts`)
 
-Express-based REST API server with thread and message management.
+Clean application entry point responsible for runtime context creation and server initialization.
+
+**Responsibilities:**
+- **Runtime Context Creation**: Sets up Mastra runtime with encrypted prompt loading
+- **Agent Initialization**: Configures the Tsuki agent with proper context
+- **Server Delegation**: Hands off control to the dedicated server module
+
+**Implementation:**
+```typescript
+async function main(): Promise<void> {
+  const agent = mastra.getAgent('tsuki')
+  const runtimeContext = await createRuntimeContext()
+  
+  serve(agent, runtimeContext)
+}
+```
+
+### 5. HTTP API Server (`src/server.ts`)
+
+Separated Express-based REST API server with dependency injection and improved type safety.
 
 **Endpoints:**
 
@@ -167,30 +187,91 @@ Get messages from a specific thread in unified ResponseMessage format.
 Send message and get agent response (legacy endpoint).
 
 **Features:**
-- **Unified Message Format**: All responses use ResponseMessage format
+- **Dependency Injection**: Uses Express.Application.locals for clean dependency management
+- **Unified Message Format**: All responses use ResponseMessage format with MastraMessageV2 support
+- **Enhanced Type Safety**: Comprehensive TypeScript type definitions and ESLint compliance
 - **Error Handling**: Proper HTTP status codes and error messages
-- **Memory Integration**: Uses ConversationManager for thread management
+- **Memory Integration**: Direct agentMemory integration via app.locals
+- **Authentication Middleware**: Centralized user authentication with proper validation
 
-### 5. Mastra Configuration (`src/mastra/`)
+**Architecture Improvements:**
+- **Separation of Concerns**: Clean separation between application entry point and server logic
+- **Improved Maintainability**: Modular route handlers with proper error handling
+- **Type Safety**: Eliminates unsafe type assertions with proper TypeScript definitions
+- **Express.Locals Extension**: Proper typing for shared dependencies across routes
 
-Centralized Mastra setup with agents, tools, and workflows.
+### 6. Mastra Configuration (`src/mastra/`)
 
-**Structure:**
+Modern Mastra setup with LibSQL storage and MCP integration.
+
+**Main Configuration (`mastra/index.ts`):**
 ```typescript
-// mastra/index.ts
 export const mastra = new Mastra({
-  agents: [tsukiAgent],
-  tools: [weatherTool], // Minimal built-in tools
-  workflows: [weatherWorkflow],
-  // ... configuration
+  storage: new LibSQLStore({ url: `${dataDir}/mastra.db` }),
+  agents: { tsuki },
+  tools: {}, // Zero built-in tools - MCP-first strategy
+  workflows: {}, // Empty - all logic in MCP servers
+  logger: new PinoLogger({ level: 'info' }),
 })
 ```
 
+**Data Management:**
+- **Unified Data Directory**: `DATA_DIR` environment variable (default: `./data`)
+- **LibSQL Database**: Single database file for all Mastra operations
+- **Automatic Directory Creation**: Creates data directory if it doesn't exist
+
+**MCP Integration (`mastra/mcp.ts`):**
+```typescript
+export const mcp = new MCPClient({
+  servers: {
+    rss: {
+      command: './node_modules/.bin/rss-mcp-lite',
+      args: [],
+      env: {
+        DB_PATH: `${dataDir}/rss_feeds.db`,
+        OPML_FILE_PATH: `${dataDir}/rss_feeds.opml`,
+      },
+    },
+  },
+})
+```
+
+**Agent Configuration (`mastra/agents/tsuki.ts`):**
+```typescript
+export const tsuki = new Agent({
+  name: 'Tsuki',
+  model: openai.chat('gpt-4o-mini'),
+  instructions: ({ runtimeContext }) => {
+    const instructions = runtimeContext.get('instructions')
+    return instructions || 'You are a helpful chatting agent.'
+  },
+  memory: new Memory({
+    storage: new LibSQLStore({ url: dbPath }),
+    vector: new LibSQLVector({ connectionUrl: dbPath }),
+    embedder: openai.embedding('text-embedding-3-small'),
+    options: {
+      lastMessages: 20,
+      semanticRecall: {
+        topK: 5,
+        messageRange: 2,
+        scope: 'resource', // Cross-thread semantic recall
+      },
+    },
+  }),
+})
+```
+
+**Advanced Memory Features:**
+- **Cross-thread Semantic Recall**: Resource-scoped memory across different conversation sessions
+- **Vector Embeddings**: text-embedding-3-small for semantic search
+- **Message Retention**: Last 20 messages with top-5 semantic matches
+- **Unified Storage**: Same LibSQL database for memory and vector data
+
 **Tool Strategy:**
-- **Minimal Built-in Tools**: Core implements only essential tools
-- **MCP Integration**: External tools provided via MCP (Model Context Protocol)
-- **Function Calling**: Replaces Rust-based function calling with MCP-standardized interfaces
-- **Extensibility**: New capabilities added through MCP plugins rather than core modifications
+- **Zero Built-in Tools**: Complete MCP delegation for all functionality
+- **RSS MCP Server**: External RSS feed management via MCP
+- **Extensible Architecture**: New capabilities added through MCP servers only
+- **Function Calling**: Rust-based function calling completely replaced with MCP-standardized interfaces
 
 ## Environment Configuration
 
@@ -215,25 +296,23 @@ OPENAI_API_KEY=your-openai-key
 
 **Note:** Mastra handles database storage internally and doesn't require external database configuration.
 
-## Memory Configuration
+## Data Directory Structure
 
-The Tsuki agent uses resource-scoped semantic recall, enabling the agent to remember and retrieve information from previous conversations across different thread sessions:
+The system uses a unified data directory for all persistent storage:
 
-```typescript
-// core/src/mastra/agents/tsuki.ts
-memory: new Memory({
-  options: {
-    semanticRecall: {
-      scope: 'resource', // Enable cross-thread semantic recall
-    },
-  },
-}),
+```
+data/                      # Runtime data directory (DATA_DIR env var)
+├── mastra.db             # LibSQL database for agents and memory
+├── mastra.db-shm         # SQLite shared memory file
+├── mastra.db-wal         # SQLite write-ahead log
+├── rss_feeds.db          # RSS MCP server database
+└── rss_feeds.opml        # RSS feed configuration (OPML format)
 ```
 
-This configuration allows the agent to:
-- Remember user preferences and information across different conversation sessions
-- Maintain context even when switching between different daily threads
-- Provide continuity in long-term interactions with users
+**Configuration:**
+- **Environment Variable**: `DATA_DIR` (default: `./data`)
+- **Auto-creation**: Directory created automatically if it doesn't exist
+- **Docker Support**: Volume mounting supported for persistent storage
 
 ## Usage Examples
 
@@ -271,13 +350,16 @@ messages.forEach(msg => {
 ```bash
 cd core/
 npm install
-npm start
+npm start                # Development with tsx watch mode
+npm run start:prod       # Production with tsx (no transpilation)
 ```
 
-### Build
-```bash
-npm run build
-```
+### Runtime Environment
+The application uses **tsx** for both development and production:
+- **Development**: tsx with watch mode for hot reload
+- **Production**: Direct TypeScript execution without transpilation
+- **Docker**: tsx-based runtime in Alpine Linux containers
+- **Unified Execution**: Consistent runtime environment across all deployments
 
 ### Testing WebSocket
 ```bash
@@ -298,21 +380,26 @@ node --env-file .env scripts/decrypt_prompt.js
 
 ## Integration with Main System
 
-The Mastra backend has completely replaced the original Rust-based Tsuki system:
+The Mastra backend represents a complete architectural modernization:
 
-- **Complete Migration**: Core system fully migrated from Rust to TypeScript/Mastra
-- **Tool Integration**: Uses MCP (Model Context Protocol) for extensible tool ecosystem
-- **Internal Storage**: Mastra handles all database operations internally with built-in memory
-- **Simplified Architecture**: Eliminates external vector database dependencies
+- **MastraMessageV2 Migration**: Complete migration from V1 to V2 message format with AI SDK UI utilities
+- **Separated Server Architecture**: Clean separation of concerns with dedicated server and entry point modules
+- **LibSQL Storage**: Unified LibSQL database for all persistent data (agents, memory, vectors)
+- **RSS MCP Integration**: External RSS feed management via dedicated MCP server
+- **tsx Runtime**: Modern TypeScript execution without build complexity
+- **Cross-thread Semantic Memory**: Resource-scoped semantic recall across conversation sessions
+- **Zero Built-in Tools**: Complete MCP delegation for all external functionality
 - **Cross-platform GUI**: Maintained Tauri + Svelte GUI client for desktop and mobile
 
 ## Performance Considerations
 
-- **Memory Management**: Uses lazy loading for message history with Mastra's built-in optimization
+- **LibSQL Optimization**: Single database file reduces connection overhead and I/O complexity
+- **tsx Runtime**: Eliminates transpilation overhead while maintaining TypeScript safety
+- **Cross-thread Semantic Search**: Efficient vector similarity search across conversation sessions
 - **Connection Pooling**: Efficient WebSocket connection management
 - **Thread Optimization**: Smart thread continuation reduces memory overhead
-- **Message Batching**: Optimized message processing pipeline
-- **Simplified Stack**: Eliminates external vector database overhead
+- **Message Batching**: Optimized message processing pipeline with MastraMessageV2
+- **Simplified Stack**: Eliminates external vector database and complex build toolchain
 
 ## Security
 
@@ -321,14 +408,37 @@ The Mastra backend has completely replaced the original Rust-based Tsuki system:
 - **Error Handling**: Sanitized error messages to prevent information leakage
 - **CORS Configuration**: Configurable cross-origin resource sharing
 
+## Recent Architectural Improvements
+
+### MastraMessageV1 to V2 Migration (c5002c3, 00ac79b, 303e0c4)
+- **Complete V2 Support**: Full migration to `MastraMessageV2` and `MastraMessageContentV2`
+- **AI SDK Integration**: Native support for AI SDK UI utilities with type safety
+- **Enhanced Content Processing**: Support for reasoning, tool-invocation, source, file, and step-start content types
+- **Backward Compatibility Removal**: Clean removal of deprecated V1 dependencies
+
+### Server Architecture Separation (6bf7e78)
+- **Clean Architecture**: Separation of application entry point (`index.ts`) and server logic (`server.ts`)
+- **Dependency Injection**: Proper Express.Application.locals usage for shared dependencies
+- **Type Safety**: Comprehensive TypeScript definitions and Express extensions
+- **Improved Maintainability**: Modular structure with clear separation of concerns
+
+### tsx Runtime Integration (ed47253)
+- **Development**: Hot reload via tsx watch mode
+- **Production**: Direct TypeScript execution without transpilation
+- **Docker**: Alpine Linux containers with native tsx runtime
+- **Unified Environment**: Consistent execution across all deployment scenarios
+
 ## Future Enhancements
 
 - **Rate Limiting**: Per-user message rate limits
 - **Message Persistence**: Optional message encryption
 - **Clustering**: Multi-instance support with shared state
-- **Metrics**: Performance and usage monitoring
+- **Metrics**: Performance and usage monitoring with OpenTelemetry
 - **MCP Plugin System**: Dynamic MCP server discovery and integration
 - **Tool Registry**: MCP-based tool marketplace and management
+- **Vector Search Optimization**: Advanced semantic search with custom embedding models
+
+
 
 ## Related Documentation
 

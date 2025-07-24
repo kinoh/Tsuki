@@ -87,10 +87,13 @@ node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
 - **Docker Services**: Microservices for external integrations
 
 ### Core Components
-- **WebSocket Server** (`core/src/websocket.ts`): Real-time communication
-- **HTTP API** (`core/src/index.ts`): RESTful endpoints for thread/message management
+- **Application Entry Point** (`core/src/index.ts`): Runtime context setup and server initialization
+- **HTTP/WebSocket Server** (`core/src/server.ts`): Unified Express server with WebSocket integration
+- **WebSocket Manager** (`core/src/websocket.ts`): Real-time communication handling
 - **Conversation Manager** (`core/src/conversation.ts`): Smart thread continuation logic
-- **Mastra Agent** (`core/src/mastra/agents/tsuki.ts`): AI chat agent with semantic memory
+- **Message Utilities** (`core/src/message.ts`): MastraMessageV2 formatting and content processing
+- **Mastra Agent** (`core/src/mastra/agents/tsuki.ts`): AI chat agent with cross-thread semantic memory
+- **MCP Integration** (`core/src/mastra/mcp.ts`): External tool integration via RSS MCP server
 - **Encrypted Prompts** (`core/src/prompt.ts`): Age encryption for secure prompt storage
 
 ### Communication Protocols
@@ -99,9 +102,10 @@ node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
 - **Unified Message Format**: Consistent ResponseMessage format across interfaces
 
 ### Configuration
-- Environment variables: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY` (JWK format)
+- Environment variables: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY` (JWK format), `DATA_DIR`
 - Configuration files: `conf/default.toml`, `conf/local.toml` (legacy, for GUI client)
-- Mastra handles internal database configuration automatically
+- Mastra LibSQL database: `${DATA_DIR}/mastra.db` (default: `./data/mastra.db`)
+- RSS MCP server: `${DATA_DIR}/rss_feeds.db` and `${DATA_DIR}/rss_feeds.opml`
 
 ### Docker Services
 The application runs with multiple services via Docker Compose:
@@ -113,9 +117,10 @@ The application runs with multiple services via Docker Compose:
 
 ### Tool Integration
 The AI agent uses MCP (Model Context Protocol) for tool integration:
-- **Minimal Built-in Tools**: Core implements only essential functionality
-- **MCP-first Strategy**: External tools provided via MCP plugins (e.g., rss-mcp-lite)
-- **Extensible Architecture**: New capabilities added through MCP rather than core modifications
+- **Zero Built-in Tools**: Core implements no internal tools, complete MCP delegation
+- **RSS MCP Server**: External RSS feed management via rss-mcp-lite MCP server
+- **MCP-first Strategy**: All external functionality provided via MCP servers
+- **Extensible Architecture**: New capabilities added through MCP servers only
 
 ### Runtime Environment
 - **Development**: tsx with watch mode for hot reload
@@ -124,10 +129,12 @@ The AI agent uses MCP (Model Context Protocol) for tool integration:
 - **Unified Runtime**: Consistent tsx-based execution across all environments
 
 ### Data Persistence
-- **Mastra Memory**: Built-in conversation history and semantic recall
-- **Cross-thread Memory**: Resource-scoped semantic recall across different conversation sessions
+- **LibSQL Database**: Unified storage for agents, memory, and vector embeddings
+- **Cross-thread Semantic Memory**: Resource-scoped semantic recall across conversation sessions
+- **Vector Embeddings**: text-embedding-3-small for semantic search with top-5 matches
 - **Thread Management**: Daily thread IDs with smart continuation logic
-- **Message Storage**: Unified message format with timestamp and user tracking
+- **Message Storage**: MastraMessageV2 format with unified ResponseMessage interface
+- **RSS MCP Data**: Separate database for RSS feed management via MCP server
 
 ## Testing
 
@@ -148,14 +155,16 @@ npm run test             # Run tests
 
 ## Key Files to Understand
 
-- `core/src/index.ts`: HTTP API server and application entry point
-- `core/src/websocket.ts`: WebSocket server for real-time communication
-- `core/src/conversation.ts`: Thread management with smart continuation
-- `core/src/mastra/agents/tsuki.ts`: Main AI agent with semantic memory
-- `core/src/message.ts`: Unified message formatting utilities
-- `core/src/prompt.ts`: Age encryption for secure prompts
+- `core/src/index.ts`: Application entry point with runtime context setup
+- `core/src/server.ts`: Express HTTP/WebSocket server with unified architecture
+- `core/src/websocket.ts`: WebSocket connection management and message processing
+- `core/src/conversation.ts`: Thread management with smart continuation logic
+- `core/src/message.ts`: MastraMessageV2 formatting and content processing utilities
+- `core/src/mastra/agents/tsuki.ts`: Main AI agent with cross-thread semantic memory
+- `core/src/mastra/mcp.ts`: MCP client configuration for RSS server integration
+- `core/src/prompt.ts`: Age encryption for secure prompt storage
 - `gui/src/routes/+page.svelte`: Main GUI interface
-- `compose.yaml`: Docker service definitions
+- `compose.yaml`: Docker service definitions with tsx runtime
 - `Taskfile.yaml`: Development and deployment tasks
 - `doc/mastra-backend-implementation.md`: Detailed implementation documentation
 
