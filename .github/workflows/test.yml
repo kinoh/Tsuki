@@ -14,36 +14,33 @@ concurrency:
 
 env:
   GIT_HASH: ${{ github.sha }}
-  CARGO_TERM_COLOR: always
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./core
     steps:
     - uses: actions/checkout@v4
-    - name: Prepare included files
-      run: |
-        cp conf/default.toml conf/local.toml
-        touch src/service_account_key.json
-        touch src/prompt/initial.txt
-    - name: Install dependencies
-      run: sudo apt-get install -y cmake protobuf-compiler
-    - name: Install vosk
-      run: |
-        curl -sSLf -o /tmp/vosk.zip https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-$(arch)-0.3.45.zip
-        unzip -qj -d /tmp /tmp/vosk.zip vosk-linux-x86_64-0.3.45/libvosk.so
-        sudo install /tmp/libvosk.so /usr/local/lib
-        rm /tmp/vosk.zip /tmp/libvosk.so
-    - name: Setup Rust
-      run: rustup update nightly && rustup default nightly
-    - uses: Swatinem/rust-cache@v2
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
       with:
-        shared-key: server
-    - name: Build
-      run: cargo build --verbose
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: 'core/package-lock.json'
+    - name: Install dependencies
+      run: npm ci
+    - name: Type check
+      run: npx tsc --noEmit
+    - name: Lint
+      run: npx eslint .
+    - name: Build check
+      run: npm run build
     - name: Run tests
       env:
         OPENAI_API_KEY: xxx
         WEB_AUTH_TOKEN: xxx
         DIFY_SANDBOX_API_KEY: xxx
-      run: cargo test --verbose
+        PROMPT_PRIVATE_KEY: xxx
+      run: npm test

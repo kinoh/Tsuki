@@ -7,34 +7,20 @@ on:
     paths-ignore:
       - ".*"
       - "*.md"
-      - "Taskdile.yaml"
+      - "Taskfile.yaml"
       - "gui/**"
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Prepare included files
-      run: |
-        touch src/service_account_key.json
-    - name: Install dependencies
-      run: sudo apt-get install -y cmake protobuf-compiler
     - name: Install Task
       uses: arduino/setup-task@v2
       with:
         version: 3.x
         repo-token: ${{ secrets.GITHUB_TOKEN }}
-    - name: Store secrets
-      env:
-        SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
-      run: |
-        sudo mkdir -p /var/secrets/
-        printf %s "$SERVICE_ACCOUNT_KEY" > src/service_account_key.json
     - name: Install SSH key
       env:
         PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -45,9 +31,6 @@ jobs:
         eval $(ssh-agent -s)
         ssh-add ~/.ssh/id_rsa
         ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
-    - uses: Swatinem/rust-cache@v2
-      with:
-        shared-key: server
     - name: Build and deploy
       env:
         DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
