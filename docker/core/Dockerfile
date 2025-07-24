@@ -13,7 +13,7 @@ RUN addgroup -g 1001 -S nodejs && \
 
 # Install production dependencies with correct ownership
 COPY --chown=tsuki:nodejs core/package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
