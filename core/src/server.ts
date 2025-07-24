@@ -6,7 +6,7 @@ import { RuntimeContext } from '@mastra/core/di'
 import { Agent } from '@mastra/core'
 import { WebSocketManager } from './websocket'
 import { ResponseMessage, createResponseMessage } from './message'
-import { MastraMessageV1 } from '@mastra/core'
+import { MastraMessageV2 } from '@mastra/core'
 
 type AppRuntimeContext = {
   instructions: string
@@ -18,11 +18,6 @@ type AgentMemory = NonNullable<ReturnType<Agent['getMemory']>>
 // Type for thread objects
 interface Thread {
   id: string
-  [key: string]: unknown
-}
-
-// Type for message objects from Mastra
-interface MastraMessage {
   [key: string]: unknown
 }
 
@@ -125,13 +120,12 @@ async function threadByIdHandler(req: express.Request, res: express.Response): P
       selectBy: {
         last: 1000,
       },
-    }) as { messages: MastraMessage[] }
+    }) as unknown as { messagesV2: MastraMessageV2[] }
 
     // Convert to ResponseMessage format
-    const messages: ResponseMessage[] = result.messages.map((message: MastraMessage) => {
-      const mastraMessage = message as MastraMessageV1
+    const messages: ResponseMessage[] = result.messagesV2.map((message: MastraMessageV2) => {
       const agentName = agent.name
-      return createResponseMessage(mastraMessage, agentName, userId)
+      return createResponseMessage(message, agentName, userId)
     })
 
     res.json({ messages })
@@ -205,13 +199,12 @@ async function messagesHandler(req: express.Request, res: express.Response): Pro
         selectBy: {
           last: before === undefined ? remainingCount : 1000, // TODO: Fix "before" handling
         },
-      }) as { messages: MastraMessage[] }
+      }) as unknown as { messagesV2: MastraMessageV2[] }
 
       // Convert to ResponseMessage format and add to collection
-      let threadMessages: ResponseMessage[] = result.messages.map((message: MastraMessage) => {
-        const mastraMessage = message as MastraMessageV1
+      let threadMessages: ResponseMessage[] = result.messagesV2.map((message: MastraMessageV2) => {
         const agentName = agent.name
-        return createResponseMessage(mastraMessage, agentName, userId)
+        return createResponseMessage(message, agentName, userId)
       })
 
       if (before !== undefined) {
