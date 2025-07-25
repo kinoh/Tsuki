@@ -4,6 +4,7 @@ import { RuntimeContext } from '@mastra/core/di'
 import { WebSocket } from 'ws'
 import { ConversationManager } from './conversation'
 import { ResponseMessage } from './message'
+import { UsageStorage } from './storage/usage'
 
 interface WebSocketClient {
   user: string
@@ -14,6 +15,7 @@ export class WebSocketManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private agent: Agent<string, any, any>
   private conversation: ConversationManager
+  private usageStorage: UsageStorage
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private runtimeContext: RuntimeContext<any>
 
@@ -26,6 +28,10 @@ export class WebSocketManager {
       throw new Error('Agent must have memory configured for WebSocket functionality')
     }
     this.conversation = new ConversationManager(memory)
+
+    // Initialize usage storage with shared LibSQL store from mastra
+    this.usageStorage = new UsageStorage(memory.storage)
+    void this.usageStorage.initTable()
   }
 
   handleConnection(ws: WebSocket, req: IncomingMessage): void {
@@ -90,13 +96,15 @@ export class WebSocketManager {
         user: client.user,
         content: message,
       })
-      
+
+      const currentThreadId = await this.conversation.currentThread(client.user)
+
       const response = await this.agent.generate([
         { role: 'user', content: formattedMessage },
       ], {
         memory: {
           resource: client.user,
-          thread: await this.conversation.currentThread(client.user),
+          thread: currentThreadId,
           options: {
             lastMessages: 20,
           },
@@ -106,6 +114,13 @@ export class WebSocketManager {
 
       console.log(`response id: ${response.response.id}`)
       console.log(`usage: ${JSON.stringify(response.usage)}`)
+
+      await this.usageStorage.recordUsage(
+        response,
+        currentThreadId,
+        client.user,
+        this.agent.name,
+      )
 
       const assistantResponse: ResponseMessage = {
         role: 'assistant',

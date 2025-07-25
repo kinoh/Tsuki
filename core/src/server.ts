@@ -7,6 +7,7 @@ import { Agent } from '@mastra/core'
 import { WebSocketManager } from './websocket'
 import { ResponseMessage, createResponseMessage } from './message'
 import { MastraMessageV2 } from '@mastra/core'
+import { UsageStorage } from './storage/usage'
 
 type AppRuntimeContext = {
   instructions: string
@@ -229,6 +230,32 @@ async function messagesHandler(req: express.Request, res: express.Response): Pro
   }
 }
 
+async function metricsHandler(req: express.Request, res: express.Response): Promise<void> {
+  try {
+    const agentMemory = req.app.locals.agentMemory
+    const userId = res.locals.user as string
+
+    if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+      res.status(400).json({ error: 'User not authenticated' })
+      return
+    }
+
+    // Initialize usage storage with agent's memory storage
+    const usageStorage = new UsageStorage(agentMemory.storage)
+
+    const metrics = await usageStorage.getMetricsSummary()
+
+    res.json({
+      total_usage: metrics.totalUsage,
+      total_messages: metrics.totalMessages,
+      total_threads: metrics.totalThreads,
+    })
+  } catch (error) {
+    console.error('Error fetching metrics:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+}
+
 export function serve(
   agent: Agent,
   runtimeContext: RuntimeContext<AppRuntimeContext>,
@@ -265,6 +292,7 @@ export function serve(
   app.get('/threads', authMiddleware, threadsHandler)
   app.get('/threads/:id', authMiddleware, threadByIdHandler)
   app.get('/messages', authMiddleware, messagesHandler)
+  app.get('/metrics', authMiddleware, metricsHandler)
 
   // Create HTTP server and WebSocket server
   const server = http.createServer(app)
