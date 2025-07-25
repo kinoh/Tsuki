@@ -329,8 +329,8 @@ export function serve(
   app.get('/threads', authMiddleware, threadsHandler)
   app.get('/threads/:id', authMiddleware, threadByIdHandler)
   app.get('/messages', authMiddleware, messagesHandler)
-  app.get('/metrics', authMiddleware, metricsHandler)
-  app.get('/metadata', metadataHandler)
+  app.get('/metrics', metricsHandler)
+  app.get('/metadata', authMiddleware, metadataHandler)
 
   // Create HTTP server and WebSocket server
   const server = http.createServer(app)
