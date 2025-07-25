@@ -51,6 +51,31 @@ declare global {
   }
 }
 
+// Internal access only middleware (localhost only)
+function internalOnlyMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void | express.Response {
+  const remoteAddress = req.socket.remoteAddress
+  const forwardedFor = req.headers['x-forwarded-for']
+
+  // Get the actual client IP address
+  let clientIp = remoteAddress
+  if (typeof forwardedFor === 'string' && forwardedFor.trim() !== '') {
+    // Use the first IP in X-Forwarded-For header
+    clientIp = forwardedFor.split(',')[0].trim()
+  }
+
+  // Check if the request is from localhost
+  const isLocalhost = clientIp === '127.0.0.1' || 
+                     clientIp === '::1' || 
+                     clientIp === 'localhost' ||
+                     clientIp === '::ffff:127.0.0.1' // IPv4-mapped IPv6 address
+
+  if (!isLocalhost) {
+    return res.status(403).json({ error: 'Access denied' })
+  }
+
+  next()
+}
+
 // Authentication middleware
 function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void | express.Response {
   const authHeader = req.headers.authorization
@@ -323,7 +348,7 @@ export function serve(
   app.get('/threads', authMiddleware, threadsHandler)
   app.get('/threads/:id', authMiddleware, threadByIdHandler)
   app.get('/messages', authMiddleware, messagesHandler)
-  app.get('/metrics', metricsHandler)
+  app.get('/metrics', internalOnlyMiddleware, metricsHandler)
   app.get('/metadata', authMiddleware, metadataHandler)
 
   // Create HTTP server and WebSocket server
