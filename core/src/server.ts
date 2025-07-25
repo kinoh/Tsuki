@@ -251,12 +251,6 @@ async function messagesHandler(req: express.Request, res: express.Response): Pro
 async function metricsHandler(req: express.Request, res: express.Response): Promise<void> {
   try {
     const agentMemory = req.app.locals.agentMemory
-    const userId = res.locals.user as string
-
-    if (!userId || typeof userId !== 'string' || userId.trim() === '') {
-      res.status(400).json({ error: 'User not authenticated' })
-      return
-    }
 
     // Initialize usage storage with agent's memory storage
     const usageStorage = new UsageStorage(agentMemory.storage)
