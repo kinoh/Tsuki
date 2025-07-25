@@ -7,6 +7,10 @@ import { mcp } from '../mcp'
 // Use same data directory as main mastra instance
 const dataDir = process.env.DATA_DIR ?? './data'
 const dbPath = `file:${dataDir}/mastra.db`
+const openAiModel = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
+
+console.log(`dataDir: ${dataDir}`)
+console.log(`openAiModel: ${openAiModel}`)
 
 export const tsuki = new Agent({
   name: 'Tsuki',
@@ -18,7 +22,7 @@ export const tsuki = new Agent({
     }
     return instructions as string
   },
-  model: openai('gpt-4o-mini'),
+  model: openai(openAiModel),
   memory: new Memory({
     storage: new LibSQLStore({
       url: dbPath,
