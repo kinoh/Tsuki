@@ -18,7 +18,7 @@ tasks:
   up:
     desc: Start production
     cmds:
-      - docker compose up --detach
+      - docker compose up --detach --remove-orphans
   down:
     desc: Stop production
     cmds:
