@@ -52,7 +52,7 @@ const rssFeeds = {
  */
 function generateOPML(feeds) {
   const now = new Date().toUTCString();
-  
+
   let opml = `<?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
   <head>
@@ -68,13 +68,13 @@ function generateOPML(feeds) {
   // Generate outline elements for each category
   for (const [category, urls] of Object.entries(feeds)) {
     opml += `    <outline text="${escapeXML(category)}" title="${escapeXML(category)}">\n`;
-    
+
     for (const url of urls) {
       // Extract site name from URL for display
       const siteName = extractSiteName(url);
       opml += `      <outline type="rss" text="${escapeXML(siteName)}" title="${escapeXML(siteName)}" xmlUrl="${escapeXML(url)}" htmlUrl="${escapeXML(getBaseUrl(url))}" />\n`;
     }
-    
+
     opml += `    </outline>\n`;
   }
 
@@ -107,10 +107,10 @@ function extractSiteName(url) {
   try {
     const urlObj = new URL(url);
     let hostname = urlObj.hostname;
-    
+
     // Remove www. prefix
     hostname = hostname.replace(/^www\./, '');
-    
+
     // Convert to title case
     return hostname.split('.')[0]
       .split(/[-_]/)
@@ -141,24 +141,24 @@ function getBaseUrl(url) {
 function main() {
   const outputFile = process.argv[2] || 'tsuki-feeds.opml';
   const outputPath = path.resolve(outputFile);
-  
+
   console.log('🚀 Generating OPML file...');
   console.log(`📁 Output: ${outputPath}`);
-  
+
   try {
     const opmlContent = generateOPML(rssFeeds);
     fs.writeFileSync(outputPath, opmlContent, 'utf8');
-    
+
     console.log('✅ OPML file generated successfully!');
     console.log(`📊 Categories: ${Object.keys(rssFeeds).length}`);
     console.log(`📡 Total feeds: ${Object.values(rssFeeds).reduce((sum, feeds) => sum + feeds.length, 0)}`);
-    
+
     // Display summary
     console.log('\n📋 Feed Summary:');
     for (const [category, urls] of Object.entries(rssFeeds)) {
       console.log(`  ${category}: ${urls.length} feeds`);
     }
-    
+
   } catch (error) {
     console.error('❌ Error generating OPML file:', error.message);
     process.exit(1);

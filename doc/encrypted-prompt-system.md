@@ -86,7 +86,7 @@ The system automatically loads encrypted prompts at startup:
 // src/index.ts
 async function createRuntimeContext(): Promise<RuntimeContext<AppRuntimeContext>> {
   const runtimeContext = new RuntimeContext<AppRuntimeContext>()
-  
+
   try {
     const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
     runtimeContext.set('instructions', instructions)

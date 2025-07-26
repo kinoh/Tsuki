@@ -64,7 +64,7 @@ export async function messagesHandler(req: express.Request, res: express.Respons
     const agentMemory = req.app.locals.agentMemory
     const userId = res.locals.user as string
     const query = req.query as GetMessagesQuery
-    
+
     if (!userId || typeof userId !== 'string' || userId.trim() === '') {
       res.status(400).json({ error: 'User not authenticated' })
       return
@@ -86,7 +86,7 @@ export async function messagesHandler(req: express.Request, res: express.Respons
 
     // Get all threads for user
     const threads = await agentMemory.getThreadsByResourceId({ resourceId: userId }) as Thread[]
-    
+
     // Filter threads by userId prefix and sort by date part (descending)
     const userThreads = threads
       .filter((thread: Thread) => thread.id.startsWith(`${userId}-`))
@@ -101,7 +101,7 @@ export async function messagesHandler(req: express.Request, res: express.Respons
     let filteredThreads = userThreads
     if (before !== undefined) {
       const beforeDate = new Date(before * 1000).toISOString().split('T')[0].replace(/-/g, '')
-      
+
       filteredThreads = userThreads.filter((thread: Thread) => {
         const threadDate = thread.id.substring(userId.length + 1)
         return threadDate <= beforeDate

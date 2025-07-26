@@ -63,7 +63,7 @@ Handles intelligent thread management with automatic continuation logic.
 ```typescript
 class ConversationManager {
   constructor(memory: MastraMemory)
-  
+
   // Get current thread ID for user with smart continuation logic
   async currentThread(userId: string): Promise<string>
 }
@@ -133,7 +133,7 @@ Real-time communication server with authentication and message processing.
 ```typescript
 class WebSocketManager {
   constructor(agent: Agent)
-  
+
   handleConnection(ws: WebSocket, req: IncomingMessage): void
   private async processMessage(ws: WebSocket, client: WebSocketClient, message: string): Promise<void>
 }
@@ -153,7 +153,7 @@ Clean application entry point responsible for runtime context creation and serve
 async function main(): Promise<void> {
   const agent = mastra.getAgent('tsuki')
   const runtimeContext = await createRuntimeContext()
-  
+
   serve(agent, runtimeContext)
 }
 ```
@@ -376,7 +376,7 @@ CREATE TABLE usage_stats (
 class UsageStorage {
   // Record usage for a conversation response
   async recordUsage(response, threadId, userId, agentName): Promise<void>
-  
+
   // Get aggregated metrics summary
   async getMetricsSummary(): Promise<MetricsSummary>
 }

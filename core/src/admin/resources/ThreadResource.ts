@@ -92,7 +92,7 @@ export class ThreadResource extends BaseResource {
   async count(): Promise<number> {
     try {
       const result = await this.client.execute(`SELECT COUNT(*) as count FROM ${TABLE_THREADS}`)
-      
+
       if (result.rows.length > 0) {
         return Number(result.rows[0].count) || 0
       }
@@ -140,7 +140,7 @@ export class ThreadResource extends BaseResource {
         sql: `SELECT * FROM ${TABLE_THREADS} WHERE id = ?`,
         args: [id],
       })
-      
+
       if (result.rows.length === 0) {
         return null
       }
@@ -154,7 +154,7 @@ export class ThreadResource extends BaseResource {
         createdAt: String(row.createdAt),
         updatedAt: String(row.updatedAt),
       }
-      
+
       return new ThreadRecord(thread, this)
     } catch (error) {
       console.error('Error finding thread:', error)
