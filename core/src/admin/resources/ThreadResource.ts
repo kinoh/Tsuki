@@ -21,7 +21,7 @@ interface LibSQLClient {
 class ThreadProperty extends BaseProperty {
   constructor(
     private propertyName: string,
-    private propertyType: 'string' | 'datetime' = 'string',
+    private propertyType: 'string' | 'datetime' | 'reference' = 'string',
   ) {
     super({ path: propertyName, type: propertyType })
   }
@@ -100,6 +100,7 @@ export class ThreadResource extends BaseResource {
       new ThreadProperty('title', 'string'),
       new ThreadProperty('createdAt', 'datetime'),
       new ThreadProperty('updatedAt', 'datetime'),
+      new ThreadProperty('messages', 'reference'),
     ]
   }
 

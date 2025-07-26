@@ -3,45 +3,71 @@ import { Router } from 'express'
 import * as AdminJSExpress from '@adminjs/express'
 import { MastraMemory } from '@mastra/core'
 import { ThreadResource } from './resources/ThreadResource.js'
+import { MessageResource } from './resources/MessageResource.js'
 
 export function createAdminJS(agentMemory: MastraMemory): AdminJS {
   const admin = new AdminJS({
-    resources: [{
-      resource: new ThreadResource(agentMemory),
-      options: {
-        id: 'threads',
-        navigation: {
-          name: 'Thread Management',
-          icon: 'MessageSquare',
-        },
-        listProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
-        showProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
-        actions: {
-          new: {
-            isVisible: false, // Disable thread creation
+    resources: [
+      {
+        resource: new ThreadResource(agentMemory),
+        options: {
+          id: 'threads',
+          navigation: {
+            name: 'Thread Management',
+            icon: 'MessageSquare',
           },
-          edit: {
-            isVisible: false, // Disable thread editing
+          listProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
+          showProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt', 'messages'],
+          properties: {
+            messages: {
+              reference: 'messages',
+            },
           },
-          delete: {
-            isVisible: true,
-            isAccessible: true,
+          actions: {
+            new: {
+              isVisible: false,
+            },
+            edit: {
+              isVisible: false,
+            },
+            delete: {
+              isVisible: true,
+              isAccessible: true,
+            },
+            show: {
+              isVisible: true,
+              isAccessible: true,
+            },
+            list: {
+              isVisible: true,
+              isAccessible: true,
+            },
           },
-          show: {
-            isVisible: true,
-            isAccessible: true,
+          sort: {
+            sortBy: 'id',
+            direction: 'desc' as const,
           },
-          list: {
-            isVisible: true,
-            isAccessible: true,
-          },
-        },
-        sort: {
-          sortBy: 'id',
-          direction: 'desc' as const,
         },
       },
-    }],
+      {
+        resource: new MessageResource(agentMemory),
+        options: {
+          id: 'messages',
+          navigation: null, // Do not show in navigation
+          listProperties: ['id', 'role', 'user', 'chat', 'timestamp'],
+          showProperties: ['id', 'role', 'user', 'chat', 'timestamp'],
+          actions: {
+            new: { isVisible: false },
+            edit: { isVisible: false },
+            delete: { isVisible: false },
+          },
+          sort: {
+            sortBy: 'timestamp',
+            direction: 'desc' as const,
+          },
+        },
+      },
+    ],
     rootPath: '/admin',
     branding: {
       companyName: 'Tsuki Admin',
@@ -57,7 +83,7 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
             threads: 'Threads',
           },
           properties: {
-            id: 'Thread ID',
+            id: 'ID',
             resourceId: 'Resource ID',
             title: 'Title',
             createdAt: 'Created Date',
