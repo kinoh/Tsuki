@@ -44,5 +44,7 @@ jobs:
         DIFY_SANDBOX_API_KEY: ${{ secrets.DIFY_SANDBOX_API_KEY }}
       run: task deploy
     - name: Wait for health
+      env:
+        WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
       run: task wait
       timeout-minutes: 5
