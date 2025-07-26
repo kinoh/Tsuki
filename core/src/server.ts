@@ -8,6 +8,7 @@ import { WebSocketManager } from './websocket'
 import { ResponseMessage, createResponseMessage } from './message'
 import { MastraMessageV2 } from '@mastra/core'
 import { UsageStorage } from './storage/usage'
+import { createAdminRouter } from './admin/index.js'
 
 // Utility function to get Git hash
 async function getGitHash(): Promise<string | null> {
@@ -350,6 +351,9 @@ export function serve(
   app.get('/messages', authMiddleware, messagesHandler)
   app.get('/metrics', internalOnlyMiddleware, metricsHandler)
   app.get('/metadata', authMiddleware, metadataHandler)
+
+  // Add AdminJS routes (with built-in authentication)
+  app.use(createAdminRouter(agentMemory))
 
   // Create HTTP server and WebSocket server
   const server = http.createServer(app)

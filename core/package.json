@@ -29,6 +29,8 @@
     "age-encryption": "^0.2.4",
     "express": "^5.1.0",
     "morgan": "^1.10.1",
+    "adminjs": "^7.8.16",
+    "@adminjs/express": "^6.1.0",
     "rss-mcp-lite": "^1.0.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
