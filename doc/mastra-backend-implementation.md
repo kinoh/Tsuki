@@ -13,10 +13,21 @@ core/
 ├── src/
 │   ├── conversation.ts    # Thread management with smart continuation logic
 │   ├── index.ts          # Application entry point and runtime context creation
-│   ├── server.ts         # Express server with REST API endpoints and WebSocket server
 │   ├── message.ts        # Message formatting utilities (MastraMessageV2 support)
 │   ├── prompt.ts         # Age encryption for secure prompt loading
 │   ├── websocket.ts      # WebSocket server for real-time communication
+│   ├── server/           # Modular Express server architecture
+│   │   ├── index.ts      # Main server integration and WebSocket setup
+│   │   ├── types.ts      # Shared type definitions
+│   │   ├── middleware/   # Authentication and access control
+│   │   │   ├── auth.ts   # Authentication middleware
+│   │   │   ├── internal.ts # Internal network access control
+│   │   │   └── index.ts  # Middleware exports
+│   │   └── routes/       # API endpoint handlers
+│   │       ├── threads.ts # Thread and message API endpoints
+│   │       ├── metrics.ts # Usage metrics API
+│   │       ├── metadata.ts # System metadata API
+│   │       └── index.ts  # Route setup and exports
 │   ├── admin/
 │   │   ├── index.ts      # AdminJS web UI setup and authentication
 │   │   └── resources/

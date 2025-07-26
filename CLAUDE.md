@@ -88,7 +88,11 @@ node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
 
 ### Core Components
 - **Application Entry Point** (`core/src/index.ts`): Runtime context setup and server initialization
-- **HTTP/WebSocket Server** (`core/src/server.ts`): Unified Express server with WebSocket integration
+- **HTTP/WebSocket Server** (`core/src/server/`): Modular Express server with clear separation of concerns
+  - `server/index.ts`: Main server integration and WebSocket setup
+  - `server/types.ts`: Shared type definitions
+  - `server/middleware/`: Authentication and access control middlewares
+  - `server/routes/`: API endpoint handlers grouped by functionality
 - **WebSocket Manager** (`core/src/websocket.ts`): Real-time communication handling
 - **Conversation Manager** (`core/src/conversation.ts`): Smart thread continuation logic
 - **Message Utilities** (`core/src/message.ts`): MastraMessageV2 formatting and content processing
@@ -161,16 +165,31 @@ npm run test             # Run tests
 
 ## Key Files to Understand
 
+### Core Application
 - `core/src/index.ts`: Application entry point with runtime context setup
-- `core/src/server.ts`: Express HTTP/WebSocket server with unified architecture
 - `core/src/websocket.ts`: WebSocket connection management and message processing
 - `core/src/conversation.ts`: Thread management with smart continuation logic
 - `core/src/message.ts`: MastraMessageV2 formatting and content processing utilities
+
+### Server Architecture (Modular)
+- `core/src/server/index.ts`: Main server integration and WebSocket setup
+- `core/src/server/types.ts`: Shared type definitions for server components
+- `core/src/server/middleware/auth.ts`: Authentication middleware
+- `core/src/server/middleware/internal.ts`: Internal network access control
+- `core/src/server/routes/threads.ts`: Thread and message API endpoints
+- `core/src/server/routes/metrics.ts`: Usage metrics API
+- `core/src/server/routes/metadata.ts`: System metadata API
+
+### AI & Integration
 - `core/src/mastra/agents/tsuki.ts`: Main AI agent with cross-thread semantic memory
 - `core/src/mastra/mcp.ts`: MCP client configuration for RSS server integration
 - `core/src/prompt.ts`: Age encryption for secure prompt storage
+
+### Admin & Monitoring
 - `core/src/admin/index.ts`: AdminJS web UI for thread management
 - `core/src/storage/usage.ts`: Usage metrics tracking and Prometheus API
+
+### Client & Infrastructure
 - `gui/src/routes/+page.svelte`: Main GUI interface
 - `compose.yaml`: Docker service definitions with tsx runtime
 - `Taskfile.yaml`: Development and deployment tasks
@@ -217,3 +236,41 @@ npm run test             # Run tests
 - Easy tool discovery and integration
 - Standardized tool interfaces
 - No core modifications needed for new functionality
+
+## Server Architecture Details
+
+The server architecture follows a modular design pattern with clear separation of concerns:
+
+### Directory Structure
+```
+src/server/
+├── index.ts              # Main server integration (49 lines)
+├── types.ts             # Shared type definitions (27 lines)
+├── middleware/
+│   ├── auth.ts          # Authentication middleware (36 lines)
+│   ├── internal.ts      # IP access control (71 lines)
+│   └── index.ts         # Middleware exports (2 lines)
+└── routes/
+    ├── threads.ts       # Thread/message endpoints (154 lines)
+    ├── metrics.ts       # Usage metrics API (23 lines)
+    ├── metadata.ts      # System metadata API (38 lines)
+    └── index.ts         # Route setup (21 lines)
+```
+
+### Design Principles
+- **Single Responsibility**: Each file has one clear purpose
+- **Dependency Injection**: Dependencies passed via Express app.locals
+- **Type Safety**: Shared type definitions prevent inconsistencies
+- **Testability**: Independent modules can be tested in isolation
+- **Consistent Patterns**: Follows same structure as admin/ module
+
+### Middleware Layer
+- **Authentication**: Validates username:token format from Authorization header
+- **Internal Access Control**: Restricts certain endpoints to private/local networks
+- **Centralized Error Handling**: Consistent error responses across endpoints
+
+### Route Organization
+- **threads.ts**: Handles `/threads`, `/threads/:id`, `/messages` endpoints
+- **metrics.ts**: Provides `/metrics` endpoint for Prometheus integration
+- **metadata.ts**: Serves `/metadata` with system information and Git hash
+- **index.ts**: Central route configuration and Express app setup
