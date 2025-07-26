@@ -60,19 +60,12 @@ class MessageProperty extends BaseProperty {
 
 class MessageRecord extends BaseRecord {
   constructor(private readonly message: ResponseMessage, resource: BaseResource) {
-    const chatAsString = { ...message, chat: message.chat.join('\n') }
-    super(chatAsString, resource)
-  }
-
-
-  params(): Record<string, unknown> {
-    return {
-      id: this.id(),
-      role: this.message.role,
-      user: this.message.user,
-      chat: this.message.chat.join('\n'),
-      timestamp: new Date(this.message.timestamp * 1000),
+    const params = {
+      ...message,
+      chat: message.chat.join('\n'),
+      timestamp: new Date(message.timestamp * 1000),
     }
+    super(params, resource)
   }
 
   id(): string {
