@@ -100,7 +100,6 @@ export class ThreadResource extends BaseResource {
       new ThreadProperty('title', 'string'),
       new ThreadProperty('createdAt', 'datetime'),
       new ThreadProperty('updatedAt', 'datetime'),
-      new ThreadProperty('messages', 'reference'),
     ]
   }
 

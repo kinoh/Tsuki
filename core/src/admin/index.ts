@@ -17,12 +17,7 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
             icon: 'MessageSquare',
           },
           listProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
-          showProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt', 'messages'],
-          properties: {
-            messages: {
-              reference: 'messages',
-            },
-          },
+          showProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
           actions: {
             new: {
               isVisible: false,
@@ -41,6 +36,20 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
             list: {
               isVisible: true,
               isAccessible: true,
+            },
+            viewMessages: {
+              actionType: 'record',
+              icon: 'List',
+              component: false,
+              handler: async (req, res, context) => {
+                const record = context.record
+                const threadId = record.params?.id
+                console.log(threadId)
+                return {
+                  redirectUrl: `/admin/resources/messages?filters.id=${threadId}`,
+                  record: record.toJSON(),
+                }
+              },
             },
           },
           sort: {

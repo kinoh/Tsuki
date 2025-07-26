@@ -142,7 +142,7 @@ export class MessageResource extends BaseResource {
     }
 
     const messages = await this.fetchMessages(threadId.value as string)
-    const sortedMessages = messages.sort((a, b) => b.timestamp - a.timestamp)
+    const sortedMessages = messages.sort((a, b) => a.id.localeCompare(b.id))
 
     const limit = options?.limit ?? 10
     const offset = options?.offset ?? 0
