@@ -95,10 +95,15 @@ node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
 - **Mastra Agent** (`core/src/mastra/agents/tsuki.ts`): AI chat agent with cross-thread semantic memory
 - **MCP Integration** (`core/src/mastra/mcp.ts`): External tool integration via RSS MCP server
 - **Encrypted Prompts** (`core/src/prompt.ts`): Age encryption for secure prompt storage
+- **AdminJS Web UI** (`core/src/admin/index.ts`): Thread management web interface with authentication
+- **Usage Metrics** (`core/src/storage/usage.ts`): Token usage tracking and Prometheus metrics
 
 ### Communication Protocols
 - **WebSocket**: Real-time bidirectional communication with authentication
 - **HTTP REST API**: Thread management and message history retrieval
+- **Admin Web UI**: AdminJS-based thread management interface at `/admin`
+- **Metrics API**: Prometheus-compatible metrics endpoint at `/metrics` (localhost only)
+- **System Information API**: System metadata at `/metadata`
 - **Unified Message Format**: Consistent ResponseMessage format across interfaces
 
 ### Configuration
@@ -134,6 +139,7 @@ The AI agent uses MCP (Model Context Protocol) for tool integration:
 - **Vector Embeddings**: text-embedding-3-small for semantic search with top-5 matches
 - **Thread Management**: Daily thread IDs with smart continuation logic
 - **Message Storage**: MastraMessageV2 format with unified ResponseMessage interface
+- **Usage Metrics Storage**: Token usage tracking with LibSQL persistence
 - **RSS MCP Data**: Separate database for RSS feed management via MCP server
 
 ## Testing
@@ -163,10 +169,31 @@ npm run test             # Run tests
 - `core/src/mastra/agents/tsuki.ts`: Main AI agent with cross-thread semantic memory
 - `core/src/mastra/mcp.ts`: MCP client configuration for RSS server integration
 - `core/src/prompt.ts`: Age encryption for secure prompt storage
+- `core/src/admin/index.ts`: AdminJS web UI for thread management
+- `core/src/storage/usage.ts`: Usage metrics tracking and Prometheus API
 - `gui/src/routes/+page.svelte`: Main GUI interface
 - `compose.yaml`: Docker service definitions with tsx runtime
 - `Taskfile.yaml`: Development and deployment tasks
 - `doc/mastra-backend-implementation.md`: Detailed implementation documentation
+
+## HTTP API Endpoints
+
+### Core APIs
+- `GET /threads` - List all available threads
+- `GET /threads/:threadId/messages` - Retrieve message history for a thread
+- `GET /metadata` - System information (Git hash, OpenAI model, MCP tools)
+
+### Admin Interface
+- `GET /admin` - AdminJS web interface for thread management
+  - Authentication required using `WEB_AUTH_TOKEN`
+  - Thread viewing, filtering, and deletion capabilities
+  - Read-only thread management (no creation/editing)
+
+### Monitoring & Metrics
+- `GET /metrics` - Prometheus-compatible metrics (localhost access only)
+  - Token usage statistics
+  - Message counts per thread/user
+  - System performance metrics
 
 ## MCP Integration
 

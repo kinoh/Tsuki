@@ -17,6 +17,12 @@ core/
 │   ├── message.ts        # Message formatting utilities (MastraMessageV2 support)
 │   ├── prompt.ts         # Age encryption for secure prompt loading
 │   ├── websocket.ts      # WebSocket server for real-time communication
+│   ├── admin/
+│   │   ├── index.ts      # AdminJS web UI setup and authentication
+│   │   └── resources/
+│   │       └── ThreadResource.ts  # AdminJS thread resource definition
+│   ├── storage/
+│   │   └── usage.ts      # Usage metrics tracking and Prometheus API
 │   ├── mastra/
 │   │   ├── index.ts      # Mastra configuration and agent setup
 │   │   ├── agents/       # Agent definitions
@@ -39,6 +45,8 @@ core/
 - **Memory Management**: Persistent conversation history using Mastra Memory with cross-thread semantic recall
 - **Encrypted Prompts**: Secure agent instruction storage using Age encryption
 - **MCP-first Tool Strategy**: Minimal built-in tools, leveraging MCP for extensibility
+- **AdminJS Web Interface**: Thread management and monitoring web UI
+- **Usage Metrics Tracking**: Prometheus-compatible metrics API with LibSQL persistence
 
 ## Core Modules
 
@@ -183,6 +191,36 @@ Get messages from a specific thread in unified ResponseMessage format.
 }
 ```
 
+#### `GET /metadata`
+Get system information including Git hash, OpenAI model, and available MCP tools.
+```json
+// Response
+{
+  "git_hash": "abc123...",
+  "openai_model": "gpt-4o-mini",
+  "mcp_tools": ["rss.list_feeds", "rss.add_feed", "rss.remove_feed"]
+}
+```
+
+#### `GET /admin`
+AdminJS web interface for thread management (authentication required).
+
+#### `GET /metrics`
+Prometheus-compatible metrics endpoint (localhost access only).
+```
+# HELP tsuki_token_usage_total Total token usage
+# TYPE tsuki_token_usage_total counter
+tsuki_token_usage_total 12345
+
+# HELP tsuki_messages_total Total messages processed
+# TYPE tsuki_messages_total counter
+tsuki_messages_total 678
+
+# HELP tsuki_threads_total Total unique threads
+# TYPE tsuki_threads_total counter
+tsuki_threads_total 90
+```
+
 #### `POST /messages`
 Send message and get agent response (legacy endpoint).
 
@@ -273,6 +311,91 @@ export const tsuki = new Agent({
 - **Extensible Architecture**: New capabilities added through MCP servers only
 - **Function Calling**: Rust-based function calling completely replaced with MCP-standardized interfaces
 
+### 7. AdminJS Web Interface (`src/admin/`)
+
+Web-based administration interface for thread management and monitoring.
+
+**Features:**
+- **Thread Management**: View, search, and delete conversation threads
+- **Authentication**: Protected by `WEB_AUTH_TOKEN`
+- **Read-only Safety**: Prevents thread creation/editing to maintain data integrity
+- **Custom Resource Definition**: Specialized ThreadResource for MastraMemory integration
+
+**Implementation (`admin/index.ts`):**
+```typescript
+export function createAdminJS(agentMemory: MastraMemory): AdminJS {
+  const admin = new AdminJS({
+    resources: [{
+      resource: new ThreadResource(agentMemory),
+      options: {
+        actions: {
+          new: { isVisible: false },    // Disable creation
+          edit: { isVisible: false },   // Disable editing
+          delete: { isVisible: true },  // Enable deletion only
+        },
+      },
+    }],
+    rootPath: '/admin',
+  })
+}
+```
+
+**Thread Resource (`admin/resources/ThreadResource.ts`):**
+- **Custom AdminJS Resource**: Direct integration with MastraMemory
+- **Thread Listing**: Displays thread ID, resource ID, title, and timestamps
+- **Safe Operations**: Only allows viewing and deletion of threads
+- **Search/Filter**: Built-in search and filtering capabilities
+
+### 8. Usage Metrics System (`src/storage/usage.ts`)
+
+Comprehensive usage tracking and Prometheus-compatible metrics API.
+
+**Features:**
+- **Token Usage Tracking**: Records prompt, completion, and total tokens
+- **LibSQL Persistence**: Stores metrics in the unified LibSQL database
+- **Prometheus Format**: Compatible with standard monitoring tools
+- **Performance Optimized**: Indexed queries for efficient metrics retrieval
+
+**Database Schema:**
+```sql
+CREATE TABLE usage_stats (
+  id TEXT PRIMARY KEY,
+  timestamp INTEGER NOT NULL,
+  thread_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  agent_name TEXT NOT NULL,
+  prompt_tokens INTEGER NOT NULL,
+  completion_tokens INTEGER NOT NULL,
+  total_tokens INTEGER NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+**API (`UsageStorage`):**
+```typescript
+class UsageStorage {
+  // Record usage for a conversation response
+  async recordUsage(response, threadId, userId, agentName): Promise<void>
+  
+  // Get aggregated metrics summary
+  async getMetricsSummary(): Promise<MetricsSummary>
+}
+```
+
+**Metrics Output (Prometheus Format):**
+```
+tsuki_token_usage_total{type="total"} 12345
+tsuki_token_usage_total{type="prompt"} 8000
+tsuki_token_usage_total{type="completion"} 4345
+tsuki_messages_total 678
+tsuki_threads_total 90
+```
+
+**Security:**
+- **Localhost Restriction**: `/metrics` endpoint only accessible from localhost
+- **Error Handling**: Graceful fallback to default values on database errors
+- **Performance**: Optimized queries with proper indexing
+
 ## Environment Configuration
 
 **Required Environment Variables:**
@@ -307,6 +430,9 @@ data/                      # Runtime data directory (DATA_DIR env var)
 ├── mastra.db-wal         # SQLite write-ahead log
 ├── rss_feeds.db          # RSS MCP server database
 └── rss_feeds.opml        # RSS feed configuration (OPML format)
+
+# Note: usage_stats table is stored within mastra.db
+# Admin interface accesses thread data through MastraMemory API
 ```
 
 **Configuration:**
