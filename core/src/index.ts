@@ -11,13 +11,8 @@ type AppRuntimeContext = {
 async function createRuntimeContext(): Promise<RuntimeContext<AppRuntimeContext>> {
   const runtimeContext = new RuntimeContext<AppRuntimeContext>()
   
-  try {
-    const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
-    runtimeContext.set('instructions', instructions)
-  } catch (error) {
-    console.warn('Failed to load encrypted prompt, using fallback:', error)
-    runtimeContext.set('instructions', 'You are a helpful chatting agent.')
-  }
+  const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
+  runtimeContext.set('instructions', instructions)
 
   return runtimeContext
 }
