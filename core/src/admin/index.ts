@@ -1,4 +1,4 @@
-import AdminJS from 'adminjs'
+import AdminJS, { ActionContext, ActionResponse, BaseRecord } from 'adminjs'
 import { Router } from 'express'
 import * as AdminJSExpress from '@adminjs/express'
 import { MastraMemory } from '@mastra/core'
@@ -41,9 +41,9 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
               actionType: 'record',
               icon: 'List',
               component: false,
-              handler: async (req, res, context) => {
-                const record = context.record
-                const threadId = record.params?.id
+              handler: (request: unknown, response: unknown, context: ActionContext): ActionResponse => {
+                const record = context.record as BaseRecord
+                const threadId = record.params.id as string
                 console.log(threadId)
                 return {
                   redirectUrl: `/admin/resources/messages?filters.id=${threadId}`,

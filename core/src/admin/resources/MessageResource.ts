@@ -37,10 +37,6 @@ class MessageProperty extends BaseProperty {
     return this.propertyName
   }
 
-  type(): string {
-    return this.propertyType
-  }
-
   isEditable(): boolean {
     return false
   }
@@ -83,7 +79,7 @@ export class MessageResource extends BaseResource {
       new MessageProperty('id', 'string'),
       new MessageProperty('role', 'string'),
       new MessageProperty('user', 'string'),
-      new MessageProperty('chat', 'textarea'),
+      new MessageProperty('chat', 'string'),
       new MessageProperty('timestamp', 'datetime'),
     ]
   }

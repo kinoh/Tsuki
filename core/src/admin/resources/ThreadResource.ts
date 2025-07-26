@@ -34,10 +34,6 @@ class ThreadProperty extends BaseProperty {
     return this.propertyName
   }
 
-  type(): string {
-    return this.propertyType
-  }
-
   isEditable(): boolean {
     return false
   }
@@ -59,21 +55,6 @@ class ThreadRecord extends BaseRecord {
   constructor(private readonly thread: Thread, resource: BaseResource) {
     super(thread, resource)
   }
-
-  params(): Record<string, unknown> {
-    return {
-      id: this.thread.id,
-      resourceId: this.thread.resourceId,
-      title: this.thread.title,
-      createdAt: this.thread.createdAt,
-      updatedAt: this.thread.updatedAt,
-    }
-  }
-
-  id(): string {
-    return this.thread.id
-  }
-
 }
 
 export class ThreadResource extends BaseResource {
