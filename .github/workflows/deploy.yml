@@ -45,6 +45,10 @@ jobs:
       run: task deploy
     - name: Wait for health
       env:
+        DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
         WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
+        PROMPT_PRIVATE_KEY: dummy
+        OPENAI_API_KEY: dummy
+        DIFY_SANDBOX_API_KEY: dummy
       run: task wait
       timeout-minutes: 5
