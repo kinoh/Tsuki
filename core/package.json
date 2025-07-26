@@ -5,6 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "lint": "tsc --noEmit && eslint **/*.ts",
     "test": "echo \"No tests configured yet\" && exit 0",
     "start": "tsx watch --env-file .env ./src/index.ts",
     "start:prod": "tsx ./src/index.ts",
