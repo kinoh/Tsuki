@@ -27,6 +27,15 @@ tasks:
     desc: Restart in production
     cmds:
       - docker compose restart
+  wait:
+    desc: Wait for core service health
+    cmds:
+      - |
+        until [ "$(docker compose ps --format json | jq -r .Health)" == "healthy" ]; do
+          echo "waiting for core service to be healthy..."
+          sleep 5
+        done
+      - echo "Core service is healthy!"
   ps:
     desc: Do ps in production
     cmds:
