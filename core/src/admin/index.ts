@@ -44,7 +44,6 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
               handler: (request: unknown, response: unknown, context: ActionContext): ActionResponse => {
                 const record = context.record as BaseRecord
                 const threadId = record.params.id as string
-                console.log(threadId)
                 return {
                   redirectUrl: `/admin/resources/messages?filters.id=${threadId}`,
                   record: record.toJSON(),
