@@ -50,11 +50,10 @@ function extractTextContent(content: MastraMessageContentV2): string[] {
 export function createResponseMessage(
   message: MastraMessageV2,
   agentName: string,
-  userIdentifier: string,
 ): ResponseMessage {
   return {
     role: message.role,
-    user: message.role === 'user' ? userIdentifier : agentName,
+    user: message.role === 'user' ? (message.resourceId ?? '?') : agentName,
     chat: extractTextContent(message.content),
     timestamp: Math.floor(message.createdAt.getTime() / 1000),
   }

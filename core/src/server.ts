@@ -216,7 +216,7 @@ async function threadByIdHandler(req: express.Request, res: express.Response): P
     // Convert to ResponseMessage format
     const messages: ResponseMessage[] = result.messagesV2.map((message: MastraMessageV2) => {
       const agentName = agent.name
-      return createResponseMessage(message, agentName, userId)
+      return createResponseMessage(message, agentName)
     })
 
     res.json({ messages })
@@ -295,7 +295,7 @@ async function messagesHandler(req: express.Request, res: express.Response): Pro
       // Convert to ResponseMessage format and add to collection
       let threadMessages: ResponseMessage[] = result.messagesV2.map((message: MastraMessageV2) => {
         const agentName = agent.name
-        return createResponseMessage(message, agentName, userId)
+        return createResponseMessage(message, agentName)
       })
 
       if (before !== undefined) {
