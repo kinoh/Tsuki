@@ -22,6 +22,8 @@ npm install              # Install dependencies
 npm start                # Start development server with tsx
 npm run start:prod       # Start production server with tsx
 npm run build            # No build needed - using tsx in production
+npm run lint             # Run TypeScript and ESLint checks
+npm run test:agent       # Test tsuki agent with encrypted prompt support
 
 # Test WebSocket connection
 node scripts/ws_client.js
@@ -153,6 +155,8 @@ The AI agent uses MCP (Model Context Protocol) for tool integration:
 cd core/
 npm test                 # Run test suite
 npm run test:watch       # Run tests in watch mode
+npm run test:agent       # Test tsuki agent functionality with encrypted prompts
+npm run lint             # TypeScript type checking and ESLint validation
 
 # WebSocket testing
 node scripts/ws_client.js
@@ -194,6 +198,11 @@ npm run test             # Run tests
 - `compose.yaml`: Docker service definitions with tsx runtime
 - `Taskfile.yaml`: Development and deployment tasks
 - `doc/mastra-backend-implementation.md`: Detailed implementation documentation
+
+### Testing & Quality Assurance
+- `core/scripts/test_agent.js`: Standalone agent testing script with encrypted prompt support
+- `core/scripts/test_agent.yaml`: Test conversation scenarios for agent validation
+- ESLint configuration with TypeScript support for code quality enforcement
 
 ## HTTP API Endpoints
 
