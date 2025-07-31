@@ -7,6 +7,7 @@
   "scripts": {
     "lint": "tsc --noEmit && eslint **/*.ts",
     "test": "echo \"No tests configured yet\" && exit 0",
+    "test:agent": "tsx --env-file .env ./scripts/test_agent.js",
     "start": "tsx watch --env-file .env ./src/index.ts",
     "start:prod": "tsx ./src/index.ts",
     "build": "echo 'No build needed - using tsx in production'",
