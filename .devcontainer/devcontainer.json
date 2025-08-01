@@ -1,10 +1,6 @@
-// https://github.com/devcontainers/templates/blob/main/src/rust/.devcontainer/devcontainer.json
 {
-	"name": "Rust",
+	"name": "tsuki",
 	"workspaceFolder": "/workspace",
     "dockerComposeFile": ["../compose.yaml", "./compose.yaml"],
-    "service": "app",
-    "containerEnv": {
-        "GIT_HASH": "current"
-    }
+    "service": "core"
 }

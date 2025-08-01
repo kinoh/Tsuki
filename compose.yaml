@@ -3,18 +3,18 @@ name: tsuki
 services:
   # TypeScript/Mastra-based backend (replacing Rust app)
   core:
-    image: tsuki-core:${GIT_HASH:?}
+    image: tsuki-core:${GIT_HASH}
     build:
       context: .
       dockerfile: docker/core/Dockerfile
       target: runtime
       args:
-        GIT_HASH: ${GIT_HASH:?}
+        GIT_HASH: ${GIT_HASH}
     environment:
       NODE_ENV: production
-      WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN:?}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?}
-      PROMPT_PRIVATE_KEY: ${PROMPT_PRIVATE_KEY:?}
+      WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PROMPT_PRIVATE_KEY: ${PROMPT_PRIVATE_KEY}
       DATA_DIR: /data
       OPENAI_MODEL: gpt-4.1
       AGENT_NAME: tsuki

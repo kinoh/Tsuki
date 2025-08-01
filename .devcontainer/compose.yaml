@@ -1,17 +1,18 @@
 services:
-  app:
+  core:
     image: tsuki-dev
     build:
       context: .devcontainer/
       dockerfile: Dockerfile
+      args:
+        GIT_HASH: local
     command: []
     volumes:
       - .:/workspace:cached
       - devcontainer-data:/home/vscode:cached
     network_mode: host
-  mumble-server:
-    environment:
-      MUMBLE_VERBOSE: true
+    stdin_open: true
+    tty: true
 
 volumes:
   devcontainer-data:
