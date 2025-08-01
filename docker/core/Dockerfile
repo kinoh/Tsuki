@@ -12,8 +12,9 @@ RUN addgroup -g 1001 -S nodejs && \
     adduser -S tsuki -u "${UID}" -G nodejs
 
 # Install production dependencies with correct ownership
-COPY --chown=tsuki:nodejs core/package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY --chown=tsuki:nodejs core/package*.json core/pnpm-lock.yaml ./
+COPY --chown=tsuki:nodejs core/.pnpmrc ./
+RUN corepack enable pnpm && pnpm install --prod --frozen-lockfile && pnpm rebuild better-sqlite3
 
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
@@ -30,6 +31,7 @@ USER tsuki
 RUN node scripts/generate_opml.js /data/rss_feeds.opml
 
 # Set environment variables
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 ENV NODE_ENV=production
 ENV PORT=2953
 
@@ -45,4 +47,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 EXPOSE 2953
 
 # Start the application with tsx
-CMD ["npm", "run", "start:prod"]
+CMD ["pnpm", "run", "start:prod"]

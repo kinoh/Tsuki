@@ -19,19 +19,30 @@ export class WebSocketManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private runtimeContext: RuntimeContext<any>
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(agent: Agent<string, any, any>, runtimeContext: RuntimeContext<any>) {
+  private constructor(
+    agent: Agent<string, any, any>, 
+    runtimeContext: RuntimeContext<any>,
+    conversation: ConversationManager,
+    usageStorage: UsageStorage,
+  ) {
     this.agent = agent
     this.runtimeContext = runtimeContext
-    const memory = agent.getMemory()
+    this.conversation = conversation
+    this.usageStorage = usageStorage
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static async create(agent: Agent<string, any, any>, runtimeContext: RuntimeContext<any>): Promise<WebSocketManager> {
+    const memory = await agent.getMemory()
     if (!memory) {
       throw new Error('Agent must have memory configured for WebSocket functionality')
     }
-    this.conversation = new ConversationManager(memory)
-
-    // Initialize usage storage with shared LibSQL store from mastra
-    this.usageStorage = new UsageStorage(memory.storage)
-    void this.usageStorage.initTable()
+    
+    const conversation = new ConversationManager(memory)
+    const usageStorage = new UsageStorage(memory.storage)
+    await usageStorage.initTable()
+    
+    return new WebSocketManager(agent, runtimeContext, conversation, usageStorage)
   }
 
   handleConnection(ws: WebSocket, req: IncomingMessage): void {

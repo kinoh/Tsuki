@@ -9,11 +9,11 @@ import { createAdminRouter } from '../admin/index.js'
 import { setupRoutes } from './routes/index.js'
 import { AppRuntimeContext } from './types.js'
 
-export function serve(
+export async function serve(
   agent: Agent,
   runtimeContext: RuntimeContext<AppRuntimeContext>,
-): void {
-  const agentMemory = agent.getMemory()
+): Promise<void> {
+  const agentMemory = await agent.getMemory()
 
   if (!agentMemory) {
     throw new Error('Agent must have memory configured')
@@ -49,15 +49,13 @@ export function serve(
   // Create HTTP server and WebSocket server
   const server = http.createServer(app)
   const wss = new WebSocketServer({ server })
-  const wsmanager = new WebSocketManager(agent, runtimeContext)
+  const wsmanager = await WebSocketManager.create(agent, runtimeContext)
 
   wss.on('connection', (ws, req) => {
     wsmanager.handleConnection(ws, req)
   })
 
   server.listen(2953, () =>
-    console.log(`
-🚀 Server ready at: http://localhost:2953
-`),
+    console.log('\n🚀 Server ready at: http://localhost:2953\n'),
   )
 }

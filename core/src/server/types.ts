@@ -4,7 +4,7 @@ export type AppRuntimeContext = {
   instructions: string
 }
 
-export type AgentMemory = NonNullable<ReturnType<Agent['getMemory']>>
+export type AgentMemory = NonNullable<Awaited<ReturnType<Agent['getMemory']>>>
 
 export interface Thread {
   id: string

@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   const agent = mastra.getAgent('tsuki')
   const runtimeContext = await createRuntimeContext()
 
-  serve(agent, runtimeContext)
+  await serve(agent, runtimeContext)
 }
 
 main().catch(console.error)
