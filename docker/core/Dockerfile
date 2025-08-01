@@ -18,15 +18,21 @@ ARG UID=10001
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S tsuki -u "${UID}" -G nodejs
 
-# Install production dependencies with correct ownership
-COPY --chown=tsuki:nodejs core/package*.json core/pnpm-lock.yaml ./
-COPY --chown=tsuki:nodejs core/.pnpmrc ./
+# Create data directory and set app directory ownership
+RUN mkdir -p /data && chown -R tsuki:nodejs /data /app
 
 # Set environment for proper native module compilation
 ENV NODE_ENV=production
 ENV npm_config_build_from_source=true
 
-# Install dependencies as root to ensure proper native module compilation
+# Switch to non-root user before installing dependencies
+USER tsuki
+
+# Install production dependencies with correct ownership
+COPY --chown=tsuki:nodejs core/package*.json core/pnpm-lock.yaml ./
+COPY --chown=tsuki:nodejs core/.pnpmrc ./
+
+# Install dependencies as non-root user (pnpm handles native modules correctly)
 RUN pnpm install --prod --frozen-lockfile
 
 # Allow build scripts for native modules
@@ -38,19 +44,10 @@ RUN pnpm rebuild better-sqlite3 && \
     pnpm rebuild bindings && \
     pnpm rebuild prebuild-install
 
-# Change ownership of node_modules to the non-root user
-RUN chown -R tsuki:nodejs node_modules/
-
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
 COPY --chown=tsuki:nodejs core/tsconfig.json ./
 COPY --chown=tsuki:nodejs core/scripts/generate_opml.js ./scripts/
-
-# Create data directory with correct ownership
-RUN mkdir -p /data && chown -R tsuki:nodejs /data
-
-# Switch to non-root user
-USER tsuki
 
 # Generate OPML file during build
 RUN node scripts/generate_opml.js /data/rss_feeds.opml
