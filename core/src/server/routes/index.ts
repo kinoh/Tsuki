@@ -1,8 +1,8 @@
 import express from 'express'
-import { authMiddleware, internalOnlyMiddleware } from '../middleware/index.js'
-import { threadsHandler, threadByIdHandler, messagesHandler } from './threads.js'
-import { metricsHandler } from './metrics.js'
-import { metadataHandler } from './metadata.js'
+import { authMiddleware, internalOnlyMiddleware } from '../middleware/index'
+import { threadsHandler, threadByIdHandler, messagesHandler } from './threads'
+import { metricsHandler } from './metrics'
+import { metadataHandler } from './metadata'
 
 function rootHandler(req: express.Request, res: express.Response): void {
   res.json({

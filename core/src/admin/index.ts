@@ -2,8 +2,8 @@ import AdminJS, { ActionContext, ActionResponse, BaseRecord } from 'adminjs'
 import { Router } from 'express'
 import * as AdminJSExpress from '@adminjs/express'
 import { MastraMemory } from '@mastra/core'
-import { ThreadResource } from './resources/ThreadResource.js'
-import { MessageResource } from './resources/MessageResource.js'
+import { ThreadResource } from './resources/ThreadResource'
+import { MessageResource } from './resources/MessageResource'
 
 export function createAdminJS(agentMemory: MastraMemory): AdminJS {
   const admin = new AdminJS({

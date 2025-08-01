@@ -1,2 +1,2 @@
-export { authMiddleware } from './auth.js'
-export { internalOnlyMiddleware } from './internal.js'
+export { authMiddleware } from './auth'
+export { internalOnlyMiddleware } from './internal'

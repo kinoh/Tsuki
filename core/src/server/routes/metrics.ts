@@ -1,5 +1,5 @@
 import express from 'express'
-import { UsageStorage } from '../../storage/usage.js'
+import { UsageStorage } from '../../storage/usage'
 
 export async function metricsHandler(req: express.Request, res: express.Response): Promise<void> {
   try {

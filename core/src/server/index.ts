@@ -4,10 +4,10 @@ import http from 'http'
 import { WebSocketServer } from 'ws'
 import { RuntimeContext } from '@mastra/core/di'
 import { Agent } from '@mastra/core'
-import { WebSocketManager } from '../websocket.js'
-import { createAdminRouter } from '../admin/index.js'
-import { setupRoutes } from './routes/index.js'
-import { AppRuntimeContext } from './types.js'
+import { WebSocketManager } from '../websocket'
+import { createAdminRouter } from '../admin/index'
+import { setupRoutes } from './routes/index'
+import { AppRuntimeContext } from './types'
 
 export async function serve(
   agent: Agent,

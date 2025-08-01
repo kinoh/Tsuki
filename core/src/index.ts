@@ -1,8 +1,8 @@
 import { RuntimeContext } from '@mastra/core/di'
 import { mastra } from './mastra/index'
 import { loadPromptFromEnv } from './prompt'
-import { serve } from './server/index.js'
-import { AppRuntimeContext } from './server/types.js'
+import { serve } from './server/index'
+import { AppRuntimeContext } from './server/types'
 
 // Function to create runtime context with encrypted prompt
 async function createRuntimeContext(): Promise<RuntimeContext<AppRuntimeContext>> {
