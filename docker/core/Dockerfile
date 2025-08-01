@@ -35,14 +35,8 @@ COPY --chown=tsuki:nodejs core/.pnpmrc ./
 # Install dependencies as non-root user (pnpm handles native modules correctly)
 RUN pnpm install --prod --frozen-lockfile
 
-# Allow build scripts for native modules
-RUN pnpm config set script-shell /bin/sh && \
-    pnpm exec pnpm approve-builds better-sqlite3 bufferutil esbuild protobufjs utf-8-validate || true
-
-# Explicitly rebuild native modules to ensure proper bindings  
-RUN pnpm rebuild better-sqlite3 && \
-    pnpm rebuild bindings && \
-    pnpm rebuild prebuild-install
+# Allow build scripts for native modules (pnpm will handle better-sqlite3 automatically)
+RUN pnpm config set script-shell /bin/sh
 
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
