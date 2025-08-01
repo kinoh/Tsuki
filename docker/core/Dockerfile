@@ -3,8 +3,15 @@ FROM node:22-alpine AS runtime
 
 WORKDIR /app
 
-# Install build dependencies for native modules
-RUN apk add --no-cache python3 make g++ sqlite
+# Install build dependencies for native modules and tools
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    sqlite \
+    sqlite-dev \
+    npm \
+    && corepack enable pnpm
 
 # Create non-root user for security first
 ARG UID=10001
@@ -14,7 +21,25 @@ RUN addgroup -g 1001 -S nodejs && \
 # Install production dependencies with correct ownership
 COPY --chown=tsuki:nodejs core/package*.json core/pnpm-lock.yaml ./
 COPY --chown=tsuki:nodejs core/.pnpmrc ./
-RUN corepack enable pnpm && pnpm install --prod --frozen-lockfile && pnpm rebuild better-sqlite3
+
+# Set environment for proper native module compilation
+ENV NODE_ENV=production
+ENV npm_config_build_from_source=true
+
+# Install dependencies as root to ensure proper native module compilation
+RUN pnpm install --prod --frozen-lockfile
+
+# Allow build scripts for native modules
+RUN pnpm config set script-shell /bin/sh && \
+    pnpm exec pnpm approve-builds better-sqlite3 bufferutil esbuild protobufjs utf-8-validate || true
+
+# Explicitly rebuild native modules to ensure proper bindings  
+RUN pnpm rebuild better-sqlite3 && \
+    pnpm rebuild bindings && \
+    pnpm rebuild prebuild-install
+
+# Change ownership of node_modules to the non-root user
+RUN chown -R tsuki:nodejs node_modules/
 
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
@@ -32,7 +57,6 @@ RUN node scripts/generate_opml.js /data/rss_feeds.opml
 
 # Set environment variables
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-ENV NODE_ENV=production
 ENV PORT=2953
 
 # Build arguments for versioning
