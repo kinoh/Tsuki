@@ -18,12 +18,12 @@ Tsuki is a kawaii chat agent built with TypeScript/Mastra that provides:
 ### Main Application (TypeScript/Mastra)
 ```bash
 cd core/
-npm install              # Install dependencies
-npm start                # Start development server with tsx
-npm run start:prod       # Start production server with tsx
-npm run build            # No build needed - using tsx in production
-npm run lint             # Run TypeScript and ESLint checks
-npm run test:agent       # Test tsuki agent with encrypted prompt support
+pnpm install             # Install dependencies
+pnpm start               # Start development server with tsx
+pnpm run start:prod      # Start production server with tsx
+pnpm run build           # No build needed - using tsx in production
+pnpm run lint            # Run TypeScript and ESLint checks
+pnpm run test:agent      # Test tsuki agent with encrypted prompt support
 
 # Test WebSocket connection
 node scripts/ws_client.js
@@ -58,10 +58,10 @@ docker ps            # List running containers
 docker compose ps    # List compose services
 
 # Execute commands in containers
-docker compose exec core npm run build                 # Build in container
-docker compose exec core npm test                      # Run tests in container
-docker compose exec core npm start                     # Run application in container
-docker compose exec core bash                          # Interactive shell in core container
+docker compose exec core pnpm run build               # Build in container
+docker compose exec core pnpm test                    # Run tests in container
+docker compose exec core pnpm start                   # Run application in container
+docker compose exec core bash                         # Interactive shell in core container
 
 # Service-specific operations
 docker compose logs core                                # View core logs
@@ -153,10 +153,10 @@ The AI agent uses MCP (Model Context Protocol) for tool integration:
 ```bash
 # Core application tests
 cd core/
-npm test                 # Run test suite
-npm run test:watch       # Run tests in watch mode
-npm run test:agent       # Test tsuki agent functionality with encrypted prompts
-npm run lint             # TypeScript type checking and ESLint validation
+pnpm test                # Run test suite
+pnpm run test:watch      # Run tests in watch mode
+pnpm run test:agent      # Test tsuki agent functionality with encrypted prompts
+pnpm run lint            # TypeScript type checking and ESLint validation
 
 # WebSocket testing
 node scripts/ws_client.js
