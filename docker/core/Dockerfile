@@ -31,6 +31,7 @@ USER tsuki
 # Install production dependencies with correct ownership
 COPY --chown=tsuki:nodejs core/package*.json core/pnpm-lock.yaml ./
 COPY --chown=tsuki:nodejs core/.pnpmrc ./
+COPY --chown=tsuki:nodejs core/patches/ ./patches/
 
 # Install dependencies as non-root user (pnpm handles native modules correctly)
 RUN pnpm install --prod --frozen-lockfile
