@@ -1,0 +1,35 @@
+diff --git a/lib/buildRouter.js b/lib/buildRouter.js
+index 3bfdd1560867ecb935a63b830b101d2568157265..e7c0e6b2f5650ee3836cd391700681e9c9dfd995 100644
+--- a/lib/buildRouter.js
++++ b/lib/buildRouter.js
+@@ -2,6 +2,9 @@ import { Router as AdminRouter } from "adminjs";
+ import { Router } from "express";
+ import formidableMiddleware from "express-formidable";
+ import path from "path";
++import { createRequire } from "node:module";
++import fs from "fs";
++import mime from "mime-types";
+ import { WrongArgumentError } from "./errors.js";
+ import { log } from "./logger.js";
+ import { convertToExpressRoute } from "./convertRoutes.js";
+@@ -56,9 +59,19 @@ export const buildAssets = ({ admin, assets, routes, router, }) => {
+     if (componentBundlerRoute) {
+         buildRoute({ route: componentBundlerRoute, router, admin });
+     }
++    const require = createRequire(import.meta.url);
+     assets.forEach((asset) => {
+         router.get(asset.path, async (_req, res) => {
+-            res.sendFile(path.resolve(asset.src));
++            try {
++                const resolvedPath = require.resolve(asset.src);
++                const content = fs.readFileSync(resolvedPath);
++                const contentType = mime.lookup(resolvedPath) || 'application/octet-stream';
++                res.set('Content-Type', contentType);
++                res.send(content);
++            } catch (err) {
++                // Fallback to original behavior
++                res.sendFile(path.resolve(asset.src));
++            }
+         });
+     });
+ };
