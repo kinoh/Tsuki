@@ -37,7 +37,6 @@ export default tseslint.config(
       'no-extra-semi': 'error',
       'no-unexpected-multiline': 'error',
       'no-unreachable': 'error',
-      'no-unused-vars': 'error',
       'object-curly-spacing': ['error', 'always'],
       'quotes': ['error', 'single'],
       'semi-spacing': ['error', {'after': true, 'before': false}],
