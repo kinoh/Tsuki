@@ -8,4 +8,5 @@ dist
 *.db-*
 .adminjs/
 
+data/
 src/prompts/initial.txt

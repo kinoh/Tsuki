@@ -5,9 +5,12 @@ import { WebSocket } from 'ws'
 import { ConversationManager } from './conversation'
 import { ResponseMessage } from './message'
 import { UsageStorage } from './storage/usage'
+import { getDynamicMCP } from './mastra/mcp'
+import { MCPClient } from '@mastra/mcp'
 
 interface WebSocketClient {
-  user: string
+  user: string,
+  mcp: MCPClient,
 }
 
 export class WebSocketManager {
@@ -81,10 +84,14 @@ export class WebSocketManager {
         return
       }
 
+      console.log(`User authenticated: ${user}`)
+
       this.clients.set(ws, {
         user,
+        mcp: getDynamicMCP(async (server: string, url: string) => {
+          await this.handleMCPAuth(ws, server, url)
+        }),
       })
-      console.log(`User authenticated: ${user}`)
       return
     }
 
@@ -98,6 +105,15 @@ export class WebSocketManager {
     this.sendToClient(ws, userResponse)
 
     await this.processMessage(ws, client, message)
+  }
+
+  private async handleMCPAuth(ws: WebSocket, server: string, url: string): Promise<void> {
+    this.sendToClient(ws, {
+      role: 'user',
+      user: '',
+      chat: [`Please authenticate with ${server} at ${url}`],
+      timestamp: Math.floor(Date.now() / 1000),
+    })
   }
 
   private async processMessage(ws: WebSocket, client: WebSocketClient, message: string): Promise<void> {
@@ -121,6 +137,7 @@ export class WebSocketManager {
           },
         },
         runtimeContext: this.runtimeContext,
+        toolsets: await client.mcp.getToolsets(),
       })
 
       console.log(`response id: ${response.response.id}`)
