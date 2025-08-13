@@ -100,8 +100,9 @@ export class WebSocketManager {
 
       this.clients.set(ws, {
         user,
+        // eslint-disable-next-line @typescript-eslint/require-await
         mcp: getDynamicMCP(async (server: string, url: string) => {
-          await this.handleMCPAuth(ws, server, url)
+          this.handleMCPAuth(ws, server, url)
         }),
       })
       return
@@ -119,7 +120,7 @@ export class WebSocketManager {
     await this.processMessage(ws, client, message)
   }
 
-  private async handleMCPAuth(ws: WebSocket, server: string, url: string): Promise<void> {
+  private handleMCPAuth(ws: WebSocket, server: string, url: string): void {
     this.sendToClient(ws, {
       role: 'user',
       user: '',

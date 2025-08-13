@@ -1,4 +1,4 @@
-import { MCPClient, MultiServerTokenStorage, TokenStorageFactory } from '@mastra/mcp'
+import { MCPClient } from '@mastra/mcp'
 
 // Use same data directory for MCP server data
 const dataDir = process.env.DATA_DIR ?? './data'
