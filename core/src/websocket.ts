@@ -66,10 +66,22 @@ export class WebSocketManager {
       })()
     })
     ws.on('close', () => {
+      const client = this.clients.get(ws)
+      if (client !== undefined) {
+        void (async () : Promise<void> => {
+          await client.mcp.disconnect()
+        })()
+      }
       this.clients.delete(ws)
     })
     ws.on('error', (error) => {
       console.error('WebSocket error:', error)
+      const client = this.clients.get(ws)
+      if (client !== undefined) {
+        void (async () : Promise<void> => {
+          await client.mcp.disconnect()
+        })()
+      }
       this.clients.delete(ws)
     })
   }
