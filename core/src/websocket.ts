@@ -8,13 +8,23 @@ import { UsageStorage } from './storage/usage'
 import { getDynamicMCP } from './mastra/mcp'
 import { MCPClient } from '@mastra/mcp'
 
-interface WebSocketClient {
-  user: string,
-  mcp: MCPClient,
+class ClientConnection {
+  constructor(
+    public readonly user: string,
+    public readonly ws: WebSocket,
+    public readonly mcp: MCPClient,
+  ) {}
+
+  async disconnect(): Promise<void> {
+    await this.mcp.disconnect()
+    if (this.ws.readyState === WebSocket.OPEN) {
+      this.ws.close()
+    }
+  }
 }
 
 export class WebSocketManager {
-  private clients = new Map<WebSocket, WebSocketClient>()
+  private clients = new Map<WebSocket, ClientConnection>()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private agent: Agent<string, any, any>
   private conversation: ConversationManager
@@ -68,8 +78,8 @@ export class WebSocketManager {
     ws.on('close', () => {
       const client = this.clients.get(ws)
       if (client !== undefined) {
-        void (async () : Promise<void> => {
-          await client.mcp.disconnect()
+        void (async (): Promise<void> => {
+          await client.disconnect()
         })()
       }
       this.clients.delete(ws)
@@ -78,8 +88,8 @@ export class WebSocketManager {
       console.error('WebSocket error:', error)
       const client = this.clients.get(ws)
       if (client !== undefined) {
-        void (async () : Promise<void> => {
-          await client.mcp.disconnect()
+        void (async (): Promise<void> => {
+          await client.disconnect()
         })()
       }
       this.clients.delete(ws)
@@ -98,13 +108,13 @@ export class WebSocketManager {
 
       console.log(`User authenticated: ${user}`)
 
-      this.clients.set(ws, {
-        user,
+      const mcp = getDynamicMCP(
         // eslint-disable-next-line @typescript-eslint/require-await
-        mcp: getDynamicMCP(async (server: string, url: string) => {
+        async (server: string, url: string) => {
           this.handleMCPAuth(ws, server, url)
-        }),
-      })
+        },
+      )
+      this.clients.set(ws, new ClientConnection(user, ws, mcp))
       return
     }
 
@@ -129,7 +139,7 @@ export class WebSocketManager {
     })
   }
 
-  private async processMessage(ws: WebSocket, client: WebSocketClient, message: string): Promise<void> {
+  private async processMessage(ws: WebSocket, client: ClientConnection, message: string): Promise<void> {
     try {
       const formattedMessage = JSON.stringify({
         modality: 'Text',
