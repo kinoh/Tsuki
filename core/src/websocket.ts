@@ -109,6 +109,7 @@ export class WebSocketManager {
       console.log(`User authenticated: ${user}`)
 
       const mcp = getDynamicMCP(
+        user,
         // eslint-disable-next-line @typescript-eslint/require-await
         async (server: string, url: string) => {
           this.handleMCPAuth(ws, server, url)
