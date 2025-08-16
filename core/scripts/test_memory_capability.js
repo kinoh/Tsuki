@@ -120,7 +120,12 @@ async function createExternalStorage(instructions) {
     instructions: ({ runtimeContext }) => {
       const contextInstructions = runtimeContext.get('instructions')
       const baseInstructions = contextInstructions || instructions
-      return baseInstructions + '\\n\\nYou have access to Notion tools for external memory storage. Use create-pages to save important information and search to retrieve it.'
+      return baseInstructions
+        + '\\n\\n'
+        + 'Record any necessary information in Notion\n'
+        + 'Use page ID 25105ae56ba9804db4bdeb67a2c9771c\n'
+        + 'Use bullet points as basic structure\n'
+        + 'You can also organize your information by dividing the page into sections or creating subpages'
     },
     model: openai(openAiModel),
     memory,
@@ -144,13 +149,17 @@ async function createWorkingMemory(instructions) {
     }),
     embedder: openai.embedding('text-embedding-3-small'),
     options: {
-      lastMessages: 3, // Same as other patterns
+      lastMessages: 3,
       semanticRecall: {
         topK: 5,
         messageRange: 2,
         scope: 'resource',
       },
-      workingMemory: true, // Enable Mastra's working memory
+      workingMemory: {
+        enabled: true,
+        scope: 'thread',
+        template: '## Memo\n',
+      },
     },
   })
 
@@ -159,7 +168,11 @@ async function createWorkingMemory(instructions) {
     instructions: ({ runtimeContext }) => {
       const contextInstructions = runtimeContext.get('instructions')
       const baseInstructions = contextInstructions || instructions
-      return baseInstructions + '\\n\\nYou have enhanced working memory capabilities that help you remember information within conversations.'
+      return baseInstructions
+        + '\\n\\n'
+        + 'You have working memory capabilities that help you remember any necessary information\n'
+        + 'Use bullet points as basic structure\n'
+        + 'You can also organize your information by dividing into sections'
     },
     model: openai(openAiModel),
     memory,
