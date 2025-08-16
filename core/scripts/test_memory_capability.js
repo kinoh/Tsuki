@@ -15,7 +15,6 @@ import { openai } from '@ai-sdk/openai'
 import { Agent } from '@mastra/core/agent'
 import { Memory } from '@mastra/memory'
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql'
-import { MCPClient } from '@mastra/mcp'
 
 // Load environment variables
 dotenv.config()
@@ -105,7 +104,7 @@ async function createExternalStorage(instructions) {
     }),
     embedder: openai.embedding('text-embedding-3-small'),
     options: {
-      lastMessages: 3, // Same as Pattern A
+      lastMessages: 3,
       semanticRecall: {
         topK: 5,
         messageRange: 2,
