@@ -74,7 +74,7 @@ async function createSemanticMemory(instructions) {
       semanticRecall: {
         topK: 5,
         messageRange: 2,
-        scope: 'resource',
+        scope: 'thread',
       },
     },
   })
@@ -108,7 +108,7 @@ async function createExternalStorage(instructions) {
       semanticRecall: {
         topK: 5,
         messageRange: 2,
-        scope: 'resource',
+        scope: 'thread',
       },
     },
   })
@@ -153,7 +153,7 @@ async function createWorkingMemory(instructions) {
       semanticRecall: {
         topK: 5,
         messageRange: 2,
-        scope: 'resource',
+        scope: 'thread',
       },
       workingMemory: {
         enabled: true,
@@ -182,7 +182,7 @@ async function createWorkingMemory(instructions) {
 /**
  * Execute single test with an agent
  */
-async function executeTest(agent, message, context, testName) {
+async function executeTest(agent, message, context, threadId) {
   console.log(`    💬 Input: "${message}"`)
   
   try {
@@ -195,7 +195,7 @@ async function executeTest(agent, message, context, testName) {
       runtimeContext: context,
       memory: {
         resource: testUserId,
-        thread: `test_${testName}_${Date.now()}`,
+        thread: threadId,
         options: {
           lastMessages: 3, // Consistent with agent config
         },
@@ -271,13 +271,16 @@ async function runMemoryTests() {
       console.log(`🧪 Testing ${pattern.name}`)
       console.log(`${'='.repeat(60)}`)
 
+      // Generate consistent thread ID for this pattern across all phases
+      const patternThreadId = `test_${pattern.name}_${Date.now()}`
+
       // Phase 1: Memory Input
       console.log('📚 Phase 1: Memory Input')
       await executeTest(
         pattern.agent,
         scenarios.memory_test.memory_input,
         runtimeContext,
-        `${pattern.name.replace(/\\s+/g, '_')}_memory`
+        patternThreadId
       )
 
       // Small delay between phases
@@ -293,7 +296,7 @@ async function runMemoryTests() {
           pattern.agent,
           filler,
           runtimeContext,
-          `${pattern.name.replace(/\\s+/g, '_')}_filler_${i}`
+          patternThreadId
         )
 
         // Short delay between fillers
@@ -309,7 +312,7 @@ async function runMemoryTests() {
         pattern.agent,
         test.query,
         runtimeContext,
-        `${pattern.name.replace(/\\s+/g, '_')}_recall`
+        patternThreadId
       )
 
       // Check if expected keywords are present
