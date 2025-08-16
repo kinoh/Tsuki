@@ -58,10 +58,10 @@ async function loadTestScenarios() {
 }
 
 /**
- * Pattern A: Mastra Memory Only
+ * Semantic Memory: Mastra Memory Only
  * lastMessages=3, semanticRecall enabled
  */
-async function createPatternA(instructions) {
+async function createSemanticMemory(instructions) {
   const memory = new Memory({
     storage: new LibSQLStore({
       url: dbPath,
@@ -81,7 +81,7 @@ async function createPatternA(instructions) {
   })
 
   return new Agent({
-    name: 'Pattern-A-Memory-Only',
+    name: 'semantic-memory',
     instructions: ({ runtimeContext }) => {
       const contextInstructions = runtimeContext.get('instructions')
       return contextInstructions || instructions
@@ -92,10 +92,10 @@ async function createPatternA(instructions) {
 }
 
 /**
- * Pattern B: Mastra Memory + Notion MCP
+ * External Storage: Mastra Memory + Notion MCP
  * lastMessages=3, semanticRecall + Notion external storage
  */
-async function createPatternB(instructions) {
+async function createExternalStorage(instructions) {
   const memory = new Memory({
     storage: new LibSQLStore({
       url: dbPath,
@@ -117,7 +117,7 @@ async function createPatternB(instructions) {
   const { getDynamicMCP } = await import('../src/mastra/mcp.ts')
 
   return new Agent({
-    name: 'Pattern-B-Memory-Plus-Notion',
+    name: 'external-storage',
     instructions: ({ runtimeContext }) => {
       const contextInstructions = runtimeContext.get('instructions')
       const baseInstructions = contextInstructions || instructions
@@ -132,10 +132,10 @@ async function createPatternB(instructions) {
 }
 
 /**
- * Pattern C: Mastra Memory + Working Memory
+ * Working Memory: Mastra Memory + Working Memory
  * lastMessages=3, semanticRecall + workingMemory enabled
  */
-async function createPatternC(instructions) {
+async function createWorkingMemory(instructions) {
   const memory = new Memory({
     storage: new LibSQLStore({
       url: dbPath,
@@ -156,7 +156,7 @@ async function createPatternC(instructions) {
   })
 
   return new Agent({
-    name: 'Pattern-C-Memory-Plus-Working',
+    name: 'working-memory',
     instructions: ({ runtimeContext }) => {
       const contextInstructions = runtimeContext.get('instructions')
       const baseInstructions = contextInstructions || instructions
@@ -241,41 +241,32 @@ async function runMemoryTests() {
 
     // Create agents for each pattern
     console.log('🔧 Creating test agents...')
-    const patternA = await createPatternA(instructions)
-    const patternB = await createPatternB(instructions)
-    const patternC = await createPatternC(instructions)
+    const semanticMemory = await createSemanticMemory(instructions)
+    const externalStorage = await createExternalStorage(instructions)
+    const workingMemory = await createWorkingMemory(instructions)
 
     const patterns = [
-      { name: 'Pattern A (Memory Only)', agent: patternA },
-      { name: 'Pattern B (Memory + Notion)', agent: patternB },
-      { name: 'Pattern C (Memory + Working)', agent: patternC },
+      { name: 'semantic-memory', agent: semanticMemory },
+      { name: 'external-storage', agent: externalStorage },
+      { name: 'working-memory', agent: workingMemory },
     ]
 
     console.log('')
 
     // Test each pattern
-    const results = {}
-
     for (const pattern of patterns) {
       console.log(`${'='.repeat(60)}`)
       console.log(`🧪 Testing ${pattern.name}`)
       console.log(`${'='.repeat(60)}`)
 
-      const patternResults = {
-        memoryInput: null,
-        fillers: [],
-        recallTests: [],
-      }
-
       // Phase 1: Memory Input
       console.log('📚 Phase 1: Memory Input')
-      const memoryResult = await executeTest(
+      await executeTest(
         pattern.agent,
         scenarios.memory_test.memory_input,
         runtimeContext,
         `${pattern.name.replace(/\\s+/g, '_')}_memory`
       )
-      patternResults.memoryInput = memoryResult
 
       // Small delay between phases
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -286,87 +277,46 @@ async function runMemoryTests() {
         const filler = scenarios.memory_test.fillers[i]
         console.log(`  Filler ${i + 1}/${scenarios.memory_test.fillers.length}`)
         
-        const fillerResult = await executeTest(
+        await executeTest(
           pattern.agent,
           filler,
           runtimeContext,
           `${pattern.name.replace(/\\s+/g, '_')}_filler_${i}`
         )
-        patternResults.fillers.push(fillerResult)
 
         // Short delay between fillers
         await new Promise(resolve => setTimeout(resolve, 100))
       }
 
-      // Phase 3: Recall Tests
-      console.log('\\n🧠 Phase 3: Memory Recall Tests')
-      for (let i = 0; i < scenarios.memory_test.recall_tests.length; i++) {
-        const test = scenarios.memory_test.recall_tests[i]
-        console.log(`  Recall Test ${i + 1}/${scenarios.memory_test.recall_tests.length}: ${test.description}`)
-        
-        const recallResult = await executeTest(
-          pattern.agent,
-          test.query,
-          runtimeContext,
-          `${pattern.name.replace(/\\s+/g, '_')}_recall_${i}`
-        )
+      // Phase 3: Memory Recall Test
+      console.log('\\n🧠 Phase 3: Memory Recall Test')
+      const test = scenarios.memory_test.recall_test
+      console.log(`  Query: ${test.query}`)
+      
+      const recallResult = await executeTest(
+        pattern.agent,
+        test.query,
+        runtimeContext,
+        `${pattern.name.replace(/\\s+/g, '_')}_recall`
+      )
 
-        // Check if expected keywords are present
-        const responseText = recallResult.response.toLowerCase()
-        const foundKeywords = test.expected_keywords.filter(keyword => 
-          responseText.includes(keyword.toLowerCase())
-        )
+      // Check if expected keywords are present
+      const responseText = recallResult.response.toLowerCase()
+      const foundKeywords = test.expected_keywords.filter(keyword => 
+        responseText.includes(keyword.toLowerCase())
+      )
 
-        recallResult.expectedKeywords = test.expected_keywords
-        recallResult.foundKeywords = foundKeywords
-        recallResult.keywordMatch = foundKeywords.length > 0
+      const keywordMatch = foundKeywords.length > 0
+      
+      console.log(`  📊 Expected Keywords: [${test.expected_keywords.join(', ')}]`)
+      console.log(`  🔍 Found Keywords: [${foundKeywords.join(', ')}]`)
+      console.log(`  ${keywordMatch ? '✅ SUCCESS' : '❌ FAILED'}: Keyword matching`)
 
-        patternResults.recallTests.push(recallResult)
-
-        // Delay between recall tests
-        await new Promise(resolve => setTimeout(resolve, 100))
-      }
-
-      results[pattern.name] = patternResults
-      console.log('')
     }
 
-    // Generate summary report
-    console.log('\\n' + '='.repeat(80))
-    console.log('📊 MEMORY CAPABILITY TEST SUMMARY')
-    console.log('='.repeat(80))
-
-    for (const [patternName, patternResults] of Object.entries(results)) {
-      console.log(`\\n${patternName}:`)
-      
-      // Memory input success
-      const memorySuccess = patternResults.memoryInput?.success || false
-      console.log(`  📚 Memory Input: ${memorySuccess ? '✅ SUCCESS' : '❌ FAILED'}`)
-
-      // Recall test results
-      const recallTests = patternResults.recallTests || []
-      const successfulRecalls = recallTests.filter(test => test.success && test.keywordMatch).length
-      const totalRecalls = recallTests.length
-      
-      console.log(`  🧠 Recall Tests: ${successfulRecalls}/${totalRecalls} successful`)
-      
-      recallTests.forEach((test, index) => {
-        const status = test.success && test.keywordMatch ? '✅' : '❌'
-        const keywords = test.keywordMatch ? 
-          `Found: [${test.foundKeywords.join(', ')}]` : 
-          `Missing: [${test.expectedKeywords.join(', ')}]`
-        console.log(`     ${index + 1}. ${status} ${keywords}`)
-      })
-
-      // Performance metrics
-      const totalDuration = [patternResults.memoryInput, ...patternResults.fillers, ...patternResults.recallTests]
-        .filter(result => result && result.success)
-        .reduce((sum, result) => sum + result.duration, 0)
-      
-      console.log(`  ⏱️  Total Duration: ${totalDuration}ms`)
-    }
-
-    console.log('\\n🎉 Memory capability testing completed!')
+    console.log(`${'='.repeat(60)}`)
+    console.log('🎉 Memory capability testing completed!')
+    console.log(`${'='.repeat(60)}`)
 
   } catch (error) {
     console.error('💥 Failed to run memory tests:', error.message)
