@@ -1,0 +1,27 @@
+# Memory Capability Test Scenarios
+# Tests memory functionality across different patterns with book list scenario
+
+memory_test:
+  # Phase 1: Memory storage (books to remember)
+  memory_input: |
+    読みたい本をメモしておいて：
+    - 偶然性・アイロニー・連帯
+    - アフリカ哲学全史
+    - 八月の砲声
+    - 表層批評宣言
+
+  # Phase 2: Filler messages (4-5 messages to exceed lastMessages=3)
+  fillers:
+    - 好きな言葉は？
+    - やってみたいことはある？
+    - 今気になっていることは？
+    - 都会と田舎のどっちが好き？
+
+  # Phase 3: Memory recall tests (should work beyond lastMessages scope)
+  recall_test:
+    query: メモしてって言った読みたい本を全部見せて
+    expected_keywords:
+      - 偶然性・アイロニー・連帯
+      - アフリカ哲学全史
+      - 八月の砲声
+      - 表層批評宣言
