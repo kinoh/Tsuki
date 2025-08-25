@@ -50,7 +50,7 @@ async function loadInstructions() {
  * Load test scenarios from YAML file
  */
 async function loadTestScenarios() {
-  const scenariosPath = resolve(__dirname, './test_memory_scenarios.yaml')
+  const scenariosPath = resolve(__dirname, './test_memory.yaml')
   const data = await readFile(scenariosPath, 'utf-8')
   const yamlData = parseYaml(data)
   return yamlData
