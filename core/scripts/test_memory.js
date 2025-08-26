@@ -15,6 +15,7 @@ import { openai } from '@ai-sdk/openai'
 import { Agent } from '@mastra/core/agent'
 import { Memory } from '@mastra/memory'
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql'
+import { PinoLogger } from '@mastra/loggers'
 
 // Load environment variables
 dotenv.config()
@@ -27,11 +28,13 @@ const dataDir = process.env.DATA_DIR ?? './data'
 const dbPath = `file:${dataDir}/mastra.db`
 const openAiModel = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
 const testUserId = 'test-user'
+const logLevel = process.env.LOG_LEVEL ?? 'debug'
 
 console.log(`🧪 Memory Capability Test`)
 console.log(`dataDir: ${dataDir}`)
 console.log(`testDbPath: ${dbPath}`)
 console.log(`openAiModel: ${openAiModel}`)
+console.log(`logLevel: ${logLevel}`)
 console.log('')
 
 /**
@@ -270,6 +273,11 @@ async function runMemoryTests() {
       console.log(`${'='.repeat(60)}`)
       console.log(`🧪 Testing ${pattern.name}`)
       console.log(`${'='.repeat(60)}`)
+
+      pattern.agent.__setLogger(new PinoLogger({
+        name: `TestAgent-${pattern.name}`,
+        level: logLevel,
+      }))
 
       // Generate consistent thread ID for this pattern across all phases
       const patternThreadId = `test_${pattern.name}_${Date.now()}`
