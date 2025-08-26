@@ -16,29 +16,11 @@ export const mcp = new MCPClient({
   },
 })
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function getDynamicMCP(clientId: string, onAuth: (server: string, url: string) => Promise<void>): MCPClient {
-  const callbackServerConfig = {
-    publicUrl: 'https://tsuki-auth.kinon.pro/oauth/callback',
-    host: '0.0.0.0',
-    port: 2954,
-  }
-  if (process.env.NODE_ENV !== 'production') {
-    callbackServerConfig.publicUrl = 'http://localhost:2954/oauth/callback'
-  }
-
   return new MCPClient({
     id: clientId,
     servers: {
-      notion: {
-        url: new URL('https://mcp.notion.com/mcp'),
-        oauth: {
-          onAuthURL: async (authUrl: string): Promise<void> => {
-            await onAuth('notion', authUrl)
-          },
-          callbackServerConfig,
-          tokenStorage: `${dataDir}/mcp_tokens.json`,
-        },
-      },
     },
   })
 }
