@@ -4,4 +4,18 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rmcp = { version = "0.6.0", features = ["server"] }
+rmcp = { version = "0.6", features = [
+  "server",
+  "macros",
+  "transport-io",
+  "schemars",
+] }
+tokio = { version = "1", features = [
+  "macros",
+  "rt-multi-thread",
+  "io-std",
+  "fs",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+regex = "1"
