@@ -147,6 +147,16 @@ impl StructuredMemoryService {
                     }
                 }
             }
+            
+            // Check for cross-tree references: ensure link doesn't belong to another parent
+            for (other_parent_id, other_node) in tree {
+                if other_parent_id != parent_id && other_node.children.contains(link) {
+                    return Err(ErrorData::internal_error(format!(
+                        "Error: content: cross-tree reference not allowed - {} already belongs to {}",
+                        link, other_parent_id
+                    ), None));
+                }
+            }
         }
         Ok(())
     }
