@@ -46,6 +46,15 @@ impl StructuredMemoryService {
         }
     }
 
+    // Constructor for testing with custom data directory
+    pub fn new_with_data_dir(data_dir: String) -> Self {
+        Self {
+            tool_router: Self::tool_router(),
+            data_dir,
+            link_regex: Regex::new(r"\[\[([a-zA-Z0-9_-]+)\]\]").unwrap(),
+        }
+    }
+
     async fn ensure_data_dir(&self) -> Result<(), ErrorData> {
         if !Path::new(&self.data_dir).exists() {
             fs::create_dir_all(&self.data_dir)
@@ -180,7 +189,7 @@ impl StructuredMemoryService {
 #[tool_router]
 impl StructuredMemoryService {
     #[tool(description = "Reads the content of a document")]
-    async fn read_document(&self, params: Parameters<ReadDocumentRequest>) -> Result<CallToolResult, ErrorData> {
+    pub async fn read_document(&self, params: Parameters<ReadDocumentRequest>) -> Result<CallToolResult, ErrorData> {
         let request = params.0;
         let doc_id = request.id.as_deref().unwrap_or("root");
 
@@ -205,7 +214,7 @@ impl StructuredMemoryService {
     }
 
     #[tool(description = "Updates the content of a document")]
-    async fn update_document(&self, params: Parameters<UpdateDocumentRequest>) -> Result<CallToolResult, ErrorData> {
+    pub async fn update_document(&self, params: Parameters<UpdateDocumentRequest>) -> Result<CallToolResult, ErrorData> {
         let request = params.0;
         let doc_id = request.id.as_deref().unwrap_or("root");
 
@@ -259,7 +268,7 @@ impl StructuredMemoryService {
     }
 
     #[tool(description = "Returns the complete document tree structure")]
-    async fn get_document_tree(&self) -> Result<CallToolResult, ErrorData> {
+    pub async fn get_document_tree(&self) -> Result<CallToolResult, ErrorData> {
         self.ensure_root_document().await?;
 
         let tree = self.build_tree().await?;
