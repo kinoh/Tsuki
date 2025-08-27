@@ -38,16 +38,7 @@ pub struct StructuredMemoryService {
 }
 
 impl StructuredMemoryService {
-    pub fn new() -> Self {
-        Self {
-            tool_router: Self::tool_router(),
-            data_dir: "data".to_string(),
-            link_regex: Regex::new(r"\[\[([a-zA-Z0-9_-]+)\]\]").unwrap(),
-        }
-    }
-
-    // Constructor for testing with custom data directory
-    pub fn new_with_data_dir(data_dir: String) -> Self {
+    pub fn new(data_dir: String) -> Self {
         Self {
             tool_router: Self::tool_router(),
             data_dir,
