@@ -13,6 +13,7 @@ import { parse as parseYaml } from 'yaml'
 import dotenv from 'dotenv'
 import { openai } from '@ai-sdk/openai'
 import { Agent } from '@mastra/core/agent'
+import { MCPClient } from '@mastra/mcp'
 import { Memory } from '@mastra/memory'
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql'
 import { PinoLogger } from '@mastra/loggers'
@@ -116,7 +117,20 @@ async function createExternalStorage(instructions) {
     },
   })
 
-  const { getDynamicMCP } = await import('../src/mastra/mcp.ts')
+  const timestamp = new Date().toISOString().replace(/[^\d]/g, '').substring(0, 14)
+  const mcp = new MCPClient({
+    servers: {
+      'structured-memory': {
+        command: './bin/structured-memory',
+        args: [],
+        env: {
+          DATA_DIR: `/tmp/structured_memory/${timestamp}`,
+          ROOT_TEMPLATE: '# メモ帳\n',
+        },
+      },
+    },
+  })
+  const tools = await mcp.getTools()
 
   return new Agent({
     name: 'external-storage',
@@ -125,16 +139,17 @@ async function createExternalStorage(instructions) {
       const baseInstructions = contextInstructions || instructions
       return baseInstructions
         + '\\n\\n'
-        + 'Record any necessary information in Notion\n'
-        + 'Use page ID 25105ae56ba9804db4bdeb67a2c9771c\n'
-        + 'Use bullet points as basic structure\n'
-        + 'You can also organize your information by dividing the page into sections or creating subpages'
+        + 'Record any necessary information using structured-memory tool\n'
+        + '<example>\n'
+        + '# メモ帳\n'
+        + '## 買いたいもの\n'
+        + '- ティーポット\n'
+        + '- 小皿\n'
+        + '</example>'
     },
     model: openai(openAiModel),
     memory,
-    tools: await getDynamicMCP(testUserId, async (server, url) => {
-      console.log(`Please authenticate with ${server} at ${url}`);
-    }).getTools(),
+    tools,
   })
 }
 
