@@ -6,7 +6,10 @@ use tempfile::TempDir;
 async fn setup_temp_service() -> (StructuredMemoryService, TempDir) {
     let temp_dir = tempfile::tempdir().unwrap();
     let data_dir = temp_dir.path().to_str().unwrap().to_string();
-    let service = StructuredMemoryService::new(data_dir);
+    let service = StructuredMemoryService::new(
+        data_dir,
+        String::from("# Root Document\n\nThis is the root document of your structured memory.\n"),
+    );
     (service, temp_dir)
 }
 

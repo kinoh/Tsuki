@@ -34,14 +34,16 @@ pub struct TreeNode {
 pub struct StructuredMemoryService {
     tool_router: ToolRouter<Self>,
     data_dir: String,
+    root_template: String,
     link_regex: Regex,
 }
 
 impl StructuredMemoryService {
-    pub fn new(data_dir: String) -> Self {
+    pub fn new(data_dir: String, root_template: String) -> Self {
         Self {
             tool_router: Self::tool_router(),
             data_dir,
+            root_template,
             link_regex: Regex::new(r"\[\[([a-zA-Z0-9_-]+)\]\]").unwrap(),
         }
     }
@@ -74,16 +76,16 @@ impl StructuredMemoryService {
 
         let root_path = self.document_path("root").await;
         if !Path::new(&root_path).exists() {
-            let initial_content =
-                "# Root Document\n\nThis is the root document of your structured memory.\n";
-            fs::write(&root_path, initial_content).await.map_err(|e| {
-                ErrorData::internal_error(
-                    "Failed to create root document",
-                    Some(json!(
-                        {"reason": e.to_string()}
-                    )),
-                )
-            })?;
+            fs::write(&root_path, &self.root_template)
+                .await
+                .map_err(|e| {
+                    ErrorData::internal_error(
+                        "Failed to create root document",
+                        Some(json!(
+                            {"reason": e.to_string()}
+                        )),
+                    )
+                })?;
         }
         Ok(())
     }

@@ -10,7 +10,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let data_dir = env::var("DATA_DIR")
         .map_err(|_| "Environment variable DATA_DIR is required but not found")?;
 
-    let service = StructuredMemoryService::new(data_dir);
+    let root_template = env::var("ROOT_TEMPLATE")
+        .map_err(|_| "Environment variable ROOT_TEMPLATE is required but not found")?;
+
+    let service = StructuredMemoryService::new(data_dir, root_template);
 
     println!("start server, connect to standard input/output");
 
