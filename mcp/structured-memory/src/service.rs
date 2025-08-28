@@ -1,15 +1,15 @@
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 use rmcp::{
+    ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
-    model::{ServerCapabilities, ServerInfo, CallToolResult, Content},
-    ErrorData,
+    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
     schemars::{self, JsonSchema},
     serde_json::json,
-    tool, tool_handler, tool_router, ServerHandler,
+    tool, tool_handler, tool_router,
 };
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use tokio::fs;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -48,11 +48,14 @@ impl StructuredMemoryService {
 
     async fn ensure_data_dir(&self) -> Result<(), ErrorData> {
         if !Path::new(&self.data_dir).exists() {
-            fs::create_dir_all(&self.data_dir)
-                .await
-                .map_err(|e| ErrorData::internal_error("Failed to create data directory", Some(json!(
-                    {"reason": e.to_string()}
-                ))))?;
+            fs::create_dir_all(&self.data_dir).await.map_err(|e| {
+                ErrorData::internal_error(
+                    "Failed to create data directory",
+                    Some(json!(
+                        {"reason": e.to_string()}
+                    )),
+                )
+            })?;
         }
         Ok(())
     }
@@ -68,15 +71,19 @@ impl StructuredMemoryService {
 
     async fn ensure_root_document(&self) -> Result<(), ErrorData> {
         self.ensure_data_dir().await?;
-        
+
         let root_path = self.document_path("root").await;
         if !Path::new(&root_path).exists() {
-            let initial_content = "# Root Document\n\nThis is the root document of your structured memory.\n";
-            fs::write(&root_path, initial_content)
-                .await
-                .map_err(|e| ErrorData::internal_error("Failed to create root document", Some(json!(
-                    {"reason": e.to_string()}
-                ))))?;
+            let initial_content =
+                "# Root Document\n\nThis is the root document of your structured memory.\n";
+            fs::write(&root_path, initial_content).await.map_err(|e| {
+                ErrorData::internal_error(
+                    "Failed to create root document",
+                    Some(json!(
+                        {"reason": e.to_string()}
+                    )),
+                )
+            })?;
         }
         Ok(())
     }
@@ -90,13 +97,16 @@ impl StructuredMemoryService {
 
     async fn get_all_documents(&self) -> Result<HashSet<String>, ErrorData> {
         self.ensure_data_dir().await?;
-        
+
         let mut documents = HashSet::new();
-        let mut entries = fs::read_dir(&self.data_dir)
-            .await
-            .map_err(|e| ErrorData::internal_error("Failed to read data directory", Some(json!(
-                {"reason": e.to_string()}
-            ))))?;
+        let mut entries = fs::read_dir(&self.data_dir).await.map_err(|e| {
+            ErrorData::internal_error(
+                "Failed to read data directory",
+                Some(json!(
+                    {"reason": e.to_string()}
+                )),
+            )
+        })?;
 
         while let Ok(Some(entry)) = entries.next_entry().await {
             if let Some(filename) = entry.file_name().to_str() {
@@ -106,7 +116,7 @@ impl StructuredMemoryService {
                 }
             }
         }
-        
+
         Ok(documents)
     }
 
@@ -125,36 +135,50 @@ impl StructuredMemoryService {
         Ok(tree)
     }
 
-    fn validate_tree_links(&self, parent_id: &str, links: &[String], tree: &HashMap<String, TreeNode>) -> Result<(), ErrorData> {
+    fn validate_tree_links(
+        &self,
+        parent_id: &str,
+        links: &[String],
+        tree: &HashMap<String, TreeNode>,
+    ) -> Result<(), ErrorData> {
         for link in links {
             if let Some(existing_node) = tree.get(link) {
                 for child_link in &existing_node.children {
                     if child_link == parent_id {
-                        return Err(ErrorData::internal_error(format!(
-                            "Error: content: cross-tree reference not allowed - circular reference detected between {} and {}",
-                            parent_id, link
-                        ), None));
+                        return Err(ErrorData::internal_error(
+                            format!(
+                                "Error: content: cross-tree reference not allowed - circular reference detected between {} and {}",
+                                parent_id, link
+                            ),
+                            None,
+                        ));
                     }
                 }
-                
+
                 let existing_links = &existing_node.children;
                 for existing_link in existing_links {
                     if links.contains(existing_link) && existing_link != link {
-                        return Err(ErrorData::internal_error(format!(
-                            "Error: content: cross-tree reference not allowed - {} would create a complex cross-reference",
-                            existing_link
-                        ), None));
+                        return Err(ErrorData::internal_error(
+                            format!(
+                                "Error: content: cross-tree reference not allowed - {} would create a complex cross-reference",
+                                existing_link
+                            ),
+                            None,
+                        ));
                     }
                 }
             }
-            
+
             // Check for cross-tree references: ensure link doesn't belong to another parent
             for (other_parent_id, other_node) in tree {
                 if other_parent_id != parent_id && other_node.children.contains(link) {
-                    return Err(ErrorData::internal_error(format!(
-                        "Error: content: cross-tree reference not allowed - {} already belongs to {}",
-                        link, other_parent_id
-                    ), None));
+                    return Err(ErrorData::internal_error(
+                        format!(
+                            "Error: content: cross-tree reference not allowed - {} already belongs to {}",
+                            link, other_parent_id
+                        ),
+                        None,
+                    ));
                 }
             }
         }
@@ -190,7 +214,10 @@ impl StructuredMemoryService {
 #[tool_router]
 impl StructuredMemoryService {
     #[tool(description = "Reads the content of a document")]
-    pub async fn read_document(&self, params: Parameters<ReadDocumentRequest>) -> Result<CallToolResult, ErrorData> {
+    pub async fn read_document(
+        &self,
+        params: Parameters<ReadDocumentRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
         let request = params.0;
         let doc_id = request.id.as_deref().unwrap_or("root");
 
@@ -201,11 +228,14 @@ impl StructuredMemoryService {
         }
 
         let path = self.document_path(doc_id).await;
-        let content = fs::read_to_string(&path)
-            .await
-            .map_err(|e| ErrorData::internal_error("Failed to read document", Some(json!(
-                {"reason": e.to_string()}
-            ))))?;
+        let content = fs::read_to_string(&path).await.map_err(|e| {
+            ErrorData::internal_error(
+                "Failed to read document",
+                Some(json!(
+                    {"reason": e.to_string()}
+                )),
+            )
+        })?;
 
         Ok(CallToolResult {
             content: vec![Content::text(content)],
@@ -215,7 +245,10 @@ impl StructuredMemoryService {
     }
 
     #[tool(description = "Updates the content of a document")]
-    pub async fn update_document(&self, params: Parameters<UpdateDocumentRequest>) -> Result<CallToolResult, ErrorData> {
+    pub async fn update_document(
+        &self,
+        params: Parameters<UpdateDocumentRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
         let request = params.0;
         let doc_id = request.id.as_deref().unwrap_or("root");
 
@@ -232,22 +265,28 @@ impl StructuredMemoryService {
         self.validate_tree_links(doc_id, &links, &tree)?;
 
         let path = self.document_path(doc_id).await;
-        fs::write(&path, &request.content)
-            .await
-            .map_err(|e| ErrorData::internal_error("Failed to write document", Some(json!(
-                {"reason": e.to_string()}
-            ))))?;
+        fs::write(&path, &request.content).await.map_err(|e| {
+            ErrorData::internal_error(
+                "Failed to write document",
+                Some(json!(
+                    {"reason": e.to_string()}
+                )),
+            )
+        })?;
 
         let mut created_docs = Vec::new();
         for link in &links {
             if !self.document_exists(link).await {
                 let new_path = self.document_path(link).await;
                 let initial_content = format!("# {}\n\n", link);
-                fs::write(&new_path, initial_content)
-                    .await
-                    .map_err(|e| ErrorData::internal_error("Failed to create linked document", Some(json!(
-                        {"reason": e.to_string()}
-                    ))))?;
+                fs::write(&new_path, initial_content).await.map_err(|e| {
+                    ErrorData::internal_error(
+                        "Failed to create linked document",
+                        Some(json!(
+                            {"reason": e.to_string()}
+                        )),
+                    )
+                })?;
                 created_docs.push(link.clone());
             }
         }
@@ -273,9 +312,13 @@ impl StructuredMemoryService {
         self.ensure_root_document().await?;
 
         let tree = self.build_tree().await?;
-        
+
         // Convert to YAML-like structure
-        fn build_yaml_node(node_id: &str, tree: &HashMap<String, TreeNode>, visited: &mut HashSet<String>) -> serde_yaml::Value {
+        fn build_yaml_node(
+            node_id: &str,
+            tree: &HashMap<String, TreeNode>,
+            visited: &mut HashSet<String>,
+        ) -> serde_yaml::Value {
             if visited.contains(node_id) {
                 return serde_yaml::Value::String(format!("{} (circular)", node_id));
             }
@@ -286,12 +329,14 @@ impl StructuredMemoryService {
                     serde_yaml::Value::String(node_id.to_string())
                 } else {
                     let mut map = serde_yaml::Mapping::new();
-                    let children: Vec<serde_yaml::Value> = node.children.iter()
+                    let children: Vec<serde_yaml::Value> = node
+                        .children
+                        .iter()
                         .map(|child| build_yaml_node(child, tree, visited))
                         .collect();
                     map.insert(
                         serde_yaml::Value::String(node_id.to_string()),
-                        serde_yaml::Value::Sequence(children)
+                        serde_yaml::Value::Sequence(children),
                     );
                     serde_yaml::Value::Mapping(map)
                 }
@@ -302,11 +347,15 @@ impl StructuredMemoryService {
 
         let mut visited = HashSet::new();
         let yaml_tree = build_yaml_node("root", &tree, &mut visited);
-        
-        let yaml_string = serde_yaml::to_string(&yaml_tree)
-            .map_err(|e| ErrorData::internal_error("Failed to serialize tree", Some(json!(
-                {"reason": e.to_string()}
-            ))))?;
+
+        let yaml_string = serde_yaml::to_string(&yaml_tree).map_err(|e| {
+            ErrorData::internal_error(
+                "Failed to serialize tree",
+                Some(json!(
+                    {"reason": e.to_string()}
+                )),
+            )
+        })?;
 
         Ok(CallToolResult {
             content: vec![Content::text(yaml_string)],
