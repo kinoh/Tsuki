@@ -70,10 +70,6 @@ tasks:
     desc: Encrypt prompt file
     cmds:
       - cd core && node --env-file .env scripts/encrypt_prompt.js
-  diff_prompt:
-    desc: Compare encrypted vs current prompt
-    cmds:
-      - cd core && node --env-file .env scripts/diff_prompt.js
   build_mcp:
     desc: Build structured-memory MCP server
     cmds:
