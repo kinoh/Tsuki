@@ -147,12 +147,12 @@ impl StructuredMemoryService {
             if let Some(existing_node) = tree.get(link) {
                 for child_link in &existing_node.children {
                     if child_link == parent_id {
-                        return Err(ErrorData::internal_error(
-                            format!(
-                                "Error: content: cross-tree reference not allowed - circular reference detected between {} and {}",
-                                parent_id, link
-                            ),
-                            None,
+                        return Err(ErrorData::invalid_params(
+                            "Error: content: cross-tree reference not allowed - circular reference detected",
+                            Some(json!({
+                                "parent_id": parent_id,
+                                "link": link,
+                            })),
                         ));
                     }
                 }
@@ -160,12 +160,12 @@ impl StructuredMemoryService {
                 let existing_links = &existing_node.children;
                 for existing_link in existing_links {
                     if links.contains(existing_link) && existing_link != link {
-                        return Err(ErrorData::internal_error(
-                            format!(
-                                "Error: content: cross-tree reference not allowed - {} would create a complex cross-reference",
-                                existing_link
-                            ),
-                            None,
+                        return Err(ErrorData::invalid_params(
+                            "Error: content: cross-tree reference not allowed - merge point detected",
+                            Some(json!({
+                                "link": link,
+                                "existing_link": existing_link,
+                            })),
                         ));
                     }
                 }
@@ -174,12 +174,12 @@ impl StructuredMemoryService {
             // Check for cross-tree references: ensure link doesn't belong to another parent
             for (other_parent_id, other_node) in tree {
                 if other_parent_id != parent_id && other_node.children.contains(link) {
-                    return Err(ErrorData::internal_error(
-                        format!(
-                            "Error: content: cross-tree reference not allowed - {} already belongs to {}",
-                            link, other_parent_id
-                        ),
-                        None,
+                    return Err(ErrorData::invalid_params(
+                        "Error: content: cross-tree reference not allowed",
+                        Some(json!({
+                            "link": link,
+                            "other_parent_id": other_parent_id,
+                        })),
                     ));
                 }
             }
@@ -226,7 +226,10 @@ impl StructuredMemoryService {
         self.ensure_root_document().await?;
 
         if !self.document_exists(doc_id).await {
-            return Err(ErrorData::internal_error("Error: id: not found", None));
+            return Err(ErrorData::invalid_params(
+                "Error: id: not found",
+                Some(json!({ "id": doc_id })),
+            ));
         }
 
         let path = self.document_path(doc_id).await;
@@ -257,7 +260,10 @@ impl StructuredMemoryService {
         self.ensure_root_document().await?;
 
         if doc_id != "root" && !self.document_exists(doc_id).await {
-            return Err(ErrorData::internal_error("Error: id: not found", None));
+            return Err(ErrorData::invalid_params(
+                "Error: id: not found",
+                Some(json!({ "id": doc_id })),
+            ));
         }
 
         let links = self.extract_links(&request.content);
