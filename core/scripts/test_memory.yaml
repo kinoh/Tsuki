@@ -1,0 +1,29 @@
+# Memory Capability Test Scenarios
+# Tests memory functionality across different patterns with book list scenario
+
+memory_test:
+  prepare:
+    - |
+      読みたい本をメモしておいて：
+      - 偶然性・アイロニー・連帯
+      - アフリカ哲学全史
+    - |
+      あと「八月の砲声」も
+    - ありがとう
+    - |
+      読みたい本を追加
+      - 表層批評宣言
+      - 夢十夜
+    - 好きな言葉は？
+    - やってみたいことはある？
+    - 今気になっていることは？
+    - 都会と田舎のどっちが好き？
+
+  recall:
+    query: メモしてって言った読みたい本を全部見せて
+    expected_keywords:
+      - 偶然性・アイロニー・連帯
+      - アフリカ哲学全史
+      - 八月の砲声
+      - 表層批評宣言
+      - 夢十夜

@@ -1,3 +1,22 @@
+# Rust build stage
+FROM rust:1.89-alpine AS rust-builder
+
+WORKDIR /build
+
+# Install musl target and tools for static linking
+RUN apk add --no-cache musl-dev \
+    && rustup target add x86_64-unknown-linux-musl
+
+# Copy Rust source code
+COPY mcp/structured-memory ./mcp/structured-memory
+
+# Build structured-memory with caching
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/mcp/structured-memory/target \
+    cd mcp/structured-memory && \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/structured-memory /build/structured-memory
+
 # Production stage
 FROM node:22-alpine AS runtime
 
@@ -34,10 +53,14 @@ COPY --chown=tsuki:nodejs core/.pnpmrc ./
 COPY --chown=tsuki:nodejs core/patches/ ./patches/
 
 # Install dependencies as non-root user (pnpm handles native modules correctly)
-RUN pnpm install --prod --frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --prod --frozen-lockfile
 
 # Allow build scripts for native modules (pnpm will handle better-sqlite3 automatically)
 RUN pnpm config set script-shell /bin/sh
+
+# Copy structured-memory binary from build stage
+COPY --from=rust-builder --chown=tsuki:nodejs /build/structured-memory ./bin/structured-memory
 
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src

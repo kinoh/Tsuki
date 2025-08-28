@@ -70,7 +70,14 @@ tasks:
     desc: Encrypt prompt file
     cmds:
       - cd core && node --env-file .env scripts/encrypt_prompt.js
-  diff_prompt:
-    desc: Compare encrypted vs current prompt
+  build_mcp:
+    desc: Build structured-memory MCP server
     cmds:
-      - cd core && node --env-file .env scripts/diff_prompt.js
+      - mkdir -p core/bin
+      - cd mcp/structured-memory && cargo build --release
+      - cp mcp/structured-memory/target/release/structured-memory core/bin/
+  setup:
+    desc: Setup development environment
+    cmds:
+      - cd core && pnpm install
+      - task: build_mcp
