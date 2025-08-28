@@ -75,8 +75,8 @@ async function createSemanticMemory(instructions) {
     embedder: openai.embedding('text-embedding-3-small'),
     options: {
       lastMessages: 3, // Short for API cost efficiency
-      semanticRecall: {
-        topK: 5,
+      semanticRecall: { // Less for API cost efficiency
+        topK: 1,
         messageRange: 2,
         scope: 'thread',
       },
@@ -110,7 +110,7 @@ async function createExternalStorage(instructions) {
     options: {
       lastMessages: 3,
       semanticRecall: {
-        topK: 5,
+        topK: 1,
         messageRange: 2,
         scope: 'thread',
       },
@@ -169,7 +169,7 @@ async function createWorkingMemory(instructions) {
     options: {
       lastMessages: 3,
       semanticRecall: {
-        topK: 5,
+        topK: 1,
         messageRange: 2,
         scope: 'thread',
       },
@@ -297,27 +297,13 @@ async function runMemoryTests() {
       // Generate consistent thread ID for this pattern across all phases
       const patternThreadId = `test_${pattern.name}_${Date.now()}`
 
-      // Phase 1: Memory Input
-      console.log('📚 Phase 1: Memory Input')
-      await executeTest(
-        pattern.agent,
-        scenarios.memory_test.memory_input,
-        runtimeContext,
-        patternThreadId
-      )
-
-      // Small delay between phases
-      await new Promise(resolve => setTimeout(resolve, 100))
-
-      // Phase 2: Filler Messages
-      console.log('\\n🔄 Phase 2: Filler Messages (to exceed lastMessages=3)')
-      for (let i = 0; i < scenarios.memory_test.fillers.length; i++) {
-        const filler = scenarios.memory_test.fillers[i]
-        console.log(`  Filler ${i + 1}/${scenarios.memory_test.fillers.length}`)
+      for (let i = 0; i < scenarios.memory_test.prepare.length; i++) {
+        const input = scenarios.memory_test.prepare[i]
+        console.log(`  Input ${i + 1}/${scenarios.memory_test.prepare.length}`)
         
         await executeTest(
           pattern.agent,
-          filler,
+          input,
           runtimeContext,
           patternThreadId
         )
@@ -326,9 +312,9 @@ async function runMemoryTests() {
         await new Promise(resolve => setTimeout(resolve, 100))
       }
 
-      // Phase 3: Memory Recall Test
+      // Phase 2: Memory Recall Test
       console.log('\\n🧠 Phase 3: Memory Recall Test')
-      const test = scenarios.memory_test.recall_test
+      const test = scenarios.memory_test.recall
       console.log(`  Query: ${test.query}`)
       
       const recallResult = await executeTest(
