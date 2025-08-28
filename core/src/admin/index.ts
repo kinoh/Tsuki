@@ -4,6 +4,7 @@ import * as AdminJSExpress from '@adminjs/express'
 import { MastraMemory } from '@mastra/core'
 import { ThreadResource } from './resources/ThreadResource'
 import { MessageResource } from './resources/MessageResource'
+import { StructuredMemoryResource } from './resources/StructuredMemoryResource'
 
 export function createAdminJS(agentMemory: MastraMemory): AdminJS {
   const admin = new AdminJS({
@@ -75,6 +76,41 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
           },
         },
       },
+      {
+        resource: new StructuredMemoryResource(),
+        options: {
+          id: 'structured-memory',
+          navigation: {
+            name: 'Structured Memory',
+            icon: 'FileText',
+          },
+          listProperties: ['id', 'filename', 'size', 'linkCount', 'modifiedAt'],
+          showProperties: ['id', 'filename', 'content', 'size', 'linkCount', 'modifiedAt'],
+          actions: {
+            new: {
+              isVisible: false,
+            },
+            edit: {
+              isVisible: false,
+            },
+            delete: {
+              isVisible: false,
+            },
+            show: {
+              isVisible: true,
+              isAccessible: true,
+            },
+            list: {
+              isVisible: true,
+              isAccessible: true,
+            },
+          },
+          sort: {
+            sortBy: 'modifiedAt',
+            direction: 'desc' as const,
+          },
+        },
+      },
     ],
     rootPath: '/admin',
     branding: {
@@ -89,6 +125,7 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
         en: {
           labels: {
             threads: 'Threads',
+            'structured-memory': 'Documents',
           },
           properties: {
             id: 'ID',
@@ -96,6 +133,11 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
             title: 'Title',
             createdAt: 'Created Date',
             updatedAt: 'Updated Date',
+            filename: 'Filename',
+            content: 'Content',
+            size: 'Size (bytes)',
+            linkCount: 'Link Count',
+            modifiedAt: 'Modified Date',
           },
           messages: {
             successfullyDeleted: 'Thread successfully deleted',
