@@ -3,6 +3,10 @@ name = "structured-memory"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "structured-memory"
+path = "src/main.rs"
+
 [dependencies]
 rmcp = { version = "0.6", features = [
   "server",

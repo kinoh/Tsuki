@@ -13,6 +13,14 @@ export const mcp = new MCPClient({
         OPML_FILE_PATH: `${dataDir}/rss_feeds.opml`,
       },
     },
+    'structured-memory': {
+      command: './bin/structured-memory',
+      args: [],
+      env: {
+        DATA_DIR: `${dataDir}/structured_memory`,
+        ROOT_TEMPLATE: '# メモ帳\n',
+      },
+    },
   },
 })
 
