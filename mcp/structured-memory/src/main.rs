@@ -1,4 +1,5 @@
-use rmcp::serve_server;
+use rmcp::ServiceExt;
+use rmcp::transport::stdio;
 use std::env;
 use std::error::Error;
 mod service;
@@ -13,8 +14,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("start server, connect to standard input/output");
 
-    let io = (tokio::io::stdin(), tokio::io::stdout());
+    let service = service.serve(stdio()).await?;
+    service.waiting().await?;
 
-    serve_server(service, io).await?;
     Ok(())
 }

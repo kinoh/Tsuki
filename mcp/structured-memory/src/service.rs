@@ -2,7 +2,7 @@ use regex::Regex;
 use rmcp::{
     ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
-    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
     schemars::{self, JsonSchema},
     serde_json::json,
     tool, tool_handler, tool_router,
@@ -371,6 +371,7 @@ impl ServerHandler for StructuredMemoryService {
         ServerInfo {
             instructions: Some("Structured memory MCP server for hierarchical document management with [[link]] syntax".into()),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
+            server_info: Implementation { name: env!("CARGO_CRATE_NAME").to_owned(), version: env!("CARGO_PKG_VERSION").to_owned() },
             ..Default::default()
         }
     }
