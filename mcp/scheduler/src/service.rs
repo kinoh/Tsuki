@@ -542,3 +542,160 @@ impl ServerHandler for SchedulerService {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::handler::server::tool::Parameters;
+    use tokio;
+
+    use tempfile;
+    
+    // Helper function to create test service with auto-cleanup temporary directory
+    async fn create_test_service() -> SchedulerService {
+        unsafe {
+            std::env::set_var("TZ", "Asia/Tokyo");
+        }
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_dir = temp_dir.path().to_string_lossy().to_string();
+        SchedulerService::new(test_dir).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_daily() {
+        let service = create_test_service().await;
+        let request = SetScheduleRequest {
+            name: "test_daily".to_string(),
+            time: "09:30".to_string(),
+            cycle: "daily".to_string(),
+            message: "Daily reminder".to_string(),
+        };
+        
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(!response.content.is_empty());
+        // Verify successful response content
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_one_time() {
+        let service = create_test_service().await;
+        let request = SetScheduleRequest {
+            name: "test_once".to_string(),
+            time: "2024-12-25T10:00:00+09:00".to_string(),
+            cycle: "none".to_string(),
+            message: "Christmas reminder".to_string(),
+        };
+        
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_invalid_cycle() {
+        let service = create_test_service().await;
+        let request = SetScheduleRequest {
+            name: "test_invalid".to_string(),
+            time: "09:30".to_string(),
+            cycle: "weekly".to_string(),
+            message: "Invalid cycle".to_string(),
+        };
+        
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_schedules_empty() {
+        let service = create_test_service().await;
+        let result = service.get_schedules().await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(!response.content.is_empty());
+        // Returns empty array when no schedules exist
+    }
+
+    #[tokio::test]
+    async fn test_get_schedules_with_data() {
+        let service = create_test_service().await;
+        
+        // Create a schedule first
+        let request = SetScheduleRequest {
+            name: "test_schedule".to_string(),
+            time: "15:00".to_string(),
+            cycle: "daily".to_string(),
+            message: "Test message".to_string(),
+        };
+        service.set_schedule(Parameters(request)).await.unwrap();
+        
+        let result = service.get_schedules().await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(!response.content.is_empty());
+        // Returns schedule data after creation
+    }
+
+    #[tokio::test]
+    async fn test_remove_schedule_existing() {
+        let service = create_test_service().await;
+        
+        // Create a schedule first
+        let set_request = SetScheduleRequest {
+            name: "to_remove".to_string(),
+            time: "12:00".to_string(),
+            cycle: "daily".to_string(),
+            message: "Will be removed".to_string(),
+        };
+        service.set_schedule(Parameters(set_request)).await.unwrap();
+        
+        // Remove the schedule
+        let remove_request = RemoveScheduleRequest {
+            name: "to_remove".to_string(),
+        };
+        let result = service.remove_schedule(Parameters(remove_request)).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(!response.content.is_empty());
+        // Confirms successful removal
+    }
+
+    #[tokio::test]
+    async fn test_remove_schedule_nonexistent() {
+        let service = create_test_service().await;
+        let request = RemoveScheduleRequest {
+            name: "nonexistent".to_string(),
+        };
+        
+        let result = service.remove_schedule(Parameters(request)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_empty_name() {
+        let service = create_test_service().await;
+        let request = SetScheduleRequest {
+            name: "".to_string(),
+            time: "09:30".to_string(),
+            cycle: "daily".to_string(),
+            message: "Test message".to_string(),
+        };
+        
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_empty_message() {
+        let service = create_test_service().await;
+        let request = SetScheduleRequest {
+            name: "test".to_string(),
+            time: "09:30".to_string(),
+            cycle: "daily".to_string(),
+            message: "".to_string(),
+        };
+        
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_err());
+    }
+}
