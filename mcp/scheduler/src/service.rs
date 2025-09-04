@@ -1,19 +1,21 @@
-use chrono::{DateTime, NaiveTime};
+use chrono::{DateTime, NaiveTime, Datelike, Timelike};
 use rmcp::{
     ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
-    model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
+    model::{Annotated, CallToolResult, Content, Implementation, ListResourcesResult, ReadResourceResult, ResourceContents, RawResource, ServerCapabilities, ServerInfo},
     schemars::{self, JsonSchema},
     serde_json::json,
     tool, tool_handler, tool_router,
 };
 use std::future::Future;
+use rmcp::service::RequestContext;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::{fs, sync::Mutex};
+use std::time::Duration;
+use tokio::{fs, sync::Mutex, time};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SetScheduleRequest {
@@ -49,6 +51,7 @@ pub struct SchedulerService {
     tool_router: ToolRouter<Self>,
     data_dir: String,
     schedules: Arc<Mutex<HashMap<String, Schedule>>>,
+    fired_schedules: Arc<Mutex<Vec<FiredSchedule>>>,
     timezone: chrono_tz::Tz,
 }
 
@@ -72,6 +75,7 @@ impl SchedulerService {
             tool_router: Self::tool_router(),
             data_dir,
             schedules: Arc::new(Mutex::new(HashMap::new())),
+            fired_schedules: Arc::new(Mutex::new(Vec::new())),
             timezone,
         })
     }
@@ -90,6 +94,10 @@ impl SchedulerService {
 
     async fn schedules_file_path(&self) -> String {
         format!("{}/schedules.json", self.data_dir)
+    }
+
+    async fn fired_schedules_file_path(&self) -> String {
+        format!("{}/fired_schedules.json", self.data_dir)
     }
 
     async fn load_schedules(&self) -> Result<(), ErrorData> {
@@ -137,6 +145,158 @@ impl SchedulerService {
             )
         })?;
 
+        Ok(())
+    }
+
+    async fn load_fired_schedules(&self) -> Result<(), ErrorData> {
+        self.ensure_data_dir().await?;
+        
+        let file_path = self.fired_schedules_file_path().await;
+        if Path::new(&file_path).exists() {
+            let content = fs::read_to_string(&file_path).await.map_err(|e| {
+                ErrorData::internal_error(
+                    "Failed to read fired schedules file",
+                    Some(json!({"reason": e.to_string()})),
+                )
+            })?;
+
+            let loaded_fired_schedules: Vec<FiredSchedule> = 
+                serde_json::from_str(&content).map_err(|e| {
+                    ErrorData::internal_error(
+                        "Failed to parse fired schedules file",
+                        Some(json!({"reason": e.to_string()})),
+                    )
+                })?;
+
+            let mut fired_schedules = self.fired_schedules.lock().await;
+            *fired_schedules = loaded_fired_schedules;
+        }
+        Ok(())
+    }
+
+    async fn save_fired_schedules(&self) -> Result<(), ErrorData> {
+        self.ensure_data_dir().await?;
+
+        let fired_schedules = self.fired_schedules.lock().await;
+        let content = serde_json::to_string_pretty(&*fired_schedules).map_err(|e| {
+            ErrorData::internal_error(
+                "Failed to serialize fired schedules",
+                Some(json!({"reason": e.to_string()})),
+            )
+        })?;
+
+        let file_path = self.fired_schedules_file_path().await;
+        fs::write(&file_path, content).await.map_err(|e| {
+            ErrorData::internal_error(
+                "Failed to write fired schedules file",
+                Some(json!({"reason": e.to_string()})),
+            )
+        })?;
+
+        Ok(())
+    }
+
+    async fn add_fired_schedule(&self, fired_schedule: FiredSchedule) -> Result<(), ErrorData> {
+        let mut fired_schedules = self.fired_schedules.lock().await;
+        
+        // Add the new fired schedule
+        fired_schedules.push(fired_schedule);
+        
+        // Keep only the most recent 1000 entries
+        const MAX_FIRED_SCHEDULES: usize = 1000;
+        if fired_schedules.len() > MAX_FIRED_SCHEDULES {
+            let excess = fired_schedules.len() - MAX_FIRED_SCHEDULES;
+            fired_schedules.drain(0..excess);
+        }
+        
+        drop(fired_schedules);
+        self.save_fired_schedules().await
+    }
+
+    pub async fn start_scheduler_daemon(self: Arc<Self>) -> Result<(), ErrorData> {
+        // Load existing schedules and fired schedules on startup
+        self.load_schedules().await?;
+        self.load_fired_schedules().await?;
+        
+        let mut interval = time::interval(Duration::from_secs(60)); // Check every minute
+        
+        loop {
+            interval.tick().await;
+            if let Err(e) = self.check_and_fire_schedules().await {
+                eprintln!("Error in scheduler daemon: {:?}", e);
+            }
+        }
+    }
+
+    async fn check_and_fire_schedules(&self) -> Result<(), ErrorData> {
+        
+        let now = chrono::Utc::now().with_timezone(&self.timezone);
+        let current_time_str = now.format("%H:%M").to_string();
+        let current_datetime = now.format("%Y-%m-%dT%H:%M:%S%z").to_string();
+        
+        let mut schedules_to_remove = Vec::new();
+        
+        // Check schedules that need to be fired
+        {
+            let schedules = self.schedules.lock().await;
+            
+            for (name, schedule) in schedules.iter() {
+                let should_fire = match schedule.cycle.as_str() {
+                    "daily" => {
+                        // For daily schedules, fire when current time matches scheduled time
+                        schedule.time == current_time_str
+                    },
+                    "none" => {
+                        // For one-time schedules, parse the ISO datetime and check if it matches current minute
+                        if let Ok(scheduled_time) = DateTime::parse_from_rfc3339(&schedule.time) {
+                            let scheduled_in_tz = scheduled_time.with_timezone(&self.timezone);
+                            // Fire if we're within the same minute
+                            scheduled_in_tz.year() == now.year() &&
+                            scheduled_in_tz.month() == now.month() &&
+                            scheduled_in_tz.day() == now.day() &&
+                            scheduled_in_tz.hour() == now.hour() &&
+                            scheduled_in_tz.minute() == now.minute()
+                        } else {
+                            false
+                        }
+                    },
+                    _ => false,
+                };
+                
+                if should_fire {
+                    let fired_schedule = FiredSchedule {
+                        name: schedule.name.clone(),
+                        scheduled_time: schedule.time.clone(),
+                        fired_time: current_datetime.clone(),
+                        message: schedule.message.clone(),
+                    };
+                    
+                    // Add to fired schedules
+                    if let Err(e) = self.add_fired_schedule(fired_schedule).await {
+                        eprintln!("Failed to add fired schedule: {:?}", e);
+                        continue;
+                    }
+                    
+                    eprintln!("🔔 Schedule fired: {} - {}", schedule.name, schedule.message);
+                    
+                    // Mark one-time schedules for removal
+                    if schedule.cycle == "none" {
+                        schedules_to_remove.push(name.clone());
+                    }
+                }
+            }
+        }
+        
+        // Remove one-time schedules that have been fired
+        if !schedules_to_remove.is_empty() {
+            let mut schedules = self.schedules.lock().await;
+            for name in schedules_to_remove {
+                schedules.remove(&name);
+            }
+            drop(schedules);
+            self.save_schedules().await?;
+        }
+        
         Ok(())
     }
 
@@ -289,12 +449,96 @@ impl ServerHandler for SchedulerService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some("Scheduler MCP server for managing time-based message notifications".into()),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
             server_info: Implementation { 
                 name: env!("CARGO_CRATE_NAME").to_owned(), 
                 version: env!("CARGO_PKG_VERSION").to_owned() 
             },
             ..Default::default()
         }
+    }
+
+    async fn list_resources(&self, _param: Option<rmcp::model::PaginatedRequestParam>, _context: RequestContext<rmcp::RoleServer>) -> Result<ListResourcesResult, ErrorData> {
+        let resources = vec![
+            Annotated::new(RawResource {
+                uri: "fired_schedule://all".to_string(),
+                name: "All Fired Schedules".to_string(),
+                description: Some("Complete history of all fired schedule notifications".to_string()),
+                mime_type: Some("application/json".to_string()),
+                size: None,
+            }, None),
+            Annotated::new(RawResource {
+                uri: "fired_schedule://recent".to_string(),
+                name: "Recent Fired Schedules".to_string(),
+                description: Some("Most recent 100 fired schedule notifications".to_string()),
+                mime_type: Some("application/json".to_string()),
+                size: None,
+            }, None),
+        ];
+        
+        Ok(ListResourcesResult {
+            resources,
+            next_cursor: None,
+        })
+    }
+
+    async fn read_resource(&self, param: rmcp::model::ReadResourceRequestParam, _context: RequestContext<rmcp::RoleServer>) -> Result<ReadResourceResult, ErrorData> {
+        self.load_fired_schedules().await?;
+        
+        let fired_schedules = self.fired_schedules.lock().await;
+        let uri = param.uri.as_str();
+        
+        let data = match uri {
+            "fired_schedule://all" => {
+                serde_json::to_string_pretty(&*fired_schedules).map_err(|e| {
+                    ErrorData::internal_error(
+                        "Failed to serialize fired schedules",
+                        Some(json!({"reason": e.to_string()})),
+                    )
+                })?
+            },
+            "fired_schedule://recent" => {
+                let recent_count = std::cmp::min(100, fired_schedules.len());
+                let recent_schedules = if fired_schedules.len() > recent_count {
+                    &fired_schedules[fired_schedules.len() - recent_count..]
+                } else {
+                    &fired_schedules[..]
+                };
+                
+                serde_json::to_string_pretty(recent_schedules).map_err(|e| {
+                    ErrorData::internal_error(
+                        "Failed to serialize recent fired schedules",
+                        Some(json!({"reason": e.to_string()})),
+                    )
+                })?
+            },
+            uri if uri.starts_with("fired_schedule://by-name/") => {
+                let name = &uri["fired_schedule://by-name/".len()..];
+                let filtered_schedules: Vec<&FiredSchedule> = fired_schedules
+                    .iter()
+                    .filter(|fs| fs.name == name)
+                    .collect();
+                
+                serde_json::to_string_pretty(&filtered_schedules).map_err(|e| {
+                    ErrorData::internal_error(
+                        "Failed to serialize named fired schedules",
+                        Some(json!({"reason": e.to_string()})),
+                    )
+                })?
+            },
+            _ => {
+                return Err(ErrorData::invalid_params(
+                    "Unknown resource URI",
+                    Some(json!({"uri": uri})),
+                ))
+            }
+        };
+
+        Ok(ReadResourceResult {
+            contents: vec![ResourceContents::text(data, param.uri)],
+        })
     }
 }
