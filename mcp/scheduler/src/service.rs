@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveTime, Datelike, Timelike};
 use rmcp::{
     ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
-    model::{Annotated, CallToolResult, Content, Implementation, ListResourcesResult, ReadResourceResult, ResourceContents, RawResource, ServerCapabilities, ServerInfo},
+    model::{Annotated, CallToolResult, Content, Implementation, ListResourcesResult, ReadResourceResult, ResourceContents, RawResource, ServerCapabilities, ServerInfo, SubscribeRequestParam, UnsubscribeRequestParam, ResourceUpdatedNotification, ResourceUpdatedNotificationMethod, ResourceUpdatedNotificationParam, Extensions},
     schemars::{self, JsonSchema},
     serde_json::json,
     tool, tool_handler, tool_router,
@@ -53,6 +53,7 @@ pub struct SchedulerService {
     schedules: Arc<Mutex<HashMap<String, Schedule>>>,
     fired_schedules: Arc<Mutex<Vec<FiredSchedule>>>,
     timezone: chrono_tz::Tz,
+    subscriptions: Arc<Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<rmcp::model::ResourceUpdatedNotification>>>>,
 }
 
 impl SchedulerService {
@@ -77,6 +78,7 @@ impl SchedulerService {
             schedules: Arc::new(Mutex::new(HashMap::new())),
             fired_schedules: Arc::new(Mutex::new(Vec::new())),
             timezone,
+            subscriptions: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -279,6 +281,9 @@ impl SchedulerService {
                     
                     eprintln!("🔔 Schedule fired: {} - {}", schedule.name, schedule.message);
                     
+                    // Send notification to subscribers
+                    self.notify_fired_schedule().await;
+                    
                     // Mark one-time schedules for removal
                     if schedule.cycle == "none" {
                         schedules_to_remove.push(name.clone());
@@ -298,6 +303,26 @@ impl SchedulerService {
         }
         
         Ok(())
+    }
+
+    async fn notify_fired_schedule(&self) {
+        let subscriptions = self.subscriptions.lock().await;
+        
+        for (uri, sender) in subscriptions.iter() {
+            if uri.starts_with("fired_schedule://") {
+                let notification = ResourceUpdatedNotification {
+                    method: ResourceUpdatedNotificationMethod,
+                    params: ResourceUpdatedNotificationParam {
+                        uri: uri.clone(),
+                    },
+                    extensions: Extensions::default(),
+                };
+
+                if let Err(e) = sender.send(notification) {
+                    eprintln!("Failed to send resource update notification: {:?}", e);
+                }
+            }
+        }
     }
 
     fn validate_cycle(&self, cycle: &str) -> Result<(), ErrorData> {
@@ -452,6 +477,7 @@ impl ServerHandler for SchedulerService {
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
+                .enable_resources_subscribe()
                 .build(),
             server_info: Implementation { 
                 name: env!("CARGO_CRATE_NAME").to_owned(), 
@@ -540,6 +566,34 @@ impl ServerHandler for SchedulerService {
         Ok(ReadResourceResult {
             contents: vec![ResourceContents::text(data, param.uri)],
         })
+    }
+
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParam,
+        _context: RequestContext<rmcp::RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        {
+            let mut subscriptions = self.subscriptions.lock().await;
+            subscriptions.insert(request.uri.clone(), sender);
+        }
+
+        eprintln!("Subscribed to resource: {}", request.uri);
+        Ok(())
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParam,
+        _context: RequestContext<rmcp::RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let mut subscriptions = self.subscriptions.lock().await;
+        subscriptions.remove(&request.uri);
+
+        eprintln!("Unsubscribed from resource: {}", request.uri);
+        Ok(())
     }
 }
 
