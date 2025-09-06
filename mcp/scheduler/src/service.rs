@@ -1,8 +1,9 @@
 use chrono::{DateTime, Datelike, NaiveTime, Timelike};
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::service::RequestContext;
 use rmcp::{
     ErrorData, ServerHandler,
-    handler::server::{router::tool::ToolRouter, tool::Parameters},
+    handler::server::router::tool::ToolRouter,
     model::{
         Annotated, CallToolResult, Content, Implementation, ListResourcesResult, RawResource,
         ReadResourceResult, ResourceContents, ResourceUpdatedNotificationParam, ServerCapabilities,
@@ -16,7 +17,6 @@ use rmcp::{Peer, RoleServer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
-use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -289,7 +289,7 @@ impl SchedulerService {
                     );
 
                     // Send notification to subscribers
-                    self.notify_fired_schedule().await;
+                    self.notify_fired_schedule(&schedule.message).await;
 
                     // Mark one-time schedules for removal
                     if schedule.cycle == "none" {
@@ -312,12 +312,15 @@ impl SchedulerService {
         Ok(())
     }
 
-    async fn notify_fired_schedule(&self) {
+    async fn notify_fired_schedule(&self, title: &str) {
         let subscriptions = self.subscriptions.lock().await;
 
         for (uri, peer) in subscriptions.iter() {
             if uri.starts_with("fired_schedule://") {
-                let params = ResourceUpdatedNotificationParam { uri: uri.clone() };
+                let params = ResourceUpdatedNotificationParam {
+                    uri: uri.clone(),
+                    title: title.to_string(),
+                };
 
                 if let Err(e) = peer.notify_resource_updated(params).await {
                     eprintln!("Failed to send resource update notification: {:?}", e);
@@ -409,6 +412,7 @@ impl SchedulerService {
             content: vec![Content::text("Succeeded".to_string())],
             structured_content: None,
             is_error: Some(false),
+            meta: None,
         })
     }
 
@@ -430,6 +434,7 @@ impl SchedulerService {
             content: vec![Content::text(content)],
             structured_content: None,
             is_error: Some(false),
+            meta: None,
         })
     }
 
@@ -466,6 +471,7 @@ impl SchedulerService {
             content: vec![Content::text("Succeeded".to_string())],
             structured_content: None,
             is_error: Some(false),
+            meta: None,
         })
     }
 }
@@ -617,7 +623,7 @@ impl ServerHandler for SchedulerService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::handler::server::tool::Parameters;
+    use rmcp::handler::server::wrapper::Parameters;
     use tokio;
 
     use tempfile;
