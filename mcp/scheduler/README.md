@@ -135,30 +135,36 @@ Returns `Succeeded` when the schedule is successfully removed.
 
 ## Resources
 
-### fired_schedule
+### fired_schedule://recent
 
-A subscribable resource that delivers notifications when scheduled times arrive.
+This server provides only one resource: `fired_schedule://recent`.
+This resource is intended to be used with the MCP protocol's subscribe feature. Clients can subscribe to this resource to receive real-time notifications (in JSON format) when a schedule fires.
 
 #### Content
 
-When you subscribe to this resource, you will receive real-time notifications in JSON format:
+The resource response's `text` field contains fired schedule data in JSON format:
 
 ```json
-{
-  "name": "meeting_reminder",
-  "scheduled_time": "2024-01-15T14:30:00",
-  "fired_time": "2024-01-15T14:30:01",
-  "message": "Team meeting in 30 minutes"
-}
+[
+  {
+    "name": "meeting_reminder",
+    "scheduled_time": "2024-01-15T14:30:00",
+    "fired_time": "2024-01-15T14:30:01",
+    "message": "Team meeting in 30 minutes"
+  }
+]
 ```
 
-Fields:
-- **name**: The unique identifier of the fired schedule
-- **scheduled_time**: The originally scheduled time
-- **fired_time**: The actual time when the notification was delivered
-- **message**: The notification message content
+#### Notification
 
-This allows LLM agents to react immediately to scheduled events without polling.
+Resource update notifications follow MCP's standard format with uri and title parameters identifying the changed resource.
+
+This mechanism allows LLM agents and other clients to react to schedule events immediately, without polling.
+
+#### Notes
+
+- No resources other than `fired_schedule://recent` are provided.
+- MCP clients should use the `subscribe` request to subscribe to this resource.
 
 #### Errors
 
