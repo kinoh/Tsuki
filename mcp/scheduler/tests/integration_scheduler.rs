@@ -537,9 +537,8 @@ async fn test_read_fired_schedules_resource() {
 
     assert_eq!(contents.len(), 1);
     let content = &contents[0];
-    // Check mimeType (might be "text" or "application/json")
     let mime_type = content.get("mimeType").unwrap().as_str().unwrap();
-    assert!(mime_type == "application/json" || mime_type == "text");
+    assert_eq!(mime_type, "application/json");
 
     // Parse the JSON content
     let text = content.get("text").unwrap().as_str().unwrap();

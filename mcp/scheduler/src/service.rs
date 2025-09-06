@@ -495,7 +495,12 @@ impl ServerHandler for SchedulerService {
         })?;
 
         Ok(ReadResourceResult {
-            contents: vec![ResourceContents::text(data, param.uri)],
+            contents: vec![ResourceContents::TextResourceContents {
+                uri: param.uri,
+                mime_type: Some("application/json".to_string()),
+                text: data,
+                meta: None,
+            }],
         })
     }
 
