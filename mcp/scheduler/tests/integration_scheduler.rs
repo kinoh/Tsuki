@@ -21,6 +21,7 @@ impl McpClient {
         let binary_path = env!("CARGO_BIN_EXE_scheduler");
 
         let mut child = TokioCommand::new(binary_path)
+            .env("SCHEDULER_LOOP_INTERVAL_MS", "100")
             .env("TZ", "UTC")
             .env("DATA_DIR", temp_dir.path())
             .stdin(Stdio::piped())
@@ -161,8 +162,11 @@ impl McpClient {
                 match self.stdout_lines.next_line().await {
                     Ok(Some(line)) => {
                         if let Ok(msg) = serde_json::from_str::<Value>(&line) {
-                            if msg.get("method") == Some(&json!("resource/updated")) {
+                            if msg.get("method") == Some(&json!("notifications/resources/updated"))
+                            {
                                 return Ok::<Value, Box<dyn std::error::Error>>(msg);
+                            } else {
+                                return Err(format!("Unexpected message: {:?}", msg).into());
                             }
                         }
                     }
@@ -558,26 +562,27 @@ async fn test_resource_subscription() {
         .unwrap();
 
     // Add a schedule to trigger a resource update
-    let time = Local::now() + chrono::Duration::seconds(1);
+    let time = Local::now();
 
-    client
+    let response = client
         .call_tool(
             "set_schedule",
             json!({
                 "name": "sub_test",
                 "time": time.to_rfc3339(),
-                "cycle": "one_time",
+                "cycle": "none",
                 "message": "Subscription test"
             }),
         )
         .await
         .unwrap();
+    assert_eq!(response.get("error"), None);
 
     // Wait for notification
-    let notification = client.wait_for_resource_update(5).await.unwrap();
-    assert_eq!(notification.get("method").unwrap(), "resource/updated");
+    let notification = client.wait_for_resource_update(1).await.unwrap();
     let params = notification.get("params").unwrap();
     assert_eq!(params.get("uri").unwrap(), "fired_schedule://recent");
+    assert_eq!(params.get("title").unwrap(), "Subscription test");
 
     client.shutdown().await.unwrap();
 }
