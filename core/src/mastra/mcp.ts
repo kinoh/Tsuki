@@ -21,6 +21,15 @@ export const mcp = new MCPClient({
         ROOT_TEMPLATE: '# メモ帳\n',
       },
     },
+    scheduler: {
+      command: './bin/scheduler',
+      args: [],
+      env: {
+        DATA_DIR: `${dataDir}/scheduler`,
+        SCHEDULER_LOOP_INTERVAL_MS: '1000',
+        TZ: 'Asia/Tokyo',
+      },
+    },
   },
 })
 
