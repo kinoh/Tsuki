@@ -17,14 +17,7 @@ pub struct McpClient {
 impl McpClient {
     /// Start scheduler server and create MCP client
     pub async fn new(temp_dir: &TempDir) -> Result<Self, Box<dyn std::error::Error>> {
-        let binary_path = std::env::var("CARGO_BIN_EXE_scheduler").unwrap_or_else(|_| {
-            // Fallback for manual execution
-            std::env::current_dir()
-                .unwrap()
-                .join("target/debug/scheduler")
-                .to_string_lossy()
-                .to_string()
-        });
+        let binary_path = env!("CARGO_BIN_EXE_scheduler");
 
         let mut child = TokioCommand::new(binary_path)
             .env("TZ", "UTC")
