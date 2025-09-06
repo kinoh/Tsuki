@@ -1,3 +1,4 @@
+use chrono::Local;
 use serde_json::{Value, json};
 use std::process::Stdio;
 use std::time::Duration;
@@ -133,6 +134,45 @@ impl McpClient {
         });
 
         self.send_request(request).await
+    }
+
+    /// Subscribe to a resource
+    pub async fn subscribe_resource(
+        &mut self,
+        uri: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": self.request_id,
+            "method": "resources/subscribe",
+            "params": { "uri": uri }
+        });
+        self.send_request(request).await?; // ignore response content
+        Ok(())
+    }
+
+    /// Wait for a resource/updated notification (returns the notification JSON)
+    pub async fn wait_for_resource_update(
+        &mut self,
+        timeout_sec: u64,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let notification = timeout(Duration::from_secs(timeout_sec), async {
+            loop {
+                match self.stdout_lines.next_line().await {
+                    Ok(Some(line)) => {
+                        if let Ok(msg) = serde_json::from_str::<Value>(&line) {
+                            if msg.get("method") == Some(&json!("resource/updated")) {
+                                return Ok::<Value, Box<dyn std::error::Error>>(msg);
+                            }
+                        }
+                    }
+                    Ok(None) => return Err("Stream ended".into()),
+                    Err(e) => return Err(format!("IO error: {}", e).into()),
+                }
+            }
+        })
+        .await??;
+        Ok(notification)
     }
 
     /// Send JSON-RPC request and wait for response
@@ -501,6 +541,43 @@ async fn test_read_fired_schedules_resource() {
     let text = content.get("text").unwrap().as_str().unwrap();
     let fired_schedules: Value = serde_json::from_str(text).unwrap();
     assert!(fired_schedules.is_array());
+
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_resource_subscription() {
+    let temp_dir = setup_test_env();
+    let mut client = McpClient::new(&temp_dir).await.unwrap();
+    client.initialize().await.unwrap();
+
+    // Subscribe to the fired_schedule resource
+    client
+        .subscribe_resource("fired_schedule://recent")
+        .await
+        .unwrap();
+
+    // Add a schedule to trigger a resource update
+    let time = Local::now() + chrono::Duration::seconds(1);
+
+    client
+        .call_tool(
+            "set_schedule",
+            json!({
+                "name": "sub_test",
+                "time": time.to_rfc3339(),
+                "cycle": "one_time",
+                "message": "Subscription test"
+            }),
+        )
+        .await
+        .unwrap();
+
+    // Wait for notification
+    let notification = client.wait_for_resource_update(5).await.unwrap();
+    assert_eq!(notification.get("method").unwrap(), "resource/updated");
+    let params = notification.get("params").unwrap();
+    assert_eq!(params.get("uri").unwrap(), "fired_schedule://recent");
 
     client.shutdown().await.unwrap();
 }
