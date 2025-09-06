@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
@@ -17,9 +17,14 @@ pub struct McpClient {
 impl McpClient {
     /// Start scheduler server and create MCP client
     pub async fn new(temp_dir: &TempDir) -> Result<Self, Box<dyn std::error::Error>> {
-        let binary_path = std::env::current_dir()
-            .unwrap()
-            .join("target/debug/scheduler");
+        let binary_path = std::env::var("CARGO_BIN_EXE_scheduler").unwrap_or_else(|_| {
+            // Fallback for manual execution
+            std::env::current_dir()
+                .unwrap()
+                .join("target/debug/scheduler")
+                .to_string_lossy()
+                .to_string()
+        });
 
         let mut child = TokioCommand::new(binary_path)
             .env("TZ", "UTC")
@@ -191,24 +196,8 @@ fn setup_test_env() -> TempDir {
     TempDir::new().expect("Failed to create temporary directory")
 }
 
-/// Build the scheduler binary before running tests
-fn ensure_binary_built() {
-    let output = Command::new("cargo")
-        .args(["build", "--bin", "scheduler"])
-        .output()
-        .expect("Failed to execute cargo build");
-
-    if !output.status.success() {
-        panic!(
-            "Failed to build scheduler binary: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-}
-
 #[tokio::test]
 async fn test_server_initialization() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
@@ -222,7 +211,6 @@ async fn test_server_initialization() {
 
 #[tokio::test]
 async fn test_list_tools() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
@@ -246,7 +234,6 @@ async fn test_list_tools() {
 
 #[tokio::test]
 async fn test_list_resources() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
@@ -273,7 +260,6 @@ async fn test_list_resources() {
 
 #[tokio::test]
 async fn test_set_schedule_daily() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
@@ -304,7 +290,6 @@ async fn test_set_schedule_daily() {
 
 #[tokio::test]
 async fn test_set_schedule_one_time() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
@@ -332,7 +317,6 @@ async fn test_set_schedule_one_time() {
 
 #[tokio::test]
 async fn test_set_schedule_validation_errors() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
@@ -391,7 +375,6 @@ async fn test_set_schedule_validation_errors() {
 
 #[tokio::test]
 async fn test_remove_schedule() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
@@ -430,7 +413,6 @@ async fn test_remove_schedule() {
 
 #[tokio::test]
 async fn test_remove_nonexistent_schedule() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
@@ -454,7 +436,6 @@ async fn test_remove_nonexistent_schedule() {
 
 #[tokio::test]
 async fn test_data_persistence() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
 
     // First session: create schedule
@@ -503,7 +484,6 @@ async fn test_data_persistence() {
 
 #[tokio::test]
 async fn test_read_fired_schedules_resource() {
-    ensure_binary_built();
     let temp_dir = setup_test_env();
     let mut client = McpClient::new(&temp_dir).await.unwrap();
 
