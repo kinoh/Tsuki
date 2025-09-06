@@ -9,6 +9,12 @@
   - Used for interpreting schedule times and calculating when schedules should fire
   - Must be a valid timezone identifier (IANA Time Zone Database)
 
+- **SCHEDULER_LOOP_INTERVAL_MS** (Optional): Scheduler event loop interval in milliseconds
+  - Example: `export SCHEDULER_LOOP_INTERVAL_MS=1000`
+  - Controls how frequently the scheduler checks and fires due notifications
+  - Default: `60000` (60 seconds)
+  - For testing, set to a lower value (e.g., `100` or `500`) to make schedule firing and notification delivery faster
+
 ## Features
 
 - Schedule message notifications at specific times

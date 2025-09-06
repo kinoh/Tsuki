@@ -167,7 +167,12 @@ impl SchedulerService {
         // Load existing schedules and fired schedules on startup
         self.load_schedules().await?;
 
-        let mut interval = time::interval(Duration::from_secs(60)); // Check every minute
+        // Allow loop interval to be configured via env var (milliseconds)
+        let interval_ms = std::env::var("SCHEDULER_LOOP_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(60_000); // default: 60s
+        let mut interval = time::interval(Duration::from_millis(interval_ms));
 
         loop {
             interval.tick().await;
