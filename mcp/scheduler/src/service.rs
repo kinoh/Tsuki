@@ -103,10 +103,6 @@ impl SchedulerService {
         format!("{}/schedules.json", self.data_dir)
     }
 
-    async fn fired_schedules_file_path(&self) -> String {
-        format!("{}/fired_schedules.json", self.data_dir)
-    }
-
     async fn load_schedules(&self) -> Result<(), ErrorData> {
         self.ensure_data_dir().await?;
 
@@ -155,75 +151,21 @@ impl SchedulerService {
         Ok(())
     }
 
-    async fn load_fired_schedules(&self) -> Result<(), ErrorData> {
-        self.ensure_data_dir().await?;
-
-        let file_path = self.fired_schedules_file_path().await;
-        if Path::new(&file_path).exists() {
-            let content = fs::read_to_string(&file_path).await.map_err(|e| {
-                ErrorData::internal_error(
-                    "Failed to read fired schedules file",
-                    Some(json!({"reason": e.to_string()})),
-                )
-            })?;
-
-            let loaded_fired_schedules: Vec<FiredSchedule> = serde_json::from_str(&content)
-                .map_err(|e| {
-                    ErrorData::internal_error(
-                        "Failed to parse fired schedules file",
-                        Some(json!({"reason": e.to_string()})),
-                    )
-                })?;
-
-            let mut fired_schedules = self.fired_schedules.lock().await;
-            *fired_schedules = loaded_fired_schedules;
-        }
-        Ok(())
-    }
-
-    async fn save_fired_schedules(&self) -> Result<(), ErrorData> {
-        self.ensure_data_dir().await?;
-
-        let fired_schedules = self.fired_schedules.lock().await;
-        let content = serde_json::to_string_pretty(&*fired_schedules).map_err(|e| {
-            ErrorData::internal_error(
-                "Failed to serialize fired schedules",
-                Some(json!({"reason": e.to_string()})),
-            )
-        })?;
-
-        let file_path = self.fired_schedules_file_path().await;
-        fs::write(&file_path, content).await.map_err(|e| {
-            ErrorData::internal_error(
-                "Failed to write fired schedules file",
-                Some(json!({"reason": e.to_string()})),
-            )
-        })?;
-
-        Ok(())
-    }
-
     async fn add_fired_schedule(&self, fired_schedule: FiredSchedule) -> Result<(), ErrorData> {
         let mut fired_schedules = self.fired_schedules.lock().await;
-
-        // Add the new fired schedule
         fired_schedules.push(fired_schedule);
-
         // Keep only the most recent 1000 entries
         const MAX_FIRED_SCHEDULES: usize = 1000;
         if fired_schedules.len() > MAX_FIRED_SCHEDULES {
             let excess = fired_schedules.len() - MAX_FIRED_SCHEDULES;
             fired_schedules.drain(0..excess);
         }
-
-        drop(fired_schedules);
-        self.save_fired_schedules().await
+        Ok(())
     }
 
     pub async fn start_scheduler_daemon(self: Arc<Self>) -> Result<(), ErrorData> {
         // Load existing schedules and fired schedules on startup
         self.load_schedules().await?;
-        self.load_fired_schedules().await?;
 
         let mut interval = time::interval(Duration::from_secs(60)); // Check every minute
 
@@ -501,30 +443,16 @@ impl ServerHandler for SchedulerService {
         _param: Option<rmcp::model::PaginatedRequestParam>,
         _context: RequestContext<rmcp::RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        let resources = vec![
-            Annotated::new(
-                RawResource {
-                    uri: "fired_schedule://all".to_string(),
-                    name: "All Fired Schedules".to_string(),
-                    description: Some(
-                        "Complete history of all fired schedule notifications".to_string(),
-                    ),
-                    mime_type: Some("application/json".to_string()),
-                    size: None,
-                },
-                None,
-            ),
-            Annotated::new(
-                RawResource {
-                    uri: "fired_schedule://recent".to_string(),
-                    name: "Recent Fired Schedules".to_string(),
-                    description: Some("Most recent 100 fired schedule notifications".to_string()),
-                    mime_type: Some("application/json".to_string()),
-                    size: None,
-                },
-                None,
-            ),
-        ];
+        let resources = vec![Annotated::new(
+            RawResource {
+                uri: "fired_schedule://recent".to_string(),
+                name: "Recent Fired Schedules".to_string(),
+                description: Some("Most recent 100 fired schedule notifications".to_string()),
+                mime_type: Some("application/json".to_string()),
+                size: None,
+            },
+            None,
+        )];
 
         Ok(ListResourcesResult {
             resources,
@@ -537,8 +465,6 @@ impl ServerHandler for SchedulerService {
         param: rmcp::model::ReadResourceRequestParam,
         _context: RequestContext<rmcp::RoleServer>,
     ) -> Result<ReadResourceResult, ErrorData> {
-        self.load_fired_schedules().await?;
-
         let fired_schedules = self.fired_schedules.lock().await;
         let uri = param.uri.as_str();
 
