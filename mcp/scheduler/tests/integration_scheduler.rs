@@ -332,14 +332,14 @@ async fn test_set_schedule_one_time() {
 
     client.initialize().await.unwrap();
 
-    // Set a one-time schedule
+    // Set a once schedule
     let response = client
         .call_tool(
             "set_schedule",
             json!({
                 "name": "test_onetime",
                 "time": "2024-12-31T23:59:59+00:00",
-                "cycle": "none",
+                "cycle": "once",
                 "message": "New Year reminder"
             }),
         )
@@ -569,7 +569,7 @@ async fn test_resource_subscription() {
             json!({
                 "name": "sub_test",
                 "time": time.to_rfc3339(),
-                "cycle": "none",
+                "cycle": "once",
                 "message": "Subscription test"
             }),
         )

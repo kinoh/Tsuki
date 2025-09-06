@@ -38,7 +38,7 @@ Schedule a single notification at a specific time:
 {
   "name": "meeting_reminder",
   "time": "2024-01-15T14:30:00",
-  "cycle": "none",
+  "cycle": "once",
   "message": "Team meeting in 30 minutes"
 }
 ```
@@ -73,7 +73,7 @@ Creates or updates a scheduled notification.
   - For one-time: ISO 8601 datetime string (e.g., "2024-01-15T14:30:00")
   - For daily: Time string in HH:MM format (e.g., "09:30")
 - **cycle** (Required): Schedule repetition type
-  - `"none"`: One-time schedule
+  - `"once"`: One-time schedule
   - `"daily"`: Repeats every day at the specified time
 - **message** (Required): Notification message to deliver when the schedule fires
 
@@ -84,7 +84,7 @@ Returns `Succeeded` when the schedule is successfully created or updated.
 #### Errors
 
 - Returns `Error: time: invalid format` if time format is invalid
-- Returns `Error: cycle: invalid value` if cycle value is not "none" or "daily"
+- Returns `Error: cycle: invalid value` if cycle value is not "once" or "daily"
 - Returns `Error: name: required` if name argument is missing
 - Returns `Error: message: required` if message argument is missing
 
@@ -105,7 +105,7 @@ Returns a list of all scheduled notifications with their details:
   {
     "name": "meeting_reminder",
     "time": "2024-01-15T14:30:00",
-    "cycle": "none",
+    "cycle": "once",
     "message": "Team meeting in 30 minutes"
   },
   {

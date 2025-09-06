@@ -26,7 +26,7 @@ use tokio::{fs, sync::Mutex, time};
 pub struct SetScheduleRequest {
     pub name: String,
     pub time: String,
-    pub cycle: String, // "daily" | "none"
+    pub cycle: String, // "daily" | "once"
     pub message: String,
 }
 
@@ -206,7 +206,7 @@ impl SchedulerService {
                         // For daily schedules, fire when current time matches scheduled time
                         schedule.time == current_time_str
                     }
-                    "none" => {
+                    "once" => {
                         // For one-time schedules, parse the ISO datetime and check if it matches current minute
                         if let Ok(scheduled_time) = DateTime::parse_from_rfc3339(&schedule.time) {
                             let scheduled_in_tz = scheduled_time.with_timezone(&self.timezone);
@@ -246,7 +246,7 @@ impl SchedulerService {
                     self.notify_fired_schedule(&schedule.message).await;
 
                     // Mark one-time schedules for removal
-                    if schedule.cycle == "none" {
+                    if schedule.cycle == "once" {
                         schedules_to_remove.push(name.clone());
                     }
                 }
@@ -285,7 +285,7 @@ impl SchedulerService {
 
     fn validate_cycle(&self, cycle: &str) -> Result<(), ErrorData> {
         match cycle {
-            "daily" | "none" => Ok(()),
+            "daily" | "once" => Ok(()),
             _ => Err(ErrorData::invalid_params(
                 "Error: cycle: invalid value",
                 Some(json!({"cycle": cycle})),
@@ -295,12 +295,14 @@ impl SchedulerService {
 
     fn validate_time_format(&self, time: &str, cycle: &str) -> Result<(), ErrorData> {
         match cycle {
-            "none" => {
+            "once" => {
                 // For one-time schedules, expect ISO 8601 format
                 DateTime::parse_from_rfc3339(time).map_err(|_| {
                     ErrorData::invalid_params(
                         "Error: time: invalid format",
-                        Some(json!({"time": time, "expected": "ISO 8601 format for one-time schedules"})),
+                        Some(
+                            json!({"time": time, "expected": "ISO 8601 format for one-time schedules"}),
+                        ),
                     )
                 })?;
             }
@@ -579,7 +581,7 @@ mod tests {
         let request = SetScheduleRequest {
             name: "test_once".to_string(),
             time: "2024-12-25T10:00:00+09:00".to_string(),
-            cycle: "none".to_string(),
+            cycle: "once".to_string(),
             message: "Christmas reminder".to_string(),
         };
 
