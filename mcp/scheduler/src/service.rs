@@ -4,15 +4,15 @@ use rmcp::{
     ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
     model::{
-        Annotated, CallToolResult, Content, Extensions, Implementation, ListResourcesResult,
-        RawResource, ReadResourceResult, ResourceContents, ResourceUpdatedNotification,
-        ResourceUpdatedNotificationMethod, ResourceUpdatedNotificationParam, ServerCapabilities,
+        Annotated, CallToolResult, Content, Implementation, ListResourcesResult, RawResource,
+        ReadResourceResult, ResourceContents, ResourceUpdatedNotificationParam, ServerCapabilities,
         ServerInfo, SubscribeRequestParam, UnsubscribeRequestParam,
     },
     schemars::{self, JsonSchema},
     serde_json::json,
     tool, tool_handler, tool_router,
 };
+use rmcp::{Peer, RoleServer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -58,14 +58,7 @@ pub struct SchedulerService {
     schedules: Arc<Mutex<HashMap<String, Schedule>>>,
     fired_schedules: Arc<Mutex<Vec<FiredSchedule>>>,
     timezone: chrono_tz::Tz,
-    subscriptions: Arc<
-        Mutex<
-            HashMap<
-                String,
-                tokio::sync::mpsc::UnboundedSender<rmcp::model::ResourceUpdatedNotification>,
-            >,
-        >,
-    >,
+    subscriptions: Arc<Mutex<HashMap<String, Peer<RoleServer>>>>,
 }
 
 impl SchedulerService {
@@ -322,15 +315,11 @@ impl SchedulerService {
     async fn notify_fired_schedule(&self) {
         let subscriptions = self.subscriptions.lock().await;
 
-        for (uri, sender) in subscriptions.iter() {
+        for (uri, peer) in subscriptions.iter() {
             if uri.starts_with("fired_schedule://") {
-                let notification = ResourceUpdatedNotification {
-                    method: ResourceUpdatedNotificationMethod,
-                    params: ResourceUpdatedNotificationParam { uri: uri.clone() },
-                    extensions: Extensions::default(),
-                };
+                let params = ResourceUpdatedNotificationParam { uri: uri.clone() };
 
-                if let Err(e) = sender.send(notification) {
+                if let Err(e) = peer.notify_resource_updated(params).await {
                     eprintln!("Failed to send resource update notification: {:?}", e);
                 }
             }
@@ -601,13 +590,11 @@ impl ServerHandler for SchedulerService {
     async fn subscribe(
         &self,
         request: SubscribeRequestParam,
-        _context: RequestContext<rmcp::RoleServer>,
+        context: RequestContext<rmcp::RoleServer>,
     ) -> Result<(), ErrorData> {
-        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
-
         {
             let mut subscriptions = self.subscriptions.lock().await;
-            subscriptions.insert(request.uri.clone(), sender);
+            subscriptions.insert(request.uri.clone(), context.peer);
         }
 
         eprintln!("Subscribed to resource: {}", request.uri);
