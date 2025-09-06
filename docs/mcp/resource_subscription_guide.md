@@ -9,35 +9,35 @@ The MCP protocol provides resource subscription functionality that enables:
 
 ## Implementation Methods
 
-1. Override ServerHandler's subscribe/unsubscribe methods
+### 1. Override ServerHandler's subscribe/unsubscribe methods
+
+The key to proper MCP resource notifications is storing `Peer<RoleServer>` instances from the RequestContext, not channels:
 
 ```rust
 use rmcp::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct ResourceServer {
-    // subscribed URIs to notification sender
-    subscriptions: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ResourceUpdatedNotification>>>>,
-    notification_sender: mpsc::UnboundedSender<ResourceUpdatedNotification>,
+    // Store Peer instances for proper MCP notifications
+    subscriptions: Arc<Mutex<HashMap<String, Peer<RoleServer>>>>,
 }
 
 impl ServerHandler for ResourceServer {
-    // Other method implementations...
-
     async fn subscribe(
         &self,
         request: SubscribeRequestParam,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<(), McpError> {
-        let mut subscriptions = self.subscriptions.lock().await;
+        context: RequestContext<RoleServer>, // Don't ignore this!
+    ) -> Result<(), ErrorData> {
+        {
+            let mut subscriptions = self.subscriptions.lock().await;
+            // Store the peer from context - this is the key!
+            subscriptions.insert(request.uri.clone(), context.peer);
+        }
 
-        // Add to subscription list
-        subscriptions.insert(request.uri.clone(), self.notification_sender.clone());
-
-        tracing::info!("Subscribed to resource: {}", request.uri);
+        eprintln!("Subscribed to resource: {}", request.uri);
         Ok(())
     }
 
@@ -45,53 +45,51 @@ impl ServerHandler for ResourceServer {
         &self,
         request: UnsubscribeRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> Result<(), McpError> {
+    ) -> Result<(), ErrorData> {
         let mut subscriptions = self.subscriptions.lock().await;
-
-        // Remove from subscription list
         subscriptions.remove(&request.uri);
 
-        tracing::info!("Unsubscribed from resource: {}", request.uri);
+        eprintln!("Unsubscribed from resource: {}", request.uri);
         Ok(())
     }
 }
 ```
 
-2. Send notifications when resources change
+### 2. Send notifications using peer.notify_resource_updated()
+
+When resources change, use the stored peer to send notifications:
 
 ```rust
 impl ResourceServer {
-    pub async fn update_resource(&self, uri: &str, new_content: &str) {
+    pub async fn update_resource(&self, uri: &str, title: &str) {
         // Resource update processing...
 
-        // Send notification to subscribers
+        // Send notification to subscribers using stored peers
         let subscriptions = self.subscriptions.lock().await;
-        if let Some(sender) = subscriptions.get(uri) {
-            let notification = ResourceUpdatedNotification {
-                method: ResourceUpdatedNotificationMethod,
-                params: ResourceUpdatedNotificationParam {
-                    uri: uri.to_string(),
-                },
+        if let Some(peer) = subscriptions.get(uri) {
+            let params = ResourceUpdatedNotificationParam {
+                uri: uri.to_string(),
+                title: title.to_string(), // MCP 2025-06-18 feature
             };
 
-            if let Err(e) = sender.send(notification) {
-                tracing::error!("Failed to send resource update notification: {}", e);
+            if let Err(e) = peer.notify_resource_updated(params).await {
+                eprintln!("Failed to send resource update notification: {:?}", e);
             }
         }
     }
 }
 ```
 
-3. Enable subscribe functionality in ServerCapabilities
+### 3. Enable subscribe functionality in ServerCapabilities
 
 ```rust
 impl ServerHandler for ResourceServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
+            protocol_version: ProtocolVersion::V_2025_06_18,
             capabilities: ServerCapabilities::builder()
                 .enable_resources()
-                .with_resource_subscribe(true)  // Enable subscribe
+                .enable_resources_subscribe()  // Correct method name
                 .build(),
             server_info: Implementation::from_build_env(),
             instructions: Some("Resource server with subscribe support".to_string()),
@@ -100,136 +98,82 @@ impl ServerHandler for ResourceServer {
 }
 ```
 
-4. Complete implementation example
+## Complete Working Example
+
+Here's a complete, working implementation based on the scheduler MCP server:
 
 ```rust
-use rmcp::*;
+use rmcp::{
+    ErrorData, ServerHandler,
+    handler::server::router::tool::ToolRouter,
+    model::{
+        ServerCapabilities, ServerInfo, SubscribeRequestParam, UnsubscribeRequestParam,
+        ResourceUpdatedNotificationParam, Implementation,
+    },
+    service::RequestContext,
+};
+use rmcp::{Peer, RoleServer};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc};
-use tokio::time::{interval, Duration};
+use tokio::sync::Mutex;
 
 #[derive(Clone)]
-pub struct SubscribableResourceServer {
-    resources: Arc<Mutex<HashMap<String, String>>>,
-    subscriptions: Arc<Mutex<HashMap<String, Vec<mpsc::UnboundedSender<String>>>>>,
+pub struct SchedulerService {
+    subscriptions: Arc<Mutex<HashMap<String, Peer<RoleServer>>>>,
+    // ... other fields
 }
 
-impl SubscribableResourceServer {
+impl SchedulerService {
     pub fn new() -> Self {
         Self {
-            resources: Arc::new(Mutex::new(HashMap::new())),
             subscriptions: Arc::new(Mutex::new(HashMap::new())),
+            // ... initialize other fields
         }
     }
 
-    // Update resource and notify subscribers
-    pub async fn update_resource(&self, uri: &str, content: String) {
-        {
-            let mut resources = self.resources.lock().await;
-            resources.insert(uri.to_string(), content.clone());
-        }
-
-        // Notify subscribers
+    // This method is called when a schedule fires
+    pub async fn notify_fired_schedule(&self, message: &str) {
         let subscriptions = self.subscriptions.lock().await;
-        if let Some(senders) = subscriptions.get(uri) {
-            for sender in senders {
-                // Actual notification is handled at service layer
-                let _ = sender.send(uri.to_string());
+
+        for (uri, peer) in subscriptions.iter() {
+            if uri.starts_with("fired_schedule://") {
+                let params = ResourceUpdatedNotificationParam {
+                    uri: uri.clone(),
+                    title: message.to_string(), // Schedule message as title
+                };
+
+                if let Err(e) = peer.notify_resource_updated(params).await {
+                    eprintln!("Failed to send resource update notification: {:?}", e);
+                }
             }
         }
-    }
-
-    // Example task for periodic resource updates
-    pub async fn start_periodic_updates(&self) {
-        let server = self.clone();
-        tokio::spawn(async move {
-            let mut interval = interval(Duration::from_secs(5));
-            let mut counter = 0;
-
-            loop {
-                interval.tick().await;
-                counter += 1;
-
-                let content = format!("Updated content at {}",
-                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
-                server.update_resource("resource://counter", content).await;
-            }
-        });
     }
 }
 
-impl ServerHandler for SubscribableResourceServer {
+impl ServerHandler for SchedulerService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
+            protocol_version: rmcp::model::ProtocolVersion::V_2025_06_18,
             capabilities: ServerCapabilities::builder()
                 .enable_resources()
-                .with_resource_subscribe(true)
+                .enable_resources_subscribe()
                 .build(),
             server_info: Implementation::from_build_env(),
-            instructions: Some("Subscribable resource server example".to_string()),
-        }
-    }
-
-    async fn list_resources(
-        &self,
-        _request: Option<PaginatedRequestParam>,
-        _: RequestContext<RoleServer>,
-    ) -> Result<ListResourcesResult, McpError> {
-        Ok(ListResourcesResult {
-            resources: vec![
-                RawResource::new("resource://counter", "counter").no_annotation(),
-                RawResource::new("resource://status", "status").no_annotation(),
-            ],
-            next_cursor: None,
-        })
-    }
-
-    async fn read_resource(
-        &self,
-        ReadResourceRequestParam { uri }: ReadResourceRequestParam,
-        _: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, McpError> {
-        let resources = self.resources.lock().await;
-
-        if let Some(content) = resources.get(&uri) {
-            Ok(ReadResourceResult {
-                contents: vec![ResourceContents::text(content, &uri)],
-            })
-        } else {
-            Err(McpError::resource_not_found(
-                "Resource not found",
-                Some(serde_json::json!({"uri": uri})),
-            ))
+            instructions: Some("Scheduler MCP server with subscription support".to_string()),
         }
     }
 
     async fn subscribe(
         &self,
         request: SubscribeRequestParam,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<(), McpError> {
-        let (sender, mut receiver) = mpsc::unbounded_channel();
-
+        context: RequestContext<RoleServer>, // Use the context!
+    ) -> Result<(), ErrorData> {
         {
             let mut subscriptions = self.subscriptions.lock().await;
-            subscriptions.entry(request.uri.clone())
-                .or_insert_with(Vec::new)
-                .push(sender);
+            subscriptions.insert(request.uri.clone(), context.peer);
         }
 
-        // Run notification receiving process in background
-        let uri = request.uri.clone();
-        tokio::spawn(async move {
-            while let Some(_update) = receiver.recv().await {
-                // Send actual notification here
-                // Typically use sending functionality from service or handler context
-                tracing::info!("Resource updated: {}", uri);
-            }
-        });
-
-        tracing::info!("Subscribed to resource: {}", request.uri);
+        eprintln!("Subscribed to resource: {}", request.uri);
         Ok(())
     }
 
@@ -237,33 +181,26 @@ impl ServerHandler for SubscribableResourceServer {
         &self,
         request: UnsubscribeRequestParam,
         _context: RequestContext<RoleServer>,
-    ) -> Result<(), McpError> {
+    ) -> Result<(), ErrorData> {
         let mut subscriptions = self.subscriptions.lock().await;
         subscriptions.remove(&request.uri);
 
-        tracing::info!("Unsubscribed from resource: {}", request.uri);
+        eprintln!("Unsubscribed from resource: {}", request.uri);
         Ok(())
     }
+
+    // ... implement other required methods (list_resources, read_resource, etc.)
 }
 ```
 
-5. Server startup
+## Key Points
 
-```rust
-#[tokio::main]
-async fn main() -> Result<()> {
-    let server = SubscribableResourceServer::new();
+1. **Store Peer instances, not channels**: The `context.peer` from `subscribe()` is what enables proper MCP notifications.
 
-    // Start periodic updates
-    server.start_periodic_updates().await;
+2. **Use peer.notify_resource_updated()**: This is the correct way to send resource update notifications to subscribed clients.
 
-    // Start server
-    server.serve(stdio()).await?.waiting().await?;
-    Ok(())
-}
-```
+3. **Include title field**: MCP protocol version 2025-06-18 adds a `title` field to resource notifications for better context.
 
-This implementation enables:
-- Clients can subscribe to resources using resources/subscribe
-- Server sends notifications/resources/updated when resources are updated
-- Resource unsubscription is possible with resources/unsubscribe
+4. **Enable correct capability**: Use `enable_resources_subscribe()` method in ServerCapabilities.
+
+This implementation ensures proper MCP protocol compliance and enables real-time resource notifications to subscribed clients.
