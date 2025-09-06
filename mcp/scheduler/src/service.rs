@@ -63,6 +63,13 @@ pub struct SchedulerService {
 
 impl SchedulerService {
     pub fn new(data_dir: String) -> Result<Self, ErrorData> {
+        if data_dir.trim().is_empty() {
+            return Err(ErrorData::invalid_params(
+                "DATA_DIR environment variable is required",
+                Some(json!({"reason": "DATA_DIR environment variable not set"})),
+            ));
+        }
+
         let timezone_str = env::var("TZ").map_err(|_| {
             ErrorData::invalid_params(
                 "TZ environment variable is required",

@@ -4,6 +4,11 @@
 
 ### Environment Variables
 
+- **DATA_DIR** (Required): Directory path where markdown documents will be stored
+  - Example: `export DATA_DIR="/path/to/documents"`
+  - The server will create this directory if it doesn't exist
+  - Must be an absolute path for reliable operation with MCP servers
+
 - **TZ** (Required): Timezone specification for schedule management
   - Example: `export TZ="Asia/Tokyo"`
   - Used for interpreting schedule times and calculating when schedules should fire
