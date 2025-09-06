@@ -473,51 +473,26 @@ impl ServerHandler for SchedulerService {
         let fired_schedules = self.fired_schedules.lock().await;
         let uri = param.uri.as_str();
 
-        let data = match uri {
-            "fired_schedule://all" => {
-                serde_json::to_string_pretty(&*fired_schedules).map_err(|e| {
-                    ErrorData::internal_error(
-                        "Failed to serialize fired schedules",
-                        Some(json!({"reason": e.to_string()})),
-                    )
-                })?
-            }
-            "fired_schedule://recent" => {
-                let recent_count = std::cmp::min(100, fired_schedules.len());
-                let recent_schedules = if fired_schedules.len() > recent_count {
-                    &fired_schedules[fired_schedules.len() - recent_count..]
-                } else {
-                    &fired_schedules[..]
-                };
+        if uri != "fired_schedule://recent" {
+            return Err(ErrorData::invalid_params(
+                "Unknown resource URI",
+                Some(json!({"uri": uri})),
+            ));
+        }
 
-                serde_json::to_string_pretty(recent_schedules).map_err(|e| {
-                    ErrorData::internal_error(
-                        "Failed to serialize recent fired schedules",
-                        Some(json!({"reason": e.to_string()})),
-                    )
-                })?
-            }
-            uri if uri.starts_with("fired_schedule://by-name/") => {
-                let name = &uri["fired_schedule://by-name/".len()..];
-                let filtered_schedules: Vec<&FiredSchedule> = fired_schedules
-                    .iter()
-                    .filter(|fs| fs.name == name)
-                    .collect();
-
-                serde_json::to_string_pretty(&filtered_schedules).map_err(|e| {
-                    ErrorData::internal_error(
-                        "Failed to serialize named fired schedules",
-                        Some(json!({"reason": e.to_string()})),
-                    )
-                })?
-            }
-            _ => {
-                return Err(ErrorData::invalid_params(
-                    "Unknown resource URI",
-                    Some(json!({"uri": uri})),
-                ));
-            }
+        let recent_count = std::cmp::min(100, fired_schedules.len());
+        let recent_schedules = if fired_schedules.len() > recent_count {
+            &fired_schedules[fired_schedules.len() - recent_count..]
+        } else {
+            &fired_schedules[..]
         };
+
+        let data = serde_json::to_string_pretty(recent_schedules).map_err(|e| {
+            ErrorData::internal_error(
+                "Failed to serialize recent fired schedules",
+                Some(json!({"reason": e.to_string()})),
+            )
+        })?;
 
         Ok(ReadResourceResult {
             contents: vec![ResourceContents::text(data, param.uri)],
