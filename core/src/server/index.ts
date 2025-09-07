@@ -8,10 +8,14 @@ import { WebSocketManager } from '../websocket'
 import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
 import { AppRuntimeContext } from './types'
+import { WebSocketSender } from '../websocket-sender'
+import { AgentService } from '../agent-service'
 
 export async function serve(
   agent: Agent,
   runtimeContext: RuntimeContext<AppRuntimeContext>,
+  webSocketSender: WebSocketSender,
+  agentService: AgentService,
 ): Promise<void> {
   const agentMemory = await agent.getMemory()
 
@@ -49,7 +53,7 @@ export async function serve(
   // Create HTTP server and WebSocket server
   const server = http.createServer(app)
   const wss = new WebSocketServer({ server })
-  const wsmanager = await WebSocketManager.create(agent, runtimeContext)
+  const wsmanager = new WebSocketManager(webSocketSender, agentService)
 
   wss.on('connection', (ws, req) => {
     wsmanager.handleConnection(ws, req)

@@ -1,214 +1,115 @@
-import { IncomingMessage } from 'http'
-import { Agent } from '@mastra/core'
-import { RuntimeContext } from '@mastra/core/di'
-import { WebSocket } from 'ws'
-import { ConversationManager } from './conversation'
-import { ResponseMessage } from './message'
-import { UsageStorage } from './storage/usage'
+import { WebSocket, type RawData as WebSocketData } from 'ws'
+import type { IncomingMessage } from 'node:http'
+import type { MCPClient } from '@mastra/mcp'
 import { getDynamicMCP } from './mastra/mcp'
-import { MCPClient } from '@mastra/mcp'
+import { WebSocketSender } from './websocket-sender'
+import { AgentService } from './agent-service'
 
 class ClientConnection {
   constructor(
     public readonly user: string,
-    public readonly ws: WebSocket,
     public readonly mcp: MCPClient,
   ) {}
 
   async disconnect(): Promise<void> {
     await this.mcp.disconnect()
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.close()
-    }
   }
 }
 
 export class WebSocketManager {
   private clients = new Map<WebSocket, ClientConnection>()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private agent: Agent<string, any, any>
-  private conversation: ConversationManager
-  private usageStorage: UsageStorage
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private runtimeContext: RuntimeContext<any>
+  private readonly webSocketSender: WebSocketSender
+  private readonly agentService: AgentService
 
-  private constructor(
-    agent: Agent<string, any, any>, 
-    runtimeContext: RuntimeContext<any>,
-    conversation: ConversationManager,
-    usageStorage: UsageStorage,
+  constructor(
+    webSocketSender: WebSocketSender,
+    agentService: AgentService,
   ) {
-    this.agent = agent
-    this.runtimeContext = runtimeContext
-    this.conversation = conversation
-    this.usageStorage = usageStorage
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  static async create(agent: Agent<string, any, any>, runtimeContext: RuntimeContext<any>): Promise<WebSocketManager> {
-    const memory = await agent.getMemory()
-    if (!memory) {
-      throw new Error('Agent must have memory configured for WebSocket functionality')
-    }
-    
-    const conversation = new ConversationManager(memory)
-    const usageStorage = new UsageStorage(memory.storage)
-    await usageStorage.initTable()
-    
-    return new WebSocketManager(agent, runtimeContext, conversation, usageStorage)
+    this.webSocketSender = webSocketSender
+    this.agentService = agentService
   }
 
   handleConnection(ws: WebSocket, req: IncomingMessage): void {
-    console.log(`connected: ${req.url}`)
+    const urlParts = new URL(req.url ?? '', 'http://localhost')
+    const user = urlParts?.searchParams.get('user') ?? 'anonymous'
+
+    console.log(`New WebSocket connection: ${user}`)
 
     ws.on('message', (data) => {
-      void (async (): Promise<void> => {
-        let message: string
-        if (typeof data === 'string') {
-          message = data
-        } else if (Buffer.isBuffer(data)) {
-          message = data.toString('utf8')
-        } else {
-          console.warn('WebSocket error: unsupported message type')
-          return
-        }
-        await this.handleMessage(ws, message)
-      })()
+      void this.handleMessage(ws, data)
     })
+
     ws.on('close', () => {
-      const client = this.clients.get(ws)
-      if (client !== undefined) {
-        void (async (): Promise<void> => {
-          await client.disconnect()
-        })()
-      }
+      console.log(`WebSocket disconnected: ${user}`)
       this.clients.delete(ws)
+      this.webSocketSender.removeConnection(user)
     })
+
     ws.on('error', (error) => {
-      console.error('WebSocket error:', error)
-      const client = this.clients.get(ws)
-      if (client !== undefined) {
-        void (async (): Promise<void> => {
-          await client.disconnect()
-        })()
-      }
+      console.error(`WebSocket error for ${user}:`, error)
       this.clients.delete(ws)
+      this.webSocketSender.removeConnection(user)
     })
+
+    ws.on('open', () => {
+      console.log(`WebSocket connected: ${user}`)
+    })
+
+    // Add connection to sender
+    this.webSocketSender.addConnection(user, ws)
   }
 
-  private async handleMessage(ws: WebSocket, message: string): Promise<void> {
-    const client = this.clients.get(ws)
+  private async handleMessage(ws: WebSocket, data: WebSocketData): Promise<void> {
+    let client = this.clients.get(ws)
+    const message = String(data as unknown)
+
     if (!client) {
-      const [user, token] = message.split(':', 2)
-      if (!this.verifyToken(token)) {
-        console.log('Invalid auth token')
-        ws.close()
+      // First message should be authentication
+      const authResult = this.handleMCPAuth(message)
+      if (authResult) {
+        client = authResult
+        this.clients.set(ws, client)
+        return
+      } else {
+        ws.close(1002, 'Authentication failed')
         return
       }
-
-      console.log(`User authenticated: ${user}`)
-
-      const mcp = getDynamicMCP(
-        user,
-        // eslint-disable-next-line @typescript-eslint/require-await
-        async (server: string, url: string) => {
-          this.handleMCPAuth(ws, server, url)
-        },
-      )
-      this.clients.set(ws, new ClientConnection(user, ws, mcp))
-      return
     }
 
-    const userResponse: ResponseMessage = {
-      role: 'user',
-      user: client.user,
-      chat: [message],
-      timestamp: Math.floor(Date.now() / 1000),
-    }
-
-    this.sendToClient(ws, userResponse)
-
-    await this.processMessage(ws, client, message)
-  }
-
-  private handleMCPAuth(ws: WebSocket, server: string, url: string): void {
-    this.sendToClient(ws, {
-      role: 'user',
-      user: '',
-      chat: [`Please authenticate with ${server} at ${url}`],
-      timestamp: Math.floor(Date.now() / 1000),
+    // Process message through AgentService
+    await this.agentService.processMessage({
+      userId: client.user,
+      content: message,
+      clientMcp: client.mcp,
     })
   }
 
-  private async processMessage(ws: WebSocket, client: ClientConnection, message: string): Promise<void> {
+  private handleMCPAuth(data: string): ClientConnection | null {
     try {
-      const formattedMessage = JSON.stringify({
-        modality: 'Text',
-        user: client.user,
-        content: message,
-      })
+      const authData = JSON.parse(data) as { user: string; token: string }
+      const { user, token } = authData
 
-      const currentThreadId = await this.conversation.currentThread(client.user)
-
-      const response = await this.agent.generate([
-        { role: 'user', content: formattedMessage },
-      ], {
-        memory: {
-          resource: client.user,
-          thread: currentThreadId,
-          options: {
-            lastMessages: 20,
-          },
-        },
-        runtimeContext: this.runtimeContext,
-        toolsets: await client.mcp.getToolsets(),
-      })
-
-      console.log(`response id: ${response.response.id}`)
-      console.log(`usage: ${JSON.stringify(response.usage)}`)
-
-      await this.usageStorage.recordUsage(
-        response,
-        currentThreadId,
-        client.user,
-        this.agent.name,
-      )
-
-      const assistantResponse: ResponseMessage = {
-        role: 'assistant',
-        user: this.agent.name,
-        chat: [response.text],
-        timestamp: Math.floor(Date.now() / 1000),
+      if (!this.verifyToken(user, token)) {
+        return null
       }
 
-      this.sendToClient(ws, assistantResponse)
+      const dynamicMCP = getDynamicMCP(user, (server: string, url: string) => {
+        console.log(`MCP Auth for ${user}, server: ${server}, url: ${url}`)
+        return Promise.resolve()
+      })
 
+      return new ClientConnection(user, dynamicMCP)
     } catch (error) {
-      console.error('Message processing error:', error)
-
-      const errorResponse: ResponseMessage = {
-        role: 'assistant',
-        user: this.agent.name,
-        chat: ['Internal error!'],
-        timestamp: Math.floor(Date.now() / 1000),
-      }
-
-      this.sendToClient(ws, errorResponse)
+      console.error('Auth parsing error:', error)
+      return null
     }
   }
 
-  private sendToClient(ws: WebSocket, response: ResponseMessage): void {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(response))
-    }
-  }
-
-  private verifyToken(token: string): boolean {
+  private verifyToken(user: string, token: string): boolean {
     const expectedToken = process.env.WEB_AUTH_TOKEN
-    if (expectedToken === null || expectedToken === '') {
-      console.error('WEB_AUTH_TOKEN not set, never authorized')
+    if (expectedToken === null) {
       return false
     }
-    return token === expectedToken
+    return `${user}:${token}` === expectedToken
   }
 }
