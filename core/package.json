@@ -13,7 +13,8 @@
     "build": "echo 'No build needed - using tsx in production'",
     "mastra-dev": "mastra dev",
     "mastra-build": "mastra build",
-    "mastra-start": "mastra start"
+    "mastra-start": "mastra start",
+    "depcruise": "npx depcruise src --include-only \"^src\" --output-type dot | dot -T svg > ../docs/core-dependency-graph.svg"
   },
   "keywords": [],
   "author": "",
@@ -48,6 +49,7 @@
     "@types/morgan": "^1.9.10",
     "@types/node": "^24.3.0",
     "@types/ws": "^8.18.1",
+    "dependency-cruiser": "^17.0.1",
     "eslint": "^9.33.0",
     "mastra": "^0.10.21",
     "tsup": "^8.5.0",
