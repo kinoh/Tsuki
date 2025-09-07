@@ -8,7 +8,7 @@ import { WebSocketManager } from '../websocket'
 import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
 import { AppRuntimeContext } from './types'
-import { AgentService } from '../agent-service'
+import { AgentService } from '../agent'
 
 export async function serve(
   agent: Agent,

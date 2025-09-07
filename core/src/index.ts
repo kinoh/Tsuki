@@ -3,6 +3,9 @@ import { mastra } from './mastra/index'
 import { loadPromptFromEnv } from './prompt'
 import { serve } from './server/index'
 import { AppRuntimeContext } from './server/types'
+import { AgentService } from './agent'
+import { ConversationManager } from './conversation'
+import { UsageStorage } from './storage/usage'
 
 // Function to create runtime context with encrypted prompt
 async function createRuntimeContext(): Promise<RuntimeContext<AppRuntimeContext>> {
@@ -19,16 +22,10 @@ async function main(): Promise<void> {
   const agent = mastra.getAgent('tsuki')
   const runtimeContext = await createRuntimeContext()
 
-  // Create AgentService
-  const { AgentService } = await import('./agent-service.js')
-  
   const agentMemory = await agent.getMemory()
   if (!agentMemory) {
     throw new Error('Agent must have memory configured')
   }
-
-  const { ConversationManager } = await import('./conversation.js')
-  const { UsageStorage } = await import('./storage/usage.js')
   
   const conversation = new ConversationManager(agentMemory)
   const usageStorage = new UsageStorage(agentMemory.storage)
