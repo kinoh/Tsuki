@@ -21,7 +21,7 @@ async function loadAgent() {
 
 async function loadInstructions() {
   // Import and use loadPromptFromEnv like the main application
-  const { loadPromptFromEnv } = await import('../src/prompt.ts')
+  const { loadPromptFromEnv } = await import('../src/agent/prompt.ts')
   return await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
 }
 

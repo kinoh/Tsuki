@@ -1,6 +1,6 @@
 import express from 'express'
 import { MastraMessageV2 } from '@mastra/core'
-import { ResponseMessage, createResponseMessage } from '../../message'
+import { ResponseMessage, createResponseMessage } from '../../agent/message'
 import { Thread, GetMessagesQuery } from '../types'
 
 export async function threadsHandler(req: express.Request, res: express.Response): Promise<void> {

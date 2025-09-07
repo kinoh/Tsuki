@@ -1,12 +1,13 @@
 import type { Agent } from '@mastra/core'
+import { RuntimeContext } from '@mastra/core/di'
 import type { MCPClient } from '@mastra/mcp'
 import { ConversationManager } from './conversation'
-import { UsageStorage } from './storage/usage'
-import type { RuntimeContext } from '@mastra/core/di'
+import { UsageStorage } from '../storage/usage'
 import { type ResponseMessage } from './message'
-import { mcp } from './mastra/mcp'
+import { mcp } from '../mastra/mcp'
+import { loadPromptFromEnv } from './prompt'
 
-export type AgentRuntimeContext = {
+type AgentRuntimeContext = {
   instructions: string
 }
 
@@ -20,7 +21,7 @@ export interface MessageSender {
   sendMessage(userId: string, message: ResponseMessage): Promise<void>
 }
 
-export interface MCPNotification {
+interface MCPNotification {
   server: string
   resource: string
   data: {
@@ -30,6 +31,14 @@ export interface MCPNotification {
     message?: string
     [key: string]: unknown
   }
+}
+
+export async function createAgentService(agent: Agent, conversation: ConversationManager, usageStorage: UsageStorage): Promise<AgentService> {
+  const runtimeContext = new RuntimeContext<AgentRuntimeContext>()
+  const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
+  runtimeContext.set('instructions', instructions)
+
+  return new AgentService(agent, conversation, usageStorage, runtimeContext)
 }
 
 export class AgentService {

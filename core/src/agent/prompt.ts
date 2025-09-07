@@ -4,7 +4,7 @@ import * as age from 'age-encryption'
 /**
  * Decrypt an encrypted prompt using Age encryption with JWK private key
  */
-export async function decryptPrompt(encryptedContent: Buffer, privateKey: string): Promise<string> {
+async function decryptPrompt(encryptedContent: Buffer, privateKey: string): Promise<string> {
   try {
     // Parse JWK private key
     const privateKeyData = JSON.parse(privateKey) as JsonWebKey
@@ -28,7 +28,7 @@ export async function decryptPrompt(encryptedContent: Buffer, privateKey: string
 /**
  * Load and decrypt an encrypted prompt file
  */
-export async function loadEncryptedPrompt(filePath: string, privateKey: string): Promise<string> {
+async function loadEncryptedPrompt(filePath: string, privateKey: string): Promise<string> {
   try {
     const encryptedContent = await readFile(filePath)
     return await decryptPrompt(encryptedContent, privateKey)

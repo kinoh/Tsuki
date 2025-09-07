@@ -1,9 +1,9 @@
 import { WebSocket, type RawData as WebSocketData } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { MCPClient } from '@mastra/mcp'
-import { getDynamicMCP } from './mastra/mcp'
-import { AgentService, type MessageSender } from './agent'
-import type { ResponseMessage } from './message'
+import { getDynamicMCP } from '../mastra/mcp'
+import { AgentService, type MessageSender } from '../agent/service'
+import type { ResponseMessage } from '../agent/message'
 
 class ClientConnection {
   constructor(

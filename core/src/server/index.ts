@@ -3,10 +3,10 @@ import morgan from 'morgan'
 import http from 'http'
 import { WebSocketServer } from 'ws'
 import { Agent } from '@mastra/core'
-import { WebSocketManager } from '../websocket'
+import { WebSocketManager } from './websocket'
 import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
-import { AgentService } from '../agent'
+import { AgentService } from '../agent/service'
 
 export async function serve(
   agent: Agent,
