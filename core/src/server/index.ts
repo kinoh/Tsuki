@@ -2,17 +2,14 @@ import express from 'express'
 import morgan from 'morgan'
 import http from 'http'
 import { WebSocketServer } from 'ws'
-import { RuntimeContext } from '@mastra/core/di'
 import { Agent } from '@mastra/core'
 import { WebSocketManager } from '../websocket'
 import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
-import { AppRuntimeContext } from './types'
 import { AgentService } from '../agent'
 
 export async function serve(
   agent: Agent,
-  runtimeContext: RuntimeContext<AppRuntimeContext>,
   agentService: AgentService,
 ): Promise<void> {
   const agentMemory = await agent.getMemory()

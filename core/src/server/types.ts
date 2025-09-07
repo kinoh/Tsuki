@@ -1,9 +1,5 @@
 import { Agent } from '@mastra/core'
 
-export type AppRuntimeContext = {
-  instructions: string
-}
-
 export type AgentMemory = NonNullable<Awaited<ReturnType<Agent['getMemory']>>>
 
 export interface Thread {

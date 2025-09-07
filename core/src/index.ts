@@ -2,14 +2,13 @@ import { RuntimeContext } from '@mastra/core/di'
 import { mastra } from './mastra/index'
 import { loadPromptFromEnv } from './prompt'
 import { serve } from './server/index'
-import { AppRuntimeContext } from './server/types'
-import { AgentService } from './agent'
+import { AgentService, AgentRuntimeContext } from './agent'
 import { ConversationManager } from './conversation'
 import { UsageStorage } from './storage/usage'
 
 // Function to create runtime context with encrypted prompt
-async function createRuntimeContext(): Promise<RuntimeContext<AppRuntimeContext>> {
-  const runtimeContext = new RuntimeContext<AppRuntimeContext>()
+async function createRuntimeContext(): Promise<RuntimeContext<AgentRuntimeContext>> {
+  const runtimeContext = new RuntimeContext<AgentRuntimeContext>()
 
   const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
   runtimeContext.set('instructions', instructions)
@@ -36,7 +35,7 @@ async function main(): Promise<void> {
   // Start AgentService (includes MCP subscriptions)
   await agentService.start()
 
-  await serve(agent, runtimeContext, agentService)
+  await serve(agent, agentService)
 }
 
 main().catch(console.error)

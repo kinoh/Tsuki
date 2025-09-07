@@ -2,10 +2,13 @@ import type { Agent } from '@mastra/core'
 import type { MCPClient } from '@mastra/mcp'
 import { ConversationManager } from './conversation'
 import { UsageStorage } from './storage/usage'
-import type { AppRuntimeContext } from './server/types'
 import type { RuntimeContext } from '@mastra/core/di'
 import { type ResponseMessage } from './message'
 import { mcp } from './mastra/mcp'
+
+export type AgentRuntimeContext = {
+  instructions: string
+}
 
 export interface MessageInput {
   userId: string
@@ -36,7 +39,7 @@ export class AgentService {
     private agent: Agent,
     private conversation: ConversationManager,
     private usageStorage: UsageStorage,
-    private runtimeContext: RuntimeContext<AppRuntimeContext>,
+    private runtimeContext: RuntimeContext<AgentRuntimeContext>,
   ) {}
 
   async start(): Promise<void> {
