@@ -19,9 +19,8 @@ async function main(): Promise<void> {
   const agent = mastra.getAgent('tsuki')
   const runtimeContext = await createRuntimeContext()
 
-  // Create AgentService and WebSocketSender
+  // Create AgentService
   const { AgentService } = await import('./agent-service.js')
-  const { WebSocketSender } = await import('./websocket-sender.js')
   
   const agentMemory = await agent.getMemory()
   if (!agentMemory) {
@@ -33,16 +32,14 @@ async function main(): Promise<void> {
   
   const conversation = new ConversationManager(agentMemory)
   const usageStorage = new UsageStorage(agentMemory.storage)
-  const webSocketSender = new WebSocketSender()
   
   // Initialize AgentService
   const agentService = new AgentService(agent, conversation, usageStorage, runtimeContext)
-  agentService.registerMessageSender('websocket', webSocketSender)
   
   // Start AgentService (includes MCP subscriptions)
   await agentService.start()
 
-  await serve(agent, runtimeContext, webSocketSender, agentService)
+  await serve(agent, runtimeContext, agentService)
 }
 
 main().catch(console.error)

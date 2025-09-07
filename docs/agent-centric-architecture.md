@@ -48,15 +48,11 @@ The previous architecture was server-centric:
 - **MCP notification handling**: Processes scheduler notifications and routes to appropriate users
 - **Autonomous startup**: Self-manages MCP resource subscriptions
 
-#### WebSocketSender (`core/src/websocket-sender.ts`)
-- **Dependency inversion implementation**: Concrete `MessageSender` for WebSocket
-- **Connection management**: Tracks active WebSocket connections per user
+#### WebSocketManager (`core/src/websocket.ts`)
+- **MessageSender implementation**: Implements `MessageSender` interface for dependency inversion
+- **WebSocket protocol handling**: Manages WebSocket connections, authentication, and per-client MCP
 - **Message delivery**: Sends responses to connected WebSocket clients
-
-#### Updated WebSocketManager (`core/src/websocket.ts`)
-- **Simplified role**: Handles WebSocket protocol details only
 - **Delegation pattern**: Forwards message processing to `AgentService`
-- **Authentication**: Manages per-client MCP authentication
 
 ### Message Flow
 
@@ -64,12 +60,12 @@ The previous architecture was server-centric:
 1. **WebSocket receives message** → `WebSocketManager.handleMessage()`
 2. **Delegate to Agent** → `AgentService.processMessage()`
 3. **Agent generates response** → Uses Mastra Agent with MCP tools
-4. **Response delivery** → `WebSocketSender.sendMessage()`
+4. **Response delivery** → `WebSocketManager.sendMessage()` (via MessageSender interface)
 
 #### MCP Notification Handling (NEW)
 1. **Scheduler MCP sends notification** → `AgentService.handleNotification()`
 2. **Process notification** → Extract user context and generate appropriate message
-3. **Route to user** → `WebSocketSender.sendMessage()` if user connected
+3. **Route to user** → `WebSocketManager.sendMessage()` (via MessageSender interface) if user connected
 4. **Fallback handling** → Store notification for later delivery if user offline
 
 ### Benefits
@@ -89,13 +85,15 @@ The previous architecture was server-centric:
 
 #### New Files
 - `core/src/agent-service.ts`: Central orchestrator class
-- `core/src/websocket-sender.ts`: WebSocket message delivery implementation
 
 #### Modified Files
 - `core/src/index.ts`: Updated initialization to create AgentService first
-- `core/src/websocket.ts`: Simplified to delegate message processing
-- `core/src/server/index.ts`: Updated to accept AgentService dependencies
+- `core/src/websocket.ts`: Integrated MessageSender interface and eliminated duplicate connection management
+- `core/src/server/index.ts`: Updated to register WebSocketManager as MessageSender
 - `core/src/mastra/mcp.ts`: Added scheduler resource subscription support
+
+#### Removed Files
+- `core/src/websocket-sender.ts`: Functionality integrated into WebSocketManager to eliminate duplicate connection management
 
 #### Preserved Functionality
 - All existing WebSocket and HTTP API functionality maintained

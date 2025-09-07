@@ -2,8 +2,8 @@ import { WebSocket, type RawData as WebSocketData } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { MCPClient } from '@mastra/mcp'
 import { getDynamicMCP } from './mastra/mcp'
-import { WebSocketSender } from './websocket-sender'
-import { AgentService } from './agent-service'
+import { AgentService, type MessageSender } from './agent-service'
+import type { ResponseMessage } from './message'
 
 class ClientConnection {
   constructor(
@@ -16,16 +16,11 @@ class ClientConnection {
   }
 }
 
-export class WebSocketManager {
+export class WebSocketManager implements MessageSender {
   private clients = new Map<WebSocket, ClientConnection>()
-  private readonly webSocketSender: WebSocketSender
   private readonly agentService: AgentService
 
-  constructor(
-    webSocketSender: WebSocketSender,
-    agentService: AgentService,
-  ) {
-    this.webSocketSender = webSocketSender
+  constructor(agentService: AgentService) {
     this.agentService = agentService
   }
 
@@ -42,21 +37,16 @@ export class WebSocketManager {
     ws.on('close', () => {
       console.log(`WebSocket disconnected: ${user}`)
       this.clients.delete(ws)
-      this.webSocketSender.removeConnection(user)
     })
 
     ws.on('error', (error) => {
       console.error(`WebSocket error for ${user}:`, error)
       this.clients.delete(ws)
-      this.webSocketSender.removeConnection(user)
     })
 
     ws.on('open', () => {
       console.log(`WebSocket connected: ${user}`)
     })
-
-    // Add connection to sender
-    this.webSocketSender.addConnection(user, ws)
   }
 
   private async handleMessage(ws: WebSocket, data: WebSocketData): Promise<void> {
@@ -111,5 +101,21 @@ export class WebSocketManager {
       return false
     }
     return `${user}:${token}` === expectedToken
+  }
+
+  // MessageSender interface implementation
+  sendMessage(userId: string, message: ResponseMessage): Promise<void> {
+    // Find the client connection for this user
+    const clientEntry = Array.from(this.clients.entries())
+      .find(([, client]) => client.user === userId)
+    
+    if (clientEntry) {
+      const [ws] = clientEntry
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(message))
+      }
+    }
+    
+    return Promise.resolve()
   }
 }
