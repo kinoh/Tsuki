@@ -51,11 +51,11 @@ export class WebSocketManager implements MessageSender {
 
   private async handleMessage(ws: WebSocket, data: WebSocketData): Promise<void> {
     let client = this.clients.get(ws)
-    const message = String(data as unknown)
+    const message = String(data as Buffer)
 
     if (!client) {
       // First message should be authentication
-      const authResult = this.handleMCPAuth(message)
+      const authResult = this.handleAuth(message)
       if (authResult) {
         client = authResult
         this.clients.set(ws, client)
@@ -74,12 +74,17 @@ export class WebSocketManager implements MessageSender {
     })
   }
 
-  private handleMCPAuth(data: string): ClientConnection | null {
+  private handleAuth(data: string): ClientConnection | null {
     try {
-      const authData = JSON.parse(data) as { user: string; token: string }
-      const { user, token } = authData
+      const [user, token] = data.split(':', 2)
+      
+      if (!user || !token) {
+        console.log(`Invalid auth attempt: broken message: ${data}`)
+        return null
+      }
 
       if (!this.verifyToken(user, token)) {
+        console.log(`Invalid auth attempt: invalid token for user: ${user}`)
         return null
       }
 
@@ -95,12 +100,13 @@ export class WebSocketManager implements MessageSender {
     }
   }
 
-  private verifyToken(user: string, token: string): boolean {
+  private verifyToken(_user: string, token: string): boolean {
     const expectedToken = process.env.WEB_AUTH_TOKEN
     if (expectedToken === null) {
       return false
     }
-    return `${user}:${token}` === expectedToken
+    // Assume the only user with the correct token
+    return token === expectedToken
   }
 
   // MessageSender interface implementation
