@@ -30,7 +30,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Start the MCP server
     let mcp_service = (*service).clone().serve(stdio()).await?;
-    mcp_service.waiting().await?;
+    let reason = mcp_service.waiting().await?;
+    eprintln!("MCP server stopped: {:?}", reason);
 
     Ok(())
 }
