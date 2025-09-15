@@ -1,4 +1,5 @@
-use chrono::{DateTime, Datelike, NaiveTime, Timelike};
+use chrono::{DateTime, FixedOffset, NaiveDateTime, NaiveTime};
+use chrono_tz::Tz;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::service::RequestContext;
 use rmcp::{
@@ -38,7 +39,7 @@ pub struct RemoveScheduleRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schedule {
     pub name: String,
-    pub time: String,
+    pub time: NaiveDateTime, // For one-time schedules, date is ignored
     pub cycle: String,
     pub message: String,
 }
@@ -46,8 +47,8 @@ pub struct Schedule {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FiredSchedule {
     pub name: String,
-    pub scheduled_time: String,
-    pub fired_time: String,
+    pub scheduled_time: NaiveDateTime,
+    pub fired_time: NaiveDateTime,
     pub message: String,
 }
 
@@ -190,9 +191,9 @@ impl SchedulerService {
     }
 
     async fn check_and_fire_schedules(&self) -> Result<(), ErrorData> {
-        let now = chrono::Utc::now().with_timezone(&self.timezone);
-        let current_time_str = now.format("%H:%M").to_string();
-        let current_datetime = now.format("%Y-%m-%dT%H:%M:%S%z").to_string();
+        let now = chrono::Utc::now()
+            .with_timezone(&self.timezone)
+            .naive_local();
 
         let mut schedules_to_remove = Vec::new();
 
@@ -204,21 +205,12 @@ impl SchedulerService {
                 let should_fire = match schedule.cycle.as_str() {
                     "daily" => {
                         // For daily schedules, fire when current time matches scheduled time
-                        schedule.time == current_time_str
+                        let delta = now.time() - schedule.time.time();
+                        delta.num_minutes() == 0
                     }
                     "once" => {
-                        // For one-time schedules, parse the ISO datetime and check if it matches current minute
-                        if let Ok(scheduled_time) = DateTime::parse_from_rfc3339(&schedule.time) {
-                            let scheduled_in_tz = scheduled_time.with_timezone(&self.timezone);
-                            // Fire if we're within the same minute
-                            scheduled_in_tz.year() == now.year()
-                                && scheduled_in_tz.month() == now.month()
-                                && scheduled_in_tz.day() == now.day()
-                                && scheduled_in_tz.hour() == now.hour()
-                                && scheduled_in_tz.minute() == now.minute()
-                        } else {
-                            false
-                        }
+                        // For one-time schedules, fire if current time is past scheduled time
+                        now >= schedule.time
                     }
                     _ => false,
                 };
@@ -226,8 +218,8 @@ impl SchedulerService {
                 if should_fire {
                     let fired_schedule = FiredSchedule {
                         name: schedule.name.clone(),
-                        scheduled_time: schedule.time.clone(),
-                        fired_time: current_datetime.clone(),
+                        scheduled_time: schedule.time,
+                        fired_time: now,
                         message: schedule.message.clone(),
                     };
 
@@ -293,31 +285,91 @@ impl SchedulerService {
         }
     }
 
-    fn validate_time_format(&self, time: &str, cycle: &str) -> Result<(), ErrorData> {
+    fn parse_time(&self, time: &str, cycle: &str) -> Result<DateTime<Tz>, ErrorData> {
         match cycle {
             "once" => {
-                // For one-time schedules, expect ISO 8601 format
-                DateTime::parse_from_rfc3339(time).map_err(|_| {
-                    ErrorData::invalid_params(
-                        "Error: time: invalid format",
-                        Some(
-                            json!({"time": time, "expected": "ISO 8601 format for one-time schedules"}),
-                        ),
-                    )
-                })?;
+                // For one-time schedules, expect ISO 8601 format (or without timezone)
+                if let Ok(naive_datetime) =
+                    chrono::NaiveDateTime::parse_from_str(time, "%Y-%m-%dT%H:%M:%S")
+                {
+                    naive_datetime.and_local_timezone(self.timezone).earliest().ok_or_else(|| {
+                        ErrorData::invalid_params(
+                            "Error: time: invalid datetime",
+                            Some(json!({"time": time, "expected": "ISO 8601 format for one-time schedules"})),
+                        )
+                    })
+                } else if let Ok(naive_time) = NaiveTime::parse_from_str(time, "%H:%M:%S") {
+                    // If only time is provided, assume today in local timezone
+                    chrono::Utc::now()
+                        .date_naive()
+                        .and_time(naive_time)
+                        .and_local_timezone(self.timezone)
+                        .earliest().ok_or_else(|| {
+                            ErrorData::invalid_params(
+                                "Error: time: invalid datetime",
+                                Some(json!({"time": time, "expected": "ISO 8601 format for one-time schedules"})),
+                            )
+                        })
+                } else if let Ok(naive_time) = NaiveTime::parse_from_str(time, "%H:%M") {
+                    // If only time is provided without seconds, assume today in local timezone
+                    chrono::Utc::now()
+                        .date_naive()
+                        .and_time(naive_time)
+                        .and_local_timezone(self.timezone)
+                        .earliest().ok_or_else(|| {
+                            ErrorData::invalid_params(
+                                "Error: time: invalid datetime",
+                                Some(json!({"time": time, "expected": "ISO 8601 format for one-time schedules"})),
+                            )
+                        })
+                } else {
+                    Ok(DateTime::parse_from_rfc3339(time).map_err(|_| {
+                        ErrorData::invalid_params(
+                            "Error: time: invalid format",
+                            Some(
+                                json!({"time": time, "expected": "ISO 8601 format for one-time schedules"}),
+                            ),
+                        )
+                    })?.with_timezone(&self.timezone))
+                }
             }
             "daily" => {
-                // For daily schedules, expect HH:MM format
-                NaiveTime::parse_from_str(time, "%H:%M").map_err(|_| {
-                    ErrorData::invalid_params(
+                // For daily schedules, expect HH:MM format or HH:MM:SS
+                if let Ok(naive_time) = NaiveTime::parse_from_str(time, "%H:%M:%S") {
+                    // Construct a DateTime<Utc> for today with the given time
+                    chrono::Utc::now()
+                        .date_naive()
+                        .and_time(naive_time)
+                        .and_local_timezone(self.timezone)
+                        .earliest().ok_or_else(|| {
+                            ErrorData::invalid_params(
+                                "Error: time: invalid format",
+                                Some(json!({"time": time, "expected": "HH:MM:SS format for daily schedules"})),
+                            )
+                        })
+                } else if let Ok(naive_time) = NaiveTime::parse_from_str(time, "%H:%M") {
+                    // If seconds are not provided, assume 00 seconds
+                    chrono::Utc::now()
+                        .date_naive()
+                        .and_time(naive_time)
+                        .and_local_timezone(self.timezone)
+                        .earliest().ok_or_else(|| {
+                            ErrorData::invalid_params(
+                                "Error: time: invalid format",
+                                Some(json!({"time": time, "expected": "HH:MM format for daily schedules"})),
+                            )
+                        })
+                } else {
+                    Err(ErrorData::invalid_params(
                         "Error: time: invalid format",
-                        Some(json!({"time": time, "expected": "HH:MM format for daily schedules"})),
-                    )
-                })?;
+                        Some(
+                            json!({"time": time, "expected": "HH:MM or HH:MM:SS format for daily schedules"}),
+                        ),
+                    ))
+                }
             }
             _ => unreachable!(), // Already validated in validate_cycle
         }
-        Ok(())
     }
 }
 
@@ -345,14 +397,16 @@ impl SchedulerService {
         }
 
         self.validate_cycle(&request.cycle)?;
-        self.validate_time_format(&request.time, &request.cycle)?;
+        let time = self
+            .parse_time(&request.time, &request.cycle)?
+            .naive_local();
 
         // Load existing schedules
         self.load_schedules().await?;
 
         let schedule = Schedule {
             name: request.name.clone(),
-            time: request.time,
+            time,
             cycle: request.cycle,
             message: request.message,
         };
@@ -379,7 +433,7 @@ impl SchedulerService {
         let schedules = self.schedules.lock().await;
         let schedules_list: Vec<&Schedule> = schedules.values().collect();
 
-        let content = serde_json::to_string_pretty(&schedules_list).map_err(|e| {
+        let content = serde_json::to_string(&schedules_list).map_err(|e| {
             ErrorData::internal_error(
                 "Failed to serialize schedules",
                 Some(json!({"reason": e.to_string()})),
@@ -583,6 +637,58 @@ mod tests {
             time: "2024-12-25T10:00:00+09:00".to_string(),
             cycle: "once".to_string(),
             message: "Christmas reminder".to_string(),
+        };
+
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_local_time() {
+        let service = create_test_service().await;
+        let request = SetScheduleRequest {
+            name: "test_once".to_string(),
+            time: "2024-12-25T10:00:00".to_string(),
+            cycle: "once".to_string(),
+            message: "Christmas reminder".to_string(),
+        };
+
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_ok());
+
+        let result2 = service.get_schedules().await;
+        assert!(result2.is_ok());
+
+        let response = result2.unwrap();
+        assert_eq!(response.content.len(), 1);
+        assert_eq!(
+            response.content[0].as_text().unwrap().text,
+            "[{\"name\":\"test_once\",\"time\":\"2024-12-25T10:00:00\",\"cycle\":\"once\",\"message\":\"Christmas reminder\"}]",
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_once_time_without_date() {
+        let service = create_test_service().await;
+        let request = SetScheduleRequest {
+            name: "test_once_time_without_date".to_string(),
+            time: "10:00:00".to_string(),
+            cycle: "once".to_string(),
+            message: "Today's one-time schedule".to_string(),
+        };
+
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_once_time_without_date_without_seconds() {
+        let service = create_test_service().await;
+        let request = SetScheduleRequest {
+            name: "test_once_time_without_date_without_seconds".to_string(),
+            time: "10:00".to_string(),
+            cycle: "once".to_string(),
+            message: "Today's one-time schedule without seconds".to_string(),
         };
 
         let result = service.set_schedule(Parameters(request)).await;
