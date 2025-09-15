@@ -27,4 +27,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
+rmcp = { git = "https://github.com/kinoh/modelcontextprotocol-rust-sdk.git", rev = "1eceec93498039a6fa6c8a5551c5c972443774a8", features = [
+  "server",
+  "macros",
+  "transport-io",
+  "schemars",
+  "client",
+  "transport-child-process",
+] }
 tempfile = "3"
