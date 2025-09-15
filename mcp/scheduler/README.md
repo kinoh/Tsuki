@@ -71,7 +71,8 @@ Creates or updates a scheduled notification.
 - **name** (Required): Unique identifier for the schedule
 - **time** (Required): Time specification for when the schedule should fire
   - For one-time: ISO 8601 datetime string (e.g., "2024-01-15T14:30:00")
-  - For daily: Time string in HH:MM format (e.g., "09:30")
+  - For one-time: ISO 8601 datetime string with or without timezone (e.g., "2024-01-15T14:30:00", "2024-01-15T14:30:00+09:00"), or time-only format (e.g., "14:30", "14:30:00") which assumes today's date
+  - For daily: Time string in HH:MM or HH:MM:SS format (e.g., "09:30", "09:30:00")
 - **cycle** (Required): Schedule repetition type
   - `"once"`: One-time schedule
   - `"daily"`: Repeats every day at the specified time

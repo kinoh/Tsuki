@@ -25,14 +25,21 @@ use tokio::{fs, sync::Mutex, time};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SetScheduleRequest {
+    #[schemars(description = "Unique name for the schedule")]
     pub name: String,
+    #[schemars(description = "Time for the schedule\n\
+        - For \"once\" cycle: local time (e.g., \"2024-01-15T14:30:00\") or ISO 8601 format (e.g., \"2024-01-15T14:30:00+09:00\")\n\
+        - For \"daily\" cycle: HH:MM format (e.g., \"14:30\") or HH:MM:SS format (e.g., \"14:30:00\")")]
     pub time: String,
-    pub cycle: String, // "daily" | "once"
+    #[schemars(description = "Cycle for the schedule (\"daily\" or \"once\")")]
+    pub cycle: String,
+    #[schemars(description = "Message (title of notification)")]
     pub message: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RemoveScheduleRequest {
+    #[schemars(description = "Name of the schedule to remove")]
     pub name: String,
 }
 
