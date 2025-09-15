@@ -155,11 +155,7 @@ Returns a JSON object with current time information:
 ```json
 {
   "current_time": "2024-01-15T14:30:45+09:00",
-  "timezone": "Asia/Tokyo",
-  "unix_timestamp": 1705298445,
-  "local_date": "2024-01-15",
-  "local_time": "14:30:45",
-  "iso8601_utc": "2024-01-15T05:30:45Z"
+  "timezone": "Asia/Tokyo"
 }
 ```
 

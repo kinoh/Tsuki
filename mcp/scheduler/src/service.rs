@@ -323,7 +323,9 @@ impl SchedulerService {
                     if today_datetime <= now {
                         return Err(ErrorData::invalid_params(
                             "Error: time: past time not allowed for one-time schedules",
-                            Some(json!({"time": time, "reason": "specified time has already passed today"})),
+                            Some(
+                                json!({"time": time, "reason": "specified time has already passed today"}),
+                            ),
                         ));
                     }
 
@@ -346,7 +348,9 @@ impl SchedulerService {
                     if today_datetime <= now {
                         return Err(ErrorData::invalid_params(
                             "Error: time: past time not allowed for one-time schedules",
-                            Some(json!({"time": time, "reason": "specified time has already passed today"})),
+                            Some(
+                                json!({"time": time, "reason": "specified time has already passed today"}),
+                            ),
                         ));
                     }
 
@@ -514,17 +518,13 @@ impl SchedulerService {
         })
     }
 
-    #[tool(description = "Gets the current date and time in the configured timezone")]
+    #[tool(description = "Gets the current date and time")]
     pub async fn get_current_time(&self) -> Result<CallToolResult, ErrorData> {
         let now = chrono::Utc::now().with_timezone(&self.timezone);
 
         let result = json!({
             "current_time": now.format("%Y-%m-%dT%H:%M:%S%z").to_string(),
-            "timezone": self.timezone.to_string(),
-            "unix_timestamp": now.timestamp(),
-            "local_date": now.format("%Y-%m-%d").to_string(),
-            "local_time": now.format("%H:%M:%S").to_string(),
-            "iso8601_utc": now.with_timezone(&chrono::Utc).format("%Y-%m-%dT%H:%M:%SZ").to_string()
+            "timezone": self.timezone.to_string()
         });
 
         Ok(CallToolResult {
@@ -907,13 +907,13 @@ mod tests {
 
         // Verify the structured content contains expected fields
         if let Some(structured) = response.structured_content {
-            assert!(structured.get("current_time").is_some());
-            assert!(structured.get("timezone").is_some());
-            assert!(structured.get("unix_timestamp").is_some());
-            assert!(structured.get("local_date").is_some());
-            assert!(structured.get("local_time").is_some());
-            assert!(structured.get("iso8601_utc").is_some());
-
+            assert_eq!(
+                structured.get("current_time").unwrap().as_str().unwrap(),
+                chrono::Utc::now()
+                    .with_timezone(&service.timezone)
+                    .format("%Y-%m-%dT%H:%M:%S%z")
+                    .to_string()
+            );
             // Verify timezone is Asia/Tokyo (as set in test)
             assert_eq!(structured.get("timezone").unwrap(), "Asia/Tokyo");
         }
