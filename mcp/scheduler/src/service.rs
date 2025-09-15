@@ -513,6 +513,27 @@ impl SchedulerService {
             meta: None,
         })
     }
+
+    #[tool(description = "Gets the current date and time in the configured timezone")]
+    pub async fn get_current_time(&self) -> Result<CallToolResult, ErrorData> {
+        let now = chrono::Utc::now().with_timezone(&self.timezone);
+
+        let result = json!({
+            "current_time": now.format("%Y-%m-%dT%H:%M:%S%z").to_string(),
+            "timezone": self.timezone.to_string(),
+            "unix_timestamp": now.timestamp(),
+            "local_date": now.format("%Y-%m-%d").to_string(),
+            "local_time": now.format("%H:%M:%S").to_string(),
+            "iso8601_utc": now.with_timezone(&chrono::Utc).format("%Y-%m-%dT%H:%M:%SZ").to_string()
+        });
+
+        Ok(CallToolResult {
+            content: vec![Content::text(result.to_string())],
+            structured_content: Some(result),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
 }
 
 #[tool_handler]
@@ -870,6 +891,31 @@ mod tests {
         // Verify error message
         if let Err(error) = result {
             assert!(error.message.contains("past time not allowed"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_current_time() {
+        let service = create_test_service().await;
+
+        let result = service.get_current_time().await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert!(!response.content.is_empty());
+        assert!(response.structured_content.is_some());
+
+        // Verify the structured content contains expected fields
+        if let Some(structured) = response.structured_content {
+            assert!(structured.get("current_time").is_some());
+            assert!(structured.get("timezone").is_some());
+            assert!(structured.get("unix_timestamp").is_some());
+            assert!(structured.get("local_date").is_some());
+            assert!(structured.get("local_time").is_some());
+            assert!(structured.get("iso8601_utc").is_some());
+
+            // Verify timezone is Asia/Tokyo (as set in test)
+            assert_eq!(structured.get("timezone").unwrap(), "Asia/Tokyo");
         }
     }
 }

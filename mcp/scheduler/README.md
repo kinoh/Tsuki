@@ -140,6 +140,33 @@ Returns `Succeeded` when the schedule is successfully removed.
 - Returns `Error: name: not found` if the specified schedule does not exist
 - Returns `Error: name: required` if name argument is missing
 
+### get_current_time
+
+Gets the current date and time in the configured timezone.
+
+#### Arguments
+
+None.
+
+#### Response
+
+Returns a JSON object with current time information:
+
+```json
+{
+  "current_time": "2024-01-15T14:30:45+09:00",
+  "timezone": "Asia/Tokyo",
+  "unix_timestamp": 1705298445,
+  "local_date": "2024-01-15",
+  "local_time": "14:30:45",
+  "iso8601_utc": "2024-01-15T05:30:45Z"
+}
+```
+
+#### Errors
+
+None.
+
 ## Resources
 
 ### fired_schedule://recent
