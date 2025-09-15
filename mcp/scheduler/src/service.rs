@@ -307,7 +307,7 @@ impl SchedulerService {
                     })
                 } else if let Ok(naive_time) = NaiveTime::parse_from_str(time, "%H:%M:%S") {
                     // If only time is provided, assume today in local timezone
-                    chrono::Utc::now()
+                    let today_datetime = chrono::Utc::now()
                         .date_naive()
                         .and_time(naive_time)
                         .and_local_timezone(self.timezone)
@@ -316,10 +316,21 @@ impl SchedulerService {
                                 "Error: time: invalid datetime",
                                 Some(json!({"time": time, "expected": "ISO 8601 format for one-time schedules"})),
                             )
-                        })
+                        })?;
+
+                    // Check if the time has already passed today
+                    let now = chrono::Utc::now().with_timezone(&self.timezone);
+                    if today_datetime <= now {
+                        return Err(ErrorData::invalid_params(
+                            "Error: time: past time not allowed for one-time schedules",
+                            Some(json!({"time": time, "reason": "specified time has already passed today"})),
+                        ));
+                    }
+
+                    Ok(today_datetime)
                 } else if let Ok(naive_time) = NaiveTime::parse_from_str(time, "%H:%M") {
                     // If only time is provided without seconds, assume today in local timezone
-                    chrono::Utc::now()
+                    let today_datetime = chrono::Utc::now()
                         .date_naive()
                         .and_time(naive_time)
                         .and_local_timezone(self.timezone)
@@ -328,7 +339,18 @@ impl SchedulerService {
                                 "Error: time: invalid datetime",
                                 Some(json!({"time": time, "expected": "ISO 8601 format for one-time schedules"})),
                             )
-                        })
+                        })?;
+
+                    // Check if the time has already passed today
+                    let now = chrono::Utc::now().with_timezone(&self.timezone);
+                    if today_datetime <= now {
+                        return Err(ErrorData::invalid_params(
+                            "Error: time: past time not allowed for one-time schedules",
+                            Some(json!({"time": time, "reason": "specified time has already passed today"})),
+                        ));
+                    }
+
+                    Ok(today_datetime)
                 } else {
                     Ok(DateTime::parse_from_rfc3339(time).map_err(|_| {
                         ErrorData::invalid_params(
@@ -679,7 +701,7 @@ mod tests {
         let service = create_test_service().await;
         let request = SetScheduleRequest {
             name: "test_once_time_without_date".to_string(),
-            time: "10:00:00".to_string(),
+            time: "23:59:00".to_string(),
             cycle: "once".to_string(),
             message: "Today's one-time schedule".to_string(),
         };
@@ -693,7 +715,7 @@ mod tests {
         let service = create_test_service().await;
         let request = SetScheduleRequest {
             name: "test_once_time_without_date_without_seconds".to_string(),
-            time: "10:00".to_string(),
+            time: "23:59".to_string(),
             cycle: "once".to_string(),
             message: "Today's one-time schedule without seconds".to_string(),
         };
@@ -807,5 +829,47 @@ mod tests {
 
         let result = service.set_schedule(Parameters(request)).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_past_time() {
+        let service = create_test_service().await;
+
+        // Use a time that's definitely in the past (early morning)
+        let request = SetScheduleRequest {
+            name: "test_past".to_string(),
+            time: "00:00:00".to_string(),
+            cycle: "once".to_string(),
+            message: "Past time test".to_string(),
+        };
+
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_err());
+
+        // Verify error message
+        if let Err(error) = result {
+            assert!(error.message.contains("past time not allowed"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_schedule_past_time_without_seconds() {
+        let service = create_test_service().await;
+
+        // Use a time that's definitely in the past (early morning without seconds)
+        let request = SetScheduleRequest {
+            name: "test_past_no_seconds".to_string(),
+            time: "00:00".to_string(),
+            cycle: "once".to_string(),
+            message: "Past time test without seconds".to_string(),
+        };
+
+        let result = service.set_schedule(Parameters(request)).await;
+        assert!(result.is_err());
+
+        // Verify error message
+        if let Err(error) = result {
+            assert!(error.message.contains("past time not allowed"));
+        }
     }
 }

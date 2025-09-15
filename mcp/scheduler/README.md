@@ -87,6 +87,7 @@ Returns `Succeeded` when the schedule is successfully created or updated.
 - Returns `Error: time: invalid format` if time format is invalid
 - Returns `Error: cycle: invalid value` if cycle value is not "once" or "daily"
 - Returns `Error: name: required` if name argument is missing
+- Returns `Error: time: past time not allowed for one-time schedules` if time-only format specifies a time that has already passed today
 - Returns `Error: message: required` if message argument is missing
 
 ### get_schedules
