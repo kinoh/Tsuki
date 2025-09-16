@@ -308,6 +308,7 @@ impl SchedulerService {
                 } else if let Ok(naive_time) = NaiveTime::parse_from_str(time, "%H:%M:%S") {
                     // If only time is provided, assume today in local timezone
                     let today_datetime = chrono::Utc::now()
+                        .with_timezone(&self.timezone)
                         .date_naive()
                         .and_time(naive_time)
                         .and_local_timezone(self.timezone)
@@ -323,9 +324,11 @@ impl SchedulerService {
                     if today_datetime <= now {
                         return Err(ErrorData::invalid_params(
                             "Error: time: past time not allowed for one-time schedules",
-                            Some(
-                                json!({"time": time, "reason": "specified time has already passed today"}),
-                            ),
+                            Some(json!({
+                                "now": now,
+                                "time": today_datetime,
+                                "reason": "specified time has already passed today"
+                            })),
                         ));
                     }
 
@@ -333,6 +336,7 @@ impl SchedulerService {
                 } else if let Ok(naive_time) = NaiveTime::parse_from_str(time, "%H:%M") {
                     // If only time is provided without seconds, assume today in local timezone
                     let today_datetime = chrono::Utc::now()
+                        .with_timezone(&self.timezone)
                         .date_naive()
                         .and_time(naive_time)
                         .and_local_timezone(self.timezone)
@@ -348,9 +352,11 @@ impl SchedulerService {
                     if today_datetime <= now {
                         return Err(ErrorData::invalid_params(
                             "Error: time: past time not allowed for one-time schedules",
-                            Some(
-                                json!({"time": time, "reason": "specified time has already passed today"}),
-                            ),
+                            Some(json!({
+                                "now": now,
+                                "time": today_datetime,
+                                "reason": "specified time has already passed today"
+                            })),
                         ));
                     }
 
@@ -728,7 +734,7 @@ mod tests {
         };
 
         let result = service.set_schedule(Parameters(request)).await;
-        assert!(result.is_ok());
+        assert_eq!(result.err(), None);
     }
 
     #[tokio::test]
@@ -742,7 +748,7 @@ mod tests {
         };
 
         let result = service.set_schedule(Parameters(request)).await;
-        assert!(result.is_ok());
+        assert_eq!(result.err(), None);
     }
 
     #[tokio::test]
