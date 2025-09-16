@@ -62,7 +62,9 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
         resource: new MessageResource(agentMemory),
         options: {
           id: 'messages',
-          navigation: null, // Do not show in navigation
+          navigation: {
+            name: 'Thread Management',
+          },
           listProperties: ['id', 'role', 'user', 'chat', 'timestamp'],
           showProperties: ['id', 'role', 'user', 'chat', 'timestamp'],
           actions: {
