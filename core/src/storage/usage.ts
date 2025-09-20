@@ -18,14 +18,12 @@ export interface MetricsSummary {
 }
 
 interface LibSQLClient {
-  // eslint-disable-next-line no-unused-vars
   execute: (params: string | { sql: string; args: (string | number)[] }) => Promise<{
     rows: Array<Record<string, string | number>>
   }>
 }
 
 export class UsageStorage {
-  // eslint-disable-next-line no-unused-vars
   constructor(private storage: MastraStorage) {}
 
   private get client(): LibSQLClient {
