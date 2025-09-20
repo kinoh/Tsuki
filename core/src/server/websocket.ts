@@ -1,19 +1,13 @@
 import { WebSocket, type RawData as WebSocketData } from 'ws'
 import type { IncomingMessage } from 'node:http'
-import type { MCPClient } from '@mastra/mcp'
-import { getDynamicMCP } from '../mastra/mcp'
-import { AgentService, type MessageSender } from '../agent/service'
+import { AgentService } from '../agent/service'
 import type { ResponseMessage } from '../agent/message'
+import { MessageSender } from '../agent/activeuser'
 
 class ClientConnection {
   constructor(
     public readonly user: string,
-    public readonly mcp: MCPClient,
   ) {}
-
-  async disconnect(): Promise<void> {
-    await this.mcp.disconnect()
-  }
 }
 
 export class WebSocketManager implements MessageSender {
@@ -36,12 +30,12 @@ export class WebSocketManager implements MessageSender {
 
     ws.on('close', () => {
       console.log(`WebSocket disconnected: ${user}`)
-      this.clients.delete(ws)
+      this.goodbyeClient(ws)
     })
 
     ws.on('error', (error) => {
       console.error(`WebSocket error for ${user}:`, error)
-      this.clients.delete(ws)
+      this.goodbyeClient(ws)
     })
 
     ws.on('open', () => {
@@ -58,7 +52,7 @@ export class WebSocketManager implements MessageSender {
       const authResult = this.handleAuth(message)
       if (authResult) {
         client = authResult
-        this.clients.set(ws, client)
+        this.acceptClient(ws, client)
         return
       } else {
         ws.close(1002, 'Authentication failed')
@@ -67,11 +61,23 @@ export class WebSocketManager implements MessageSender {
     }
 
     // Process message through AgentService
-    await this.agentService.processMessage({
+    await this.agentService.processMessage(client.user, {
       userId: client.user,
       content: message,
-      clientMcp: client.mcp,
     })
+  }
+
+  private acceptClient(ws: WebSocket, connection: ClientConnection): void {
+    this.clients.set(ws, connection)
+    this.agentService.registerMessageSender(connection.user, 'websocket', this, this.handleMCPAuth.bind(this))
+  }
+
+  private goodbyeClient(ws: WebSocket): void {
+    const client = this.clients.get(ws)
+    if (client) {
+      this.clients.delete(ws)
+      this.agentService.deregisterMessageSender(client.user, 'websocket')
+    }
   }
 
   private handleAuth(data: string): ClientConnection | null {
@@ -88,12 +94,7 @@ export class WebSocketManager implements MessageSender {
         return null
       }
 
-      const dynamicMCP = getDynamicMCP(user, (server: string, url: string) => {
-        console.log(`MCP Auth for ${user}, server: ${server}, url: ${url}`)
-        return Promise.resolve()
-      })
-
-      return new ClientConnection(user, dynamicMCP)
+      return new ClientConnection(user)
     } catch (error) {
       console.error('Auth parsing error:', error)
       return null
@@ -109,12 +110,20 @@ export class WebSocketManager implements MessageSender {
     return token === expectedToken
   }
 
-  // MessageSender interface implementation
-  sendMessage(userId: string, message: ResponseMessage): Promise<void> {
+  private async handleMCPAuth(userId: string, server: string, url: string): Promise<void> {
+    await this.sendMessage(userId, {
+      role: 'user',
+      user: '',
+      chat: [`Please authenticate with ${server} at ${url}`],
+      timestamp: Math.floor(Date.now() / 1000),
+    })
+  }
+
+  sendMessage(principalUserId: string, message: ResponseMessage): Promise<void> {
     // Find the client connection for this user
     const clientEntry = Array.from(this.clients.entries())
-      .find(([, client]) => client.user === userId)
-    
+      .find(([, client]) => client.user === principalUserId)
+
     if (clientEntry) {
       const [ws] = clientEntry
       if (ws.readyState === WebSocket.OPEN) {

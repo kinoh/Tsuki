@@ -50,9 +50,6 @@ export async function serve(
   const wss = new WebSocketServer({ server })
   const wsmanager = new WebSocketManager(agentService)
   
-  // Register WebSocketManager as websocket message sender
-  agentService.registerMessageSender('websocket', wsmanager)
-
   wss.on('connection', (ws, req) => {
     wsmanager.handleConnection(ws, req)
   })

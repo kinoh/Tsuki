@@ -1,11 +1,11 @@
 import type { Agent } from '@mastra/core'
 import { RuntimeContext } from '@mastra/core/di'
-import type { MCPClient } from '@mastra/mcp'
 import { ConversationManager } from './conversation'
 import { UsageStorage } from '../storage/usage'
 import { type ResponseMessage } from './message'
-import { mcp } from '../mastra/mcp'
 import { loadPromptFromEnv } from './prompt'
+import { ActiveUser, MCPNotificationHandler, MCPNotificationResourceUpdated, MessageChannel, MessageSender } from './activeuser'
+import { MCPAuthHandler } from '../mastra/mcp'
 
 type AgentRuntimeContext = {
   instructions: string
@@ -14,23 +14,6 @@ type AgentRuntimeContext = {
 export interface MessageInput {
   userId: string
   content: string
-  clientMcp?: MCPClient
-}
-
-export interface MessageSender {
-  sendMessage(userId: string, message: ResponseMessage): Promise<void>
-}
-
-interface MCPNotification {
-  server: string
-  resource: string
-  data: {
-    type?: string
-    userId?: string
-    taskId?: string
-    message?: string
-    [key: string]: unknown
-  }
 }
 
 export async function createAgentService(agent: Agent, conversation: ConversationManager, usageStorage: UsageStorage): Promise<AgentService> {
@@ -41,8 +24,8 @@ export async function createAgentService(agent: Agent, conversation: Conversatio
   return new AgentService(agent, conversation, usageStorage, runtimeContext)
 }
 
-export class AgentService {
-  private messageSenders = new Map<string, MessageSender>()
+export class AgentService implements MCPNotificationHandler {
+  private activeUsers = new Map<string, ActiveUser>()
 
   constructor(
     private agent: Agent,
@@ -51,17 +34,50 @@ export class AgentService {
     private runtimeContext: RuntimeContext<AgentRuntimeContext>,
   ) {}
 
-  async start(): Promise<void> {
-    await mcp.resources.subscribe('scheduler', 'fired_schedule://recent')
+  start(permanentUsers: string[]): void {
+    this.activeUsers.clear()
 
-    console.log('AgentService started with scheduler subscription')
+    for (const userId of permanentUsers) {
+      this.activateUser(userId)
+    }
+
+    console.log('AgentService started with notification subscription')
   }
 
-  registerMessageSender(name: string, sender: MessageSender): void {
-    this.messageSenders.set(name, sender)
+  activateUser(userId: string): ActiveUser {
+    const user = this.activeUsers.get(userId)
+    if (user) {
+      return user
+    }
+
+    const newUser = new ActiveUser(userId, this, null)
+    this.activeUsers.set(userId, newUser)
+
+    return newUser
   }
 
-  async processMessage(input: MessageInput): Promise<void> {
+  registerMessageSender(userId: string, channel: MessageChannel, sender: MessageSender, onAuth: MCPAuthHandler | null): void {
+    console.log(`AgentService: Channel opened: ${channel} for user ${userId}`)
+
+    const user = this.activateUser(userId)
+    user.registerMessageSender(channel, sender, onAuth)
+  }
+
+  deregisterMessageSender(userId: string, channel: MessageChannel): void {
+    console.log(`AgentService: Channel closed: ${channel} for user ${userId}`)
+
+    const user = this.activateUser(userId)
+    user.deregisterMessageSender(channel)
+  }
+
+  /**
+   * @param principalUserId The ID of the user who has ownership of the conversation (Mastra memory, MCP connection)
+   */
+  async processMessage(principalUserId: string, input: MessageInput): Promise<void> {
+    console.log(`AgentService: Processing message from ${input.userId} (principal: ${principalUserId}): ${input.content}`)
+
+    const activeUser = this.activateUser(principalUserId)
+
     try {
       const formattedMessage = JSON.stringify({
         modality: 'Text',
@@ -69,22 +85,20 @@ export class AgentService {
         content: input.content,
       })
 
-      const currentThreadId = await this.conversation.currentThread(input.userId)
+      const currentThreadId = await this.conversation.currentThread(principalUserId)
 
       const response = await this.agent.generate(
         [{ role: 'user', content: formattedMessage }],
         {
           memory: {
-            resource: input.userId,
+            resource: principalUserId,
             thread: currentThreadId,
             options: {
               lastMessages: 20,
             },
           },
           runtimeContext: this.runtimeContext,
-          toolsets: input.clientMcp 
-            ? await input.clientMcp.getToolsets()
-            : await mcp.getToolsets(),
+          toolsets: await activeUser.mcpClient?.getToolsets() ?? {},
         },
       )
 
@@ -94,7 +108,7 @@ export class AgentService {
       await this.usageStorage.recordUsage(
         response,
         currentThreadId,
-        input.userId,
+        principalUserId,
         this.agent.name,
       )
 
@@ -105,11 +119,7 @@ export class AgentService {
         timestamp: Math.floor(Date.now() / 1000),
       }
 
-      // Send to WebSocket sender
-      const webSocketSender = this.messageSenders.get('websocket')
-      if (webSocketSender) {
-        await webSocketSender.sendMessage(input.userId, assistantResponse)
-      }
+      await activeUser.sendMessage('websocket', assistantResponse)
 
     } catch (error) {
       console.error('Message processing error:', error)
@@ -121,50 +131,17 @@ export class AgentService {
         timestamp: Math.floor(Date.now() / 1000),
       }
 
-      // Send error to WebSocket sender
-      const webSocketSender = this.messageSenders.get('websocket')
-      if (webSocketSender) {
-        await webSocketSender.sendMessage(input.userId, errorResponse)
-      }
+      // In any case, a response should be returned
+      await activeUser.sendMessage('websocket', errorResponse)
     }
   }
 
-  async handleNotification(notification: MCPNotification): Promise<void> {
-    console.log('MCP Notification received:', notification)
-    
-    // Handle scheduler notifications
-    if (notification.server === 'scheduler') {
-      await this.handleSchedulerNotification(notification)
-    }
-  }
+  public async handleSchedulerNotification(userId: string, notification: MCPNotificationResourceUpdated): Promise<void> {
+    console.log(`AgentService: Handling scheduler notification for user ${userId}:`, notification)
 
-  private async handleSchedulerNotification(notification: MCPNotification): Promise<void> {
-    try {
-      // Example: Task reminder notification
-      if (notification.resource.includes('task') && notification.data.type === 'reminder') {
-        const { userId, message } = notification.data
-        
-        if (typeof userId === 'string' && userId.length > 0) {
-          const notificationMessage: ResponseMessage = {
-            role: 'assistant',
-            user: this.agent.name,
-            chat: [`📅 Task Reminder: ${message}`],
-            timestamp: Math.floor(Date.now() / 1000),
-          }
-
-          // Send to WebSocket if user is connected
-          const webSocketSender = this.messageSenders.get('websocket')
-          if (webSocketSender) {
-            await webSocketSender.sendMessage(userId, notificationMessage)
-          }
-        }
-      }
-      
-      // Handle other scheduler notification types as needed
-      console.log(`Processed scheduler notification for resource: ${String(notification.resource)}`)
-      
-    } catch (error) {
-      console.error('Error handling scheduler notification:', error)
-    }
+    await this.processMessage(userId, {
+      userId: 'system',
+      content: `Received scheduler notification: ${notification.title}`,
+    })
   }
 }

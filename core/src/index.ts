@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   const agentService = await createAgentService(agent, conversation, usageStorage)
 
   // Start AgentService (includes MCP subscriptions)
-  await agentService.start()
+  agentService.start((process.env.PERMANENT_USERS ?? '').split(','))
 
   await serve(agent, agentService)
 }
