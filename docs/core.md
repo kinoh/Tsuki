@@ -30,24 +30,25 @@ config:
     hideEmptyMembersBox: true
 ---
 classDiagram
+    node --> WebSocketManager
     `WebSocket client` --> WebSocketManager : Connect
     MCPClient --> `MCP server` : Get toolsets, Subscribe resources
-    AgentService --> `Agent@mastra/core`
-    AgentService --> ConversationManager
-    AgentService --> ActiveUser
-    AgentService --|> NotificationHandler
+    AgentService --> ActiveUser : Manage lifecycle
+    ActiveUser --> `Agent@mastra/core` : Get response
+    ActiveUser --> UsageStorage
+    ActiveUser --> ConversationManager
     ActiveUser --> MCPClient
-    ActiveUser --> NotificationHandler
-    ActiveUser --> MessageSender
-    WebSocketManager --> AgentService : Pass messages
-    WebSocketManager --|> MessageSender
+    ActiveUser --> MessageSender : Send responses
+    WebSocketManager --> AgentService : Pass messages, register sender
+    WebSocketManager ..|> MessageSender
     WebSocketManager --> ClientConnection : For each user
     class `Agent@mastra/core`
+    class UsageStorage
     class ConversationManager
-    <<interface>> NotificationHandler
     <<interface>> MessageSender
     class WebSocketManager
     class ActiveUser
+    class node:::external
     class `MCP server`:::external
     class `WebSocket client`:::external
     classDef external stroke:none,fill:#383838

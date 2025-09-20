@@ -1,22 +1,23 @@
 import { MastraMemory } from '@mastra/core'
 
 export class ConversationManager {
-  private memory: MastraMemory
   private readonly RECENT_UPDATE_THRESHOLD_HOURS = 1
 
-  constructor(memory: MastraMemory) {
-    this.memory = memory
+  constructor(
+    private memory: MastraMemory,
+    private userId: string,
+  ) {
   }
 
-  private generateThreadId(userId: string, date: Date): string {
+  private generateThreadId(date: Date): string {
     const dateStr = date.toISOString().split('T')[0].replace(/-/g, '') // YYYYMMDD format
-    return `${userId}-${dateStr}`
+    return `${this.userId}-${dateStr}`
   }
 
-  private getPreviousDayThreadId(userId: string): string {
+  private getPreviousDayThreadId(): string {
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
-    return this.generateThreadId(userId, yesterday)
+    return this.generateThreadId(yesterday)
   }
 
   private async getLastMessageTime(threadId: string): Promise<Date | null> {
@@ -56,10 +57,10 @@ export class ConversationManager {
     return lastMessageTime > thresholdTime
   }
 
-  async currentThread(userId: string): Promise<string> {
+  async currentThread(): Promise<string> {
     const today = new Date()
-    const todayId = this.generateThreadId(userId, today)
-    const yesterdayId = this.getPreviousDayThreadId(userId)
+    const todayId = this.generateThreadId(today)
+    const yesterdayId = this.getPreviousDayThreadId()
 
     try {
       // Check if previous day's thread exists

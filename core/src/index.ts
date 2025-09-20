@@ -1,6 +1,5 @@
 import { mastra } from './mastra/index'
 import { serve } from './server/index'
-import { ConversationManager } from './agent/conversation'
 import { createAgentService } from './agent/service'
 import { UsageStorage } from './storage/usage'
 
@@ -13,9 +12,8 @@ async function main(): Promise<void> {
     throw new Error('Agent must have memory configured')
   }
 
-  const conversation = new ConversationManager(agentMemory)
   const usageStorage = new UsageStorage(agentMemory.storage)
-  const agentService = await createAgentService(agent, conversation, usageStorage)
+  const agentService = await createAgentService(agent, agentMemory, usageStorage)
 
   // Start AgentService (includes MCP subscriptions)
   agentService.start((process.env.PERMANENT_USERS ?? '').split(','))
