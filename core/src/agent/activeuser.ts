@@ -10,7 +10,7 @@ export type AgentRuntimeContext = {
   instructions: string
 }
 
-export type MessageChannel = 'websocket'
+export type MessageChannel = 'websocket' | 'fcm'
 
 export interface MessageInput {
   userId: string
@@ -165,7 +165,18 @@ export class ActiveUser {
   public async sendMessage(message: ResponseMessage): Promise<void> {
     console.log(`ActiveUser: Sending message to user ${this.userId}:`, message)
 
+    const availableChannels = Array.from(this.senders.keys())
+    if (availableChannels.length === 0) {
+      console.warn(`No message senders registered for user ${this.userId}. Cannot send message.`)
+      return
+    }
+
     for (const [channel, sender] of this.senders.entries()) {
+      if (channel === 'fcm' && availableChannels.length >= 2) {
+        // Prefer other channels if available
+        continue
+      }
+
       try {
         await sender.sendMessage(this.userId, message)
       } catch (error) {
