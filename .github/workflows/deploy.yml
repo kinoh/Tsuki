@@ -42,6 +42,7 @@ jobs:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
         GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
       run: task deploy
     - name: Wait for health
       env:
@@ -50,5 +51,7 @@ jobs:
         PROMPT_PRIVATE_KEY: dummy
         OPENAI_API_KEY: dummy
         DIFY_SANDBOX_API_KEY: dummy
+        GCP_SERVICE_ACCOUNT_KEY: dummy
+        FCM_PROJECT_ID: dummy
       run: task wait
       timeout-minutes: 5
