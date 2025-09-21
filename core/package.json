@@ -35,6 +35,7 @@
     "adminjs": "^7.8.17",
     "age-encryption": "^0.2.4",
     "express": "^5.1.0",
+    "firebase-admin": "^13.5.0",
     "morgan": "^1.10.1",
     "node-fetch": "^3.3.2",
     "rss-mcp-lite": "^1.0.0",
