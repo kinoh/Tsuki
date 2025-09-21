@@ -21,8 +21,6 @@ services:
       AGENT_NAME: tsuki
       PERMANENT_USERS: kino
       ADMIN_JS_TMP_DIR: /tmp/.adminjs
-    secrets:
-      - service_account_key
     volumes:
       - core-data:/data
     ports:
@@ -34,10 +32,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-secrets:
-  service_account_key:
-    file: ./core/serviceAccountKey.json
 
 volumes:
   core-data:
