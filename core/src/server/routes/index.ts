@@ -3,6 +3,7 @@ import { authMiddleware, internalOnlyMiddleware } from '../middleware/index'
 import { threadsHandler, threadByIdHandler, messagesHandler } from './threads'
 import { metricsHandler } from './metrics'
 import { metadataHandler } from './metadata'
+import { notificationTestHandler, notificationTokenHandler, notificationTokensHandler } from './notification'
 
 function rootHandler(req: express.Request, res: express.Response): void {
   res.json({
@@ -17,4 +18,8 @@ export function setupRoutes(app: express.Application): void {
   app.get('/messages', authMiddleware, messagesHandler)
   app.get('/metrics', internalOnlyMiddleware, metricsHandler)
   app.get('/metadata', authMiddleware, metadataHandler)
+  app.put('/notification/token', authMiddleware, notificationTokenHandler)
+  app.delete('/notification/token', authMiddleware, notificationTokenHandler)
+  app.get('/notification/tokens', authMiddleware, notificationTokensHandler)
+  app.post('/notification/_test', authMiddleware, notificationTestHandler)
 }
