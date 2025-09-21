@@ -10,3 +10,4 @@ dist
 
 data/
 src/prompts/initial.txt
+serviceAccountKey.json

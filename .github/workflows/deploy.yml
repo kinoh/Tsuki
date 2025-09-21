@@ -35,6 +35,11 @@ jobs:
         eval $(ssh-agent -s)
         ssh-add ~/.ssh/id_rsa
         ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
+    - name: Save secrets for compose secrets
+      env:
+        SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+      run: |
+        echo $SERVICE_ACCOUNT_KEY > core/serviceAccountKey.json
     - name: Build and deploy
       env:
         DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}

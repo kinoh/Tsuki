@@ -34,6 +34,7 @@ classDiagram
     `WebSocket client` --> WebSocketManager : Connect
     MCPClient --> `MCP server` : Get toolsets, Subscribe resources
     AgentService --> ActiveUser : Manage lifecycle
+    AgentService --> FCMManager
     ActiveUser --> `Agent@mastra/core` : Get response
     ActiveUser --> UsageStorage
     ActiveUser --> ConversationManager
@@ -42,6 +43,9 @@ classDiagram
     WebSocketManager --> AgentService : Pass messages, register sender
     WebSocketManager ..|> MessageSender
     WebSocketManager --> ClientConnection : For each user
+    FCMManager ..|> MessageSender
+    FCMManager --|> FCMTokenStorage
+    FCMManager ..> FCM : Send notification
     class `Agent@mastra/core`
     class UsageStorage
     class ConversationManager
@@ -51,5 +55,6 @@ classDiagram
     class node:::external
     class `MCP server`:::external
     class `WebSocket client`:::external
+    class FCM:::external
     classDef external stroke:none,fill:#383838
   ```
