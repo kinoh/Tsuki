@@ -18,7 +18,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("start server, connect to standard input/output");
 
     let service = service.serve(stdio()).await?;
-    service.waiting().await?;
+    let reason = service.waiting().await?;
+    eprintln!("MCP server stopped: {:?}", reason);
 
     Ok(())
 }

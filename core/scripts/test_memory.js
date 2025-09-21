@@ -43,7 +43,7 @@ console.log('')
  */
 async function loadInstructions() {
   try {
-    const { loadPromptFromEnv } = await import('../src/prompt.ts')
+    const { loadPromptFromEnv } = await import('../src/agent/prompt.ts')
     return await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
   } catch (error) {
     throw new Error(`Failed to load prompt: ${error}`)

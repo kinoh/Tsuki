@@ -13,22 +13,32 @@ export const mcp = new MCPClient({
         OPML_FILE_PATH: `${dataDir}/rss_feeds.opml`,
       },
     },
-    'structured-memory': {
-      command: './bin/structured-memory',
-      args: [],
-      env: {
-        DATA_DIR: `${dataDir}/structured_memory`,
-        ROOT_TEMPLATE: '# メモ帳\n',
-      },
-    },
   },
 })
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function getDynamicMCP(clientId: string, onAuth: (server: string, url: string) => Promise<void>): MCPClient {
+export type MCPAuthHandler = (userId: string, server: string, url: string) => Promise<void>
+
+export function getUserSpecificMCP(clientId: string): MCPClient {
   return new MCPClient({
     id: clientId,
     servers: {
+      'structured-memory': {
+        command: './bin/structured-memory',
+        args: [],
+        env: {
+          DATA_DIR: `${dataDir}//${clientId}__structured_memory`,
+          ROOT_TEMPLATE: '# メモ帳\n',
+        },
+      },
+      scheduler: {
+        command: './bin/scheduler',
+        args: [],
+        env: {
+          DATA_DIR: `${dataDir}/${clientId}__scheduler`,
+          SCHEDULER_LOOP_INTERVAL_MS: '1000',
+          TZ: 'Asia/Tokyo',
+        },
+      },
     },
   })
 }

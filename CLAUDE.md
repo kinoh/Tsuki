@@ -23,7 +23,7 @@ pnpm start               # Start development server with tsx
 pnpm run start:prod      # Start production server with tsx
 pnpm run build           # No build needed - using tsx in production
 pnpm run lint            # Run TypeScript and ESLint checks
-pnpm run test:agent      # Test tsuki agent with encrypted prompt support
+pnpm run test:agent      # Test tsuki agent with encrypted prompt support (DO NOT RUN: Consumes OpenAI API credits - only run when explicitly requested)
 
 # Test WebSocket connection
 node scripts/ws_client.js
@@ -155,7 +155,7 @@ The AI agent uses MCP (Model Context Protocol) for tool integration:
 cd core/
 pnpm test                # Run test suite
 pnpm run test:watch      # Run tests in watch mode
-pnpm run test:agent      # Test tsuki agent functionality with encrypted prompts
+pnpm run test:agent      # Test tsuki agent functionality with encrypted prompts (DO NOT RUN: Consumes OpenAI API credits - only run when explicitly requested)
 pnpm run lint            # TypeScript type checking and ESLint validation
 
 # WebSocket testing

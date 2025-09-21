@@ -1,4 +1,5 @@
-import { MastraStorage } from '@mastra/core/storage'
+import { MastraStorage } from '@mastra/core'
+import { getClient, LibSQLClient } from './libsql'
 
 export interface UsageData {
   id: string
@@ -17,21 +18,14 @@ export interface MetricsSummary {
   totalThreads: number
 }
 
-interface LibSQLClient {
-  // eslint-disable-next-line no-unused-vars
-  execute: (params: string | { sql: string; args: (string | number)[] }) => Promise<{
-    rows: Array<Record<string, string | number>>
-  }>
-}
-
 export class UsageStorage {
-  // eslint-disable-next-line no-unused-vars
-  constructor(private storage: MastraStorage) {}
+  private readonly client: LibSQLClient
 
-  private get client(): LibSQLClient {
-    // Access private LibSQL client directly
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
-    return (this.storage as any).client as LibSQLClient
+  constructor(storage: MastraStorage) {
+    this.client = getClient(storage)
+    this.initTable().catch((error) => {
+      console.error('Failed to initialize usage storage:', error)
+    })
   }
 
   async initTable(): Promise<void> {

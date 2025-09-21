@@ -9,6 +9,7 @@ RUN apk add --no-cache musl-dev \
 
 # Copy Rust source code
 COPY mcp/structured-memory ./mcp/structured-memory
+COPY mcp/scheduler ./mcp/scheduler
 
 # Build structured-memory with caching
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -16,6 +17,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cd mcp/structured-memory && \
     cargo build --release --target x86_64-unknown-linux-musl && \
     cp target/x86_64-unknown-linux-musl/release/structured-memory /build/structured-memory
+
+# Build scheduler with caching
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/mcp/scheduler/target \
+    cd mcp/scheduler && \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/scheduler /build/scheduler
 
 # Production stage
 FROM node:22-alpine AS runtime
@@ -61,6 +69,9 @@ RUN pnpm config set script-shell /bin/sh
 
 # Copy structured-memory binary from build stage
 COPY --from=rust-builder --chown=tsuki:nodejs /build/structured-memory ./bin/structured-memory
+
+# Copy scheduler binary from build stage
+COPY --from=rust-builder --chown=tsuki:nodejs /build/scheduler ./bin/scheduler
 
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src

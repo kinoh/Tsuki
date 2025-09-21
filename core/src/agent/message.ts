@@ -9,7 +9,7 @@ export interface ResponseMessage {
   timestamp: number
 }
 
-type MessageContentPart = TextUIPart | ReasoningUIPart | ToolInvocationUIPart | SourceUIPart | FileUIPart | StepStartUIPart
+export type MessageContentPart = TextUIPart | ReasoningUIPart | ToolInvocationUIPart | SourceUIPart | FileUIPart | StepStartUIPart
 
 function extractTextPart(part: MessageContentPart): string | null {
   switch (part.type) {

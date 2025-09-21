@@ -1,25 +1,29 @@
-import { RuntimeContext } from '@mastra/core/di'
 import { mastra } from './mastra/index'
-import { loadPromptFromEnv } from './prompt'
 import { serve } from './server/index'
-import { AppRuntimeContext } from './server/types'
-
-// Function to create runtime context with encrypted prompt
-async function createRuntimeContext(): Promise<RuntimeContext<AppRuntimeContext>> {
-  const runtimeContext = new RuntimeContext<AppRuntimeContext>()
-
-  const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
-  runtimeContext.set('instructions', instructions)
-
-  return runtimeContext
-}
+import { createAgentService } from './agent/service'
+import { UsageStorage } from './storage/usage'
+import { FCMManager } from './server/fcm'
+import { FCMTokenStorage } from './storage/fcm'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {
   const agent = mastra.getAgent('tsuki')
-  const runtimeContext = await createRuntimeContext()
 
-  await serve(agent, runtimeContext)
+  const agentMemory = await agent.getMemory()
+  if (!agentMemory) {
+    throw new Error('Agent must have memory configured')
+  }
+
+  const usageStorage = new UsageStorage(agentMemory.storage)
+  const agentService = await createAgentService(agent, agentMemory, usageStorage)
+
+  const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
+  const fcm = new FCMManager(fcmTokenStorage)
+
+  // Start AgentService (includes MCP subscriptions)
+  agentService.start((process.env.PERMANENT_USERS ?? '').split(','), fcm)
+
+  await serve(agent, agentService)
 }
 
 main().catch(console.error)
