@@ -21,8 +21,8 @@ importers:
         specifier: ^2
         version: 2.2.6
       '@tauri-plugin-fcm-api':
-        specifier: git@github.com:kinoh/tauri-plugin-fcm.git#25e6d8562bc2e1a64e64534828e93393af3c0dbf
-        version: tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/25e6d8562bc2e1a64e64534828e93393af3c0dbf
+        specifier: git@github.com:kinoh/tauri-plugin-fcm.git#ec5e2293fd7e6b30ab3144ef6bdd772ef790e312
+        version: tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/ec5e2293fd7e6b30ab3144ef6bdd772ef790e312
       tauri-plugin-app-events-api:
         specifier: ^0.2.0
         version: 0.2.0
@@ -592,8 +592,8 @@ packages:
   tauri-plugin-app-events-api@0.2.0:
     resolution: {integrity: sha512-CnlAeucWhT+Rgx6CCsqUpq2D3pqgx0fhjSPKomH7O2t1rGVu5kGLMkYvaCX6gqVTUYpIWX5BLV7LGY2DRri0QA==}
 
-  tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/25e6d8562bc2e1a64e64534828e93393af3c0dbf:
-    resolution: {tarball: https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/25e6d8562bc2e1a64e64534828e93393af3c0dbf}
+  tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/ec5e2293fd7e6b30ab3144ef6bdd772ef790e312:
+    resolution: {tarball: https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/ec5e2293fd7e6b30ab3144ef6bdd772ef790e312}
     version: 0.0.0
 
   totalist@3.0.1:
@@ -1093,7 +1093,7 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 2.3.0
 
-  tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/25e6d8562bc2e1a64e64534828e93393af3c0dbf:
+  tauri-plugin-fcm-api@https://codeload.github.com/kinoh/tauri-plugin-fcm/tar.gz/ec5e2293fd7e6b30ab3144ef6bdd772ef790e312:
     dependencies:
       '@tauri-apps/api': 2.3.0
 
