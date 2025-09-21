@@ -41,7 +41,7 @@ jobs:
       run: |
         pwd
         echo $SERVICE_ACCOUNT_KEY > core/serviceAccountKey.json
-        ls -alh
+        ls -alh /home/runner/work/Tsuki/Tsuki/core
     - name: Build and deploy
       env:
         DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
