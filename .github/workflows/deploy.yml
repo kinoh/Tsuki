@@ -35,18 +35,14 @@ jobs:
         eval $(ssh-agent -s)
         ssh-add ~/.ssh/id_rsa
         ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
-    - name: Save secrets for compose secrets
-      env:
-        SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
-      run: |
-        echo $SERVICE_ACCOUNT_KEY > core/serviceAccountKey.json
     - name: Build and deploy
       env:
         DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
         PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
-        DIFY_SANDBOX_API_KEY: ${{ secrets.DIFY_SANDBOX_API_KEY }}
+        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
       run: task deploy
     - name: Wait for health
       env:
@@ -55,5 +51,7 @@ jobs:
         PROMPT_PRIVATE_KEY: dummy
         OPENAI_API_KEY: dummy
         DIFY_SANDBOX_API_KEY: dummy
+        GCP_SERVICE_ACCOUNT_KEY: dummy
+        FCM_PROJECT_ID: dummy
       run: task wait
       timeout-minutes: 5

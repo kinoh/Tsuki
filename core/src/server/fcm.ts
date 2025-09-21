@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase-admin/app'
+import { cert, FirebaseAppError, getApp, initializeApp, ServiceAccount } from 'firebase-admin/app'
 import { getMessaging, Messaging, MulticastMessage } from 'firebase-admin/messaging'
 import { FCMTokenStorage } from '../storage/fcm'
 import { MessageSender } from '../agent/activeuser'
@@ -14,15 +14,34 @@ export class FCMManager implements MessageSender {
   private readonly messaging: Messaging
 
   public constructor(private storage: FCMTokenStorage) {
+    try {
+      void getApp()
+    } catch (e) {
+      if (e instanceof FirebaseAppError && e.code === 'app/no-app') {
+        this.initialize()
+      }
+    }
+
+    this.messaging = getMessaging() 
+  }
+
+  private initialize(): void {
+    console.log('Initializing Firebase app for FCMManager')
+
     const projectId = process.env.FCM_PROJECT_ID
     if (projectId === undefined) {
       throw new Error('FCM_PROJECT_ID environment variable is not set')
     }
 
+    const serviceAccountKey = process.env.GCP_SERVICE_ACCOUNT_KEY
+    if (serviceAccountKey === undefined) {
+      throw new Error('GCP_SERVICE_ACCOUNT_KEY environment variable is not set')
+    }
+
     initializeApp({
+      credential: cert(JSON.parse(serviceAccountKey) as ServiceAccount),
       projectId,
     })
-    this.messaging = getMessaging() 
   }
 
   public async addClient(userId: string, token: string): Promise<void> {
