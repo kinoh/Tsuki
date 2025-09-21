@@ -54,9 +54,6 @@ export async function notificationTokensHandler(req: Request, res: Response): Pr
     res.status(500).json({ error: 'Internal server error' })
     return
   }
-
-  res.status(200).json({ ok: true })
-  return
 }
 
 export async function notificationTestHandler(req: Request, res: Response): Promise<void> {
