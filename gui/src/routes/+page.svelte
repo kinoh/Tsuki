@@ -222,8 +222,35 @@
         permissionGranted = permission === "granted";
       }
       if (permissionGranted) {
-        // sendNotification({ title: "Tsuki", body: "届いてるかな～？" });
-        subscribeToTopic("message");
+        getFCMToken()
+          .then(result => {
+            const token = result.token;
+            console.log("FCM Token:", token);
+            // Register token to core server
+            fetch(`http${secure()}://${config.endpoint}/notification/token`, {
+              method: "PUT",
+              headers: {
+                "Authorization": `${config.user}:${config.token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ token }),
+            })
+              .then(response => {
+                if (response.status < 200 || response.status >= 300) {
+                  throw new Error(`Failed to register FCM token: ${response.status} ${response.statusText}`);
+                }
+                return response.json();
+              })
+              .then(data => {
+                console.log("Registered FCM token to server:", data);
+              })
+              .catch(error => {
+                errorToast = error.toString();
+              });
+          })
+          .catch(err => {
+            errorToast = err.toString();
+          });
       }
     };
     notificationSetup();
