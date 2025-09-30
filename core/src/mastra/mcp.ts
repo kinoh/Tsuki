@@ -11,8 +11,7 @@ export class MCPClient {
   }
 
   [Symbol.dispose](): void {
-    console.log('Disposing MCP client...')
-    console.trace('Disposing MCP client stack trace:')
+    console.log('Closing MCP connection...')
 
     this.client.disconnect().catch((err) => {
       console.error('Error disconnecting MCP client:', err)
