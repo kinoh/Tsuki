@@ -1,20 +1,39 @@
-import { MCPClient } from '@mastra/mcp'
+import { MCPClient as MastraMCPClient, MCPClientOptions } from '@mastra/mcp'
 
 // Use same data directory for MCP server data
 const dataDir = process.env.DATA_DIR ?? './data'
 
-export const mcp = new MCPClient({
-  servers: {
-    rss: {
-      command: './node_modules/.bin/rss-mcp-lite',
-      args: [],
-      env: {
-        DB_PATH: `${dataDir}/rss_feeds.db`,
-        OPML_FILE_PATH: `${dataDir}/rss_feeds.opml`,
+export class MCPClient {
+  public readonly client: MastraMCPClient
+
+  constructor(options: MCPClientOptions) {
+    this.client = new MastraMCPClient(options)
+  }
+
+  [Symbol.dispose](): void {
+    console.log('Disposing MCP client...')
+    console.trace('Disposing MCP client stack trace:')
+
+    this.client.disconnect().catch((err) => {
+      console.error('Error disconnecting MCP client:', err)
+    })
+  }
+}
+
+export function getUniversalMCP(): MCPClient {
+  return new MCPClient({
+    servers: {
+      rss: {
+        command: './node_modules/.bin/rss-mcp-lite',
+        args: [],
+        env: {
+          DB_PATH: `${dataDir}/rss_feeds.db`,
+          OPML_FILE_PATH: `${dataDir}/rss_feeds.opml`,
+        },
       },
     },
-  },
-})
+  })
+}
 
 export type MCPAuthHandler = (userId: string, server: string, url: string) => Promise<void>
 

@@ -57,4 +57,26 @@ export async function serve(
   server.listen(2953, () =>
     console.log('\n🚀 Server ready at: http://localhost:2953\n'),
   )
+
+  const gracefulShutdown = () => {
+    console.log('Shutting down server...')
+    wss.close(() => {
+      server.close(() => {
+        console.log('Server closed.')
+        process.exit(0)
+      })
+    })
+
+    // Force shutdown after 5 seconds
+    setTimeout(() => {
+      console.error('Forcing shutdown...')
+      process.exit(1)
+    }, 5000)
+  }
+
+  process.on('SIGINT', gracefulShutdown)
+  process.on('SIGTERM', gracefulShutdown)
+
+  // Keep the Promise pending until the server is closed
+  await new Promise<void>(() => {})
 }

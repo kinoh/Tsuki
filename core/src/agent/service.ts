@@ -39,6 +39,13 @@ export class AgentService {
     console.log('AgentService started with notification subscription')
   }
 
+  [Symbol.dispose](): void {
+    for (const user of this.activeUsers.values()) {
+      user[Symbol.dispose]()
+    }
+    this.activeUsers.clear()
+  }
+
   activateUser(userId: string): ActiveUser {
     const user = this.activeUsers.get(userId)
     if (user) {

@@ -1,4 +1,4 @@
-import { mastra } from './mastra/index'
+import { MastraInstance } from './mastra/index'
 import { serve } from './server/index'
 import { createAgentService } from './agent/service'
 import { UsageStorage } from './storage/usage'
@@ -7,7 +7,8 @@ import { FCMTokenStorage } from './storage/fcm'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {
-  const agent = mastra.getAgent('tsuki')
+  using mastraInstance = await MastraInstance.create()
+  const agent = mastraInstance.getAgent('tsuki')
 
   const agentMemory = await agent.getMemory()
   if (!agentMemory) {
@@ -15,7 +16,7 @@ async function main(): Promise<void> {
   }
 
   const usageStorage = new UsageStorage(agentMemory.storage)
-  const agentService = await createAgentService(agent, agentMemory, usageStorage)
+  using agentService = await createAgentService(agent, agentMemory, usageStorage)
 
   const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
   const fcm = new FCMManager(fcmTokenStorage)

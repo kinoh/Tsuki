@@ -1,6 +1,5 @@
 import type { Agent as MastraAgent } from '@mastra/core'
-import { MCPClient } from '@mastra/mcp'
-import { getUserSpecificMCP, MCPAuthHandler } from '../mastra/mcp'
+import { getUserSpecificMCP, MCPAuthHandler, MCPClient } from '../mastra/mcp'
 import { ResponseMessage } from './message'
 import { ConversationManager } from './conversation'
 import { UsageStorage } from '../storage/usage'
@@ -31,11 +30,11 @@ export interface MCPNotificationHandler {
 }
 
 export class ActiveUser {
-  private mcp: MCPClient | null = null
+  private readonly mcp: MCPClient | null = null
   private senders = new Map<MessageChannel, MessageSender>()
 
   constructor(
-    private userId: string,
+    public readonly userId: string,
     private agent: MastraAgent,
     private conversation: ConversationManager,
     private usageStorage: UsageStorage,
@@ -51,6 +50,10 @@ export class ActiveUser {
     this.subscribeNotifications().catch((err) => {
       console.error(`Error subscribing to notifications for user ${this.userId}:`, err)
     })
+  }
+
+  [Symbol.dispose](): void {
+    this.mcp?.[Symbol.dispose]()
   }
 
   get mcpClient(): MCPClient | null {
@@ -80,7 +83,7 @@ export class ActiveUser {
             },
           },
           runtimeContext: this.runtimeContext,
-          toolsets: await this.mcp?.getToolsets() ?? {},
+          toolsets: await this.mcp?.client.getToolsets() ?? {},
         },
       )
 
@@ -127,8 +130,8 @@ export class ActiveUser {
       return
     }
 
-    await mcp.resources.subscribe('scheduler', 'fired_schedule://recent')
-    await mcp.resources.onUpdated('scheduler', (params) => {
+    await mcp.client.resources.subscribe('scheduler', 'fired_schedule://recent')
+    await mcp.client.resources.onUpdated('scheduler', (params) => {
       console.log(`Received scheduler notification for user ${this.userId}:`, params)
       this.handleSchedulerNotification(params as MCPNotificationResourceUpdated).catch((err) => {
         console.error(`Error handling scheduler notification for user ${this.userId}:`, err)
