@@ -2,6 +2,7 @@ import { MastraMemory } from '@mastra/core'
 
 export class ConversationManager {
   private readonly RECENT_UPDATE_THRESHOLD_HOURS = 1
+  private fixedThreadId: string | null = null
 
   constructor(
     private memory: MastraMemory,
@@ -57,7 +58,15 @@ export class ConversationManager {
     return lastMessageTime > thresholdTime
   }
 
+  public fixThread(id: string): void {
+    this.fixedThreadId = id
+  }
+
   async currentThread(): Promise<string> {
+    if (this.fixedThreadId !== null) {
+      return this.fixedThreadId
+    }
+
     const today = new Date()
     const todayId = this.generateThreadId(today)
     const yesterdayId = this.getPreviousDayThreadId()

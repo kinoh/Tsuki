@@ -53,7 +53,7 @@ export class AgentService {
     }
 
     const conversation = new ConversationManager(this.memory, userId)
-    const newUser = new ActiveUser(userId, this.agent, conversation, this.usageStorage, this.runtimeContext, null)
+    const newUser = new ActiveUser(userId, conversation, this.agent, this.usageStorage, this.runtimeContext, null)
     this.activeUsers.set(userId, newUser)
 
     if (this.fcm) {

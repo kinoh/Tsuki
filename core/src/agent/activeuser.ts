@@ -35,8 +35,8 @@ export class ActiveUser {
 
   constructor(
     public readonly userId: string,
+    public readonly conversation: ConversationManager,
     private agent: MastraAgent,
-    private conversation: ConversationManager,
     private usageStorage: UsageStorage,
     private runtimeContext: RuntimeContext<AgentRuntimeContext>,
     onAuth: MCPAuthHandler | null,
