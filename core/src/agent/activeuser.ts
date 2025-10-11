@@ -9,7 +9,7 @@ export type AgentRuntimeContext = {
   instructions: string
 }
 
-export type MessageChannel = 'websocket' | 'fcm'
+export type MessageChannel = 'websocket' | 'fcm' | 'internal'
 
 export interface MessageInput {
   userId: string
