@@ -1,12 +1,12 @@
 
 import { Agent, ToolsInput } from '@mastra/core/agent'
 import { Mastra } from '@mastra/core/mastra'
-import { PinoLogger } from '@mastra/loggers'
 import { LibSQLStore } from '@mastra/libsql'
 import { mkdirSync } from 'fs'
 import { summon } from './agents/tsuki'
 import { getUniversalMCP, MCPClient } from './mcp'
 import { Metric, ToolAction } from '@mastra/core'
+import { ConsoleLogger } from '@mastra/core/logger'
 
 export class MastraInstance {
   constructor(
@@ -31,7 +31,7 @@ export class MastraInstance {
       storage: new LibSQLStore({
         url: `file:${dataDir}/mastra.db`,
       }),
-      logger: new PinoLogger({
+      logger: new ConsoleLogger({
         name: 'Mastra',
         level: 'info',
       }),

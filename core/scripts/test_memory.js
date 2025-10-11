@@ -16,7 +16,7 @@ import { Agent } from '@mastra/core/agent'
 import { MCPClient } from '@mastra/mcp'
 import { Memory } from '@mastra/memory'
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql'
-import { PinoLogger } from '@mastra/loggers'
+import { ConsoleLogger } from '@mastra/core/logger'
 
 // Load environment variables
 dotenv.config()
@@ -289,7 +289,7 @@ async function runMemoryTests() {
       console.log(`🧪 Testing ${pattern.name}`)
       console.log(`${'='.repeat(60)}`)
 
-      pattern.agent.__setLogger(new PinoLogger({
+      pattern.agent.__setLogger(new ConsoleLogger({
         name: `TestAgent-${pattern.name}`,
         level: logLevel,
       }))
