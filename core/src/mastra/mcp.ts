@@ -1,3 +1,5 @@
+import { Tool } from '@mastra/core'
+import { RuntimeContext } from '@mastra/core/di'
 import { MCPClient as MastraMCPClient, MCPClientOptions } from '@mastra/mcp'
 
 export class MCPClient {
@@ -13,6 +15,29 @@ export class MCPClient {
     this.client.disconnect().catch((err) => {
       console.error('Error disconnecting MCP client:', err)
     })
+  }
+
+  public async callTool(serverName: string, toolName: string, params: Record<string, unknown>): Promise<unknown> {
+    const toolsets = await this.client.getToolsets()
+    const tools = toolsets[serverName]
+    if (tools === undefined) {
+      throw new Error(`Tool ${toolName} is not available`)
+    }
+    const tool = tools[toolName] as Tool
+    if (tool === undefined) {
+      throw new Error(`Tool ${toolName} is not available`)
+    }
+
+    if (typeof tool.execute !== 'function') {
+      throw new Error(`Tool ${toolName} does not have an executable function`)
+    }
+    const result = await tool.execute({
+      runtimeContext: new RuntimeContext(),
+      context: {
+        ...params,
+      },
+    })
+    return result
   }
 }
 
