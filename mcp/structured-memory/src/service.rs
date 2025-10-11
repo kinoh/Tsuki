@@ -215,7 +215,7 @@ impl StructuredMemoryService {
 
 #[tool_router]
 impl StructuredMemoryService {
-    #[tool(description = "Reads the content of a document")]
+    #[tool(description = "Reads the full content of a document by ID. If the ID is omitted, reads the root document. Returns an error if the document does not exist.")]
     pub async fn read_document(
         &self,
         params: Parameters<ReadDocumentRequest>,
@@ -249,7 +249,7 @@ impl StructuredMemoryService {
         })
     }
 
-    #[tool(description = "Updates the content of a document")]
+    #[tool(description = "Replaces the entire content of a document (full overwrite). The document must already exist, except for new subdocuments created by adding [[id]] links in a parent document. You cannot update or create a subdocument unless its parent contains a [[id]] link. Returns an error if the document does not exist or if the tree structure would be invalid.")]
     pub async fn update_document(
         &self,
         params: Parameters<UpdateDocumentRequest>,
@@ -315,7 +315,7 @@ impl StructuredMemoryService {
         })
     }
 
-    #[tool(description = "Returns the complete document tree structure")]
+    #[tool(description = "Returns the full tree structure of all documents and their parent-child relationships in YAML format. Always succeeds.")]
     pub async fn get_document_tree(&self) -> Result<CallToolResult, ErrorData> {
         self.ensure_root_document().await?;
 
@@ -377,7 +377,7 @@ impl StructuredMemoryService {
 impl ServerHandler for StructuredMemoryService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
-            instructions: Some("Structured memory MCP server for hierarchical document management with [[link]] syntax".into()),
+            instructions: Some("Structured memory MCP server for hierarchical document management with [[link]] syntax. The root document is the main entry point and should contain all primary information. LLM agents should always read and update the root document by default. Only when a specific topic in the root becomes too large or complex, create a subdocument by adding a [[subdocument_id]] link in the root. Subdocuments are for offloading detailed or expanded content; otherwise, keep all content in the root. This design keeps the document tree shallow and the root as the central knowledge hub.".into()),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation { name: env!("CARGO_CRATE_NAME").to_owned(), version: env!("CARGO_PKG_VERSION").to_owned() },
             ..Default::default()
