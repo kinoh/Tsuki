@@ -1,8 +1,5 @@
 import { MCPClient as MastraMCPClient, MCPClientOptions } from '@mastra/mcp'
 
-// Use same data directory for MCP server data
-const dataDir = process.env.DATA_DIR ?? './data'
-
 export class MCPClient {
   public readonly client: MastraMCPClient
 
@@ -20,6 +17,9 @@ export class MCPClient {
 }
 
 export function getUniversalMCP(): MCPClient {
+  // Use same data directory for MCP server data
+  const dataDir = process.env.DATA_DIR ?? './data'
+
   return new MCPClient({
     servers: {
       rss: {
@@ -37,6 +37,9 @@ export function getUniversalMCP(): MCPClient {
 export type MCPAuthHandler = (userId: string, server: string, url: string) => Promise<void>
 
 export function getUserSpecificMCP(clientId: string): MCPClient {
+  // Use same data directory for MCP server data
+  const dataDir = process.env.DATA_DIR ?? './data'
+
   return new MCPClient({
     id: clientId,
     servers: {
@@ -44,7 +47,7 @@ export function getUserSpecificMCP(clientId: string): MCPClient {
         command: './bin/structured-memory',
         args: [],
         env: {
-          DATA_DIR: `${dataDir}//${clientId}__structured_memory`,
+          DATA_DIR: `${dataDir}/${clientId}__structured_memory`,
           ROOT_TEMPLATE: '# メモ帳\n',
         },
       },
