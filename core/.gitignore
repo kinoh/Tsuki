@@ -9,5 +9,6 @@ dist
 .adminjs/
 
 data/
+data_tmp_*/
 src/prompts/initial.txt
 serviceAccountKey.json
