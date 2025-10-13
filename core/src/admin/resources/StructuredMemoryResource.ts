@@ -56,7 +56,7 @@ export class StructuredMemoryResource extends BaseResource {
   constructor() {
     super()
     const baseDataDir = process.env.DATA_DIR ?? './data'
-    this.dataDir = join(baseDataDir, 'structured_memory')
+    this.dataDir = join(baseDataDir, `${process.env.PERMANENT_USERS}__structured_memory`)
   }
 
   id(): string {
