@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Note**: For detailed design decisions and historical context, see `/docs/README.md`.
+
 ## Project Overview
 
 Tsuki is a kawaii chat agent built with TypeScript/Mastra that provides:
