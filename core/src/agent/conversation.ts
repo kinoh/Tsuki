@@ -2,6 +2,7 @@ import { MastraMemory } from '@mastra/core'
 
 export class ConversationManager {
   private readonly RECENT_UPDATE_THRESHOLD_HOURS = 1
+  private readonly THREAD_BOUNDARY_OFFSET_HOUR = 4
   private fixedThreadId: string | null = null
 
   constructor(
@@ -11,7 +12,17 @@ export class ConversationManager {
   }
 
   private generateThreadId(date: Date): string {
-    const dateStr = date.toISOString().split('T')[0].replace(/-/g, '') // YYYYMMDD format
+    const timezone = process.env.TZ ?? 'Asia/Tokyo'
+    // Clone date and add offset
+    const d = new Date(date.getTime())
+    d.setTime(d.getTime() - this.THREAD_BOUNDARY_OFFSET_HOUR * 60 * 60 * 1000)
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+    const dateStr = formatter.format(d).replace(/-/g, '')
     return `${this.userId}-${dateStr}`
   }
 

@@ -82,7 +82,7 @@ export function getUserSpecificMCP(clientId: string): MCPClient {
         env: {
           DATA_DIR: `${dataDir}/${clientId}__scheduler`,
           SCHEDULER_LOOP_INTERVAL_MS: '1000',
-          TZ: 'Asia/Tokyo',
+          TZ: process.env.TZ ?? 'Asia/Tokyo',
         },
       },
     },
