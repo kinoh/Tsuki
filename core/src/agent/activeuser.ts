@@ -7,6 +7,7 @@ import { RuntimeContext } from '@mastra/core/runtime-context'
 
 export type AgentRuntimeContext = {
   instructions: string
+  memory?: string
 }
 
 export type MessageChannel = 'websocket' | 'fcm' | 'internal'
@@ -60,6 +61,21 @@ export class ActiveUser {
     return this.mcp
   }
 
+  private async loadMemory(): Promise<string> {
+    try {
+      const response = await this.mcp?.callTool(
+        'structured-memory',
+        'read_document',
+        {},
+      ) as { content: { text: string }[] } | undefined
+
+      return response?.content[0]?.text ?? ''
+    } catch (error) {
+      console.warn(`Failed to load memory for user ${this.userId}:`, error)
+      return ''
+    }
+  }
+
   async processMessage(input: MessageInput): Promise<void> {
     console.log(`AgentService: Processing message for user ${input.userId}:`, input)
 
@@ -71,6 +87,10 @@ export class ActiveUser {
       })
 
       const currentThreadId = await this.conversation.currentThread()
+
+      // Load user-specific structured memory
+      const memory = await this.loadMemory()
+      this.runtimeContext.set('memory', memory)
 
       const response = await this.agent.generate(
         [{ role: 'user', content: formattedMessage }],

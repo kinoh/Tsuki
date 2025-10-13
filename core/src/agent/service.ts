@@ -8,11 +8,9 @@ import { MCPAuthHandler } from '../mastra/mcp'
 import { FCMManager } from '../server/fcm'
 
 export async function createAgentService(agent: Agent, memory: MastraMemory, usageStorage: UsageStorage): Promise<AgentService> {
-  const runtimeContext = new RuntimeContext<AgentRuntimeContext>()
   const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
-  runtimeContext.set('instructions', instructions)
 
-  return new AgentService(agent, memory, usageStorage, runtimeContext)
+  return new AgentService(agent, memory, usageStorage, instructions)
 }
 
 export class AgentService {
@@ -23,7 +21,7 @@ export class AgentService {
     private agent: Agent,
     private memory: MastraMemory,
     private usageStorage: UsageStorage,
-    private runtimeContext: RuntimeContext<AgentRuntimeContext>,
+    private commonInstructions: string,
   ) {}
 
   start(permanentUsers: string[], fcm?: FCMManager): void {
@@ -53,7 +51,13 @@ export class AgentService {
     }
 
     const conversation = new ConversationManager(this.memory, userId)
-    const newUser = new ActiveUser(userId, conversation, this.agent, this.usageStorage, this.runtimeContext, null)
+
+    // Create per-user runtime context with common instructions
+    // Memory is loaded on-demand in ActiveUser.processMessage
+    const userContext = new RuntimeContext<AgentRuntimeContext>()
+    userContext.set('instructions', this.commonInstructions)
+
+    const newUser = new ActiveUser(userId, conversation, this.agent, this.usageStorage, userContext, null)
     this.activeUsers.set(userId, newUser)
 
     if (this.fcm) {

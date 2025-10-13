@@ -12,12 +12,19 @@ export function summon(dataDir: string, openAiModel: string, tools: ToolsInput):
   return new Agent({
     name: 'Tsuki',
     instructions: ({ runtimeContext }): string => {
-      const instructions = runtimeContext.get('instructions')
-      if (instructions === null || instructions === undefined || instructions === '') {
+      const instructions = runtimeContext.get<string, string>('instructions')
+      if (!instructions) {
         console.warn('Instructions not found in runtime context, using default instructions')
         return 'You are a helpful chatting agent.'
       }
-      return instructions as string
+
+      // Append user-specific memory if available
+      const memory = runtimeContext.get<string, string>('memory')
+      if (memory) {
+        return `${instructions}\n\n<memory>\n${memory}\n</memory>`
+      }
+
+      return instructions
     },
     model: openai(openAiModel),
     memory: new Memory({
