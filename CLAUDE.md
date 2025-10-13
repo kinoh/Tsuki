@@ -7,11 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Tsuki is a kawaii chat agent built with TypeScript/Mastra that provides:
 - WebSocket and HTTP API server for real-time communication
 - AI-powered chat using Mastra agents with MCP tool integration
-- Code execution capabilities via dify-sandbox
+- Multi-channel message delivery (WebSocket, FCM push notifications, internal)
 - Cross-platform GUI client (desktop and Android) built with Tauri + Svelte
 - Intelligent thread management with conversation continuity
 - Encrypted prompt system using Age encryption
 - Cross-thread semantic recall for persistent memory
+- Per-user structured memory with MCP integration
+- Firebase Cloud Messaging (FCM) push notification support
 
 ## Development Commands
 
@@ -23,10 +25,13 @@ pnpm start               # Start development server with tsx
 pnpm run start:prod      # Start production server with tsx
 pnpm run build           # No build needed - using tsx in production
 pnpm run lint            # Run TypeScript and ESLint checks
-pnpm run test:agent      # Test tsuki agent with encrypted prompt support (DO NOT RUN: Consumes OpenAI API credits - only run when explicitly requested)
 
-# Test WebSocket connection
-node scripts/ws_client.js
+# Verification scripts (DO NOT RUN without explicit request - may consume API credits)
+pnpm run test:agent      # Test agent conversation flow
+node scripts/test_memory.js      # Test memory functionality
+tsx scripts/test_reflection.ts   # Test reflection functionality
+node scripts/mcp_subscribe.js    # Test MCP subscription
+node scripts/ws_client.js        # Test WebSocket connection
 ```
 
 ### GUI Client
@@ -69,16 +74,28 @@ docker compose restart core                            # Restart core service
 ```
 
 
+### MCP Server Management
+```bash
+task mcp/build                # Build all MCP servers
+task mcp/build-scheduler      # Build scheduler MCP server
+task mcp/build-structured-memory  # Build structured-memory MCP server
+task setup                    # Setup dev environment (pnpm install + MCP build)
+```
+
 ### Prompt Management (Encrypted)
 ```bash
 task decrypt_prompt  # Decrypt prompt file for editing
 task encrypt_prompt  # Encrypt prompt file after editing
-task diff_prompt     # Compare encrypted vs current
 
 # Manual encryption (from core/ directory)
 node --env-file .env scripts/decrypt_prompt.js
 node --env-file .env scripts/encrypt_prompt.js
 node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
+```
+
+### Database Management
+```bash
+task backup          # Backup database to ./backup/ directory
 ```
 
 ## Architecture
@@ -90,48 +107,92 @@ node --env-file .env scripts/generate_key.js  # Generate X25519 key pair
 
 ### Core Components
 - **Application Entry Point** (`core/src/index.ts`): Runtime context setup and server initialization
+- **Agent Service Layer** (`core/src/agent/`): Central orchestration and user management
+  - `agent/service.ts`: AgentService - manages ActiveUser instances and MCP subscriptions
+  - `agent/activeuser.ts`: ActiveUser - per-user state, MCP clients, and message routing
+  - `agent/conversation.ts`: ConversationManager - smart thread continuation logic
+  - `agent/message.ts`: Message formatting utilities for MastraMessageV2
+  - `agent/prompt.ts`: Encrypted prompt handling with Age encryption
+  - `agent/senders.ts`: Multi-channel message sender implementations
 - **HTTP/WebSocket Server** (`core/src/server/`): Modular Express server with clear separation of concerns
-  - `server/index.ts`: Main server integration and WebSocket setup
+  - `server/index.ts`: Main server integration and startup
+  - `server/websocket.ts`: WebSocketManager - real-time communication handling
+  - `server/fcm.ts`: FCMManager - Firebase Cloud Messaging integration
   - `server/types.ts`: Shared type definitions
   - `server/middleware/`: Authentication and access control middlewares
-  - `server/routes/`: API endpoint handlers grouped by functionality
-- **WebSocket Manager** (`core/src/websocket.ts`): Real-time communication handling
-- **Conversation Manager** (`core/src/conversation.ts`): Smart thread continuation logic
-- **Message Utilities** (`core/src/message.ts`): MastraMessageV2 formatting and content processing
-- **Mastra Agent** (`core/src/mastra/agents/tsuki.ts`): AI chat agent with cross-thread semantic memory
-- **MCP Integration** (`core/src/mastra/mcp.ts`): External tool integration via RSS MCP server
-- **Encrypted Prompts** (`core/src/prompt.ts`): Age encryption for secure prompt storage
-- **AdminJS Web UI** (`core/src/admin/index.ts`): Thread management web interface with authentication
-- **Usage Metrics** (`core/src/storage/usage.ts`): Token usage tracking and Prometheus metrics
+  - `server/routes/`: API endpoint handlers (threads, metrics, metadata, notifications)
+- **Mastra Integration** (`core/src/mastra/`): AI agent and MCP configuration
+  - `mastra/agents/tsuki.ts`: Main AI chat agent with cross-thread semantic memory
+  - `mastra/mcp.ts`: Two-tier MCP client configuration (universal + user-specific)
+  - `mastra/index.ts`: Mastra instance creation and configuration
+- **Storage Layer** (`core/src/storage/`): Data persistence and metrics
+  - `storage/usage.ts`: Token usage tracking and Prometheus metrics
+  - `storage/fcm.ts`: FCM token storage in LibSQL
+  - `storage/libsql.ts`: LibSQL client utilities
+- **Admin Interface** (`core/src/admin/`): Web-based management UI
+  - `admin/index.ts`: AdminJS configuration and authentication
+  - `admin/resources/ThreadResource.ts`: Thread management resource
+  - `admin/resources/MessageResource.ts`: Message viewing resource
+  - `admin/resources/StructuredMemoryResource.ts`: Per-user memory management
 
 ### Communication Protocols
 - **WebSocket**: Real-time bidirectional communication with authentication
 - **HTTP REST API**: Thread management and message history retrieval
+- **FCM Push Notifications**: Firebase Cloud Messaging for mobile/background delivery
 - **Admin Web UI**: AdminJS-based thread management interface at `/admin`
 - **Metrics API**: Prometheus-compatible metrics endpoint at `/metrics` (localhost only)
 - **System Information API**: System metadata at `/metadata`
-- **Unified Message Format**: Consistent ResponseMessage format across interfaces
+- **Unified Message Format**: Consistent ResponseMessage format across all channels
 
 ### Configuration
-- Environment variables: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY` (JWK format), `DATA_DIR`
-- Configuration files: `conf/default.toml`, `conf/local.toml` (legacy, for GUI client)
-- Mastra LibSQL database: `${DATA_DIR}/mastra.db` (default: `./data/mastra.db`)
-- RSS MCP server: `${DATA_DIR}/rss_feeds.db` and `${DATA_DIR}/rss_feeds.opml`
+- **Core Environment Variables**:
+  - `WEB_AUTH_TOKEN`: Authentication token for HTTP API
+  - `OPENAI_API_KEY`: OpenAI API key for agent
+  - `OPENAI_MODEL`: Model name (e.g., `gpt-4.1`, `gpt-4o`)
+  - `AGENT_NAME`: Agent identifier (default: `tsuki`)
+  - `PROMPT_PRIVATE_KEY`: Age encryption private key in JWK format
+  - `DATA_DIR`: Data directory path (default: `./data`)
+  - `TZ`: Timezone for scheduler (default: `Asia/Tokyo`)
+
+- **FCM Configuration** (optional):
+  - `GCP_SERVICE_ACCOUNT_KEY`: Firebase service account credentials (JSON)
+  - `FCM_PROJECT_ID`: Firebase project ID
+
+- **Advanced Configuration**:
+  - `PERMANENT_USERS`: Comma-separated list of always-active users
+  - `ADMIN_JS_TMP_DIR`: AdminJS temporary directory (default: `/tmp/.adminjs`)
+
+- **Data Storage**:
+  - Mastra LibSQL database: `${DATA_DIR}/mastra.db`
+  - RSS MCP data: `${DATA_DIR}/rss_feeds.db` and `${DATA_DIR}/rss_feeds.opml`
+  - User-specific MCP data: `${DATA_DIR}/${userId}__structured_memory/`, `${DATA_DIR}/${userId}__scheduler/`
 
 ### Docker Services
-The application runs with multiple services via Docker Compose:
+The application runs as a single containerized service:
 - **core**: TypeScript/Mastra backend with tsx runtime (port 2953)
-- **ssrf-proxy**: Secure proxy for dify-sandbox (port 3128, 8194)
-- **sandbox**: Code execution environment (dify-sandbox)
-- **mumble-server**: Voice chat server (port 64738)
-- **voicevox-engine**: Text-to-speech engine (port 50021)
+  - Includes HTTP API server, WebSocket server, and AdminJS UI
+  - Built-in MCP servers: scheduler and structured-memory (Rust binaries)
+  - External MCP integration: rss-mcp-lite (npm package)
 
 ### Tool Integration
-The AI agent uses MCP (Model Context Protocol) for tool integration:
-- **Zero Built-in Tools**: Core implements no internal tools, complete MCP delegation
-- **RSS MCP Server**: External RSS feed management via rss-mcp-lite MCP server
-- **MCP-first Strategy**: All external functionality provided via MCP servers
-- **Extensible Architecture**: New capabilities added through MCP servers only
+The AI agent uses a two-tier MCP (Model Context Protocol) architecture:
+
+- **Universal MCP** (shared across all users via `getUniversalMCP()`):
+  - **RSS Feed Management**: rss-mcp-lite npm package
+  - Provides shared functionality accessible to all users
+  - Single instance per application
+
+- **User-specific MCP** (per-user instances via `getUserSpecificMCP(userId)`):
+  - **scheduler**: Time-based notifications and reminders (Rust MCP server)
+  - **structured-memory**: Per-user markdown-based note-taking (Rust MCP server)
+  - Each user gets isolated MCP client with private data directory
+  - Supports MCP resource subscriptions for real-time notifications
+
+- **Architecture Benefits**:
+  - Zero built-in tools - complete MCP delegation
+  - Clean separation between shared and private functionality
+  - MCP-first strategy for extensibility
+  - New capabilities added through MCP servers only
 
 ### Runtime Environment
 - **Development**: tsx with watch mode for hot reload
@@ -140,69 +201,105 @@ The AI agent uses MCP (Model Context Protocol) for tool integration:
 - **Unified Runtime**: Consistent tsx-based execution across all environments
 
 ### Data Persistence
-- **LibSQL Database**: Unified storage for agents, memory, and vector embeddings
+- **LibSQL Database**: Unified storage for agents, memory, and vector embeddings (`${DATA_DIR}/mastra.db`)
 - **Cross-thread Semantic Memory**: Resource-scoped semantic recall across conversation sessions
 - **Vector Embeddings**: text-embedding-3-small for semantic search with top-5 matches
-- **Thread Management**: Daily thread IDs with smart continuation logic
+- **Thread Management**: Timezone-aware daily thread IDs with 4-hour offset and smart continuation logic
 - **Message Storage**: MastraMessageV2 format with unified ResponseMessage interface
 - **Usage Metrics Storage**: Token usage tracking with LibSQL persistence
-- **RSS MCP Data**: Separate database for RSS feed management via MCP server
+- **Per-user Structured Memory**: MCP-based markdown documents stored per user (`${DATA_DIR}/${userId}__structured_memory/`)
+- **Per-user Scheduler Data**: MCP-based time-based notifications (`${DATA_DIR}/${userId}__scheduler/`)
+- **FCM Token Storage**: Firebase Cloud Messaging tokens in LibSQL
+- **RSS MCP Data**: Shared RSS feed database (`${DATA_DIR}/rss_feeds.db` and OPML file)
 
 ## Testing
 
+**Note**: The project currently uses manual verification scripts only. There is no automated regression test suite.
+
+### Manual Verification Scripts
 ```bash
-# Core application tests
 cd core/
-pnpm test                # Run test suite
-pnpm run test:watch      # Run tests in watch mode
-pnpm run test:agent      # Test tsuki agent functionality with encrypted prompts (DO NOT RUN: Consumes OpenAI API credits - only run when explicitly requested)
+
+# Static analysis
 pnpm run lint            # TypeScript type checking and ESLint validation
 
-# WebSocket testing
-node scripts/ws_client.js
-
-# GUI client tests
-cd gui/
-npm run check            # Type checking
-npm run test             # Run tests
+# Manual verification (DO NOT RUN without explicit request - consumes API credits)
+pnpm run test:agent              # Agent conversation flow testing
+node scripts/test_memory.js      # Memory functionality verification
+tsx scripts/test_reflection.ts   # Reflection feature testing
+node scripts/mcp_subscribe.js    # MCP subscription testing
+node scripts/ws_client.js        # WebSocket connection testing
 ```
+
+### Test Configuration Files
+- `scripts/test_agent.yaml`: Test conversation scenarios for agent validation
+- `scripts/test_memory.yaml`: Memory test scenarios
+
+### Future Work
+Automated unit tests and integration tests are needed for regression testing.
 
 ## Key Files to Understand
 
-### Core Application
-- `core/src/index.ts`: Application entry point with runtime context setup
-- `core/src/websocket.ts`: WebSocket connection management and message processing
-- `core/src/conversation.ts`: Thread management with smart continuation logic
-- `core/src/message.ts`: MastraMessageV2 formatting and content processing utilities
+### Application Entry Point
+- `core/src/index.ts`: Main entry point - creates Mastra instance, AgentService, and starts server
 
-### Server Architecture (Modular)
-- `core/src/server/index.ts`: Main server integration and WebSocket setup
-- `core/src/server/types.ts`: Shared type definitions for server components
-- `core/src/server/middleware/auth.ts`: Authentication middleware
+### Agent Service Layer
+- `core/src/agent/service.ts`: AgentService - orchestrates ActiveUser instances
+- `core/src/agent/activeuser.ts`: ActiveUser - per-user state, MCP clients, message routing, and multi-channel delivery
+- `core/src/agent/conversation.ts`: ConversationManager - timezone-aware thread management with continuation logic
+- `core/src/agent/message.ts`: Message formatting utilities (ResponseMessage, MastraMessageV2)
+- `core/src/agent/prompt.ts`: Encrypted prompt loading with Age encryption
+- `core/src/agent/senders.ts`: InternalMessageSender for testing and debugging
+
+### Server Components
+- `core/src/server/index.ts`: Express server setup, route registration, and startup
+- `core/src/server/websocket.ts`: WebSocketManager - handles WebSocket connections and authentication
+- `core/src/server/fcm.ts`: FCMManager - Firebase Cloud Messaging integration
+- `core/src/server/types.ts`: Shared type definitions
+- `core/src/server/middleware/auth.ts`: HTTP authentication middleware
 - `core/src/server/middleware/internal.ts`: Internal network access control
-- `core/src/server/routes/threads.ts`: Thread and message API endpoints
-- `core/src/server/routes/metrics.ts`: Usage metrics API
-- `core/src/server/routes/metadata.ts`: System metadata API
 
-### AI & Integration
-- `core/src/mastra/agents/tsuki.ts`: Main AI agent with cross-thread semantic memory
-- `core/src/mastra/mcp.ts`: MCP client configuration for RSS server integration
-- `core/src/prompt.ts`: Age encryption for secure prompt storage
+### API Routes
+- `core/src/server/routes/threads.ts`: Thread and message history endpoints
+- `core/src/server/routes/metrics.ts`: Prometheus-compatible usage metrics
+- `core/src/server/routes/metadata.ts`: System metadata (Git hash, model info, MCP tools)
+- `core/src/server/routes/notification.ts`: FCM token management and test endpoints
 
-### Admin & Monitoring
-- `core/src/admin/index.ts`: AdminJS web UI for thread management
-- `core/src/storage/usage.ts`: Usage metrics tracking and Prometheus API
+### Mastra & AI Integration
+- `core/src/mastra/index.ts`: Mastra instance creation with LibSQL storage
+- `core/src/mastra/agents/tsuki.ts`: Main AI agent definition with cross-thread semantic memory
+- `core/src/mastra/mcp.ts`: Two-tier MCP client configuration (universal + user-specific)
 
-### Client & Infrastructure
-- `gui/src/routes/+page.svelte`: Main GUI interface
-- `compose.yaml`: Docker service definitions with tsx runtime
-- `Taskfile.yaml`: Development and deployment tasks
-- `doc/mastra-backend-implementation.md`: Detailed implementation documentation
+### Storage & Persistence
+- `core/src/storage/libsql.ts`: LibSQL client utilities
+- `core/src/storage/usage.ts`: Token usage tracking and metrics storage
+- `core/src/storage/fcm.ts`: FCM token storage in LibSQL
 
-### Testing & Quality Assurance
-- `core/scripts/test_agent.js`: Standalone agent testing script with encrypted prompt support
-- `core/scripts/test_agent.yaml`: Test conversation scenarios for agent validation
-- ESLint configuration with TypeScript support for code quality enforcement
+### Admin Interface
+- `core/src/admin/index.ts`: AdminJS configuration and authentication
+- `core/src/admin/resources/ThreadResource.ts`: Thread management UI
+- `core/src/admin/resources/MessageResource.ts`: Message viewing UI
+- `core/src/admin/resources/StructuredMemoryResource.ts`: Per-user memory management UI
+
+### Infrastructure & Configuration
+- `compose.yaml`: Docker service definition (single core service)
+- `Taskfile.yaml`: Development and deployment task automation
+- `docker/core/Dockerfile`: Multi-stage Docker build with Rust MCP servers
+
+### Verification Scripts
+- `core/scripts/test_agent.js`: Agent conversation flow testing
+- `core/scripts/test_memory.js`: Memory functionality verification
+- `core/scripts/test_reflection.ts`: Reflection feature testing
+- `core/scripts/mcp_subscribe.js`: MCP subscription testing
+- `core/scripts/ws_client.js`: WebSocket connection testing
+- `core/scripts/test_agent.yaml`: Agent test scenarios
+- `core/scripts/test_memory.yaml`: Memory test scenarios
+
+### Encryption & Security
+- `core/scripts/encrypt_prompt.js`: Encrypt system prompt with Age
+- `core/scripts/decrypt_prompt.js`: Decrypt system prompt for editing
+- `core/scripts/generate_key.js`: Generate X25519 key pair for Age encryption
+- `core/src/prompts/initial.txt.encrypted`: Encrypted system prompt
 
 ## HTTP API Endpoints
 
@@ -211,11 +308,25 @@ npm run test             # Run tests
 - `GET /threads/:threadId/messages` - Retrieve message history for a thread
 - `GET /metadata` - System information (Git hash, OpenAI model, MCP tools)
 
+### Push Notification Management
+- `PUT /notifications/token` - Register FCM token for push notifications
+  - Body: `{ "token": "fcm_token_string" }`
+  - Requires authentication
+- `DELETE /notifications/token` - Unregister FCM token
+  - Body: `{ "token": "fcm_token_string" }`
+  - Requires authentication
+- `GET /notifications/tokens` - List user's registered FCM tokens
+  - Requires authentication
+- `POST /notifications/test` - Send test notification to user
+  - Requires authentication
+  - Useful for verifying FCM configuration
+
 ### Admin Interface
 - `GET /admin` - AdminJS web interface for thread management
   - Authentication required using `WEB_AUTH_TOKEN`
   - Thread viewing, filtering, and deletion capabilities
-  - Read-only thread management (no creation/editing)
+  - Message history browsing
+  - Structured memory management per user
 
 ### Monitoring & Metrics
 - `GET /metrics` - Prometheus-compatible metrics (localhost access only)
@@ -223,63 +334,74 @@ npm run test             # Run tests
   - Message counts per thread/user
   - System performance metrics
 
-## MCP Integration
+## Multi-channel Message Delivery
 
-**Tool Strategy**: The system uses MCP (Model Context Protocol) for extensibility.
+The system supports three message delivery channels, managed by ActiveUser:
 
-**Built-in Capabilities**: 
-- Core conversation management
-- Message formatting and threading
-- Encrypted prompt handling
-- Basic agent functionality
+### Channel Types
+- **WebSocket** (`websocket`): Real-time bidirectional communication
+  - Managed by WebSocketManager
+  - Requires authentication via Authorization header
+  - Primary channel for interactive sessions
 
-**External Tools via MCP**: 
-- Scheduling and time management
-- Code execution (via dify-sandbox)
-- File operations
-- API integrations
-- Custom business logic
+- **FCM Push Notifications** (`fcm`): Background/mobile delivery
+  - Managed by FCMManager
+  - Requires Firebase Cloud Messaging configuration
+  - Used as fallback when WebSocket unavailable
+  - Automatically avoided when other channels are available
 
-**Benefits**: 
-- Clean separation of concerns
-- Easy tool discovery and integration
-- Standardized tool interfaces
-- No core modifications needed for new functionality
+- **Internal** (`internal`): Console output for testing
+  - InternalMessageSender for debugging and verification
+  - Used by test scripts and manual verification
 
-## Server Architecture Details
+### Message Routing
+- Each ActiveUser can have multiple senders registered
+- Messages are sent to all registered channels
+- FCM is skipped if 2+ channels are available (preference for real-time channels)
+- All channels use unified ResponseMessage format
 
-The server architecture follows a modular design pattern with clear separation of concerns:
+## Per-user MCP Architecture
 
-### Directory Structure
-```
-src/server/
-├── index.ts              # Main server integration (49 lines)
-├── types.ts             # Shared type definitions (27 lines)
-├── middleware/
-│   ├── auth.ts          # Authentication middleware (36 lines)
-│   ├── internal.ts      # IP access control (71 lines)
-│   └── index.ts         # Middleware exports (2 lines)
-└── routes/
-    ├── threads.ts       # Thread/message endpoints (154 lines)
-    ├── metrics.ts       # Usage metrics API (23 lines)
-    ├── metadata.ts      # System metadata API (38 lines)
-    └── index.ts         # Route setup (21 lines)
-```
+Each user gets isolated MCP client instances for privacy and security:
 
-### Design Principles
-- **Single Responsibility**: Each file has one clear purpose
-- **Dependency Injection**: Dependencies passed via Express app.locals
-- **Type Safety**: Shared type definitions prevent inconsistencies
-- **Testability**: Independent modules can be tested in isolation
-- **Consistent Patterns**: Follows same structure as admin/ module
+### User-specific MCP Servers
+- **scheduler**: Per-user time-based notifications
+  - Data stored in `${DATA_DIR}/${userId}__scheduler/`
+  - Supports MCP resource subscriptions
+  - Real-time notification delivery via MCP protocol
 
-### Middleware Layer
-- **Authentication**: Validates username:token format from Authorization header
-- **Internal Access Control**: Restricts certain endpoints to private/local networks
-- **Centralized Error Handling**: Consistent error responses across endpoints
+- **structured-memory**: Per-user markdown notes
+  - Data stored in `${DATA_DIR}/${userId}__structured_memory/`
+  - Accessible via AdminJS UI and MCP tools
+  - Injected into system prompt for personalization
 
-### Route Organization
-- **threads.ts**: Handles `/threads`, `/threads/:id`, `/messages` endpoints
-- **metrics.ts**: Provides `/metrics` endpoint for Prometheus integration
-- **metadata.ts**: Serves `/metadata` with system information and Git hash
-- **index.ts**: Central route configuration and Express app setup
+### Universal MCP Servers
+- **RSS**: Shared RSS feed management
+  - Single instance for all users
+  - Data stored in `${DATA_DIR}/rss_feeds.db`
+
+### Benefits
+- Complete data isolation between users
+- MCP subscription support for real-time updates
+- Clean separation of shared vs. private functionality
+
+## Structured Memory System
+
+Per-user memory is managed through both MCP and AdminJS:
+
+### MCP Integration
+- Agent can read/write user memory via `structured-memory` MCP server
+- Memory loaded before each agent invocation
+- Injected into runtime context for prompt personalization
+
+### AdminJS Management
+- Web UI for viewing/editing user memory at `/admin`
+- StructuredMemoryResource provides CRUD operations
+- Useful for debugging and manual memory management
+
+### Memory Loading Flow
+1. User sends message to agent
+2. ActiveUser loads structured memory via MCP
+3. Memory injected into agent's runtime context
+4. Agent generates response with personalized context
+5. Agent can update memory via MCP tools if needed
