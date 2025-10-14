@@ -10,5 +10,5 @@ dist
 
 data/
 data_tmp_*/
-src/prompts/initial.txt
+src/prompts/*.txt
 serviceAccountKey.json
