@@ -104,7 +104,7 @@ export class MessageResource extends BaseResource {
       const data = await response.json() as { messages: ResponseMessage[] }
 
       for (let i = 0; i < data.messages.length; i++) {
-        data.messages[i].id = `${threadId}-${i}`
+        data.messages[i].id = `${threadId}-${i.toString().padStart(3, '0')}`
       }
 
       return data.messages
