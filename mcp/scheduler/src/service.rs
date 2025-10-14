@@ -204,16 +204,28 @@ impl SchedulerService {
 
         let mut schedules_to_remove = Vec::new();
 
-        // Check schedules that need to be fired
-        {
+        // Collect schedules that should fire
+        let schedules_to_fire = {
             let schedules = self.schedules.lock().await;
+            let fired_schedules = self.fired_schedules.lock().await;
+
+            let mut to_fire = Vec::new();
 
             for (name, schedule) in schedules.iter() {
                 let should_fire = match schedule.cycle.as_str() {
                     "daily" => {
-                        // For daily schedules, fire when current time matches scheduled time
-                        let delta = now.time() - schedule.time.time();
-                        delta.num_minutes() == 0
+                        // For daily schedules, fire when current time is at or past scheduled time
+                        // Check both that time has passed and not yet fired today
+                        let time_matches = now.time() >= schedule.time.time();
+                        if !time_matches {
+                            false
+                        } else {
+                            // Check if already fired today to prevent duplicate notifications
+                            let today = now.date();
+                            !fired_schedules.iter().any(|f| {
+                                f.name == schedule.name && f.fired_time.date() == today
+                            })
+                        }
                     }
                     "once" => {
                         // For one-time schedules, fire if current time is past scheduled time
@@ -223,32 +235,39 @@ impl SchedulerService {
                 };
 
                 if should_fire {
-                    let fired_schedule = FiredSchedule {
-                        name: schedule.name.clone(),
-                        scheduled_time: schedule.time,
-                        fired_time: now,
-                        message: schedule.message.clone(),
-                    };
-
-                    // Add to fired schedules
-                    if let Err(e) = self.add_fired_schedule(fired_schedule).await {
-                        eprintln!("Failed to add fired schedule: {:?}", e);
-                        continue;
-                    }
-
-                    eprintln!(
-                        "🔔 Schedule fired: {} - {}",
-                        schedule.name, schedule.message
-                    );
-
-                    // Send notification to subscribers
-                    self.notify_fired_schedule(&schedule.message).await;
-
-                    // Mark one-time schedules for removal
-                    if schedule.cycle == "once" {
-                        schedules_to_remove.push(name.clone());
-                    }
+                    to_fire.push((name.clone(), schedule.clone()));
                 }
+            }
+
+            to_fire
+        };
+
+        // Fire collected schedules (after releasing locks)
+        for (name, schedule) in schedules_to_fire {
+            let fired_schedule = FiredSchedule {
+                name: schedule.name.clone(),
+                scheduled_time: schedule.time,
+                fired_time: now,
+                message: schedule.message.clone(),
+            };
+
+            // Add to fired schedules
+            if let Err(e) = self.add_fired_schedule(fired_schedule).await {
+                eprintln!("Failed to add fired schedule: {:?}", e);
+                continue;
+            }
+
+            eprintln!(
+                "🔔 Schedule fired: {} - {}",
+                schedule.name, schedule.message
+            );
+
+            // Send notification to subscribers
+            self.notify_fired_schedule(&schedule.message).await;
+
+            // Mark one-time schedules for removal
+            if schedule.cycle == "once" {
+                schedules_to_remove.push(name);
             }
         }
 

@@ -367,7 +367,7 @@ async fn test_resource_subscription() {
         .await
         .unwrap();
 
-    // Set a schedule that will fire soon
+    // Set a schedule that will fire soon (once)
     let time = chrono::Local::now();
     let response = client
         .call_tool(CallToolRequestParam {
@@ -392,6 +392,79 @@ async fn test_resource_subscription() {
             title: "Subscription test".to_string()
         }
     );
+
+    // No more notifications should be received
+    let no_notification = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
+    assert!(no_notification.is_err(), "Unexpected notification received");
+
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_resource_subscription_daily() {
+    let temp_dir = setup_test_env();
+
+    // Start the server process
+    let mut child = create_server_command(&temp_dir).spawn().unwrap();
+
+    // Client transport using the child's stdin and stdout
+    let stdin = child.stdin.take().expect("Failed to get stdin");
+    let stdout = child.stdout.take().expect("Failed to get stdout");
+    let client_transport = AsyncRwTransport::new(stdout, stdin);
+
+    // Notification channel
+    let (tx, mut rx) = mpsc::channel(8);
+
+    // Create the client
+    let client = Client {
+        notification_channel: tx,
+    }
+    .serve(client_transport)
+    .await
+    .unwrap();
+
+    // Subscribe to the fired_schedule resource
+    client
+        .subscribe(SubscribeRequestParam {
+            uri: "fired_schedule://recent".into(),
+        })
+        .await
+        .unwrap();
+
+    // Set a daily schedule that should fire immediately
+    // Use UTC to match server's timezone (TZ=UTC)
+    let now = chrono::Utc::now();
+    let time_str = now.format("%H:%M:%S").to_string();
+    let response = client
+        .call_tool(CallToolRequestParam {
+            name: "set_schedule".into(),
+            arguments: Some(rmcp::object!({
+                "name": "sub_test_daily",
+                "time": time_str,
+                "cycle": "daily",
+                "message": "Subscription test daily"
+            })),
+        })
+        .await
+        .unwrap();
+    assert_eq!(response.is_error, Some(false));
+
+    // Wait for the notification (should fire within a short interval)
+    let notification = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+        .await
+        .expect("No notification received")
+        .unwrap();
+    assert_eq!(
+        notification,
+        rmcp::model::ResourceUpdatedNotificationParam {
+            uri: "fired_schedule://recent".to_string(),
+            title: "Subscription test daily".to_string()
+        }
+    );
+
+    // No more notifications should be received immediately after
+    let no_notification = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
+    assert!(no_notification.is_err(), "Unexpected notification received");
 
     client.cancel().await.unwrap();
 }
