@@ -1,74 +1,77 @@
 # Metrics MCP server for Prometheus-compatible backends
 
 ## Overview
-- Fetches point-in-time metric snapshots from a Prometheus HTTP API (backed by VictoriaMetrics in production)
-- Uses a pre-defined query catalogue so agents can only request approved metrics
-- Integrates with Tsuki's MCP launcher alongside `structured-memory`, `scheduler`, and `weather`
+- Fetches point-in-time metric snapshots from a Prometheus HTTP API (VictoriaMetrics backend in production)
+- Loads a fixed catalogue of PromQL queries from a multi-line environment variable so deployment stays self-contained
+- Exposes a single MCP tool that returns all configured metrics in TOON format
 
 ## Configuration
 
 ### Environment Variables
 
 - `PROMETHEUS_BASE_URL` (required): Base URL of the Prometheus-compatible endpoint, e.g. `https://victoria.example.com`.
-- `METRICS_CONFIG_PATH` (required): Absolute path to a JSON or YAML file describing the allowed metric queries.
-- `DEFAULT_STEP` (optional): Step size for range queries in seconds when VictoriaMetrics requires it. Defaults to `60`.
+- `METRICS_QUERIES` (required): Multi-line string describing the queries to execute. Each line uses `name=query` format.
+  - Example:
+    ```bash
+    export METRICS_QUERIES=$'temperature=avg(tsuki_temperature_celsius)\nrequests=sum(rate(tsuki_core_requests_total[5m]))'
+    ```
+  - Names become the `name` field in the TOON response. Queries must not contain newlines.
+- `HTTP_TIMEOUT_SECONDS` (optional): Override default HTTP timeout (defaults to `10` seconds).
 
-### Metric Catalogue File
+## Query Catalogue Semantics
 
-The config file maps exported metric IDs to PromQL expressions and optional descriptions:
-
-```json
-{
-  "core_requests_per_minute": {
-    "query": "sum(rate(tsuki_core_requests_total[5m]))",
-    "description": "Rolling 5 minute request rate across all channels"
-  },
-  "core_memory_usage": {
-    "query": "max(tsuki_core_process_resident_memory_bytes)"
-  }
-}
-```
-
-This catalogue is loaded at startup; agents cannot supply ad-hoc queries.
+- Queries are loaded at startup; agents cannot provide ad-hoc expressions.
+- All configured queries are evaluated on every tool invocation.
+- A query line without `=` or with an empty expression is ignored and reported in logs during startup.
 
 ## Tools
 
 ### get_metric
 
-Retrieves one or more configured metric snapshots.
+Retrieves the configured metric snapshots.
 
 #### Arguments
 
-- `id` (optional): Metric ID from the catalogue. When omitted, all configured metrics are returned.
 - `at` (optional): RFC3339 timestamp (`2024-09-18T03:15:00Z`). Uses the latest value if omitted.
 
 #### Behaviour
 
-- Uses the Prometheus `/api/v1/query` endpoint with the configured expression.
-- When `at` is supplied, the query is executed with the `time` parameter to obtain the historical point-in-time value.
-- When `at` is omitted, the server queries the latest sample and returns the freshest value VictoriaMetrics exposes.
-- Results include the numeric value, the query expression, and the scrape timestamp returned by VictoriaMetrics.
+- Issues one `/api/v1/query` request per configured query using the provided PromQL expression.
+- When `at` is supplied, the request includes the `time` parameter to obtain historical values.
+- When `at` is omitted, the latest sample available in VictoriaMetrics is returned.
+- Every query result is summarised into TOON format (see below) and aggregated into a single response string.
 
 #### Errors
 
-- `Error: id: unknown metric` when `id` is not present in the catalogue.
 - `Error: at: invalid timestamp` when the timestamp cannot be parsed.
-- `Error: upstream: ...` when the Prometheus API returns an error payload or non-200 status.
+- `Error: upstream: ...` when the Prometheus API responds with an error payload or non-200 status.
+- `Error: metrics: not configured` when no valid queries were loaded at startup.
+
+## Response Format (TOON)
+
+Results are returned using [TOON](https://github.com/johannschopplich/toon) so downstream agents can parse a compact tabular form:
+
+```
+results[1]{name,timestamp,value}: temperature,1762086423,23.5
+results[2]{name,timestamp,value}: requests,1762086423,125.17
+```
+
+- `name`: Entry from `METRICS_QUERIES` to identify the metric.
+- `timestamp`: Unix epoch seconds reported by VictoriaMetrics.
+- `value`: Parsed numeric value from the Prometheus sample (NaN/Inf converted to strings).
 
 ## Usage Patterns
 
-### Fetch the latest request rate
+### Fetch latest metrics
 
 ```json
 {
   "tool": "get_metric",
-  "arguments": {
-    "id": "core_requests_per_minute"
-  }
+  "arguments": {}
 }
 ```
 
-### Fetch all core health metrics at a specific time
+### Fetch metrics at a specific point in time
 
 ```json
 {
@@ -82,5 +85,5 @@ Retrieves one or more configured metric snapshots.
 ## Implementation Notes
 
 - Follow the Rust server conventions established in `mcp/structured-memory` and `mcp/scheduler` (Tokio runtime, tool registry, MCP transport).
-- Leverage `reqwest` for HTTPS requests and reuse the shared MCP logging/telemetry helpers when available.
-- VictoriaMetrics is API-compatible with Prometheus, so standard `/api/v1/query` semantics apply.
+- Use `reqwest` for HTTPS requests and parse the multi-line environment variable during startup.
+- VictoriaMetrics is API-compatible with Prometheus, so standard `/api/v1/query` semantics apply; range queries are intentionally unsupported.
