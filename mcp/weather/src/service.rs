@@ -1,4 +1,4 @@
-use regex::{Regex, RegexBuilder};
+use regex::Regex;
 use reqwest::Client;
 use rmcp::{
     ErrorData, ServerHandler,
@@ -9,7 +9,6 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
-use std::fmt::Write;
 use url::Url;
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -21,7 +20,8 @@ pub struct WeatherService {
     client: Client,
     location_path: String,
     location_regex: Regex,
-    forecast_regex: Regex,
+    today_heading_regex: Regex,
+    tomorrow_heading_regex: Regex,
 }
 
 impl WeatherService {
@@ -42,12 +42,10 @@ impl WeatherService {
                 .expect("reqwest client with user agent"),
             location_path: normalized,
             location_regex: Regex::new(r"(?m)^.*?の天気.+発表").expect("valid location regex"),
-            forecast_regex: RegexBuilder::new(
-                r"(今日.{0,10}月\d+日.*?最大風速.*?\n+)(明日.{0,10}月\d+日.*?最大風速.*?\n+)",
-            )
-            .dot_matches_new_line(true)
-            .build()
-            .expect("valid forecast regex"),
+            today_heading_regex: Regex::new(r"(?m)^#{0,6}\s*今日[^\n]*")
+                .expect("valid today heading regex"),
+            tomorrow_heading_regex: Regex::new(r"(?m)^#{0,6}\s*明日[^\n]*")
+                .expect("valid tomorrow heading regex"),
         }
     }
 
@@ -124,24 +122,80 @@ impl WeatherService {
         let location = self
             .location_regex
             .find(markdown)
-            .map(|m| m.as_str().trim().to_string());
+            .map(|m| m.as_str().trim().to_string())
+            .ok_or_else(|| {
+                ErrorData::internal_error(
+                    "Error: failed to parse",
+                    Some(json!({"reason": "location line not found"})),
+                )
+            })?;
 
-        let forecast = self.forecast_regex.captures(markdown).map(|caps| {
-            let mut buffer = String::new();
-            if let Some(today) = caps.get(1) {
-                writeln!(&mut buffer, "{}", today.as_str().trim()).ok();
-            }
-            if let Some(tomorrow) = caps.get(2) {
-                writeln!(&mut buffer, "{}", tomorrow.as_str().trim()).ok();
-            }
-            buffer.trim().to_string()
-        });
+        let today_match = self.today_heading_regex.find(markdown).ok_or_else(|| {
+            ErrorData::internal_error(
+                "Error: failed to parse",
+                Some(json!({"reason": "today section not found"})),
+            )
+        })?;
 
-        match (location, forecast) {
-            (Some(loc), Some(data)) if !loc.is_empty() && !data.is_empty() => {
-                Ok(format!("{}\n{}", loc, data))
+        let tomorrow_match = self.tomorrow_heading_regex.find(markdown).ok_or_else(|| {
+            ErrorData::internal_error(
+                "Error: failed to parse",
+                Some(json!({"reason": "tomorrow section not found"})),
+            )
+        })?;
+
+        if tomorrow_match.start() <= today_match.start() {
+            return Err(ErrorData::internal_error(
+                "Error: failed to parse",
+                Some(json!({"reason": "tomorrow section precedes today section"})),
+            ));
+        }
+
+        let today_section =
+            self.capture_section(markdown, today_match.start(), tomorrow_match.start())?;
+        let tomorrow_section =
+            self.capture_section(markdown, tomorrow_match.start(), markdown.len())?;
+
+        Ok(format!(
+            "{}\n{}\n{}",
+            location,
+            today_section.trim_end(),
+            tomorrow_section.trim_end()
+        ))
+    }
+
+    fn capture_section(
+        &self,
+        markdown: &str,
+        start: usize,
+        end: usize,
+    ) -> Result<String, ErrorData> {
+        let section_slice = markdown
+            .get(start..end)
+            .ok_or_else(|| ErrorData::internal_error("Error: failed to parse", None))?;
+
+        if let Some(max_wind_pos) = section_slice.find("最大風速") {
+            let remainder = &section_slice[max_wind_pos..];
+            let line_end_offset = remainder
+                .find('\n')
+                .map(|idx| max_wind_pos + idx + 1)
+                .unwrap_or(section_slice.len());
+
+            let captured = section_slice[..line_end_offset].trim_end().to_string();
+
+            if captured.is_empty() {
+                Err(ErrorData::internal_error(
+                    "Error: failed to parse",
+                    Some(json!({"reason": "empty section"})),
+                ))
+            } else {
+                Ok(captured)
             }
-            _ => Err(ErrorData::internal_error("Error: failed to parse", None)),
+        } else {
+            Err(ErrorData::internal_error(
+                "Error: failed to parse",
+                Some(json!({"reason": "max wind not found"})),
+            ))
         }
     }
 
@@ -292,5 +346,74 @@ mod tests {
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert_eq!(error.message, "Error: disallowed by robots.txt");
+    }
+
+    #[test]
+    fn forecast_extraction_handles_real_markdown() {
+        let srv = service();
+        let markdown = r#"## 新宿区の天気02日16:00発表
+
+### 今日 11月02日(日)
+
+[日の出]日の出｜06時04分
+
+[日の入]日の入｜16時45分
+
+[曇のち晴]
+
+曇のち晴
+
+*最高*
+  19 ℃
+  [-2]
+*最低*
+  12 ℃
+  [-1]
+
+────────┬─────┬─────┬─────┬─────
+時間    │00-06│06-12│12-18│18-24
+────────┼─────┼─────┼─────┼─────
+降水確率│---  │---  │20%  │0%
+────────┼─────┴─────┴─────┴─────
+最大風速│南2m/s
+────────┴───────────────────────
+
+### 明日 11月03日(月)
+
+[日の出]日の出｜06時05分
+
+[日の入]日の入｜16時44分
+
+[晴一時雨]
+
+晴一時雨
+
+*最高*
+  19℃
+  [-1]
+*最低*
+  11℃
+  [-1]
+
+────────┬─────┬─────┬─────┬─────
+時間    │00-06│06-12│12-18│18-24
+────────┼─────┼─────┼─────┼─────
+降水確率│0%   │50%  │10%  │0%
+────────┼─────┴─────┴─────┴─────
+最大風速│北西7m/s
+────────┴───────────────────────
+
+* [時間]16:40現在
+* [[温度]16.9℃(前日差:-0.7℃)][1]
+"#;
+
+        let forecast = srv
+            .compose_forecast(markdown)
+            .expect("forecast should parse");
+        assert!(forecast.contains("新宿区の天気02日16:00発表"));
+        assert!(forecast.contains("### 今日 11月02日(日)"));
+        assert!(forecast.contains("最大風速│南2m/s"));
+        assert!(forecast.contains("### 明日 11月03日(月)"));
+        assert!(forecast.contains("最大風速│北西7m/s"));
     }
 }
