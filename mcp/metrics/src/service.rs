@@ -273,8 +273,15 @@ impl MetricsService {
     }
 
     fn build_toon(rows: &[ToonRow]) -> String {
-        let mut buffer = String::from("results[1]{name,timestamp,value}:\n");
-        for row in rows {
+        let mut buffer = String::new();
+        for (index, row) in rows.iter().enumerate() {
+            // TOON lists use 1-based index with count inside brackets: results[<count>]
+            if index == 0 {
+                let _ = std::fmt::Write::write_fmt(
+                    &mut buffer,
+                    format_args!("results[{}]{{name,timestamp,value}}:\n", rows.len()),
+                );
+            }
             // Use the original value string to preserve formatting like NaN/Inf.
             let _ = std::fmt::Write::write_fmt(
                 &mut buffer,
