@@ -27,10 +27,19 @@ pub struct WeatherService {
 impl WeatherService {
     pub fn new(location_path: String) -> Self {
         let normalized = normalize_location_path(location_path);
+        const USER_AGENT: &str = concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/kinoh/tsuki)"
+        );
 
         Self {
             tool_router: Self::tool_router(),
-            client: Client::new(),
+            client: Client::builder()
+                .user_agent(USER_AGENT)
+                .build()
+                .expect("reqwest client with user agent"),
             location_path: normalized,
             location_regex: Regex::new(r"(?m)^.*?の天気.+発表").expect("valid location regex"),
             forecast_regex: RegexBuilder::new(
