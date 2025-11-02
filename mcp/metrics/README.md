@@ -53,7 +53,7 @@ Retrieves the configured metric snapshots.
 Results are returned using [TOON](https://github.com/johannschopplich/toon) so downstream agents can parse a compact tabular form:
 
 ```
-results[1]{name,timestamp,value}:
+results[2]{name,timestamp,value}:
   temperature,2025-11-01T20:00:00+09:00,23.5
   requests,2025-11-01T20:00:00+09:00,125
 ```
