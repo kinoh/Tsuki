@@ -21,3 +21,4 @@
   - Converts optional `at` parameter to Prometheus `time` query and formats results in local timezone (`TZ` env).
   - Summarises each sample to TOON rows using the Prometheus `__name__` label (falls back to alias).
   - Uses `reqwest` with rustls backend and exposes a single `get_metric` tool via rmcp macros.
+  - Supports optional Basic Auth via `PROMETHEUS_BASIC_AUTH_USERNAME` / `PROMETHEUS_BASIC_AUTH_PASSWORD`.

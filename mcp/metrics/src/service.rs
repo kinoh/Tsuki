@@ -61,6 +61,7 @@ pub struct MetricsService {
     query_url: Url,
     timezone: Tz,
     queries: Vec<MetricQuery>,
+    auth: Option<(String, String)>,
 }
 
 impl MetricsService {
@@ -69,6 +70,7 @@ impl MetricsService {
         query_url: Url,
         timezone: Tz,
         queries: Vec<MetricQuery>,
+        auth: Option<(String, String)>,
     ) -> Result<Self, ErrorData> {
         if queries.is_empty() {
             return Err(ErrorData::internal_error(
@@ -83,6 +85,7 @@ impl MetricsService {
             query_url,
             timezone,
             queries,
+            auth,
         })
     }
 
@@ -142,6 +145,10 @@ impl MetricsService {
             .client
             .get(self.query_url.clone())
             .query(&[("query", query.expression.as_str())]);
+
+        if let Some((ref username, ref password)) = self.auth {
+            request = request.basic_auth(username, Some(password));
+        }
 
         if let Some(at) = at {
             request = request.query(&[("time", at.to_rfc3339())]);

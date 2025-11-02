@@ -17,6 +17,7 @@
     ```
   - Names serve as aliases when Prometheus results lack a `__name__` label. Queries must not contain newlines.
 - `TZ` (required): Timezone which response uses.
+- `PROMETHEUS_BASIC_AUTH_USERNAME` / `PROMETHEUS_BASIC_AUTH_PASSWORD` (optional, pair): When both are set, requests include HTTP Basic Auth credentials. Leave unset for unauthenticated endpoints.
 
 ## Query Catalogue Semantics
 

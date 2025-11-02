@@ -30,6 +30,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .transpose()?
         .unwrap_or(10);
 
+    let basic_auth = match (
+        env::var("PROMETHEUS_BASIC_AUTH_USERNAME").ok(),
+        env::var("PROMETHEUS_BASIC_AUTH_PASSWORD").ok(),
+    ) {
+        (Some(username), Some(password)) => Some((username, password)),
+        (None, None) => None,
+        (Some(_), None) => {
+            return Err(
+                "PROMETHEUS_BASIC_AUTH_USERNAME set but PROMETHEUS_BASIC_AUTH_PASSWORD missing"
+                    .into(),
+            );
+        }
+        (None, Some(_)) => {
+            return Err(
+                "PROMETHEUS_BASIC_AUTH_PASSWORD set but PROMETHEUS_BASIC_AUTH_USERNAME missing"
+                    .into(),
+            );
+        }
+    };
+
     let queries = MetricsService::parse_queries(&queries_raw);
     let base_url = Url::parse(&base_url)
         .map_err(|err| format!("Invalid PROMETHEUS_BASE_URL '{}': {}", base_url, err))?;
@@ -37,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{:?}", err)))?;
     let client = MetricsService::build_client(Duration::from_secs(timeout_secs))
         .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{:?}", err)))?;
-    let service = MetricsService::new(client, query_url, timezone, queries)
+    let service = MetricsService::new(client, query_url, timezone, queries, basic_auth)
         .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{:?}", err)))?;
 
     println!("start server, connect to standard input/output");
