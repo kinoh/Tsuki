@@ -1,8 +1,8 @@
 # Metrics MCP README Worklog
 
 ## Overview
-- Branch `feat/metrics-mcp` introduces documentation for a future Prometheus/VictoriaMetrics MCP server.
-- Work limited to drafting `mcp/metrics/README.md`; no code scaffold yet.
+- Branch `feat/metrics-mcp` now contains both the README and a Rust MCP implementation at `mcp/metrics/`.
+- Implementation follows the rmcp 0.6.x tool pattern, hitting Prometheus `/api/v1/query` and emitting TOON-formatted tables.
 
 ## Instruction Trail & Rationale
 - **Initial brief**: Create a concise README similar to other MCP servers. Goal: server returns fixed metrics via a tool, defaulting to latest values when timestamp omitted.
@@ -16,3 +16,8 @@
 - Early draft assumed file-based config and optional metric selection; user guidance shifted design to environment-driven, all-metrics output—simplifies ops but required README rewrite.
 - Timestamp handling refined from epoch seconds to RFC3339 local time to better support downstream reasoning.
 - README explicitly references TOON to ensure future implementation matches expected serialization.
+- Rust service now:
+  - Parses `METRICS_QUERIES` into `name=query` pairs (comments/blank lines ignored).
+  - Converts optional `at` parameter to Prometheus `time` query and formats results in local timezone (`TZ` env).
+  - Summarises each sample to TOON rows using the Prometheus `__name__` label (falls back to alias).
+  - Uses `reqwest` with rustls backend and exposes a single `get_metric` tool via rmcp macros.

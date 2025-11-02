@@ -15,7 +15,7 @@
     ```bash
     export METRICS_QUERIES=$'temperature=avg(tsuki_temperature_celsius)\nrequests=sum(rate(tsuki_core_requests_total[5m]))'
     ```
-  - Names become the `name` field in the TOON response. Queries must not contain newlines.
+  - Names serve as aliases when Prometheus results lack a `__name__` label. Queries must not contain newlines.
 - `TZ` (required): Timezone which response uses.
 
 ## Query Catalogue Semantics
@@ -57,7 +57,7 @@ results[1]{name,timestamp,value}:
   requests,2025-11-01T20:00:00+09:00,125
 ```
 
-- `name`: Entry from `METRICS_QUERIES` to identify the metric.
+- `name`: `__name__` label from the Prometheus sample (falls back to the configured alias when missing).
 - `timestamp`: RFC 3339 local time.
 - `value`: Parsed numeric value from the Prometheus sample (NaN/Inf converted to strings).
 
