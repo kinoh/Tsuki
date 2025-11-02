@@ -8,7 +8,7 @@ use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
     schemars::{self, JsonSchema},
-    serde_json::json,
+    serde_json::{Value, json},
     tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
@@ -51,7 +51,7 @@ struct PrometheusData {
 struct PrometheusResult {
     #[serde(default)]
     metric: HashMap<String, String>,
-    value: (String, String),
+    value: (Value, Value),
 }
 
 #[derive(Debug, Clone)]
@@ -228,13 +228,32 @@ impl MetricsService {
             )
         })?;
 
-        let (timestamp_str, value_str) = &sample.value;
+        let timestamp_raw = &sample.value.0;
+        let value_raw = &sample.value.1;
+        let timestamp_str = value_to_string(timestamp_raw).map_err(|err| {
+            ErrorData::internal_error(
+                "Error: upstream: invalid timestamp format",
+                Some(json!({
+                    "query": query.name,
+                    "reason": err,
+                })),
+            )
+        })?;
+        let value_str = value_to_string(value_raw).map_err(|err| {
+            ErrorData::internal_error(
+                "Error: upstream: invalid value format",
+                Some(json!({
+                    "query": query.name,
+                    "reason": err,
+                })),
+            )
+        })?;
         let metric_name = sample
             .metric
             .get("__name__")
             .cloned()
             .unwrap_or_else(|| query.name.clone());
-        let timestamp = parse_timestamp(timestamp_str).map_err(|err| {
+        let timestamp = parse_timestamp(&timestamp_str).map_err(|err| {
             ErrorData::internal_error(
                 "Error: upstream: invalid timestamp",
                 Some(json!({
@@ -249,7 +268,7 @@ impl MetricsService {
         Ok(ToonRow {
             name: metric_name,
             timestamp: local_time.to_rfc3339(),
-            value: value_str.clone(),
+            value: value_str,
         })
     }
 
@@ -288,6 +307,14 @@ fn parse_timestamp(raw: &str) -> Result<DateTime<Utc>, String> {
 
     DateTime::<Utc>::from_timestamp(seconds, nanos_u32)
         .ok_or_else(|| format!("timestamp out of range: {}", raw))
+}
+
+fn value_to_string(value: &Value) -> Result<String, String> {
+    match value {
+        Value::String(s) => Ok(s.clone()),
+        Value::Number(n) => Ok(n.to_string()),
+        other => Err(format!("unsupported value type: {}", other)),
+    }
 }
 
 #[tool_router]
