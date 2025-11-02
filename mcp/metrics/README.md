@@ -16,7 +16,7 @@
     export METRICS_QUERIES=$'temperature=avg(tsuki_temperature_celsius)\nrequests=sum(rate(tsuki_core_requests_total[5m]))'
     ```
   - Names become the `name` field in the TOON response. Queries must not contain newlines.
-- `HTTP_TIMEOUT_SECONDS` (optional): Override default HTTP timeout (defaults to `10` seconds).
+- `TZ` (required): Timezone which response uses.
 
 ## Query Catalogue Semantics
 
@@ -52,12 +52,13 @@ Retrieves the configured metric snapshots.
 Results are returned using [TOON](https://github.com/johannschopplich/toon) so downstream agents can parse a compact tabular form:
 
 ```
-results[1]{name,timestamp,value}: temperature,1762086423,23.5
-results[2]{name,timestamp,value}: requests,1762086423,125.17
+results[1]{name,timestamp,value}:
+  temperature,2025-11-01T20:00:00+09:00,23.5
+  requests,2025-11-01T20:00:00+09:00,125
 ```
 
 - `name`: Entry from `METRICS_QUERIES` to identify the metric.
-- `timestamp`: Unix epoch seconds reported by VictoriaMetrics.
+- `timestamp`: RFC 3339 local time.
 - `value`: Parsed numeric value from the Prometheus sample (NaN/Inf converted to strings).
 
 ## Usage Patterns
