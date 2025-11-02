@@ -27,7 +27,7 @@
 
 ## Tools
 
-### get_metric
+### get_metrics
 
 Retrieves the configured metric snapshots.
 
@@ -68,7 +68,7 @@ results[1]{name,timestamp,value}:
 
 ```json
 {
-  "tool": "get_metric",
+  "tool": "get_metrics",
   "arguments": {}
 }
 ```
@@ -77,7 +77,7 @@ results[1]{name,timestamp,value}:
 
 ```json
 {
-  "tool": "get_metric",
+  "tool": "get_metrics",
   "arguments": {
     "at": "2024-09-18T03:15:00Z"
   }

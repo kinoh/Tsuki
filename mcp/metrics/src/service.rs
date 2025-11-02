@@ -295,7 +295,7 @@ impl MetricsService {
     #[tool(
         description = "Fetch configured Prometheus metric snapshots and return them in TOON format. Optional `at` parameter accepts RFC3339 timestamps for historical queries."
     )]
-    pub async fn get_metric(
+    pub async fn get_metrics(
         &self,
         params: Parameters<GetMetricRequest>,
     ) -> Result<CallToolResult, ErrorData> {
@@ -340,7 +340,7 @@ impl ServerHandler for MetricsService {
 
         ServerInfo {
             instructions: Some(
-                "Metrics MCP server. Use get_metric to read predefined Prometheus/VictoriaMetrics queries. Metrics are configured via METRICS_QUERIES and rendered in TOON format."
+                "Metrics MCP server. Use get_metrics to read predefined Prometheus/VictoriaMetrics queries. Metrics are configured via METRICS_QUERIES and rendered in TOON format."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
