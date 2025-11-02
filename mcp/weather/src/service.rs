@@ -9,6 +9,7 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -38,6 +39,8 @@ impl WeatherService {
             tool_router: Self::tool_router(),
             client: Client::builder()
                 .user_agent(USER_AGENT)
+                .connect_timeout(Duration::from_secs(2))
+                .timeout(Duration::from_secs(4))
                 .build()
                 .expect("reqwest client with user agent"),
             location_path: normalized,
