@@ -43,6 +43,10 @@ jobs:
         WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
         GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
         FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
+        WEATHER_LOCATION_PATH: ${{ secrets.WEATHER_LOCATION_PATH }}
+        PROMETHEUS_BASE_URL: ${{ secrets.PROMETHEUS_BASE_URL }}
+        PROMETHEUS_BASIC_AUTH_USERNAME: ${{ secrets.PROMETHEUS_BASIC_AUTH_USERNAME }}
+        PROMETHEUS_BASIC_AUTH_PASSWORD: ${{ secrets.PROMETHEUS_BASIC_AUTH_PASSWORD }}
       run: task deploy
     - name: Wait for health
       env:

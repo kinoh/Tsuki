@@ -75,6 +75,8 @@ tasks:
     deps:
       - mcp/build-structured-memory
       - mcp/build-scheduler
+      - mcp/build-weather
+      - mcp/build-metrics
   mcp/build-*:
     desc: Build a MCP server
     vars:

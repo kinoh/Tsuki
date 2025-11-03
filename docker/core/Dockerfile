@@ -10,6 +10,8 @@ RUN apk add --no-cache musl-dev \
 # Copy Rust source code
 COPY mcp/structured-memory ./mcp/structured-memory
 COPY mcp/scheduler ./mcp/scheduler
+COPY mcp/weather ./mcp/weather
+COPY mcp/metrics ./mcp/metrics
 
 # Build structured-memory with caching
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -24,6 +26,20 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cd mcp/scheduler && \
     cargo build --release --target x86_64-unknown-linux-musl && \
     cp target/x86_64-unknown-linux-musl/release/scheduler /build/scheduler
+
+# Build weather with caching
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/mcp/weather/target \
+    cd mcp/weather && \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/weather /build/weather
+
+# Build metrics with caching
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/mcp/metrics/target \
+    cd mcp/metrics && \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/metrics /build/metrics
 
 # Production stage
 FROM node:22-alpine AS runtime
@@ -67,11 +83,11 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # Allow build scripts for native modules (pnpm will handle better-sqlite3 automatically)
 RUN pnpm config set script-shell /bin/sh
 
-# Copy structured-memory binary from build stage
+# Copy mcp binaries from build stage
 COPY --from=rust-builder --chown=tsuki:nodejs /build/structured-memory ./bin/structured-memory
-
-# Copy scheduler binary from build stage
 COPY --from=rust-builder --chown=tsuki:nodejs /build/scheduler ./bin/scheduler
+COPY --from=rust-builder --chown=tsuki:nodejs /build/weather ./bin/weather
+COPY --from=rust-builder --chown=tsuki:nodejs /build/metrics ./bin/metrics
 
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
