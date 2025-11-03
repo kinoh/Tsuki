@@ -55,6 +55,24 @@ export function getUniversalMCP(): MCPClient {
           OPML_FILE_PATH: `${dataDir}/rss_feeds.opml`,
         },
       },
+      weather: {
+        command: './bin/weather',
+        args: [],
+        env: {
+          LOCATION_PATH: process.env.WEATHER_LOCATION_PATH ?? '3/16/4410/13104/', // Default to Shinjuku, Tokyo
+        },
+      },
+      metrics: {
+        command: './bin/metrics',
+        args: [],
+        env: {
+          PROMETHEUS_BASE_URL: process.env.METRICS_QUERIES ?? 'http://localhost:9090',
+          TZ: process.env.TZ ?? 'Asia/Tokyo',
+          METRICS_QUERIES: 'temperature=sensor_dht_temperature\nhumidity=sensor_dht_humidity\nco2=sensor_mhz19_co2',
+          PROMETHEUS_BASIC_AUTH_USERNAME: process.env.PROMETHEUS_BASIC_AUTH_USERNAME ?? '',
+          PROMETHEUS_BASIC_AUTH_PASSWORD: process.env.PROMETHEUS_BASIC_AUTH_PASSWORD ?? '',
+        },
+      },
     },
   })
 }
@@ -83,24 +101,6 @@ export function getUserSpecificMCP(clientId: string): MCPClient {
           DATA_DIR: `${dataDir}/${clientId}__scheduler`,
           SCHEDULER_LOOP_INTERVAL_MS: '1000',
           TZ: process.env.TZ ?? 'Asia/Tokyo',
-        },
-      },
-      weather: {
-        command: './bin/weather',
-        args: [],
-        env: {
-          LOCATION_PATH: process.env.WEATHER_LOCATION_PATH ?? '3/16/4410/13104/', // Default to Shinjuku, Tokyo
-        },
-      },
-      metrics: {
-        command: './bin/metrics',
-        args: [],
-        env: {
-          PROMETHEUS_BASE_URL: process.env.METRICS_QUERIES ?? 'http://localhost:9090',
-          TZ: process.env.TZ ?? 'Asia/Tokyo',
-          METRICS_QUERIES: 'temperature=sensor_dht_temperature\nhumidity=sensor_dht_humidity\nco2=sensor_mhz19_co2',
-          PROMETHEUS_BASIC_AUTH_USERNAME: process.env.PROMETHEUS_BASIC_AUTH_USERNAME ?? '',
-          PROMETHEUS_BASIC_AUTH_PASSWORD: process.env.PROMETHEUS_BASIC_AUTH_PASSWORD ?? '',
         },
       },
     },
