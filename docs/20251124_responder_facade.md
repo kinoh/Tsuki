@@ -1,0 +1,3 @@
+- Added a `UserContext` facade interface to expose only per-user state needed for response generation (thread lookup, memory load, toolsets, runtime context accessor).
+- Added a `Responder` interface and `MastraResponder` implementation that own Mastra agent + usage storage while depending on the `UserContext` facade for per-user inputs.
+- Left existing `ActiveUser` unchanged for now; the new abstractions are scaffolding for future integration.
