@@ -1,11 +1,12 @@
 import type { Agent, MastraMemory } from '@mastra/core'
-import { RuntimeContext } from '@mastra/core/di'
+import { RuntimeContext } from '@mastra/core/runtime-context'
 import { ConversationManager } from './conversation'
 import { UsageStorage } from '../storage/usage'
 import { loadPromptFromEnv } from './prompt'
 import { ActiveUser, AgentRuntimeContext, MessageChannel, MessageInput, MessageSender } from './activeuser'
 import { MCPAuthHandler } from '../mastra/mcp'
 import { FCMManager } from '../server/fcm'
+import { MastraResponder, Responder } from './mastraResponder'
 
 export async function createAgentService(agent: Agent, memory: MastraMemory, usageStorage: UsageStorage): Promise<AgentService> {
   const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
@@ -16,13 +17,16 @@ export async function createAgentService(agent: Agent, memory: MastraMemory, usa
 export class AgentService {
   private fcm: FCMManager | null = null
   private activeUsers = new Map<string, ActiveUser>()
+  private responder: Responder
 
   constructor(
     private agent: Agent,
     private memory: MastraMemory,
     private usageStorage: UsageStorage,
     private commonInstructions: string,
-  ) {}
+  ) {
+    this.responder = new MastraResponder(agent, usageStorage)
+  }
 
   start(permanentUsers: string[], fcm?: FCMManager): void {
     this.activeUsers.clear()
@@ -57,7 +61,14 @@ export class AgentService {
     const userContext = new RuntimeContext<AgentRuntimeContext>()
     userContext.set('instructions', this.commonInstructions)
 
-    const newUser = new ActiveUser(userId, conversation, this.agent, this.usageStorage, userContext, null)
+    const newUser = new ActiveUser(
+      userId,
+      conversation,
+      this.responder,
+      userContext,
+      this.agent.name,
+      null,
+    )
     this.activeUsers.set(userId, newUser)
 
     if (this.fcm) {

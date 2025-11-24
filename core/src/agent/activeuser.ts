@@ -1,9 +1,9 @@
-import type { Agent as MastraAgent } from '@mastra/core'
 import { getUserSpecificMCP, MCPAuthHandler, MCPClient } from '../mastra/mcp'
 import { ResponseMessage } from './message'
 import { ConversationManager } from './conversation'
-import { UsageStorage } from '../storage/usage'
 import { RuntimeContext } from '@mastra/core/runtime-context'
+import { UserContext } from './userContext'
+import { Responder } from './mastraResponder'
 
 export type AgentRuntimeContext = {
   instructions: string
@@ -30,16 +30,16 @@ export interface MCPNotificationHandler {
   handleSchedulerNotification(userId: string, notification: MCPNotificationResourceUpdated): Promise<void>
 }
 
-export class ActiveUser {
-  private readonly mcp: MCPClient | null = null
+export class ActiveUser implements UserContext {
+  readonly mcp: MCPClient | null = null
   private senders = new Map<MessageChannel, MessageSender>()
 
   constructor(
     public readonly userId: string,
     public readonly conversation: ConversationManager,
-    private agent: MastraAgent,
-    private usageStorage: UsageStorage,
+    private responder: Responder,
     private runtimeContext: RuntimeContext<AgentRuntimeContext>,
+    private readonly assistantName: string,
     onAuth: MCPAuthHandler | null,
   ) {
     this.mcp = getUserSpecificMCP(userId)
@@ -61,7 +61,7 @@ export class ActiveUser {
     return this.mcp
   }
 
-  private async loadMemory(): Promise<string> {
+  async loadMemory(): Promise<string> {
     try {
       const response = await this.mcp?.callTool(
         'structured-memory',
@@ -76,62 +76,31 @@ export class ActiveUser {
     }
   }
 
+  async getCurrentThread(): Promise<string> {
+    return this.conversation.currentThread()
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async getToolsets(): Promise<Record<string, Record<string, any>>> {
+    return await this.mcp?.client.getToolsets() ?? {}
+  }
+
+  getRuntimeContext(): RuntimeContext<AgentRuntimeContext> {
+    return this.runtimeContext
+  }
+
   async processMessage(input: MessageInput): Promise<void> {
     console.log(`AgentService: Processing message for user ${input.userId}:`, input)
 
     try {
-      const formattedMessage = JSON.stringify({
-        modality: 'Text',
-        user: input.userId,
-        content: input.content,
-      })
-
-      const currentThreadId = await this.conversation.currentThread()
-
-      // Load user-specific structured memory
-      const memory = await this.loadMemory()
-      this.runtimeContext.set('memory', memory)
-
-      const response = await this.agent.generate(
-        [{ role: 'user', content: formattedMessage }],
-        {
-          memory: {
-            resource: this.userId,
-            thread: currentThreadId,
-            options: {
-              lastMessages: 20,
-            },
-          },
-          runtimeContext: this.runtimeContext,
-          toolsets: await this.mcp?.client.getToolsets() ?? {},
-        },
-      )
-
-      console.log(`response id: ${response.response.id}`)
-      console.log(`usage: ${JSON.stringify(response.usage)}`)
-
-      await this.usageStorage.recordUsage(
-        response,
-        currentThreadId,
-        this.userId,
-        this.agent.name,
-      )
-
-      const assistantResponse: ResponseMessage = {
-        role: 'assistant',
-        user: this.agent.name,
-        chat: [response.text],
-        timestamp: Math.floor(Date.now() / 1000),
-      }
-
-      await this.sendMessage(assistantResponse)
-
+      const response = await this.responder.respond(input, this)
+      await this.sendMessage(response)
     } catch (error) {
       console.error('Message processing error:', error)
 
       const errorResponse: ResponseMessage = {
         role: 'assistant',
-        user: this.agent.name,
+        user: this.assistantName,
         chat: ['Internal error!'],
         timestamp: Math.floor(Date.now() / 1000),
       }
@@ -162,10 +131,20 @@ export class ActiveUser {
   public async handleSchedulerNotification(notification: MCPNotificationResourceUpdated): Promise<void> {
     console.log(`AgentService: Handling scheduler notification for user ${this.userId}:`, notification)
 
-    await this.processMessage({
-      userId: 'system',
-      content: `Received scheduler notification: ${notification.title}`,
-    })
+    try {
+      if (this.responder.handleNotification) {
+        const response = await this.responder.handleNotification(notification, this)
+        await this.sendMessage(response)
+        return
+      }
+
+      await this.processMessage({
+        userId: 'system',
+        content: `Received scheduler notification: ${notification.title}`,
+      })
+    } catch (err) {
+      console.error(`Error handling scheduler notification for user ${this.userId}:`, err)
+    }
   }
 
   public registerMessageSender(channel: MessageChannel, sender: MessageSender, onAuth: MCPAuthHandler | null): void {
