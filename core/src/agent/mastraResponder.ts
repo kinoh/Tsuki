@@ -19,11 +19,24 @@ export class MastraResponder implements Responder {
   ) {}
 
   async respond(input: MessageInput, ctx: UserContext): Promise<ResponseMessage> {
-    const formattedMessage = JSON.stringify({
-      modality: 'Text',
-      user: input.userId,
-      content: input.content,
-    })
+    const contentParts: Array<
+      | { type: 'text'; text: string }
+      | { type: 'image'; image: string; mimeType?: string }
+    > = []
+
+    if (input.text?.trim()) {
+      contentParts.push({ type: 'text', text: input.text })
+    }
+
+    if (input.images && input.images.length > 0) {
+      for (const image of input.images) {
+        contentParts.push({
+          type: 'image',
+          image: image.data.replace(/^data:.*;base64,/, ''),
+          mimeType: image.mimeType,
+        })
+      }
+    }
 
     const threadId = await ctx.getCurrentThread()
     const memory = await ctx.loadMemory()
@@ -32,7 +45,7 @@ export class MastraResponder implements Responder {
     const toolsets = await ctx.getToolsets()
 
     const response = await this.agent.generate(
-      [{ role: 'user', content: formattedMessage }],
+      [{ role: 'user', content: contentParts }],
       {
         memory: {
           resource: ctx.userId,
@@ -60,7 +73,7 @@ export class MastraResponder implements Responder {
   ): Promise<ResponseMessage> {
     const synthesized: MessageInput = {
       userId: 'system',
-      content: `Received scheduler notification: ${notification.title}`,
+      text: `Received scheduler notification: ${notification.title}`,
     }
     return this.respond(synthesized, ctx)
   }

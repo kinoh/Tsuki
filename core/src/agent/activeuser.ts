@@ -14,7 +14,11 @@ export type MessageChannel = 'websocket' | 'fcm' | 'internal'
 
 export interface MessageInput {
   userId: string
-  content: string
+  text: string
+  images?: Array<{
+    data: string
+    mimeType?: string
+  }>
 }
 
 export interface MessageSender {
@@ -140,7 +144,7 @@ export class ActiveUser implements UserContext {
 
       await this.processMessage({
         userId: 'system',
-        content: `Received scheduler notification: ${notification.title}`,
+        text: `Received scheduler notification: ${notification.title}`,
       })
     } catch (err) {
       console.error(`Error handling scheduler notification for user ${this.userId}:`, err)

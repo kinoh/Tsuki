@@ -3,6 +3,19 @@ import type { IncomingMessage } from 'node:http'
 import { AgentService } from '../agent/service'
 import type { ResponseMessage } from '../agent/message'
 import { MessageSender } from '../agent/activeuser'
+import { z } from 'zod'
+
+const clientMessageSchema = z.object({
+  type: z.literal('message'),
+  text: z.string().optional(),
+  images: z.array(z.object({
+    data: z.string(),
+    mimeType: z.string().optional(),
+  })).optional(),
+}).refine(
+  (msg) => Boolean((msg.text && msg.text.trim() !== '') || (msg.images && msg.images.length > 0)),
+  { message: 'Either text or images is required' },
+)
 
 class ClientConnection {
   constructor(
@@ -61,10 +74,26 @@ export class WebSocketManager implements MessageSender {
     }
 
     // Process message through AgentService
-    await this.agentService.processMessage(client.user, {
-      userId: client.user,
-      content: message,
-    })
+    try {
+      const parsed = clientMessageSchema.parse(JSON.parse(message))
+
+      await this.agentService.processMessage(client.user, {
+        userId: client.user,
+        text: parsed.text ?? '',
+        images: parsed.images?.map((image) => ({
+          data: image.data,
+          mimeType: image.mimeType,
+        })),
+      })
+    } catch (err) {
+      console.error('WebSocket message parsing error:', err)
+      await this.sendMessage(client.user, {
+        role: 'system',
+        user: 'system',
+        chat: ['Invalid message payload'],
+        timestamp: Math.floor(Date.now() / 1000),
+      })
+    }
   }
 
   private acceptClient(ws: WebSocket, connection: ClientConnection): void {
