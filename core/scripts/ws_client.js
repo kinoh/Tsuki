@@ -51,8 +51,12 @@ ws.on('error', (error) => {
 rl.on('line', (input) => {
   const message = input.trim();
   if (message) {
-    console.log(`📤 Sending: ${message}`);
-    ws.send(message);
+    const payload = {
+      type: 'message',
+      text: message,
+    };
+    console.log('📤 Sending:', JSON.stringify(payload));
+    ws.send(JSON.stringify(payload));
   }
   rl.prompt();
 });
