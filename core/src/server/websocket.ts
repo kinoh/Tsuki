@@ -3,19 +3,7 @@ import type { IncomingMessage } from 'node:http'
 import { AgentService } from '../agent/service'
 import type { ResponseMessage } from '../agent/message'
 import { MessageSender } from '../agent/activeuser'
-import { z } from 'zod'
-
-const clientMessageSchema = z.object({
-  type: z.literal('message'),
-  text: z.string().optional(),
-  images: z.array(z.object({
-    data: z.string(),
-    mimeType: z.string().optional(),
-  })).optional(),
-}).refine(
-  (msg) => Boolean((msg.text && msg.text.trim() !== '') || (msg.images && msg.images.length > 0)),
-  { message: 'Either text or images is required' },
-)
+import { clientMessageSchema } from '../shared/wsSchema'
 
 class ClientConnection {
   constructor(

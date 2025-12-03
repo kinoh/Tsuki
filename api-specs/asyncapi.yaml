@@ -1,0 +1,78 @@
+asyncapi: 3.0.0
+info:
+  title: Tsuki WebSocket API
+  version: 1.0.0
+  description: Messaging over WebSocket (text + images)
+
+servers:
+  prod:
+    host: wss://example.com/ws
+    protocol: wss
+    description: Production endpoint
+
+channels:
+  /ws:
+    description: WebSocket endpoint
+    subscribe:  # client -> server
+      message:
+        $ref: '#/components/messages/ClientMessage'
+    publish:    # server -> client
+      message:
+        $ref: '#/components/messages/ServerMessage'
+
+components:
+  messages:
+    ClientMessage:
+      payload:
+        $ref: '#/components/schemas/ClientMessage'
+    ServerMessage:
+      payload:
+        $ref: '#/components/schemas/ServerMessage'
+
+  schemas:
+    ClientMessage:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [message]
+        text:
+          type: string
+          description: Optional if images present.
+        images:
+          type: array
+          description: Base64 (no data: prefix)
+          items:
+            type: object
+            required: [data]
+            properties:
+              data:
+                type: string
+                description: raw base64 image bytes
+              mimeType:
+                type: string
+                example: image/png
+      oneOf:
+        - required: [text]
+        - required: [images]
+
+    ServerMessage:
+      type: object
+      required: [type, role, user, chat, timestamp]
+      properties:
+        type:
+          type: string
+          enum: [response]
+        role:
+          type: string
+          enum: [assistant, user, system, tool]
+        user:
+          type: string
+        chat:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: integer
+          format: int64
