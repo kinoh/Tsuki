@@ -4,6 +4,7 @@ import { ConversationManager } from './conversation'
 import { RuntimeContext } from '@mastra/core/runtime-context'
 import { UserContext } from './userContext'
 import { Responder } from './mastraResponder'
+import { MessageRouter } from './router'
 
 export type AgentRuntimeContext = {
   instructions: string
@@ -42,6 +43,7 @@ export class ActiveUser implements UserContext {
     public readonly userId: string,
     public readonly conversation: ConversationManager,
     private responder: Responder,
+    private router: MessageRouter,
     private runtimeContext: RuntimeContext<AgentRuntimeContext>,
     private readonly assistantName: string,
     onAuth: MCPAuthHandler | null,
@@ -97,6 +99,18 @@ export class ActiveUser implements UserContext {
     console.log(`AgentService: Processing message for user ${input.userId}:`, input)
 
     try {
+      const decision = await this.router.route(input, this)
+      if (decision.action === 'skip') {
+        const ackResponse: ResponseMessage = {
+          role: 'system',
+          user: this.assistantName,
+          chat: ['Message received. No response will be sent.'],
+          timestamp: Math.floor(Date.now() / 1000),
+        }
+        await this.sendMessage(ackResponse)
+        return
+      }
+
       const response = await this.responder.respond(input, this)
       await this.sendMessage(response)
     } catch (error) {

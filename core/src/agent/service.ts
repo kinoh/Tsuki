@@ -7,6 +7,8 @@ import { ActiveUser, AgentRuntimeContext, MessageChannel, MessageInput, MessageS
 import { MCPAuthHandler } from '../mastra/mcp'
 import { FCMManager } from '../server/fcm'
 import { MastraResponder, Responder } from './mastraResponder'
+import { AIRouter } from './aiRouter'
+import { MessageRouter } from './router'
 
 export async function createAgentService(agent: Agent, memory: MastraMemory, usageStorage: UsageStorage): Promise<AgentService> {
   const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
@@ -18,6 +20,7 @@ export class AgentService {
   private fcm: FCMManager | null = null
   private activeUsers = new Map<string, ActiveUser>()
   private responder: Responder
+  private router: MessageRouter
 
   constructor(
     private agent: Agent,
@@ -26,6 +29,8 @@ export class AgentService {
     private commonInstructions: string,
   ) {
     this.responder = new MastraResponder(agent, usageStorage)
+    const routerModel = process.env.ROUTER_MODEL ?? 'gpt-4o-mini'
+    this.router = new AIRouter(routerModel, commonInstructions)
   }
 
   start(permanentUsers: string[], fcm?: FCMManager): void {
@@ -65,6 +70,7 @@ export class AgentService {
       userId,
       conversation,
       this.responder,
+      this.router,
       userContext,
       this.agent.name,
       null,
