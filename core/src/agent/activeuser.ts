@@ -38,6 +38,8 @@ export interface MCPNotificationHandler {
 export class ActiveUser implements UserContext {
   readonly mcp: MCPClient | null = null
   private senders = new Map<MessageChannel, MessageSender>()
+  private sensoryBuffer: string[] = []
+  private readonly MAX_SENSORY_LOG = 20
 
   constructor(
     public readonly userId: string,
@@ -93,6 +95,18 @@ export class ActiveUser implements UserContext {
 
   getRuntimeContext(): RuntimeContext<AgentRuntimeContext> {
     return this.runtimeContext
+  }
+
+  getSensoryLog(): string {
+    return this.sensoryBuffer.join('\n')
+  }
+
+  appendSensory(entry: string): void {
+    if (!entry.trim()) return
+    this.sensoryBuffer.push(entry.trim())
+    if (this.sensoryBuffer.length > this.MAX_SENSORY_LOG) {
+      this.sensoryBuffer.shift()
+    }
   }
 
   async processMessage(input: MessageInput): Promise<void> {

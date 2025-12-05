@@ -89,6 +89,11 @@ export class AgentService {
     await user.processMessage(input)
   }
 
+  ingestSensory(userId: string, text: string): void {
+    const user = this.activateUser(userId)
+    user.appendSensory(text)
+  }
+
   registerMessageSender(userId: string, channel: MessageChannel, sender: MessageSender, onAuth: MCPAuthHandler | null): void {
     console.log(`AgentService: Channel opened: ${channel} for user ${userId}`)
 

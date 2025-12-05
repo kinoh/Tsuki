@@ -65,14 +65,18 @@ export class WebSocketManager implements MessageSender {
     try {
       const parsed = clientMessageSchema.parse(JSON.parse(message))
 
-      await this.agentService.processMessage(client.user, {
-        userId: client.user,
-        text: parsed.text ?? '',
-        images: parsed.images?.map((image) => ({
-          data: image.data,
-          mimeType: image.mimeType,
-        })),
-      })
+      if (parsed.type === 'message') {
+        await this.agentService.processMessage(client.user, {
+          userId: client.user,
+          text: parsed.text ?? '',
+          images: parsed.images?.map((image) => ({
+            data: image.data,
+            mimeType: image.mimeType,
+          })),
+        })
+      } else {
+        this.agentService.ingestSensory(client.user, parsed.text)
+      }
     } catch (err) {
       console.error('WebSocket message parsing error:', err)
       await this.sendMessage(client.user, {
