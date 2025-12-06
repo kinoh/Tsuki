@@ -326,6 +326,8 @@ class SimpleWebSocketClient:
 
 
 def main() -> None:
+    dry_run = sys.argv.count("--dry-run") > 0
+
     cfg = load_config()
     try:
         image_bytes = capture_image(cfg.capture_cmd)
@@ -340,6 +342,10 @@ def main() -> None:
         sys.exit(f"Failed to describe image: {err}")
 
     print(f"✅ Image described: {description}")
+
+    if dry_run:
+        print("🛑 Dry run mode, not sending to WebSocket")
+        return
 
     client = SimpleWebSocketClient(cfg.ws_url)
     try:
