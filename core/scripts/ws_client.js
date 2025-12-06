@@ -51,9 +51,11 @@ ws.on('error', (error) => {
 rl.on('line', (input) => {
   const message = input.trim();
   if (message) {
+    // Message with prefix "sensory:" treated as sensory message
+    const isSensory = message.startsWith('sensory:');
     const payload = {
-      type: 'message',
-      text: message,
+      type: (isSensory ? 'sensory' : 'message'),
+      text: message.replace(/^sensory:/, '').trim(),
     };
     console.log('📤 Sending:', JSON.stringify(payload));
     ws.send(JSON.stringify(payload));
