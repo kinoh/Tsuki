@@ -1,5 +1,4 @@
 import { MessageInput } from './activeuser'
-import { UserContext } from './userContext'
 
 export type RouteAction = 'respond' | 'skip'
 
@@ -8,5 +7,5 @@ export interface RouteDecision {
 }
 
 export interface MessageRouter {
-  route(input: MessageInput, ctx: UserContext): Promise<RouteDecision>
+  route(input: MessageInput): Promise<RouteDecision>
 }

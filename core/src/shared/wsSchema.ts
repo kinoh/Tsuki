@@ -9,7 +9,11 @@ export const clientChatMessageSchema = z.object({
     mimeType: z.string().optional(),
   })).optional(),
 }).refine(
-  (msg) => Boolean((msg.text && msg.text.trim() !== '') || (msg.images && msg.images.length > 0)),
+  (msg) => {
+    const hasText = typeof msg.text === 'string' && msg.text.trim() !== ''
+    const hasImages = Array.isArray(msg.images) && msg.images.length > 0
+    return hasText || hasImages
+  },
   { message: 'Either text or images is required' },
 )
 

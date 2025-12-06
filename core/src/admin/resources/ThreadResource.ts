@@ -12,7 +12,6 @@ interface Thread {
 }
 
 interface LibSQLClient {
-  // eslint-disable-next-line no-unused-vars
   execute: (query: string | { sql: string; args: (string | number)[] }) => Promise<{
     rows: Array<Record<string, string | number>>
   }>

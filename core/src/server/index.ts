@@ -58,7 +58,7 @@ export async function serve(
     console.log('\n🚀 Server ready at: http://localhost:2953\n'),
   )
 
-  const gracefulShutdown = () => {
+  const gracefulShutdown = (): void => {
     console.log('Shutting down server...')
     wss.close(() => {
       server.close(() => {

@@ -2,7 +2,6 @@ import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { MessageInput } from './activeuser'
 import { MessageRouter, RouteDecision } from './router'
-import { UserContext } from './userContext'
 
 // Router prompt is public and only handles routing, not persona.
 const ROUTER_APPEND_INSTRUCTIONS = `
@@ -48,7 +47,9 @@ export class AIRouter implements MessageRouter {
 
   private appendSensory(entry: string): void {
     const trimmed = entry.trim()
-    if (!trimmed) return
+    if (!trimmed) {
+      return
+    }
     this.sensoryBuffer.push(trimmed)
     if (this.sensoryBuffer.length > this.maxSensoryLog) {
       this.sensoryBuffer.shift()
@@ -59,7 +60,7 @@ export class AIRouter implements MessageRouter {
     return this.sensoryBuffer.join('\n')
   }
 
-  async route(input: MessageInput, _ctx: UserContext): Promise<RouteDecision> {
+  async route(input: MessageInput): Promise<RouteDecision> {
     const kind = input.type ?? 'message'
 
     // User messages are always forwarded to the responder.

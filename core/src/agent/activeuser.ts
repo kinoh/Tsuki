@@ -100,7 +100,7 @@ export class ActiveUser implements UserContext {
     console.log(`AgentService: Processing message for user ${input.userId}:`, input)
 
     try {
-      const decision = await this.router.route(input, this)
+      const decision = await this.router.route(input)
       if (decision.action === 'skip') {
         const ackResponse: ResponseMessage = {
           role: 'system',
