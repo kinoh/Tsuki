@@ -51,11 +51,7 @@ def load_config() -> Config:
     request_timeout = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
     reply_window = int(os.getenv("WS_REPLY_WINDOW_SECONDS", "10"))
 
-    capture_cmd_env = os.getenv("FSWEBCAM_CMD")
-    if capture_cmd_env:
-        capture_cmd = tuple(capture_cmd_env.split())
-    else:
-        capture_cmd = ("fswebcam", "-q", "--no-banner")
+    capture_cmd = ("fswebcam", "--device", "/dev/video0", "--input", "0", "--resolution", "1920x1080", "--no-banner")
 
     return Config(
         ws_url=ws_url,
