@@ -328,6 +328,8 @@ def main() -> None:
     except Exception as err:
         sys.exit(f"Image capture failed: {err}")
 
+    print(f"📸 Captured image ({len(image_bytes)} bytes)")
+
     try:
         description = describe_image(cfg, image_bytes)
     except Exception as err:
