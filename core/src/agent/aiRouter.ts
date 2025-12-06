@@ -62,12 +62,15 @@ export class AIRouter implements MessageRouter {
   async route(input: MessageInput, _ctx: UserContext): Promise<RouteDecision> {
     const kind = input.type ?? 'message'
 
-    if (kind === 'sensory') {
-      this.appendSensory(input.text ?? '')
-      return { action: 'skip' }
+    // User messages are always forwarded to the responder.
+    if (kind === 'message') {
+      return { action: 'respond' }
     }
 
-    const prompt = `${this.baseInstructions}\n\n${ROUTER_APPEND_INSTRUCTIONS}\n\nSensory log:\n${this.getSensoryLog() || 'none'}\n\nUser message:\n${input.text ?? ''}`.trim()
+    // Sensory inputs are gated by the router model.
+    this.appendSensory(input.text ?? '')
+
+    const prompt = `${this.baseInstructions}\n\n${ROUTER_APPEND_INSTRUCTIONS}\n\nSensory log:\n${this.getSensoryLog() || 'none'}\n\nIncoming sensory:\n${input.text ?? ''}\n\nUser message:\n`.trim()
 
     const { text } = await generateText({
       model: openai(this.model),
