@@ -36,6 +36,9 @@ class Config:
     openai_base_url: str
     request_timeout: int
     reply_window: int
+    capture_interval: int
+    reconnect_base_delay: int
+    reconnect_max_delay: int
 
 
 def load_config() -> Config:
@@ -50,6 +53,9 @@ def load_config() -> Config:
     openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
     request_timeout = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
     reply_window = int(os.getenv("WS_REPLY_WINDOW_SECONDS", "10"))
+    capture_interval = int(os.getenv("CAPTURE_INTERVAL_SECONDS", "60"))
+    reconnect_base_delay = int(os.getenv("RECONNECT_BASE_DELAY_SECONDS", "5"))
+    reconnect_max_delay = int(os.getenv("RECONNECT_MAX_DELAY_SECONDS", "30"))
 
     capture_cmd = ("fswebcam", "--device", "/dev/video0", "--input", "0", "--resolution", "1920x1080", "--no-banner")
 
@@ -63,6 +69,9 @@ def load_config() -> Config:
         openai_base_url=openai_base_url.rstrip("/"),
         request_timeout=request_timeout,
         reply_window=reply_window,
+        capture_interval=capture_interval,
+        reconnect_base_delay=reconnect_base_delay,
+        reconnect_max_delay=reconnect_max_delay,
     )
 
 
@@ -324,43 +333,58 @@ class SimpleWebSocketClient:
         masked_payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
         return header + mask_key + masked_payload
 
+    def is_connected(self) -> bool:
+        return self.sock is not None
+
+
+def ensure_connected(client: SimpleWebSocketClient, cfg: Config) -> None:
+    if client.is_connected():
+        return
+    client.connect()
+    client.send_text(f"{cfg.user}:{cfg.token}")
+
 
 def main() -> None:
-    dry_run = sys.argv.count("--dry-run") > 0
-
     cfg = load_config()
-    try:
-        image_bytes = capture_image(cfg.capture_cmd)
-    except Exception as err:
-        sys.exit(f"Image capture failed: {err}")
-
-    print(f"📸 Captured image ({len(image_bytes)} bytes)")
-
-    try:
-        description = describe_image(cfg, image_bytes)
-    except Exception as err:
-        sys.exit(f"Failed to describe image: {err}")
-
-    print(f"✅ Image described: {description}")
-
-    if dry_run:
-        print("🛑 Dry run mode, not sending to WebSocket")
-        return
-
     client = SimpleWebSocketClient(cfg.ws_url)
-    try:
-        client.connect()
-    except Exception as err:
-        sys.exit(f"WebSocket connection failed: {err}")
+    backoff = cfg.reconnect_base_delay
 
-    auth_message = f"{cfg.user}:{cfg.token}"
     try:
-        client.send_text(auth_message)
-        client.send_json({"type": "sensory", "text": description})
-        print("📤 Sent sensory message, waiting for replies...")
-        client.read_messages(cfg.reply_window)
-    except Exception as err:
-        sys.exit(f"WebSocket interaction failed: {err}")
+        while True:
+            try:
+                ensure_connected(client, cfg)
+            except Exception as err:
+                client.close()
+                print(f"⚠️ WebSocket connect/auth failed: {err}")
+                print(f"🔌 Reconnecting in {backoff}s")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, cfg.reconnect_max_delay)
+                continue
+
+            try:
+                image_bytes = capture_image(cfg.capture_cmd)
+                print(f"📸 Captured image ({len(image_bytes)} bytes)")
+
+                description = describe_image(cfg, image_bytes)
+                print(f"✅ Image described: {description}")
+
+                client.send_json({"type": "sensory", "text": description})
+                if cfg.reply_window > 0:
+                    print("📤 Sent sensory message, waiting for replies...")
+                    client.read_messages(cfg.reply_window)
+
+                backoff = cfg.reconnect_base_delay
+            except Exception as err:
+                client.close()
+                print(f"⚠️ Cycle failed, will retry: {err}")
+                print(f"🔁 Next attempt in {backoff}s")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, cfg.reconnect_max_delay)
+                continue
+
+            time.sleep(cfg.capture_interval)
+    except KeyboardInterrupt:
+        print("👋 Stopping loop")
     finally:
         client.close()
 
