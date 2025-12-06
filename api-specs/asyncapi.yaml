@@ -31,17 +31,12 @@ components:
 
   schemas:
     ClientMessage:
-      oneOf:
-        - $ref: '#/components/schemas/ClientChatMessage'
-        - $ref: '#/components/schemas/ClientSensoryMessage'
-
-    ClientChatMessage:
       type: object
       required: [type]
       properties:
         type:
           type: string
-          enum: [message]
+          enum: [message, sensory]
         text:
           type: string
           description: Optional if images present.
@@ -61,17 +56,6 @@ components:
       oneOf:
         - required: [text]
         - required: [images]
-
-    ClientSensoryMessage:
-      type: object
-      required: [type]
-      properties:
-        type:
-          type: string
-          enum: [sensory]
-        text:
-          type: string
-          description: Sensory log text
 
     ServerMessage:
       type: object

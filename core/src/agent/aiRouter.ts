@@ -42,10 +42,32 @@ export class AIRouter implements MessageRouter {
   constructor(
     private readonly model: string,
     private readonly baseInstructions: string,
+    private readonly maxSensoryLog = 20,
   ) {}
+  private sensoryBuffer: string[] = []
+
+  private appendSensory(entry: string): void {
+    const trimmed = entry.trim()
+    if (!trimmed) return
+    this.sensoryBuffer.push(trimmed)
+    if (this.sensoryBuffer.length > this.maxSensoryLog) {
+      this.sensoryBuffer.shift()
+    }
+  }
+
+  private getSensoryLog(): string {
+    return this.sensoryBuffer.join('\n')
+  }
 
   async route(input: MessageInput, _ctx: UserContext): Promise<RouteDecision> {
-    const prompt = `${this.baseInstructions}\n\n${ROUTER_APPEND_INSTRUCTIONS}\n\nSensory log:\n${_ctx.getSensoryLog() || 'none'}\n\nUser message:\n${input.text ?? ''}`.trim()
+    const kind = input.type ?? 'message'
+
+    if (kind === 'sensory') {
+      this.appendSensory(input.text ?? '')
+      return { action: 'skip' }
+    }
+
+    const prompt = `${this.baseInstructions}\n\n${ROUTER_APPEND_INSTRUCTIONS}\n\nSensory log:\n${this.getSensoryLog() || 'none'}\n\nUser message:\n${input.text ?? ''}`.trim()
 
     const { text } = await generateText({
       model: openai(this.model),

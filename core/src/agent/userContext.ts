@@ -12,6 +12,4 @@ export interface UserContext {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getToolsets(): Promise<Record<string, Record<string, any>>>
   getRuntimeContext(): RuntimeContext<AgentRuntimeContext>
-  getSensoryLog(): string
-  appendSensory(entry: string): void
 }
