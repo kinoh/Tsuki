@@ -103,7 +103,11 @@ def describe_image(cfg: Config, image_bytes: bytes) -> str:
                 "content": [
                     {
                         "type": "text",
-                        "text": "Describe the photo concisely for a sensory log. Focus on who/what/where and notable actions or objects.",
+                        "text": """Describe the photo according to following format in Japanese 数単語:
+- 人物の行動・使っているもの
+- 人物の様子
+- 部屋の明るさ・時間帯
+""",
                     },
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}" }},
                 ],
