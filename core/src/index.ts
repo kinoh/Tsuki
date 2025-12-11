@@ -30,8 +30,8 @@ async function main(): Promise<void> {
   // Start AgentService (includes MCP subscriptions)
   agentService.start(permanentUsers, fcm)
 
-  // Sensory service runs inside core; SENSORY_POLL_MS is interpreted in seconds (for simplicity).
-  const sensoryPollSeconds = Number(process.env.SENSORY_POLL_MS ?? '60')
+  // Sensory service runs inside core; SENSORY_POLL_SECONDS is interpreted in seconds.
+  const sensoryPollSeconds = Number(process.env.SENSORY_POLL_SECONDS ?? '60')
   using sensoryService = new SensoryService(agentService, {
     userIds: permanentUsers,
     pollSeconds: sensoryPollSeconds,
