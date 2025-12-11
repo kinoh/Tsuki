@@ -3,38 +3,62 @@
 Guidance for coding agents working on Tsuki.
 
 ## Concept & Experience
-- Tsuki is a kawaii, conversational agent; the goal is casual, non-productive chatter and a playful presence.
-- The router acts as a pre-conscious filter: repeated sensory inputs may still pass so the core model can notice new facets later—strict dedupe is intentionally avoided.
-- Liveliness is preferred over determinism; variability and small surprises are acceptable and desired.
+- Tsuki is a kawaii, conversational agent; aim for casual, non-productive chatter and playful presence.
+- Router is a pre-conscious filter; repeated sensory inputs may pass to surface new facets later. Strict dedupe is intentionally avoided.
+- Liveliness > determinism; allow variability and small surprises.
+
+## Directory Layout (high level)
+- `core/`: TypeScript backend on Mastra
+  - `src/agent/`: router, responder, ActiveUser orchestration
+  - `src/server/`: HTTP + WebSocket server, routes, middleware
+  - `src/mastra/`: Mastra setup, MCP wiring
+  - `src/storage/`: LibSQL and usage tracking
+  - `scripts/`: prompt encrypt/decrypt, manual checks
+- `gui/`: Tauri + Svelte client
+- `api-specs/`: AsyncAPI for WebSocket protocol
+- `docs/`: design decisions and change logs
+- `docker/`, `compose.yaml`, `Taskfile.yaml`: container and task runner configs
 
 ## System Shape
-- Core: TypeScript backend on Mastra in `core/`, exposes HTTP + WebSocket, multi-channel delivery (websocket, FCM, internal).
-- Client: Tauri + Svelte app in `gui/`.
-- MCP-first: abilities come from MCP servers rather than built-in tools.
-- Per-user orchestration: `ActiveUser` holds conversation state, router, and responder.
+- Core (in `core/`): Mastra/TypeScript backend; exposes HTTP + WebSocket; channels: websocket, FCM, internal.
+- Client (in `gui/`): Tauri + Svelte desktop/mobile client.
+- MCP-first: abilities come from MCP servers, not built-ins.
+- Per-user orchestration: `ActiveUser` holds conversation state, router, responder, and MCP client.
 
 ## Interfaces
-- HTTP API: see `core/src/server/routes` for the authoritative list of endpoints and middleware.
-- WebSocket: protocol is specified in `api-specs/asyncapi.yaml` (AsyncAPI).
-- Admin: AdminJS at `/admin`, authenticated via `WEB_AUTH_TOKEN`.
+- HTTP API: see `core/src/server/routes` for endpoints and middleware.
+- WebSocket: see `api-specs/asyncapi.yaml` (AsyncAPI spec).
+- Admin UI: AdminJS at `/admin`, authenticated via `WEB_AUTH_TOKEN`.
 
 ## MCP Topology
-- Universal MCP: `rss-mcp-lite` (npm) for shared RSS feed management; data under `${DATA_DIR}/rss_feeds.db` and `${DATA_DIR}/rss_feeds.opml`.
-- User-specific MCP (Rust binaries): `scheduler` (time-based notifications) and `structured-memory` (markdown notes), each stored under `${DATA_DIR}/${userId}__scheduler/` and `${DATA_DIR}/${userId}__structured_memory/`.
-- MCP clients support resource subscriptions; isolation is per user and storage roots in `DATA_DIR`.
+- Universal MCP
+  - `rss-mcp-lite` (npm) for shared RSS; data: `${DATA_DIR}/rss_feeds.db`, `${DATA_DIR}/rss_feeds.opml`.
+- User-specific MCP (Rust binaries)
+  - `scheduler`: time-based notifications, data under `${DATA_DIR}/${userId}__scheduler/`.
+  - `structured-memory`: markdown notes, data under `${DATA_DIR}/${userId}__structured_memory/`.
+- MCP clients support resource subscriptions; isolation is per user; roots are under `DATA_DIR`.
 
 ## Runtime & Commands
-- Dev server: `cd core && pnpm start` (tsx runtime).
-- Prod-like: `pnpm run start:prod`.
-- Lint/typecheck: `pnpm run lint`.
-- GUI dev: `cd gui && npm run dev`.
-- Docker/Taskfile helpers for deploy/build: e.g., `task up`, `task deploy-core`, `docker compose up --build --detach`.
+- Core dev
+  - `cd core && pnpm start` (tsx dev)
+  - `pnpm run start:prod`
+  - `pnpm run lint`
+- GUI dev
+  - `cd gui && npm run dev`
+- Docker/Taskfile
+  - `task up`, `task deploy-core`
+  - `docker compose up --build --detach`
 
 ## Config & Data
 - Core env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY`, `DATA_DIR` (default `./data`), `TZ`.
-- Optional: `GCP_SERVICE_ACCOUNT_KEY`, `FCM_PROJECT_ID`, `PERMANENT_USERS`, `ADMIN_JS_TMP_DIR`.
-- Key storage: Mastra DB `${DATA_DIR}/mastra.db`; RSS DB under `${DATA_DIR}`; encrypted prompt files in `core/src/prompts/`; AdminJS temp dir defaults to `/tmp/.adminjs`.
+- Optional env: `GCP_SERVICE_ACCOUNT_KEY`, `FCM_PROJECT_ID`, `PERMANENT_USERS`, `ADMIN_JS_TMP_DIR`.
+- Storage roots: Mastra DB `${DATA_DIR}/mastra.db`; RSS DB under `${DATA_DIR}`; encrypted prompts in `core/src/prompts/`; AdminJS temp dir default `/tmp/.adminjs`.
 
 ## Testing
-- Manual scripts only; avoid API-consuming scripts without explicit request: `pnpm run test:agent`, `node scripts/test_memory.js`, `tsx scripts/test_reflection.ts`, `node scripts/mcp_subscribe.js`, `node scripts/ws_client.js`.
 - Static checks: `pnpm run lint`.
+- Manual scripts (run only when requested; may consume API or external calls):
+  - `pnpm run test:agent`
+  - `node scripts/test_memory.js`
+  - `tsx scripts/test_reflection.ts`
+  - `node scripts/mcp_subscribe.js`
+  - `node scripts/ws_client.js`
