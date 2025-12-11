@@ -10,6 +10,7 @@
 - Document now references `api-specs/asyncapi.yaml` for WebSocket protocol and `core/src/server/routes` for HTTP routes; removed duplicated endpoint listings.
 - MCP section highlights universal RSS MCP (npm) and per-user Rust MCPs (`scheduler`, `structured-memory`) with storage roots under `DATA_DIR`.
 - Second pass: added directory layout (core/gui/api-specs/docs/docker) and restructured bullets hierarchically to keep single ideas per line.
+- Third pass: documented Tauri-specific `gui/` layout (`src`, `src-tauri` with Rust shell, `static` assets).
 
 ## Notes
 - No code or API behavior changes; documentation-only update.

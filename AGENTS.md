@@ -15,6 +15,9 @@ Guidance for coding agents working on Tsuki.
   - `src/storage/`: LibSQL and usage tracking
   - `scripts/`: prompt encrypt/decrypt, manual checks
 - `gui/`: Tauri + Svelte client
+  - `src/`: Svelte routes/components (e.g., `routes/+page.svelte`, `Config.svelte`, `Status.svelte`, `Note.svelte`)
+  - `src-tauri/`: Tauri shell (Rust) with `src/main.rs`, `lib.rs`, `tauri.conf.json`, `capabilities/`, `icons/`
+  - `static/`: packaged static assets
 - `api-specs/`: AsyncAPI for WebSocket protocol
 - `docs/`: design decisions and change logs
 - `docker/`, `compose.yaml`, `Taskfile.yaml`: container and task runner configs
