@@ -54,7 +54,7 @@ Guidance for coding agents working on Tsuki.
 
 ## Config & Data
 - Core env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY`, `DATA_DIR` (default `./data`), `TZ`.
-- Optional env: `GCP_SERVICE_ACCOUNT_KEY`, `FCM_PROJECT_ID`, `PERMANENT_USERS`, `ADMIN_JS_TMP_DIR`.
+- Optional env: `GCP_SERVICE_ACCOUNT_KEY`, `FCM_PROJECT_ID`, `PERMANENT_USERS`, `ADMIN_JS_TMP_DIR`, `SENSORY_POLL_MS` (seconds).
 - Storage roots: Mastra DB `${DATA_DIR}/mastra.db`; RSS DB under `${DATA_DIR}`; encrypted prompts in `core/src/prompts/`; AdminJS temp dir default `/tmp/.adminjs`.
 
 ## Testing

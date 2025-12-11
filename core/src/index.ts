@@ -4,6 +4,7 @@ import { createAgentService } from './agent/service'
 import { UsageStorage } from './storage/usage'
 import { FCMManager } from './server/fcm'
 import { FCMTokenStorage } from './storage/fcm'
+import { SensoryService } from './agent/sensoryService'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {
@@ -21,8 +22,21 @@ async function main(): Promise<void> {
   const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
   const fcm = new FCMManager(fcmTokenStorage)
 
+  const permanentUsers = (process.env.PERMANENT_USERS ?? '')
+    .split(',')
+    .map((userId) => userId.trim())
+    .filter(Boolean)
+
   // Start AgentService (includes MCP subscriptions)
-  agentService.start((process.env.PERMANENT_USERS ?? '').split(','), fcm)
+  agentService.start(permanentUsers, fcm)
+
+  // Sensory service runs inside core; SENSORY_POLL_MS is interpreted in seconds (for simplicity).
+  const sensoryPollSeconds = Number(process.env.SENSORY_POLL_MS ?? '60')
+  using sensoryService = new SensoryService(agentService, {
+    userIds: permanentUsers,
+    pollSeconds: sensoryPollSeconds,
+  })
+  sensoryService.start()
 
   await serve(agent, agentService)
 }
