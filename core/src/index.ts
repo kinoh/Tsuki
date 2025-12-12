@@ -1,6 +1,6 @@
 import { MastraInstance } from './mastra/index'
 import { serve } from './server/index'
-import { createAgentService } from './agent/service'
+import { createAgentService } from './agent/agentService'
 import { UsageStorage } from './storage/usage'
 import { FCMManager } from './server/fcm'
 import { FCMTokenStorage } from './storage/fcm'

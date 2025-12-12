@@ -6,7 +6,7 @@ import { Agent } from '@mastra/core'
 import { WebSocketManager } from './websocket'
 import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
-import { AgentService } from '../agent/service'
+import { AgentService } from '../agent/agentService'
 
 export async function serve(
   agent: Agent,

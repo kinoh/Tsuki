@@ -1,6 +1,6 @@
 import { WebSocket, type RawData as WebSocketData } from 'ws'
 import type { IncomingMessage } from 'node:http'
-import { AgentService } from '../agent/service'
+import { AgentService } from '../agent/agentService'
 import type { ResponseMessage } from '../agent/message'
 import { MessageSender } from '../agent/activeuser'
 import { clientMessageSchema } from '../shared/wsSchema'

@@ -1,4 +1,4 @@
-import { AgentService } from './service'
+import { AgentService } from './agentService'
 
 type SensoryPollerConfig = {
   userIds: string[]
