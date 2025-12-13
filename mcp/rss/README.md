@@ -17,6 +17,9 @@
 - **TZ** (Required): Timezone used to format article timestamps
   - Example: `export TZ="Asia/Tokyo"`
   - Must be a valid IANA timezone
+- **FEED_TIMEOUT_SECONDS** (Optional): Per-feed HTTP timeout in seconds
+  - Example: `export FEED_TIMEOUT_SECONDS=2`
+  - Default: `2`
 
 ### Feed List
 
