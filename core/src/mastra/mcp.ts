@@ -48,11 +48,11 @@ export function getUniversalMCP(): MCPClient {
   return new MCPClient({
     servers: {
       rss: {
-        command: './node_modules/.bin/rss-mcp-lite',
+        command: './bin/rss',
         args: [],
         env: {
-          DB_PATH: `${dataDir}/rss_feeds.db`,
-          OPML_FILE_PATH: `${dataDir}/rss_feeds.opml`,
+          RSS_CONFIG_PATH: `${dataDir}/rss.yaml`,
+          TZ: process.env.TZ ?? 'Asia/Tokyo',
         },
       },
       weather: {
