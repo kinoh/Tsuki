@@ -12,6 +12,7 @@ COPY mcp/structured-memory ./mcp/structured-memory
 COPY mcp/scheduler ./mcp/scheduler
 COPY mcp/weather ./mcp/weather
 COPY mcp/metrics ./mcp/metrics
+COPY mcp/rss ./mcp/rss
 
 # Build structured-memory with caching
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -40,6 +41,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cd mcp/metrics && \
     cargo build --release --target x86_64-unknown-linux-musl && \
     cp target/x86_64-unknown-linux-musl/release/metrics /build/metrics
+
+# Build rss with caching
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/mcp/rss/target \
+    cd mcp/rss && \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/rss /build/rss
 
 # Production stage
 FROM node:22-alpine AS runtime
@@ -88,14 +96,15 @@ COPY --from=rust-builder --chown=tsuki:nodejs /build/structured-memory ./bin/str
 COPY --from=rust-builder --chown=tsuki:nodejs /build/scheduler ./bin/scheduler
 COPY --from=rust-builder --chown=tsuki:nodejs /build/weather ./bin/weather
 COPY --from=rust-builder --chown=tsuki:nodejs /build/metrics ./bin/metrics
+COPY --from=rust-builder --chown=tsuki:nodejs /build/rss ./bin/rss
 
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
 COPY --chown=tsuki:nodejs core/tsconfig.json ./
-COPY --chown=tsuki:nodejs core/scripts/generate_opml.js ./scripts/
 
-# Generate OPML file during build
-RUN node scripts/generate_opml.js /data/rss_feeds.opml
+# Default RSS config path (override by mounting your own file)
+ENV RSS_CONFIG_PATH=/data/rss.yaml
+RUN printf "feeds:\n  - https://techcrunch.com/feed/\n" > ${RSS_CONFIG_PATH}
 
 # Set environment variables
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0

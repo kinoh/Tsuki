@@ -10,3 +10,4 @@
 - Added explicit binary name `rss` (matching directory) via Cargo `[[bin]]`.
 - Swapped config location from `DATA_DIR` + `rss.yaml` to explicit `RSS_CONFIG_PATH` pointing at the YAML file.
 - Core wiring: `core/src/mastra/mcp.ts` now launches `./bin/rss` with `RSS_CONFIG_PATH` and `TZ`, replacing `rss-mcp-lite`.
+- Docker image now builds the Rust `rss` binary and ships a default `RSS_CONFIG_PATH=/data/rss.yaml` (with a sample feed), removing the OPML generation step.
