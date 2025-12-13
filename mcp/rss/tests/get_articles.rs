@@ -4,7 +4,7 @@ use tempfile::TempDir;
 
 use rss_mcp::{config::RssConfig, service::{GetArticlesRequest, RssService}};
 
-fn write_config(dir: &TempDir, feeds: &[&str]) {
+fn write_config(dir: &TempDir, feeds: &[&str]) -> String {
     let yaml = format!(
         "feeds:\n{}\n",
         feeds
@@ -13,16 +13,18 @@ fn write_config(dir: &TempDir, feeds: &[&str]) {
             .collect::<Vec<_>>()
             .join("\n")
     );
-    fs::write(dir.path().join("rss.yaml"), yaml).expect("write rss.yaml");
+    let path = dir.path().join("rss.yaml");
+    fs::write(&path, yaml).expect("write rss.yaml");
+    path.to_string_lossy().to_string()
 }
 
 #[tokio::test]
 async fn config_uses_default_timeout_when_env_missing() {
     let dir = TempDir::new().expect("temp dir");
-    write_config(&dir, &["https://example.com/feed.xml"]);
+    let path = write_config(&dir, &["https://example.com/feed.xml"]);
 
     unsafe {
-        env::set_var("DATA_DIR", dir.path());
+        env::set_var("RSS_CONFIG_PATH", path);
         env::set_var("TZ", "UTC");
         env::remove_var("FEED_TIMEOUT_SECONDS");
     }
@@ -34,10 +36,10 @@ async fn config_uses_default_timeout_when_env_missing() {
 #[tokio::test]
 async fn config_honors_env_timeout_override() {
     let dir = TempDir::new().expect("temp dir");
-    write_config(&dir, &["https://example.com/feed.xml"]);
+    let path = write_config(&dir, &["https://example.com/feed.xml"]);
 
     unsafe {
-        env::set_var("DATA_DIR", dir.path());
+        env::set_var("RSS_CONFIG_PATH", path);
         env::set_var("TZ", "UTC");
         env::set_var("FEED_TIMEOUT_SECONDS", "5");
     }
@@ -82,10 +84,10 @@ async fn get_articles_filters_since_and_limits() {
     });
 
     let dir = TempDir::new().expect("temp dir");
-    write_config(&dir, &[feed_url.as_str()]);
+    let path = write_config(&dir, &[feed_url.as_str()]);
 
     unsafe {
-        env::set_var("DATA_DIR", dir.path());
+        env::set_var("RSS_CONFIG_PATH", path);
         env::set_var("TZ", "Asia/Tokyo");
         env::remove_var("FEED_TIMEOUT_SECONDS");
     }

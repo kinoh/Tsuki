@@ -8,3 +8,4 @@
 - Implemented Rust MCP server (`mcp/rss`) with `get_articles` tool that honors `since`, `n`, `TZ`, and `FEED_TIMEOUT_SECONDS`, emitting TOON output.
 - Cleaned descriptions: strip HTML tags, normalize whitespace, and truncate to 280 characters with ellipsis to keep TOON rows compact.
 - Added explicit binary name `rss` (matching directory) via Cargo `[[bin]]`.
+- Swapped config location from `DATA_DIR` + `rss.yaml` to explicit `RSS_CONFIG_PATH` pointing at the YAML file.

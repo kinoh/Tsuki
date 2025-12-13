@@ -13,7 +13,7 @@ struct RssYaml {
 
 #[derive(Debug, Clone)]
 pub struct RssConfig {
-    pub data_dir: PathBuf,
+    pub config_path: PathBuf,
     pub tz: Tz,
     pub feed_timeout: Duration,
     pub feeds: Vec<Url>,
@@ -33,7 +33,8 @@ pub enum ConfigError {
 
 impl RssConfig {
     pub async fn from_env() -> Result<Self, ConfigError> {
-        let data_dir = env::var("DATA_DIR").map_err(|_| ConfigError::Missing("DATA_DIR not set"))?;
+        let config_path =
+            env::var("RSS_CONFIG_PATH").map_err(|_| ConfigError::Missing("RSS_CONFIG_PATH not set"))?;
         let tz_str = env::var("TZ").map_err(|_| ConfigError::Missing("TZ not set"))?;
         let tz = tz_str
             .parse::<Tz>()
@@ -44,7 +45,7 @@ impl RssConfig {
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(2);
 
-        let config_path = PathBuf::from(&data_dir).join("rss.yaml");
+        let config_path = PathBuf::from(&config_path);
         let yaml = fs::read_to_string(&config_path).await?;
         let parsed: RssYaml = serde_yaml::from_str(&yaml)?;
         let feeds = parsed
@@ -62,7 +63,7 @@ impl RssConfig {
         }
 
         Ok(Self {
-            data_dir: PathBuf::from(data_dir),
+            config_path,
             tz,
             feed_timeout: Duration::from_secs(timeout_secs),
             feeds,

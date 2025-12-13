@@ -11,9 +11,8 @@
 
 ### Environment Variables
 
-- **DATA_DIR** (Required): Directory that contains `rss.yaml` and runtime data
-  - Example: `export DATA_DIR="/path/to/data"`
-  - Should be an absolute path for consistent resolution
+- **RSS_CONFIG_PATH** (Required): Absolute path to the YAML feed list
+  - Example: `export RSS_CONFIG_PATH="/path/to/rss.yaml"`
 - **TZ** (Required): Timezone used to format article timestamps
   - Example: `export TZ="Asia/Tokyo"`
   - Must be a valid IANA timezone
@@ -23,7 +22,7 @@
 
 ### Feed List
 
-Feeds are defined in `${DATA_DIR}/rss.yaml`:
+Feeds are defined in the file pointed to by `RSS_CONFIG_PATH`:
 
 ```yaml
 feeds:
