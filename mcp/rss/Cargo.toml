@@ -3,6 +3,10 @@ name = "rss-mcp"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "rss"
+path = "src/main.rs"
+
 [dependencies]
 rmcp = { git = "https://github.com/kinoh/modelcontextprotocol-rust-sdk.git", rev = "1eceec93498039a6fa6c8a5551c5c972443774a8", features = [
   "server",
