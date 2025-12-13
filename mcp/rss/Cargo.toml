@@ -1,0 +1,32 @@
+[package]
+name = "rss-mcp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rmcp = { git = "https://github.com/kinoh/modelcontextprotocol-rust-sdk.git", rev = "1eceec93498039a6fa6c8a5551c5c972443774a8", features = [
+  "server",
+  "macros",
+  "transport-io",
+  "schemars",
+] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "time", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.8"
+feed-rs = "1.5"
+url = "2"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
+httpmock = "0.7"
+rmcp = { git = "https://github.com/kinoh/modelcontextprotocol-rust-sdk.git", rev = "1eceec93498039a6fa6c8a5551c5c972443774a8", features = [
+  "client",
+  "server",
+  "transport-io",
+  "macros",
+] }
