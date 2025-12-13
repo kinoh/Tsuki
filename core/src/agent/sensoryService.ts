@@ -5,10 +5,15 @@ type SensoryPollerConfig = {
   pollSeconds: number
 }
 
-type SensorySample = {
+export type SensorySample = {
   source: string
   text: string
   timestamp: Date
+}
+
+export interface SensoryFetcher {
+  identifier(): string
+  fetch(): Promise<SensorySample | null>
 }
 
 /**
@@ -20,6 +25,8 @@ export class SensoryService {
   private timer: NodeJS.Timeout | null = null
   private readonly pollSeconds: number
   private readonly userIds: string[]
+  private readonly fetchers: SensoryFetcher[] = []
+  private readonly lastValues: Map<string, string> = new Map()
 
   constructor(
     private readonly agentService: AgentService,
@@ -27,6 +34,11 @@ export class SensoryService {
   ) {
     this.pollSeconds = Math.max(1, config.pollSeconds)
     this.userIds = config.userIds.filter(Boolean)
+  }
+
+  registerFetcher(fetcher: SensoryFetcher): typeof this {
+    this.fetchers.push(fetcher)
+    return this
   }
 
   start(): void {
@@ -53,11 +65,14 @@ export class SensoryService {
   }
 
   private async emitSensory(): Promise<void> {
-    const sample = await this.fetchSample()
-    if (!sample) {
-      return
-    }
+    const samples = await this.fetchSamples()
 
+    for (const sample of samples) {
+      await this.emitSensorySample(sample)
+    }
+  }
+
+  private async emitSensorySample(sample: SensorySample): Promise<void> {
     const message = `[source:${sample.source}] [time:${sample.timestamp.toISOString()}] ${sample.text}`
     await Promise.all(
       this.userIds.map((userId) =>
@@ -70,37 +85,31 @@ export class SensoryService {
     )
   }
 
-  /**
-   * Placeholder fetcher: emits a rotating faux headline.
-   * Replace with real sensory data retrieval as needed.
-   */
-  private async fetchSample(): Promise<SensorySample | null> {
-    const feeds: Array<{ source: string; items: string[] }> = [
-      {
-        source: 'RSS demo feed',
-        items: [
-          'Evening sky turns pink over the city',
-          'Local cafe adds a new seasonal latte',
-          'A gentle rain starts after a sunny morning',
-        ],
-      },
-      {
-        source: 'Daily mood',
-        items: [
-          'Feeling cozy and curious',
-          'A bit sleepy but cheerful',
-          'Quietly energized, ready to chat',
-        ],
-      },
-    ]
+  private async fetchSamples(): Promise<SensorySample[]> {
+    const samples: SensorySample[] = []
 
-    const feed = feeds[Math.floor(Math.random() * feeds.length)]
-    const text = feed.items[Math.floor(Math.random() * feed.items.length)]
-
-    return {
-      source: feed.source,
-      text,
-      timestamp: new Date(),
+    for (const fetcher of this.fetchers) {
+      try {
+        const sample = await fetcher.fetch()
+        if (sample) {
+          if (!this.isDuplicate(fetcher.identifier(), sample)) {
+            samples.push(sample)
+          }
+        }
+      } catch (error) {
+        console.error('SensoryService: fetcher error', error)
+      }
     }
+
+    return samples
+  }
+
+  private isDuplicate(fetcherId: string, sample: SensorySample): boolean {
+    const lastValue = this.lastValues.get(fetcherId)
+    if (lastValue === sample.text) {
+      return true
+    }
+    this.lastValues.set(fetcherId, sample.text)
+    return false
   }
 }
