@@ -62,7 +62,7 @@ async fn get_articles_filters_since_and_limits() {
               <title>Newer</title>
               <link>https://example.com/newer</link>
               <pubDate>Sat, 13 Dec 2025 10:00:00 GMT</pubDate>
-              <description>Newer desc</description>
+              <description><![CDATA[<p>Newer desc <b>bold</b> and a very long text.............................................................................................................................................................................................]]></description>
             </item>
             <item>
               <title>Older</title>
@@ -112,9 +112,20 @@ async fn get_articles_filters_since_and_limits() {
         text.contains("articles[1]{title,url,published_at,description}:"),
         "response should be TOON formatted"
     );
+    let line = text
+        .lines()
+        .find(|l| l.contains("Newer,https://example.com/newer"))
+        .expect("newer line");
+    let parts: Vec<_> = line.trim_start().splitn(4, ',').collect();
+    assert_eq!(4, parts.len(), "line should have 4 fields");
+    assert_eq!(parts[2], "2025-12-13T19:00:00+09:00");
     assert!(
-        text.contains("Newer,https://example.com/newer,2025-12-13T19:00:00+09:00,Newer desc"),
-        "should include newer entry with TZ applied"
+        !parts[3].contains('<') && !parts[3].contains('>'),
+        "description should have tags stripped"
+    );
+    assert!(
+        parts[3].len() <= 283 && parts[3].ends_with("..."),
+        "description should be truncated with ellipsis"
     );
     assert!(
         !text.contains("Older"),

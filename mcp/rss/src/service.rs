@@ -17,6 +17,8 @@ use url::Url;
 
 use crate::config::{ConfigError, RssConfig};
 
+const MAX_DESCRIPTION_CHARS: usize = 280;
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GetArticlesRequest {
     #[schemars(description = "RFC3339 timestamp to filter entries (inclusive)")]
@@ -221,12 +223,13 @@ fn entry_to_article(entry: Entry) -> Article {
         .map(|l| l.href.clone())
         .unwrap_or_default();
     let published = entry.published;
-    let description = entry
+    let raw_description = entry
         .summary
         .as_ref()
         .map(|s| s.content.clone())
         .or_else(|| entry.content.as_ref().and_then(|c| c.body.clone()))
         .unwrap_or_default();
+    let description = clean_description(&raw_description);
 
     Article {
         title,
@@ -240,8 +243,45 @@ fn sanitize(value: &str) -> String {
     value
         .replace('\n', " ")
         .replace('\r', " ")
+        .replace(',', ";")
         .trim()
         .to_string()
+}
+
+fn clean_description(raw: &str) -> String {
+    let no_tags = strip_tags(raw);
+    let normalized = normalize_whitespace(&no_tags);
+    truncate(&normalized, MAX_DESCRIPTION_CHARS)
+}
+
+fn strip_tags(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut in_tag = false;
+    for ch in raw.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn normalize_whitespace(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate(raw: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (i, ch) in raw.chars().enumerate() {
+        if i >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn map_config_error(err: ConfigError) -> ErrorData {

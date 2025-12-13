@@ -60,7 +60,7 @@ articles[2]{title,url,published_at,description}:
 - `title`: Article title (empty string when missing)
 - `url`: Canonical or link URL from the feed entry
 - `published_at`: Timestamp in the configured `TZ` (falls back to feed-provided date or omitted when unavailable)
-- `description`: Short summary derived from feed `description`/`content` when available (may be empty)
+- `description`: Short summary derived from feed `description`/`content` when available (may be empty). HTML tags are stripped and content is truncated to 280 characters with an ellipsis when longer.
 
 #### Errors
 
