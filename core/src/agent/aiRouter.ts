@@ -82,7 +82,7 @@ export class AIRouter implements MessageRouter {
     const normalized: RouteDecision['action'] =
       normalizedText.includes('respond') || normalizedText.includes('maybe')
         ? 'respond'
-        : 'skip'
+        : 'ignore'
 
     return { action: normalized }
   }

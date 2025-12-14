@@ -101,7 +101,7 @@ export class ActiveUser implements UserContext {
 
     try {
       const decision = await this.router.route(input)
-      if (decision.action === 'skip') {
+      if (decision.action === 'ignore') {
         const ackResponse: ResponseMessage = {
           role: 'system',
           user: this.assistantName,

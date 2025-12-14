@@ -1,6 +1,6 @@
 import { MessageInput } from './activeuser'
 
-export type RouteAction = 'respond' | 'skip'
+export type RouteAction = 'respond' | 'ignore'
 
 export interface RouteDecision {
   action: RouteAction
