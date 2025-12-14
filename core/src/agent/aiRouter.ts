@@ -73,10 +73,14 @@ export class AIRouter implements MessageRouter {
 
     const prompt = `${this.baseInstructions}\n\n${ROUTER_APPEND_INSTRUCTIONS}\n\nSensory log:\n${this.getSensoryLog() || 'none'}\n\nIncoming sensory:\n${input.text ?? ''}`.trim()
 
+    console.debug('Router prompt:', prompt)
+
     const { text } = await generateText({
       model: openai(this.model),
       prompt,
     })
+
+    console.debug('Router output:', text)
 
     const normalizedText = text.toLowerCase()
     const normalized: RouteDecision['action'] =
