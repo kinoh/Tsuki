@@ -1,4 +1,4 @@
-import { MastraMemory } from '@mastra/core'
+import { MastraMemory, MastraMessageV2 } from '@mastra/core'
 
 export class ConversationManager {
   private readonly RECENT_UPDATE_THRESHOLD_HOURS = 1
@@ -104,5 +104,22 @@ export class ConversationManager {
 
     // Return today's thread if no previous day's thread or not recently updated
     return todayId
+  }
+
+  async getRecentMessages(limit = 10): Promise<MastraMessageV2[]> {
+    const threadId = await this.currentThread()
+    try {
+      const result = await this.memory.query({
+        threadId,
+        selectBy: {
+          last: limit,
+        },
+      }) as { messagesV2?: MastraMessageV2[] }
+      const messages = result.messagesV2 ?? []
+      return [...messages].reverse()
+    } catch (error) {
+      console.warn('Failed to get recent messages:', error)
+      return []
+    }
   }
 }

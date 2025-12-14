@@ -1,10 +1,11 @@
 import { getUserSpecificMCP, MCPAuthHandler, MCPClient } from '../mastra/mcp'
-import { ResponseMessage } from './message'
+import { ResponseMessage, createResponseMessage } from './message'
 import { ConversationManager } from './conversation'
 import { RuntimeContext } from '@mastra/core/runtime-context'
 import { UserContext } from './userContext'
 import { Responder } from './mastraResponder'
 import { MessageRouter } from './router'
+import { MastraMessageV2 } from '@mastra/core'
 
 export type AgentRuntimeContext = {
   instructions: string
@@ -21,6 +22,7 @@ export interface MessageInput {
     data: string
     mimeType?: string
   }>
+  history?: string[]
 }
 
 export interface MessageSender {
@@ -99,8 +101,14 @@ export class ActiveUser implements UserContext {
   async processMessage(input: MessageInput): Promise<void> {
     console.log(`AgentService: Processing message for user ${input.userId}:`, input)
 
+    const kind = input.type ?? 'message'
+    let history: string[] | undefined
+    if (kind === 'sensory') {
+      history = await this.getHistoryForRouter()
+    }
+
     try {
-      const decision = await this.router.route(input)
+      const decision = await this.router.route({ ...input, history })
       if (decision.action === 'ignore') {
         const ackResponse: ResponseMessage = {
           role: 'system',
@@ -127,6 +135,26 @@ export class ActiveUser implements UserContext {
       // In any case, a response should be returned
       await this.sendMessage(errorResponse)
     }
+  }
+
+  private routerHistoryLimit(): number {
+    const raw = process.env.ROUTER_HISTORY_LIMIT
+    const parsed = raw ? Number(raw) : NaN
+    if (Number.isNaN(parsed) || parsed <= 0) {
+      return 10
+    }
+    return parsed
+  }
+
+  private async getHistoryForRouter(): Promise<string[]> {
+    const limit = this.routerHistoryLimit()
+    const messages = await this.conversation.getRecentMessages(limit)
+    const formatted = messages.map((message: MastraMessageV2) => createResponseMessage(message, this.assistantName))
+    return formatted.map((msg) => {
+      const flattened = msg.chat.join(' ').replace(/\s+/g, ' ').trim()
+      const truncated = flattened.length > 200 ? `${flattened.slice(0, 200)}…` : flattened
+      return `${msg.role}: ${truncated || '[empty]'}`
+    })
   }
 
   private async subscribeNotifications(): Promise<void> {

@@ -72,9 +72,10 @@ export class AIRouter implements MessageRouter {
     this.appendSensory(input.text ?? '')
 
     const sensoryLog = this.getSensoryLog() || 'none'
+    const messageLog = input.history?.join('\n') || 'none'
     const prompt = `${ROUTER_APPEND_INSTRUCTIONS
       .replaceAll('{{instruction}}', this.baseInstructions)
-      .replaceAll('{{messages}}', 'none')
+      .replaceAll('{{messages}}', messageLog)
       .replaceAll('{{sensories}}', sensoryLog)}\n\nIncoming sensory:\n${input.text ?? ''}`.trim()
 
     console.debug('Router prompt:', prompt)
