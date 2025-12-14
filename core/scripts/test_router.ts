@@ -198,7 +198,7 @@ async function main(): Promise<void> {
   const { mode, args } = parseArgs(argv)
 
   if (mode === 'prepare') {
-    const outPath = path.resolve(__dirname, args.out ?? 'scripts/test_router.samples.jsonl')
+    const outPath = path.resolve(__dirname, args.out ?? 'test_router.samples.jsonl')
     const limit = numberArg(args, 'limit', 20)
     const feedId = args['feed-id']
     await prepareRss({ outPath, limit, feedId })
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
   }
 
   // run mode
-  const inPath = path.resolve(__dirname, args.in ?? 'scripts/test_router.samples.jsonl')
+  const inPath = path.resolve(__dirname, args.in ?? 'test_router.samples.jsonl')
   const limit = args.limit ? numberArg(args, 'limit', 0) : undefined
   const model = args.model ?? process.env.ROUTER_MODEL ?? 'gpt-4o-mini'
   const maxLog = numberArg(args, 'max-log', 20)
