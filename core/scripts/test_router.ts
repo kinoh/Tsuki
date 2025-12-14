@@ -120,11 +120,8 @@ function toonLinesToSensory(text: string, limit: number, sourceLabel: string): S
     }
     seen.add(line)
 
-    const isoMatch = line.match(/\d{4}-\d{2}-\d{2}T[^\s,]+/)
-    const time = isoMatch?.[0] ?? new Date().toISOString()
-
     records.push({
-      text: `[source:${sourceLabel}] [time:${time}] ${line}`,
+      text: `[source:${sourceLabel}] ${line}`,
     })
   }
 
