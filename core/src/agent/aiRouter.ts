@@ -71,7 +71,7 @@ export class AIRouter implements MessageRouter {
     // Sensory inputs are gated by the router model.
     this.appendSensory(input.text ?? '')
 
-    const prompt = `${this.baseInstructions}\n\n${ROUTER_APPEND_INSTRUCTIONS}\n\nSensory log:\n${this.getSensoryLog() || 'none'}\n\nIncoming sensory:\n${input.text ?? ''}\n\nUser message:\n`.trim()
+    const prompt = `${this.baseInstructions}\n\n${ROUTER_APPEND_INSTRUCTIONS}\n\nSensory log:\n${this.getSensoryLog() || 'none'}\n\nIncoming sensory:\n${input.text ?? ''}`.trim()
 
     const { text } = await generateText({
       model: openai(this.model),
