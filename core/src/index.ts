@@ -6,7 +6,6 @@ import { FCMManager } from './server/fcm'
 import { FCMTokenStorage } from './storage/fcm'
 import { SensoryService } from './agent/sensoryService'
 import { McpSensory } from './agent/sensories/mcpSensory'
-import { getUniversalMCP } from './mastra/mcp'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {
@@ -34,16 +33,19 @@ async function main(): Promise<void> {
 
   // Sensory service runs inside core; SENSORY_POLL_SECONDS is interpreted in seconds.
   const sensoryPollSeconds = Number(process.env.SENSORY_POLL_SECONDS ?? '60')
-  const mcp = getUniversalMCP()
   using sensoryService = new SensoryService(agentService, {
     userIds: permanentUsers,
     pollSeconds: sensoryPollSeconds,
   })
-    .registerFetcher(new McpSensory(mcp, 'rss', 'get_articles', {
-    limit: 20,
-  }))
-    .registerFetcher(new McpSensory(mcp, 'weather', 'get_weather', {
-  }))
+  const mcp = agentService.activateUser(permanentUsers[0]).mcpClient
+  if (mcp) {
+    sensoryService
+      .registerFetcher(new McpSensory(mcp, 'rss', 'get_articles', {
+      limit: 20,
+    }))
+      .registerFetcher(new McpSensory(mcp, 'weather', 'get_weather', {
+    }))
+  }
 
   sensoryService.start()
 
