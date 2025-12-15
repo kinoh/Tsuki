@@ -7,5 +7,5 @@ export interface RouteDecision {
 }
 
 export interface MessageRouter {
-  route(input: MessageInput): Promise<RouteDecision>
+  route(input: MessageInput, history: string[]): Promise<RouteDecision>
 }

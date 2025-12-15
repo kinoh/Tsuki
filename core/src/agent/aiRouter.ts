@@ -60,7 +60,7 @@ export class AIRouter implements MessageRouter {
     return this.sensoryBuffer.join('\n')
   }
 
-  async route(input: MessageInput): Promise<RouteDecision> {
+  async route(input: MessageInput, history: string[]): Promise<RouteDecision> {
     const kind = input.type ?? 'message'
 
     // User messages are always forwarded to the responder.
@@ -73,7 +73,7 @@ export class AIRouter implements MessageRouter {
     // Sensory inputs are gated by the router model.
     this.appendSensory(input.text ?? '')
 
-    const messageLog = input.history?.join('\n') || 'none'
+    const messageLog = history.join('\n') || 'none'
     const prompt = `${ROUTER_APPEND_INSTRUCTIONS
       .replaceAll('{{instruction}}', this.baseInstructions)
       .replaceAll('{{messages}}', messageLog)

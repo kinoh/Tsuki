@@ -22,7 +22,6 @@ export interface MessageInput {
     data: string
     mimeType?: string
   }>
-  history?: string[]
 }
 
 export interface MessageSender {
@@ -102,13 +101,13 @@ export class ActiveUser implements UserContext {
     console.log(`AgentService: Processing message for user ${input.userId}:`, input)
 
     const kind = input.type ?? 'message'
-    let history: string[] | undefined
+    let history: string[] = []
     if (kind === 'sensory') {
       history = await this.getHistoryForRouter()
     }
 
     try {
-      const decision = await this.router.route({ ...input, history })
+      const decision = await this.router.route(input, history)
       if (decision.action === 'ignore') {
         const ackResponse: ResponseMessage = {
           role: 'system',

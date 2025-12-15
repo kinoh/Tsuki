@@ -180,7 +180,7 @@ async function runRouter(options: RunOptions): Promise<void> {
         userId: 'router-test',
         type: 'sensory',
         text: rec.text,
-      })
+      }, [])
       console.log(
         `${String(idx).padStart(3, '0')} | ${decision.action.padEnd(7)} | ${snippet(rec.text)}`,
       )
