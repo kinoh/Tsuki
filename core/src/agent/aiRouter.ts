@@ -68,10 +68,11 @@ export class AIRouter implements MessageRouter {
       return { action: 'respond' }
     }
 
+    const sensoryLog = this.getSensoryLog() || 'none'
+
     // Sensory inputs are gated by the router model.
     this.appendSensory(input.text ?? '')
 
-    const sensoryLog = this.getSensoryLog() || 'none'
     const messageLog = input.history?.join('\n') || 'none'
     const prompt = `${ROUTER_APPEND_INSTRUCTIONS
       .replaceAll('{{instruction}}', this.baseInstructions)
