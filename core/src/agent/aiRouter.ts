@@ -50,9 +50,11 @@ export class AIRouter implements MessageRouter {
   constructor(
     private readonly model: string,
     private readonly baseInstructions: string,
-    private readonly maxSensoryLog = 20,
+    private readonly maxSensoryLog = 50,
+    private readonly rateLimitSensoryRespondPerHour = 1,
   ) {}
   private sensoryBuffer: string[] = []
+  private lastSensoryRespondTime: number = 0
 
   private appendSensory(entry: string): void {
     const trimmed = entry.trim()
@@ -98,13 +100,23 @@ export class AIRouter implements MessageRouter {
 
     appLogger.debug('Router output', { text })
 
-    // const normalizedText = text.toLowerCase()
-    // const normalized: RouteDecision['action'] =
-    //   normalizedText.includes('respond') || normalizedText.includes('maybe')
-    //     ? 'respond'
-    //     : 'ignore'
+    const normalizedText = text.toLowerCase()
+    const normalized: RouteDecision['action'] =
+      normalizedText.includes('respond') || normalizedText.includes('maybe')
+        ? 'respond'
+        : 'ignore'
 
-    // return { action: normalized }
-    return { action: 'ignore' }
+    // Rate limit sensory-triggered responses
+    if (normalized === 'respond') {
+      const now = Date.now()
+      const oneHour = 60 * 60 * 1000
+      if (now - this.lastSensoryRespondTime < oneHour / this.rateLimitSensoryRespondPerHour) {
+        appLogger.info('Router: Sensory response rate-limited', { userId: input.userId })
+        return { action: 'ignore' }
+      }
+      this.lastSensoryRespondTime = now
+    }
+
+    return { action: normalized }
   }
 }
