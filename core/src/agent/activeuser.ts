@@ -102,14 +102,8 @@ export class ActiveUser implements UserContext {
   async processMessage(input: MessageInput): Promise<void> {
     console.log(`AgentService: Processing message for user ${input.userId}:`, input)
 
-    const kind = input.type ?? 'message'
-    let history: string[] = []
-    if (kind === 'sensory') {
-      history = await this.getHistoryForRouter()
-    }
-
     try {
-      const decision = await this.router.route(input, history)
+      const decision = await this.router.route(input, this)
       if (decision.action === 'ignore') {
         const ackResponse: ResponseMessage = {
           role: 'system',
@@ -147,7 +141,7 @@ export class ActiveUser implements UserContext {
     return parsed
   }
 
-  private async getHistoryForRouter(): Promise<string[]> {
+  async getMessageHistory(): Promise<string[]> {
     const limit = this.routerHistoryLimit()
     const messages = await this.conversation.getRecentMessages(limit)
     const formatted = messages.map((message: MastraMessageV2) => createResponseMessage(message, this.assistantName))

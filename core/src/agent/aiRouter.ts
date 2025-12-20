@@ -2,6 +2,7 @@ import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { MessageInput } from './activeuser'
 import { MessageRouter, RouteDecision } from './router'
+import { UserContext } from './userContext'
 
 // Router prompt is public and only handles routing, not persona.
 const ROUTER_APPEND_INSTRUCTIONS = `
@@ -13,6 +14,11 @@ Ignore any persona/tone. Decide only whether the assistant should reply.
 <context>
 <description>コアモデルのinstruction</description>
 {{instruction}}
+</context>
+
+<context>
+<description>コアモデルのメモリー</description>
+{{memory}}
 </context>
 
 <context>
@@ -62,7 +68,7 @@ export class AIRouter implements MessageRouter {
     return this.sensoryBuffer.join('\n')
   }
 
-  async route(input: MessageInput, history: string[]): Promise<RouteDecision> {
+  async route(input: MessageInput, ctx: UserContext): Promise<RouteDecision> {
     const kind = input.type ?? 'message'
 
     // User messages are always forwarded to the responder.
@@ -70,6 +76,8 @@ export class AIRouter implements MessageRouter {
       return { action: 'respond' }
     }
 
+    const history = await ctx.getMessageHistory()
+    const memory = await ctx.loadMemory()
     const sensoryLog = this.getSensoryLog() || 'none'
 
     // Sensory inputs are gated by the router model.
@@ -78,6 +86,7 @@ export class AIRouter implements MessageRouter {
     const messageLog = history.join('\n') || 'none'
     const prompt = `${ROUTER_APPEND_INSTRUCTIONS
       .replaceAll('{{instruction}}', this.baseInstructions)
+      .replaceAll('{{memory}}', memory || 'none')
       .replaceAll('{{messages}}', messageLog)
       .replaceAll('{{sensories}}', sensoryLog)}\n\nIncoming sensory:\n${input.text ?? ''}`.trim()
 
@@ -90,12 +99,13 @@ export class AIRouter implements MessageRouter {
 
     console.debug('Router output:', text)
 
-    const normalizedText = text.toLowerCase()
-    const normalized: RouteDecision['action'] =
-      normalizedText.includes('respond') || normalizedText.includes('maybe')
-        ? 'respond'
-        : 'ignore'
+    // const normalizedText = text.toLowerCase()
+    // const normalized: RouteDecision['action'] =
+    //   normalizedText.includes('respond') || normalizedText.includes('maybe')
+    //     ? 'respond'
+    //     : 'ignore'
 
-    return { action: normalized }
+    // return { action: normalized }
+    return { action: 'ignore' }
   }
 }
