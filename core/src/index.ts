@@ -53,6 +53,6 @@ async function main(): Promise<void> {
   await serve(config, agent, agentService)
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   appLogger.error('Unhandled error during startup', { error })
 })

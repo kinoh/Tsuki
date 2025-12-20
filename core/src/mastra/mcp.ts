@@ -14,7 +14,7 @@ export class MCPClient {
   [Symbol.dispose](): void {
     appLogger.info('Closing MCP connection...')
 
-    this.client.disconnect().catch((err) => {
+    this.client.disconnect().catch((err: unknown) => {
       appLogger.error('Error disconnecting MCP client', { error: err })
     })
   }

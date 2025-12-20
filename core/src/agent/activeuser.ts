@@ -59,7 +59,7 @@ export class ActiveUser implements UserContext {
       // Initialize MCP client requiring authentication
     }
 
-    this.subscribeNotifications().catch((err) => {
+    this.subscribeNotifications().catch((err: unknown) => {
       appLogger.error(`Error subscribing to notifications for user ${this.userId}`, { error: err, userId: this.userId })
     })
   }
@@ -165,7 +165,7 @@ export class ActiveUser implements UserContext {
     await mcp.client.resources.subscribe('scheduler', 'fired_schedule://recent')
     await mcp.client.resources.onUpdated('scheduler', (params) => {
       appLogger.info(`Received scheduler notification for user ${this.userId}`, { params, userId: this.userId })
-      this.handleSchedulerNotification(params as MCPNotificationResourceUpdated).catch((err) => {
+      this.handleSchedulerNotification(params as MCPNotificationResourceUpdated).catch((err: unknown) => {
         appLogger.error(`Error handling scheduler notification for user ${this.userId}`, { error: err, userId: this.userId })
       })
     })

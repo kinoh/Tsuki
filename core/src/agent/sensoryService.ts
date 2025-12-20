@@ -48,7 +48,7 @@ export class SensoryService {
     }
 
     this.timer = setInterval(() => {
-      this.emitSensory().catch((err) => {
+      this.emitSensory().catch((err: unknown) => {
         appLogger.error('SensoryService: poll error', { error: err })
       })
     }, this.pollSeconds * 1000)

@@ -7,7 +7,7 @@ export class FCMTokenStorage {
 
   constructor(storage: MastraStorage) {
     this.client = getClient(storage)
-    this.initTable().catch((error) => {
+    this.initTable().catch((error: unknown) => {
       appLogger.error('Failed to initialize FCM token storage', { error })
     })
   }

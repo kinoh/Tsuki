@@ -24,7 +24,7 @@ export class UsageStorage {
 
   constructor(storage: MastraStorage) {
     this.client = getClient(storage)
-    this.initTable().catch((error) => {
+    this.initTable().catch((error: unknown) => {
       appLogger.error('Failed to initialize usage storage', { error })
     })
   }
