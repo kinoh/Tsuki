@@ -10,6 +10,8 @@ import { ConfigService } from './configService'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {
+  console.log('Starting Tsuki Core Server...')
+
   const config = new ConfigService()
   using mastraInstance = await MastraInstance.create(config)
   const agent = mastraInstance.getAgent('tsuki')

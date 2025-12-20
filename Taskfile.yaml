@@ -100,5 +100,5 @@ tasks:
     cmds:
       - mkdir -p {{.BACKUP_DIR}}
       - docker compose cp core:/data /tmp/tsuki-backup-{{.TIMESTAMP}}
-      - tar czf {{.BACKUP_DIR}}/tsuki-backup-{{.TIMESTAMP}}.tar.gz -C /tmp tsuki-backup-{{.TIMESTAMP}}
+      - tar czf {{.BACKUP_DIR}}/tsuki-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-{{.TIMESTAMP}} .
       - rm -rf /tmp/tsuki-backup-{{.TIMESTAMP}}

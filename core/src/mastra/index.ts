@@ -2,7 +2,6 @@
 import { Agent, ToolsInput } from '@mastra/core/agent'
 import { Mastra } from '@mastra/core/mastra'
 import { LibSQLStore } from '@mastra/libsql'
-import { mkdirSync } from 'fs'
 import { summon } from './agents/tsuki'
 import { getUniversalMCP, MCPClient } from './mcp'
 import { Metric, ToolAction } from '@mastra/core'
@@ -18,7 +17,6 @@ export class MastraInstance {
 
   public static async create(config: ConfigService): Promise<MastraInstance> {
     const dataDir = config.dataDir
-    mkdirSync(dataDir, { recursive: true })
 
     const openAiModel = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
 
