@@ -101,6 +101,8 @@ export class SensoryService {
       }
     }
 
+    console.log(`SensoryService: fetched ${samples.length} new samples`)
+
     return samples
   }
 

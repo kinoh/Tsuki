@@ -90,8 +90,6 @@ export class AIRouter implements MessageRouter {
       .replaceAll('{{messages}}', messageLog)
       .replaceAll('{{sensories}}', sensoryLog)}\n\nIncoming sensory:\n${input.text ?? ''}`.trim()
 
-    console.debug('Router prompt:', prompt)
-
     const { text } = await generateText({
       model: openai(this.model),
       prompt,
