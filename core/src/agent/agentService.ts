@@ -8,11 +8,12 @@ import { MCPAuthHandler } from '../mastra/mcp'
 import { FCMManager } from '../server/fcm'
 import { MastraResponder, Responder } from './mastraResponder'
 import { AIRouter } from './aiRouter'
+import { ConfigService } from '../configService'
 
-export async function createAgentService(agent: Agent, memory: MastraMemory, usageStorage: UsageStorage): Promise<AgentService> {
+export async function createAgentService(config: ConfigService, agent: Agent, memory: MastraMemory, usageStorage: UsageStorage): Promise<AgentService> {
   const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
 
-  return new AgentService(agent, memory, usageStorage, instructions)
+  return new AgentService(config, agent, memory, usageStorage, instructions)
 }
 
 export class AgentService {
@@ -21,6 +22,7 @@ export class AgentService {
   private responder: Responder
 
   constructor(
+    private config: ConfigService,
     private agent: Agent,
     private memory: MastraMemory,
     private usageStorage: UsageStorage,
@@ -68,6 +70,7 @@ export class AgentService {
     const newUser = new ActiveUser(
       userId,
       conversation,
+      this.config,
       this.responder,
       router,
       userContext,

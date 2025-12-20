@@ -7,6 +7,7 @@ import { summon } from './agents/tsuki'
 import { getUniversalMCP, MCPClient } from './mcp'
 import { Metric, ToolAction } from '@mastra/core'
 import { ConsoleLogger } from '@mastra/core/logger'
+import { ConfigService } from '../configService'
 
 export class MastraInstance {
   constructor(
@@ -15,14 +16,13 @@ export class MastraInstance {
   ) {
   }
 
-  public static async create(): Promise<MastraInstance> {
-    // Initialize data directory
-    const dataDir = process.env.DATA_DIR ?? './data'
+  public static async create(config: ConfigService): Promise<MastraInstance> {
+    const dataDir = config.dataDir
     mkdirSync(dataDir, { recursive: true })
 
     const openAiModel = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
 
-    const mcp = getUniversalMCP()
+    const mcp = getUniversalMCP(config)
     const tools = await mcp.client.getTools()
 
     const mastra = new Mastra({

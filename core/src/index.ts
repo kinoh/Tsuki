@@ -6,10 +6,12 @@ import { FCMManager } from './server/fcm'
 import { FCMTokenStorage } from './storage/fcm'
 import { SensoryService } from './agent/sensoryService'
 import { McpSensory } from './agent/sensories/mcpSensory'
+import { ConfigService } from './configService'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {
-  using mastraInstance = await MastraInstance.create()
+  const config = new ConfigService()
+  using mastraInstance = await MastraInstance.create(config)
   const agent = mastraInstance.getAgent('tsuki')
 
   const agentMemory = await agent.getMemory()
@@ -18,7 +20,7 @@ async function main(): Promise<void> {
   }
 
   const usageStorage = new UsageStorage(agentMemory.storage)
-  using agentService = await createAgentService(agent, agentMemory, usageStorage)
+  using agentService = await createAgentService(config, agent, agentMemory, usageStorage)
 
   const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
   const fcm = (process.env.LOCAL?.toLowerCase() === 'true') ? undefined : new FCMManager(fcmTokenStorage)
@@ -49,7 +51,7 @@ async function main(): Promise<void> {
 
   sensoryService.start()
 
-  await serve(agent, agentService)
+  await serve(config, agent, agentService)
 }
 
 main().catch(console.error)

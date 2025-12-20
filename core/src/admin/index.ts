@@ -5,8 +5,9 @@ import { MastraMemory } from '@mastra/core'
 import { ThreadResource } from './resources/ThreadResource'
 import { MessageResource } from './resources/MessageResource'
 import { StructuredMemoryResource } from './resources/StructuredMemoryResource'
+import { ConfigService } from '../configService'
 
-export function createAdminJS(agentMemory: MastraMemory): AdminJS {
+export function createAdminJS(config: ConfigService, agentMemory: MastraMemory): AdminJS {
   const admin = new AdminJS({
     resources: [
       {
@@ -79,7 +80,7 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
         },
       },
       {
-        resource: new StructuredMemoryResource(),
+        resource: new StructuredMemoryResource(config),
         options: {
           id: 'structured-memory',
           navigation: {
@@ -155,9 +156,10 @@ export function createAdminJS(agentMemory: MastraMemory): AdminJS {
 }
 
 export function createAdminRouter(
+  config: ConfigService,
   agentMemory: MastraMemory,
 ): Router {
-  const admin = createAdminJS(agentMemory)
+  const admin = createAdminJS(config, agentMemory)
 
   const authenticate = (email: string, password: string): { email: string; role: string } | null => {
     const expectedToken = process.env.WEB_AUTH_TOKEN

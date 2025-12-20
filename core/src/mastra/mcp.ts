@@ -1,6 +1,7 @@
 import { Tool } from '@mastra/core'
 import { RuntimeContext } from '@mastra/core/di'
 import { MCPClient as MastraMCPClient, MCPClientOptions } from '@mastra/mcp'
+import { ConfigService } from '../configService'
 
 export class MCPClient {
   public readonly client: MastraMCPClient
@@ -41,17 +42,14 @@ export class MCPClient {
   }
 }
 
-export function getUniversalMCP(): MCPClient {
-  // Use same data directory for MCP server data
-  const dataDir = process.env.DATA_DIR ?? './data'
-
+export function getUniversalMCP(config: ConfigService): MCPClient {
   return new MCPClient({
     servers: {
       rss: {
         command: './bin/rss',
         args: [],
         env: {
-          RSS_CONFIG_PATH: `${dataDir}/rss.yaml`,
+          RSS_CONFIG_PATH: `${config.dataDir}/rss.yaml`,
           TZ: process.env.TZ ?? 'Asia/Tokyo',
         },
       },
@@ -79,10 +77,7 @@ export function getUniversalMCP(): MCPClient {
 
 export type MCPAuthHandler = (userId: string, server: string, url: string) => Promise<void>
 
-export function getUserSpecificMCP(clientId: string): MCPClient {
-  // Use same data directory for MCP server data
-  const dataDir = process.env.DATA_DIR ?? './data'
-
+export function getUserSpecificMCP(config: ConfigService, clientId: string): MCPClient {
   return new MCPClient({
     id: clientId,
     servers: {
@@ -90,7 +85,7 @@ export function getUserSpecificMCP(clientId: string): MCPClient {
         command: './bin/structured-memory',
         args: [],
         env: {
-          DATA_DIR: `${dataDir}/${clientId}__structured_memory`,
+          DATA_DIR: `${config.dataDir}/${clientId}__structured_memory`,
           ROOT_TEMPLATE: '# メモ帳\n',
         },
       },
@@ -98,7 +93,7 @@ export function getUserSpecificMCP(clientId: string): MCPClient {
         command: './bin/scheduler',
         args: [],
         env: {
-          DATA_DIR: `${dataDir}/${clientId}__scheduler`,
+          DATA_DIR: `${config.dataDir}/${clientId}__scheduler`,
           SCHEDULER_LOOP_INTERVAL_MS: '1000',
           TZ: process.env.TZ ?? 'Asia/Tokyo',
         },

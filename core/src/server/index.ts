@@ -7,8 +7,10 @@ import { WebSocketManager } from './websocket'
 import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
 import { AgentService } from '../agent/agentService'
+import { ConfigService } from '../configService'
 
 export async function serve(
+  config: ConfigService,
   agent: Agent,
   agentService: AgentService,
 ): Promise<void> {
@@ -43,7 +45,7 @@ export async function serve(
   setupRoutes(app)
 
   // Add AdminJS routes (with built-in authentication)
-  app.use(createAdminRouter(agentMemory))
+  app.use(createAdminRouter(config, agentMemory))
 
   // Create HTTP server and WebSocket server
   const server = http.createServer(app)

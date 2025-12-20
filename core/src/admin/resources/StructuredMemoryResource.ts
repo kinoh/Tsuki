@@ -1,6 +1,7 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
 import { promises as fs } from 'fs'
 import { join, extname } from 'path'
+import { ConfigService } from '../../configService'
 
 interface StructuredMemoryDocument {
   id: string
@@ -53,10 +54,9 @@ class StructuredMemoryRecord extends BaseRecord {
 export class StructuredMemoryResource extends BaseResource {
   private dataDir: string
 
-  constructor() {
+  constructor(private config: ConfigService) {
     super()
-    const baseDataDir = process.env.DATA_DIR ?? './data'
-    this.dataDir = join(baseDataDir, `${process.env.PERMANENT_USERS}__structured_memory`)
+    this.dataDir = join(this.config.dataDir, `${process.env.PERMANENT_USERS}__structured_memory`)
   }
 
   id(): string {

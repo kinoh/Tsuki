@@ -6,6 +6,7 @@ import { UserContext } from './userContext'
 import { Responder } from './mastraResponder'
 import { MessageRouter } from './router'
 import { MastraMessageV2 } from '@mastra/core'
+import { ConfigService } from '../configService'
 
 export type AgentRuntimeContext = {
   instructions: string
@@ -44,13 +45,14 @@ export class ActiveUser implements UserContext {
   constructor(
     public readonly userId: string,
     public readonly conversation: ConversationManager,
+    private config: ConfigService,
     private responder: Responder,
     private router: MessageRouter,
     private runtimeContext: RuntimeContext<AgentRuntimeContext>,
     private readonly assistantName: string,
     onAuth: MCPAuthHandler | null,
   ) {
-    this.mcp = getUserSpecificMCP(userId)
+    this.mcp = getUserSpecificMCP(config, userId)
 
     if (onAuth) {
       // Initialize MCP client requiring authentication
