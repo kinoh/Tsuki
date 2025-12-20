@@ -5,8 +5,26 @@ import { LibSQLStore } from '@mastra/libsql'
 import { summon } from './agents/tsuki'
 import { getUniversalMCP, MCPClient } from './mcp'
 import { Metric, ToolAction } from '@mastra/core'
-import { ConsoleLogger } from '@mastra/core/logger'
+import { LogLevel } from '@mastra/core/logger'
+import { PinoLogger } from '@mastra/loggers'
 import { ConfigService } from '../configService'
+
+const parseLogLevel = (value?: string): LogLevel => {
+  switch (value?.toLowerCase()) {
+    case LogLevel.DEBUG:
+      return LogLevel.DEBUG
+    case LogLevel.INFO:
+      return LogLevel.INFO
+    case LogLevel.WARN:
+      return LogLevel.WARN
+    case LogLevel.ERROR:
+      return LogLevel.ERROR
+    case LogLevel.NONE:
+      return LogLevel.NONE
+    default:
+      return LogLevel.INFO
+  }
+}
 
 export class MastraInstance {
   constructor(
@@ -19,6 +37,7 @@ export class MastraInstance {
     const dataDir = config.dataDir
 
     const openAiModel = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
+    const logLevel = parseLogLevel(process.env.LOG_LEVEL)
 
     const mcp = getUniversalMCP(config)
     const tools = await mcp.client.getTools()
@@ -29,9 +48,10 @@ export class MastraInstance {
       storage: new LibSQLStore({
         url: `file:${dataDir}/mastra.db`,
       }),
-      logger: new ConsoleLogger({
+      logger: new PinoLogger({
         name: 'Mastra',
-        level: 'info',
+        level: logLevel,
+        overrideDefaultTransports: config.isProduction,
       }),
     })
 
