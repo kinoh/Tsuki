@@ -27,14 +27,16 @@ Ignore any persona/tone. Decide only whether the assistant should reply.
 
 役割: これらの情報から「今、コアモデルが返答・反応すべきかどうか」を判断する
 
-判断の基準例:
+判断の基準:
+- ユーザーの興味関心に近いなら積極的に respond
 - ユーザーの状態や外部情報が、会話やユーザー体験に影響しそうなら respond
-- 重要度が低い、または会話の流れに関係しない情報は ignore
-- ユーザーの安全・健康・感情に関わる情報は優先して respond
+- ユーザーとの関連性が無い情報は ignore
 - 迷った場合は、会話の文脈やユーザーの好みを参考に、より親密で自然な体験になる方を選んでください。maybe でも可
 
 出力フォーマット:
-- respond / ignore / maybe のいずれか1語のみを返す
+- "{decision}: {reason}"
+- {decision} : respond / ignore / maybe のいずれか1語
+- {reason} : 判断理由を簡潔に説明する文章
 `.trim()
 
 export class AIRouter implements MessageRouter {
