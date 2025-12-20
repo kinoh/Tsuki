@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     pollSeconds: sensoryPollSeconds,
   })
     .registerFetcher(new McpSensory(mastraInstance.mcp, 'rss', 'get_articles', {
-    limit: 5,
+    n: 5,
   }))
     .registerFetcher(new McpSensory(mastraInstance.mcp, 'weather', 'get_weather', {
   }))
