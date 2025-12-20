@@ -112,7 +112,7 @@ export class ActiveUser implements UserContext {
         const ackResponse: ResponseMessage = {
           role: 'system',
           user: this.assistantName,
-          chat: ['Message received. No response will be sent.'],
+          chat: ['No response'],
           timestamp: Math.floor(Date.now() / 1000),
         }
         await this.sendMessage(ackResponse)
