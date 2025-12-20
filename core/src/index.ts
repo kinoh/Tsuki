@@ -41,15 +41,11 @@ async function main(): Promise<void> {
     userIds: permanentUsers,
     pollSeconds: sensoryPollSeconds,
   })
-  const mcp = agentService.activateUser(permanentUsers[0]).mcpClient
-  if (mcp) {
-    sensoryService
-      .registerFetcher(new McpSensory(mcp, 'rss', 'get_articles', {
-      limit: 20,
-    }))
-      .registerFetcher(new McpSensory(mcp, 'weather', 'get_weather', {
-    }))
-  }
+    .registerFetcher(new McpSensory(mastraInstance.mcp, 'rss', 'get_articles', {
+    limit: 5,
+  }))
+    .registerFetcher(new McpSensory(mastraInstance.mcp, 'weather', 'get_weather', {
+  }))
 
   sensoryService.start()
 

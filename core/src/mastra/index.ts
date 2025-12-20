@@ -11,7 +11,7 @@ import { ConfigService } from '../configService'
 export class MastraInstance {
   constructor(
     public readonly mastra: Mastra<Record<string, Agent<string, ToolsInput, Record<string, Metric>>>>,
-    private readonly mcp: MCPClient,
+    public readonly mcp: MCPClient,
   ) {
   }
 
