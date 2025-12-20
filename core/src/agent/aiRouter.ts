@@ -3,6 +3,7 @@ import { openai } from '@ai-sdk/openai'
 import { MessageInput } from './activeuser'
 import { MessageRouter, RouteDecision } from './router'
 import { UserContext } from './userContext'
+import { appLogger } from '../logger'
 
 // Router prompt is public and only handles routing, not persona.
 const ROUTER_APPEND_INSTRUCTIONS = `
@@ -95,7 +96,7 @@ export class AIRouter implements MessageRouter {
       prompt,
     })
 
-    console.debug('Router output:', text)
+    appLogger.debug('Router output', { text })
 
     // const normalizedText = text.toLowerCase()
     // const normalized: RouteDecision['action'] =

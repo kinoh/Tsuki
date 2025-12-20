@@ -1,5 +1,6 @@
 import { mkdirSync, readdirSync } from 'fs'
 import { spawnSync } from 'child_process'
+import { appLogger } from './logger'
 
 export class ConfigService {
   public readonly dataDir: string
@@ -17,7 +18,7 @@ export class ConfigService {
   private initDataDir(): void {
     mkdirSync(this.dataDir, { recursive: true })
 
-    console.log(`Data directory: ${this.dataDir}`)
+    appLogger.info(`Data directory: ${this.dataDir}`)
 
     // If directory is empty
     if (readdirSync(this.dataDir).length === 0) {
@@ -33,7 +34,7 @@ export class ConfigService {
    * @param backupFile tarball file path
    */
   private loadBackup(backupFile: string): void {
-    console.log(`Restoring data from file: ${backupFile}`)
+    appLogger.info(`Restoring data from file: ${backupFile}`)
 
     // Allow external command because this is only for development environment
     const result = spawnSync('tar', ['-xzf', backupFile, '-C', this.dataDir], {

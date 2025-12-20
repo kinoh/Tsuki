@@ -1,4 +1,5 @@
 import express from 'express'
+import { appLogger } from '../../logger'
 
 async function getGitHash(): Promise<string | null> {
   // In Docker environment, get from environment variable
@@ -12,7 +13,7 @@ async function getGitHash(): Promise<string | null> {
     const hash = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
     return hash
   } catch (error) {
-    console.warn('Failed to get git hash:', error)
+    appLogger.warn('Failed to get git hash', { error })
     return null
   }
 }
@@ -31,7 +32,7 @@ export async function metadataHandler(req: express.Request, res: express.Respons
       mcp_tools: mcpTools,
     })
   } catch (error) {
-    console.error('Error fetching metadata:', error)
+    appLogger.error('Error fetching metadata', { error })
     res.status(500).json({ error: 'Internal server error' })
   }
 }

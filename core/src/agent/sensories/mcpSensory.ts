@@ -1,5 +1,6 @@
 import { MCPClient } from '../../mastra/mcp'
 import { SensoryFetcher, SensorySample } from '../sensoryService'
+import { appLogger } from '../../logger'
 
 export class McpSensory implements SensoryFetcher {
   constructor(
@@ -23,7 +24,7 @@ export class McpSensory implements SensoryFetcher {
         this.params,
       )
     } catch (err) {
-      console.error('McpSensory: error fetching notifications', err)
+      appLogger.error('McpSensory: error fetching notifications', { error: err })
     }
     return {
       source: this.identifier(),

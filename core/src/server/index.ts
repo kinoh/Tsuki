@@ -8,6 +8,7 @@ import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
 import { AgentService } from '../agent/agentService'
 import { ConfigService } from '../configService'
+import { appLogger } from '../logger'
 
 export async function serve(
   config: ConfigService,
@@ -56,22 +57,22 @@ export async function serve(
     wsmanager.handleConnection(ws, req)
   })
 
-  server.listen(2953, () =>
-    console.log('\n🚀 Server ready at: http://localhost:2953\n'),
-  )
+  server.listen(2953, () => {
+    appLogger.info('Server ready at: http://localhost:2953')
+  })
 
   const gracefulShutdown = (): void => {
-    console.log('Shutting down server...')
+    appLogger.info('Shutting down server...')
     wss.close(() => {
       server.close(() => {
-        console.log('Server closed.')
+        appLogger.info('Server closed.')
         process.exit(0)
       })
     })
 
     // Force shutdown after 5 seconds
     setTimeout(() => {
-      console.error('Forcing shutdown...')
+      appLogger.error('Forcing shutdown...')
       process.exit(1)
     }, 5000)
   }

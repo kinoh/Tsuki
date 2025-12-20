@@ -7,10 +7,11 @@ import { FCMTokenStorage } from './storage/fcm'
 import { SensoryService } from './agent/sensoryService'
 import { McpSensory } from './agent/sensories/mcpSensory'
 import { ConfigService } from './configService'
+import { appLogger } from './logger'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {
-  console.log('Starting Tsuki Core Server...')
+  appLogger.info('Starting Tsuki Core Server...')
 
   const config = new ConfigService()
   using mastraInstance = await MastraInstance.create(config)
@@ -52,4 +53,6 @@ async function main(): Promise<void> {
   await serve(config, agent, agentService)
 }
 
-main().catch(console.error)
+main().catch((error) => {
+  appLogger.error('Unhandled error during startup', { error })
+})

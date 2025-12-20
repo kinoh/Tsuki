@@ -1,4 +1,5 @@
 import { AgentService } from './agentService'
+import { appLogger } from '../logger'
 
 type SensoryPollerConfig = {
   userIds: string[]
@@ -48,7 +49,7 @@ export class SensoryService {
 
     this.timer = setInterval(() => {
       this.emitSensory().catch((err) => {
-        console.error('SensoryService: poll error', err)
+        appLogger.error('SensoryService: poll error', { error: err })
       })
     }, this.pollSeconds * 1000)
   }
@@ -97,11 +98,11 @@ export class SensoryService {
           }
         }
       } catch (error) {
-        console.error('SensoryService: fetcher error', error)
+        appLogger.error('SensoryService: fetcher error', { error })
       }
     }
 
-    console.log(`SensoryService: fetched ${samples.length} new samples`)
+    appLogger.info(`SensoryService: fetched ${samples.length} new samples`, { count: samples.length })
 
     return samples
   }

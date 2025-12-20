@@ -1,6 +1,7 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
 import { MastraMemory } from '@mastra/core'
 import { TABLE_THREADS } from '@mastra/core/storage'
+import { appLogger } from '../../logger'
 
 interface Thread {
   id: string
@@ -97,7 +98,7 @@ export class ThreadResource extends BaseResource {
       }
       return 0
     } catch (error) {
-      console.error('Error counting threads:', error)
+      appLogger.error('Error counting threads', { error })
       return 0
     }
   }
@@ -128,7 +129,7 @@ export class ThreadResource extends BaseResource {
 
       return threads.map(thread => new ThreadRecord(thread, this))
     } catch (error) {
-      console.error('Error finding threads:', error)
+      appLogger.error('Error finding threads', { error })
       return []
     }
   }
@@ -156,7 +157,7 @@ export class ThreadResource extends BaseResource {
 
       return new ThreadRecord(thread, this)
     } catch (error) {
-      console.error('Error finding thread:', error)
+      appLogger.error('Error finding thread', { error, threadId: id })
       return null
     }
   }
@@ -174,7 +175,7 @@ export class ThreadResource extends BaseResource {
       const storage = this.agentMemory.storage
       await storage.deleteThread({ threadId: id })
     } catch (error) {
-      console.error('Error deleting thread:', error)
+      appLogger.error('Error deleting thread', { error, threadId: id })
       throw error
     }
   }

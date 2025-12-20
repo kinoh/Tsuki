@@ -1,4 +1,5 @@
 import { MastraMemory, MastraMessageV2 } from '@mastra/core'
+import { appLogger } from '../logger'
 
 export class ConversationManager {
   private readonly RECENT_UPDATE_THRESHOLD_HOURS = 1
@@ -53,7 +54,7 @@ export class ConversationManager {
 
       return null
     } catch (error) {
-      console.warn('Failed to get last message time:', error)
+      appLogger.warn('Failed to get last message time', { error, threadId })
       return null
     }
   }
@@ -99,7 +100,7 @@ export class ConversationManager {
       }
     } catch (error) {
       // Ignore if previous day's thread doesn't exist
-      console.debug('Previous day thread not found or error occurred:', error)
+      appLogger.debug('Previous day thread not found or error occurred', { error, threadId: yesterdayId })
     }
 
     // Return today's thread if no previous day's thread or not recently updated
@@ -118,7 +119,7 @@ export class ConversationManager {
       const messages = result.messagesV2 ?? []
       return [...messages].reverse()
     } catch (error) {
-      console.warn('Failed to get recent messages:', error)
+      appLogger.warn('Failed to get recent messages', { error, threadId })
       return []
     }
   }

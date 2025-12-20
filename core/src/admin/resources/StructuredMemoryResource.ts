@@ -2,6 +2,7 @@ import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
 import { promises as fs } from 'fs'
 import { join, extname } from 'path'
 import { ConfigService } from '../../configService'
+import { appLogger } from '../../logger'
 
 interface StructuredMemoryDocument {
   id: string
@@ -119,13 +120,13 @@ export class StructuredMemoryResource extends BaseResource {
             modifiedAt: stats.mtime,
           })
         } catch (error) {
-          console.error(`Error reading file ${filename}:`, error)
+          appLogger.error(`Error reading file ${filename}`, { error, filename })
         }
       }
       
       return documents
     } catch (error) {
-      console.error('Error reading structured memory directory:', error)
+      appLogger.error('Error reading structured memory directory', { error })
       return []
     }
   }
@@ -135,7 +136,7 @@ export class StructuredMemoryResource extends BaseResource {
       const documents = await this.readDocuments()
       return documents.length
     } catch (error) {
-      console.error('Error counting structured memory documents:', error)
+      appLogger.error('Error counting structured memory documents', { error })
       return 0
     }
   }
@@ -182,7 +183,7 @@ export class StructuredMemoryResource extends BaseResource {
       
       return documents.map(doc => new StructuredMemoryRecord(doc, this))
     } catch (error) {
-      console.error('Error finding structured memory documents:', error)
+      appLogger.error('Error finding structured memory documents', { error })
       return []
     }
   }
@@ -198,7 +199,7 @@ export class StructuredMemoryResource extends BaseResource {
       
       return new StructuredMemoryRecord(document, this)
     } catch (error) {
-      console.error('Error finding structured memory document:', error)
+      appLogger.error('Error finding structured memory document', { error, documentId: id })
       return null
     }
   }

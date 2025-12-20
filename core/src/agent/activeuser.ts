@@ -7,6 +7,7 @@ import { Responder } from './mastraResponder'
 import { MessageRouter } from './router'
 import { MastraMessageV2 } from '@mastra/core'
 import { ConfigService } from '../configService'
+import { appLogger } from '../logger'
 
 export type AgentRuntimeContext = {
   instructions: string
@@ -59,7 +60,7 @@ export class ActiveUser implements UserContext {
     }
 
     this.subscribeNotifications().catch((err) => {
-      console.error(`Error subscribing to notifications for user ${this.userId}:`, err)
+      appLogger.error(`Error subscribing to notifications for user ${this.userId}`, { error: err, userId: this.userId })
     })
   }
 
@@ -81,7 +82,7 @@ export class ActiveUser implements UserContext {
 
       return response?.content[0]?.text ?? ''
     } catch (error) {
-      console.warn(`Failed to load memory for user ${this.userId}:`, error)
+      appLogger.warn(`Failed to load memory for user ${this.userId}`, { error, userId: this.userId })
       return ''
     }
   }
@@ -100,7 +101,7 @@ export class ActiveUser implements UserContext {
   }
 
   async processMessage(input: MessageInput): Promise<void> {
-    console.log(`AgentService: Processing message for user ${input.userId}:`, input)
+    appLogger.info(`AgentService: Processing message for user ${input.userId}`, { input, userId: input.userId })
 
     try {
       const decision = await this.router.route(input, this)
@@ -118,7 +119,7 @@ export class ActiveUser implements UserContext {
       const response = await this.responder.respond(input, this)
       await this.sendMessage(response)
     } catch (error) {
-      console.error('Message processing error:', error)
+      appLogger.error('Message processing error', { error, userId: input.userId })
 
       const errorResponse: ResponseMessage = {
         role: 'assistant',
@@ -153,25 +154,28 @@ export class ActiveUser implements UserContext {
   }
 
   private async subscribeNotifications(): Promise<void> {
-    console.log(`ActiveUser: Subscribing to notifications for user ${this.userId}`)
+    appLogger.info(`ActiveUser: Subscribing to notifications for user ${this.userId}`, { userId: this.userId })
 
     const mcp = this.mcp
     if (!mcp) {
-      console.error('MCP client is not initialized')
+      appLogger.error('MCP client is not initialized', { userId: this.userId })
       return
     }
 
     await mcp.client.resources.subscribe('scheduler', 'fired_schedule://recent')
     await mcp.client.resources.onUpdated('scheduler', (params) => {
-      console.log(`Received scheduler notification for user ${this.userId}:`, params)
+      appLogger.info(`Received scheduler notification for user ${this.userId}`, { params, userId: this.userId })
       this.handleSchedulerNotification(params as MCPNotificationResourceUpdated).catch((err) => {
-        console.error(`Error handling scheduler notification for user ${this.userId}:`, err)
+        appLogger.error(`Error handling scheduler notification for user ${this.userId}`, { error: err, userId: this.userId })
       })
     })
   }
 
   public async handleSchedulerNotification(notification: MCPNotificationResourceUpdated): Promise<void> {
-    console.log(`AgentService: Handling scheduler notification for user ${this.userId}:`, notification)
+    appLogger.info(`AgentService: Handling scheduler notification for user ${this.userId}`, {
+      notification,
+      userId: this.userId,
+    })
 
     try {
       if (this.responder.handleNotification) {
@@ -186,12 +190,15 @@ export class ActiveUser implements UserContext {
         text: `Received scheduler notification: ${notification.title}`,
       })
     } catch (err) {
-      console.error(`Error handling scheduler notification for user ${this.userId}:`, err)
+      appLogger.error(`Error handling scheduler notification for user ${this.userId}`, { error: err, userId: this.userId })
     }
   }
 
   public registerMessageSender(channel: MessageChannel, sender: MessageSender, onAuth: MCPAuthHandler | null): void {
-    console.log(`ActiveUser: Registering sender for channel ${channel} for user ${this.userId}`)
+    appLogger.info(`ActiveUser: Registering sender for channel ${channel} for user ${this.userId}`, {
+      channel,
+      userId: this.userId,
+    })
 
     this.senders.set(channel, sender)
 
@@ -202,17 +209,20 @@ export class ActiveUser implements UserContext {
   }
 
   public deregisterMessageSender(channel: MessageChannel): void {
-    console.log(`ActiveUser: Deregistering sender for channel ${channel} for user ${this.userId}`)
+    appLogger.info(`ActiveUser: Deregistering sender for channel ${channel} for user ${this.userId}`, {
+      channel,
+      userId: this.userId,
+    })
 
     this.senders.delete(channel)
   }
 
   public async sendMessage(message: ResponseMessage): Promise<void> {
-    console.log(`ActiveUser: Sending message to user ${this.userId}:`, message)
+    appLogger.info(`ActiveUser: Sending message to user ${this.userId}`, { message, userId: this.userId })
 
     const availableChannels = Array.from(this.senders.keys())
     if (availableChannels.length === 0) {
-      console.warn(`No message senders registered for user ${this.userId}. Cannot send message.`)
+      appLogger.warn(`No message senders registered for user ${this.userId}. Cannot send message.`, { userId: this.userId })
       return
     }
 
@@ -225,7 +235,11 @@ export class ActiveUser implements UserContext {
       try {
         await sender.sendMessage(this.userId, message)
       } catch (error) {
-        console.error(`Error sending message to user ${this.userId} via channel ${channel}:`, error)
+        appLogger.error(`Error sending message to user ${this.userId} via channel ${channel}`, {
+          error,
+          userId: this.userId,
+          channel,
+        })
       }
     }
   }

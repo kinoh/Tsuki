@@ -3,6 +3,7 @@ import { getMessaging, Messaging, MulticastMessage } from 'firebase-admin/messag
 import { FCMTokenStorage } from '../storage/fcm'
 import { MessageSender } from '../agent/activeuser'
 import { ResponseMessage } from '../agent/message'
+import { appLogger } from '../logger'
 
 export interface Notification {
   title: string
@@ -26,7 +27,7 @@ export class FCMManager implements MessageSender {
   }
 
   private initialize(): void {
-    console.log('Initializing Firebase app for FCMManager')
+    appLogger.info('Initializing Firebase app for FCMManager')
 
     const projectId = process.env.FCM_PROJECT_ID
     if (projectId === undefined) {
@@ -55,7 +56,7 @@ export class FCMManager implements MessageSender {
   public async sendNotification(userId: string, data: Notification): Promise<void> {
     const tokens = await this.storage.getTokens(userId)
     if (tokens.length === 0) {
-      console.log(`No FCM tokens found for user ${userId}`)
+      appLogger.info(`No FCM tokens found for user ${userId}`, { userId })
       return
     }
 
@@ -73,7 +74,11 @@ export class FCMManager implements MessageSender {
     if (batchResponse.failureCount > 0) {
       for (const [index, response] of batchResponse.responses.entries()) {
         if (!response.success) {
-          console.error(`Error sending FCM message for token ${tokens[index]}:`, response.error)
+          appLogger.error(`Error sending FCM message for token ${tokens[index]}`, {
+            error: response.error,
+            token: tokens[index],
+            userId,
+          })
         }
       }
     }
