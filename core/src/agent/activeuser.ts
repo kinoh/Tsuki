@@ -138,7 +138,7 @@ export class ActiveUser implements UserContext {
 
   private routerHistoryLimit(): number {
     const raw = process.env.ROUTER_HISTORY_LIMIT
-    const parsed = raw ? Number(raw) : NaN
+    const parsed = raw !== undefined ? parseInt(raw, 10) : NaN
     if (Number.isNaN(parsed) || parsed <= 0) {
       return 10
     }
