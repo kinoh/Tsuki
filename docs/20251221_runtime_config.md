@@ -9,10 +9,11 @@
 ## Notes
 - Payload is minimal: `enableNotification` and `enableSensory` only.
 - `PUT /config` requires both fields; no PATCH support.
-- Generation runs via `pnpm -C core run generate:openapi` and in the Docker build.
+- Generation runs via `pnpm -C core run generate:openapi`; Docker build no longer generates types.
 
 ## User Feedback Incorporated
 - Use OpenAPI as the source of truth and generate types from it.
 - Keep settings global, not per-user.
 - Persist to `config.json` under `DATA_DIR`.
 - Apply changes without restart.
+- Keep `openapi.ts` in git and remove Docker-based generation.
