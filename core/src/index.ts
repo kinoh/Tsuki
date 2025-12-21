@@ -7,6 +7,7 @@ import { FCMTokenStorage } from './storage/fcm'
 import { SensoryService } from './agent/sensoryService'
 import { McpSensory } from './agent/sensories/mcpSensory'
 import { ConfigService } from './configService'
+import { RuntimeConfigStore } from './runtimeConfig'
 import { appLogger } from './logger'
 
 // Main function to start server with runtime context
@@ -14,6 +15,8 @@ async function main(): Promise<void> {
   appLogger.info('Starting Tsuki Core Server...')
 
   const config = new ConfigService()
+  const runtimeConfigStore = new RuntimeConfigStore(config.dataDir)
+  await runtimeConfigStore.load()
   using mastraInstance = await MastraInstance.create(config)
   const agent = mastraInstance.getAgent('tsuki')
 
@@ -26,7 +29,7 @@ async function main(): Promise<void> {
   using agentService = await createAgentService(config, agent, agentMemory, usageStorage)
 
   const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
-  const fcm = config.isProduction ? new FCMManager(fcmTokenStorage) : undefined
+  const fcm = config.isProduction ? new FCMManager(fcmTokenStorage, runtimeConfigStore) : undefined
 
   const permanentUsers = (process.env.PERMANENT_USERS ?? '')
     .split(',')
@@ -48,9 +51,19 @@ async function main(): Promise<void> {
     .registerFetcher(new McpSensory(mastraInstance.mcp, 'weather', 'get_weather', {
   }))
 
-  sensoryService.start()
+  if (runtimeConfigStore.get().enableSensory) {
+    sensoryService.start()
+  }
 
-  await serve(config, agent, agentService)
+  runtimeConfigStore.onChange((nextConfig) => {
+    if (nextConfig.enableSensory) {
+      sensoryService.start()
+    } else {
+      sensoryService.stop()
+    }
+  })
+
+  await serve(config, agent, agentService, runtimeConfigStore)
 }
 
 main().catch((error: unknown) => {

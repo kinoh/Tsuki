@@ -4,6 +4,7 @@ import { FCMTokenStorage } from '../storage/fcm'
 import { MessageSender } from '../agent/activeuser'
 import { ResponseMessage } from '../agent/message'
 import { appLogger } from '../logger'
+import { RuntimeConfigStore } from '../runtimeConfig'
 
 export interface Notification {
   title: string
@@ -14,7 +15,10 @@ export interface Notification {
 export class FCMManager implements MessageSender {
   private readonly messaging: Messaging
 
-  public constructor(private storage: FCMTokenStorage) {
+  public constructor(
+    private storage: FCMTokenStorage,
+    private runtimeConfigStore?: RuntimeConfigStore,
+  ) {
     try {
       void getApp()
     } catch (e) {
@@ -54,6 +58,11 @@ export class FCMManager implements MessageSender {
   }
 
   public async sendNotification(userId: string, data: Notification): Promise<void> {
+    if (this.runtimeConfigStore && !this.runtimeConfigStore.get().enableNotification) {
+      appLogger.info('Notifications disabled, skipping FCM send', { userId })
+      return
+    }
+
     const tokens = await this.storage.getTokens(userId)
     if (tokens.length === 0) {
       appLogger.info(`No FCM tokens found for user ${userId}`, { userId })

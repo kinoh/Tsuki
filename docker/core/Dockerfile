@@ -101,6 +101,10 @@ COPY --from=rust-builder --chown=tsuki:nodejs /build/rss ./bin/rss
 # Copy source code with correct ownership
 COPY --chown=tsuki:nodejs core/src ./src
 COPY --chown=tsuki:nodejs core/tsconfig.json ./
+COPY --chown=tsuki:nodejs api-specs/openapi.yaml ./api-specs/openapi.yaml
+
+# Generate OpenAPI types
+RUN pnpm run generate:openapi
 
 # Default RSS config path (override by mounting your own file)
 ENV RSS_CONFIG_PATH=/data/rss.yaml

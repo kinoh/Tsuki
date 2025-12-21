@@ -4,6 +4,7 @@ import { threadsHandler, threadByIdHandler, messagesHandler } from './threads'
 import { metricsHandler } from './metrics'
 import { metadataHandler } from './metadata'
 import { notificationTestHandler, notificationTokenHandler, notificationTokensHandler } from './notification'
+import { configGetHandler, configPutHandler } from './config'
 
 function rootHandler(req: express.Request, res: express.Response): void {
   res.json({
@@ -18,6 +19,8 @@ export function setupRoutes(app: express.Application): void {
   app.get('/messages', authMiddleware, messagesHandler)
   app.get('/metrics', internalOnlyMiddleware, metricsHandler)
   app.get('/metadata', authMiddleware, metadataHandler)
+  app.get('/config', authMiddleware, configGetHandler)
+  app.put('/config', authMiddleware, configPutHandler)
   app.put('/notification/token', authMiddleware, notificationTokenHandler)
   app.delete('/notification/token', authMiddleware, notificationTokenHandler)
   app.get('/notification/tokens', authMiddleware, notificationTokensHandler)

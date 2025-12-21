@@ -2,6 +2,7 @@ import { Request, Response } from 'express'
 import { FCMTokenStorage } from '../../storage/fcm'
 import { FCMManager } from '../fcm'
 import { appLogger } from '../../logger'
+import { RuntimeConfigStore } from '../../runtimeConfig'
 
 interface MutateNotificationTokenPayload {
   token?: string
@@ -61,9 +62,16 @@ export async function notificationTestHandler(req: Request, res: Response): Prom
   try {
     const agentMemory = req.app.locals.agentMemory
     const userId = res.locals.user as string
+    const runtimeConfigStore = req.app.locals.runtimeConfigStore as RuntimeConfigStore
+
+    if (!runtimeConfigStore.get().enableNotification) {
+      res.status(409).json({ error: 'Notifications are disabled' })
+      return
+    }
+
     const tokenStorage = new FCMTokenStorage(agentMemory.storage)
     // Only for testing purposes, in real usage the FCMManager should be a singleton
-    const fcm = new FCMManager(tokenStorage)
+    const fcm = new FCMManager(tokenStorage, runtimeConfigStore)
 
     const notification = {
       title: 'Test Notification',

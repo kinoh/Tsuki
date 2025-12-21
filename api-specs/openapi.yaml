@@ -1,0 +1,61 @@
+openapi: 3.0.3
+info:
+  title: Tsuki Core HTTP API
+  version: 1.0.0
+  description: Core HTTP endpoints for Tsuki.
+
+servers:
+  - url: http://localhost:2953
+
+paths:
+  /config:
+    get:
+      summary: Get runtime configuration
+      operationId: getConfig
+      responses:
+        '200':
+          description: Current runtime config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '500':
+          description: Internal server error
+    put:
+      summary: Update runtime configuration
+      operationId: updateConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Config'
+      responses:
+        '200':
+          description: Updated runtime config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        '400':
+          description: Invalid payload
+        '500':
+          description: Internal server error
+
+components:
+  schemas:
+    Config:
+      type: object
+      additionalProperties: false
+      required:
+        - enableNotification
+        - enableSensory
+      properties:
+        enableNotification:
+          type: boolean
+          default: true
+          description: Enable FCM notifications.
+        enableSensory:
+          type: boolean
+          default: true
+          description: Enable sensory polling and routing.

@@ -8,12 +8,14 @@ import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
 import { AgentService } from '../agent/agentService'
 import { ConfigService } from '../configService'
+import { RuntimeConfigStore } from '../runtimeConfig'
 import { appLogger } from '../logger'
 
 export async function serve(
   config: ConfigService,
   agent: Agent,
   agentService: AgentService,
+  runtimeConfigStore: RuntimeConfigStore,
 ): Promise<void> {
   const agentMemory = await agent.getMemory()
 
@@ -26,6 +28,7 @@ export async function serve(
   // Set dependencies in app.locals
   app.locals.agent = agent
   app.locals.agentMemory = agentMemory
+  app.locals.runtimeConfigStore = runtimeConfigStore
 
   // Middlewares
   app.use(morgan((tokens, req, res) => {
