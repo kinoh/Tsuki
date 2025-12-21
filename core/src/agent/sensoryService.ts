@@ -78,7 +78,7 @@ export class SensoryService {
     await Promise.all(
       this.userIds.map((userId) =>
         this.agentService.processMessage(userId, {
-          userId,
+          userId: 'system',
           type: 'sensory',
           text: message,
         }),
