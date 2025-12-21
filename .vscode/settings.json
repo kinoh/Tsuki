@@ -1,0 +1,14 @@
+{
+  "files.watcherExclude": {
+    "**/target": true
+  },
+  "editor.tabSize": 2,
+  "editor.indentSize": 2,
+  "rust-analyzer.diagnostics.disabled": [
+    "unresolved-proc-macro"
+  ],
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true
+  }
+}
