@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/config": {
+    '/config': {
         parameters: {
             query?: never;
             header?: never;
@@ -12,9 +12,9 @@ export interface paths {
             cookie?: never;
         };
         /** Get runtime configuration */
-        get: operations["getConfig"];
+        get: operations['getConfig'];
         /** Update runtime configuration */
-        put: operations["updateConfig"];
+        put: operations['updateConfig'];
         post?: never;
         delete?: never;
         options?: never;
@@ -23,8 +23,8 @@ export interface paths {
         trace?: never;
     };
 }
-export type webhooks = Record<string, never>;
-export interface components {
+export type webhooks = Record<string, never>
+;export interface components {
     schemas: {
         Config: {
             /**
@@ -45,8 +45,8 @@ export interface components {
     headers: never;
     pathItems: never;
 }
-export type $defs = Record<string, never>;
-export interface operations {
+export type $defs = Record<string, never>
+;export interface operations {
     getConfig: {
         parameters: {
             query?: never;
@@ -62,7 +62,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Config"];
+                    'application/json': components['schemas']['Config'];
                 };
             };
             /** @description Internal server error */
@@ -83,7 +83,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Config"];
+                'application/json': components['schemas']['Config'];
             };
         };
         responses: {
@@ -93,7 +93,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Config"];
+                    'application/json': components['schemas']['Config'];
                 };
             };
             /** @description Invalid payload */

@@ -11,7 +11,7 @@
     "start": "tsx watch --env-file .env ./src/index.ts",
     "start:prod": "tsx ./src/index.ts",
     "build": "echo 'No build needed - using tsx in production'",
-    "generate:openapi": "openapi-typescript ../api-specs/openapi.yaml -o src/shared/openapi.ts",
+    "generate:openapi": "openapi-typescript ../api-specs/openapi.yaml -o src/shared/openapi.ts && eslint src/shared/openapi.ts --fix",
     "mastra-dev": "mastra dev",
     "mastra-build": "mastra build",
     "mastra-start": "mastra start",

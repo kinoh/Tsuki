@@ -89,7 +89,7 @@ function parseRuntimeConfig(input: unknown): RuntimeConfig {
 }
 
 function isRuntimeConfig(input: unknown): input is RuntimeConfig {
-  if (!input || typeof input !== 'object') {
+  if (input === null || typeof input !== 'object') {
     return false
   }
 

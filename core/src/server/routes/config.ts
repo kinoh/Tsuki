@@ -7,7 +7,7 @@ function getStore(req: Request): RuntimeConfigStore {
 }
 
 function isConfigPayload(payload: unknown): payload is RuntimeConfig {
-  if (!payload || typeof payload !== 'object') {
+  if (payload === null || typeof payload !== 'object') {
     return false
   }
 
@@ -15,7 +15,7 @@ function isConfigPayload(payload: unknown): payload is RuntimeConfig {
   return typeof candidate.enableNotification === 'boolean' && typeof candidate.enableSensory === 'boolean'
 }
 
-export async function configGetHandler(req: Request, res: Response): Promise<void> {
+export function configGetHandler(req: Request, res: Response): void {
   try {
     const store = getStore(req)
     res.status(200).json(store.get())
