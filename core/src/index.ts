@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   using agentService = await createAgentService(config, agent, agentMemory, usageStorage)
 
   const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
-  const fcm = config.isProduction ? new FCMManager(fcmTokenStorage, runtimeConfigStore) : undefined
+  const fcm = new FCMManager(fcmTokenStorage, runtimeConfigStore)
 
   const permanentUsers = (process.env.PERMANENT_USERS ?? '')
     .split(',')
