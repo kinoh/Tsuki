@@ -38,6 +38,7 @@ Ignore any persona/tone. Decide only whether the assistant should reply.
 - ユーザーの興味関心に近いなら積極的に respond
 - ユーザーの状態や外部情報が、会話やユーザー体験に影響しそうなら respond
 - ユーザーとの関連性が無い情報は ignore
+- 履歴と重複するものは ignore
 - 迷った場合は、会話の文脈やユーザーの好みを参考に、より親密で自然な体験になる方を選んでください。maybe でも可
 
 出力フォーマット:
