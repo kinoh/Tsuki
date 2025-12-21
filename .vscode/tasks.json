@@ -23,10 +23,12 @@
       "type": "shell",
       "command": "pnpm",
       "args": [
-        "tauri",
-        "android",
-        "dev"
+        "run",
+        "tauri:android:dev"
       ],
+      "options": {
+        "cwd": "${workspaceFolder}/gui"
+      },
       "presentation": {
         "clear": true,
         "panel": "shared",
@@ -39,10 +41,12 @@
       "type": "shell",
       "command": "pnpm",
       "args": [
-        "tauri",
-        "android",
-        "build"
+        "run",
+        "tauri:android:build"
       ],
+      "options": {
+        "cwd": "${workspaceFolder}/gui"
+      },
       "presentation": {
         "clear": true,
         "panel": "shared",

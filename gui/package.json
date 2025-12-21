@@ -9,18 +9,21 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:android:dev": "dotenvx run -- tauri android dev",
+    "tauri:android:build": "dotenvx run -- tauri android build"
   },
   "license": "MIT",
   "dependencies": {
     "@tauri-apps/api": "^2.3.0",
     "@tauri-apps/plugin-http": "~2",
-    "@tauri-apps/plugin-opener": "^2",
-    "tauri-plugin-app-events-api": "^0.2.0",
     "@tauri-apps/plugin-notification": "^2.2.2",
-    "@tauri-plugin-fcm-api": "git@github.com:kinoh/tauri-plugin-fcm.git#ec5e2293fd7e6b30ab3144ef6bdd772ef790e312"
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-plugin-fcm-api": "git@github.com:kinoh/tauri-plugin-fcm.git#ec5e2293fd7e6b30ab3144ef6bdd772ef790e312",
+    "tauri-plugin-app-events-api": "^0.2.0"
   },
   "devDependencies": {
+    "@dotenvx/dotenvx": "^1.51.2",
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.20.6",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
