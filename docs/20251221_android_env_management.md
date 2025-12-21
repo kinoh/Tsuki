@@ -12,3 +12,4 @@
 
 ## Notes
 - User corrected the package name to `@dotenvx/dotenvx` after initial lookup.
+- User confirmed Windows paths are required in `.env` (use `C:\...`, no quotes).
