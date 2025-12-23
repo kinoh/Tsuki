@@ -2,6 +2,7 @@
 
   import { fetch } from '@tauri-apps/plugin-http';
   import { onMount } from 'svelte';
+  import { log } from '../lib/logger';
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let runtimeConfig: { enableNotification: boolean, enableSensory: boolean } = $state({
@@ -43,6 +44,7 @@
       })
       .catch(error => {
         runtimeError = error.toString();
+        log("error", "http", "Failed to load runtime config.", error);
       });
   }
 
@@ -75,6 +77,7 @@
       })
       .catch(error => {
         runtimeError = error.toString();
+        log("error", "http", "Failed to save runtime config.", error);
       })
       .finally(() => {
         runtimeSaving = false;

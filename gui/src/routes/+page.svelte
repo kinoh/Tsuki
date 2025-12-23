@@ -12,6 +12,7 @@
   import Config from './Config.svelte';
   import Note from './Note.svelte';
   import Status from './Status.svelte';
+  import { log } from '../lib/logger';
 
   type UserChat = { modality: string, user: string, content: string };
   type AssistantChat = { modality: string, content: string, feeling: number, activity: number };
@@ -56,6 +57,7 @@
       })
       .catch(error => {
         errorToast = error.toString();
+        log("error", "http", "Failed to load messages.", error);
       });
 
     connection = new WebSocket(`ws${secure()}://${config.endpoint}/ws`);
@@ -64,19 +66,22 @@
       inputPlaceholder = "";
       if (connection !== null) {
         connection.send(`${config.user}:${config.token}`);
+        log("info", "ws", "Connected.");
       }
     }
     connection.onclose = function(event) {
       inputPlaceholder = "Connection closed!";
       connection = null;
+      log("warn", "ws", "Connection closed.");
     }
     connection.onerror = function(event) {
       inputPlaceholder = "Connection error";
       connection = null;
+      log("error", "ws", "Connection error.", event);
     }
     connection.onmessage = function(event) {
       let message = JSON.parse(event.data) as Message;
-      console.log(message);
+      log("debug", "ws", "Message received.", message);
       if (message.user !== config.user) {
         messages.unshift(convertMessage(message));
       }
@@ -101,6 +106,7 @@
       })
       .catch(error => {
         errorToast = error.toString();
+        log("error", "http", "Failed to load more messages.", error);
       })
       .finally(() => {
         loadingMore = false;
@@ -180,7 +186,7 @@
   }
 
   function blink() {
-    console.log(`blink ${close}`);
+    log("debug", "ui", "Blink timer started.");
 
     intervalId = setInterval(() => {
       if (Math.random() < 0.1) {
@@ -196,7 +202,7 @@
   connect();
 
   onPause(() => {
-    console.log("App pause");
+    log("info", "app", "App paused.");
     if (intervalId !== null) {
       clearInterval(intervalId);
       intervalId = null;
@@ -206,7 +212,7 @@
     connection = null;
   });
   onResume(() => {
-    console.log("App resume");
+    log("info", "app", "App resumed.");
     if (intervalId === null) {
       blink();
     }
@@ -225,7 +231,7 @@
         getFCMToken()
           .then(result => {
             const token = result.token;
-            console.log("FCM Token:", token);
+            log("info", "notification", "FCM token obtained.");
             // Register token to core server
             fetch(`http${secure()}://${config.endpoint}/notification/token`, {
               method: "PUT",
@@ -242,14 +248,16 @@
                 return response.json();
               })
               .then(data => {
-                console.log("Registered FCM token to server:", data);
+                log("info", "notification", "FCM token registered.");
               })
               .catch(error => {
                 errorToast = error.toString();
+                log("error", "notification", "Failed to register FCM token.", error);
               });
           })
           .catch(err => {
             errorToast = err.toString();
+            log("error", "notification", "Failed to get FCM token.", err);
           });
       }
     };
