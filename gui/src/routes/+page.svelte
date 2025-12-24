@@ -60,6 +60,19 @@
         log("error", "http", "Failed to load messages.", error);
       });
 
+    fetch(`http${secure()}://${config.endpoint}/metadata`, {
+      headers: {
+        "Authorization": `${config.user}:${config.token}`,
+      }
+    })
+      .then(response => response.json())
+      .then(json => {
+        log("info", "http", "Server metadata received.", json);
+      })
+      .catch(error => {
+        log("error", "http", "Failed to load server metadata.", error);
+      });
+
     connection = new WebSocket(`ws${secure()}://${config.endpoint}/ws`);
 
     connection.onopen = function(event) {
