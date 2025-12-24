@@ -136,11 +136,11 @@
 }
 
 .level-warn {
-  color: #a66a00;
+  color: #e29b00;
 }
 
 .level-error {
-  color: #b00020;
+  color: #e9002b;
 }
 
 </style>
