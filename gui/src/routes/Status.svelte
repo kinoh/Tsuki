@@ -5,6 +5,9 @@
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let logs = $state<Array<{ ts: number; level: string; scope: string; message: string; data?: string }>>([]);
+  let filteredLogs = $state<Array<{ ts: number; level: string; scope: string; message: string; data?: string }>>([]);
+  let filterText = $state("");
+  let filterError = $state("");
 
   function formatLog(entry: { ts: number; level: string; scope: string; message: string; data?: string }): string {
     const time = new Date(entry.ts).toISOString();
@@ -21,6 +24,22 @@
     loadLogs();
   }
 
+  $effect(() => {
+    if (filterText.trim() === "") {
+      filterError = "";
+      filteredLogs = logs;
+      return;
+    }
+    try {
+      const regex = new RegExp(filterText);
+      filterError = "";
+      filteredLogs = logs.filter(entry => regex.test(formatLog(entry)));
+    } catch {
+      filterError = "Invalid regex";
+      filteredLogs = logs;
+    }
+  });
+
   onMount(() => {
     loadLogs();
     const intervalId = setInterval(loadLogs, 1000);
@@ -35,10 +54,20 @@
   <div class="field">
     <div class="log-header">
       <label for="localLogs">Local logs</label>
-      <button class="clear-button" onclick={handleClearLogs}>Clear</button>
+      <div class="log-controls">
+        <input
+          class="log-filter"
+          class:invalid={filterError !== ""}
+          type="text"
+          placeholder="Regex filter"
+          aria-label="Regex filter"
+          bind:value={filterText}
+        />
+        <button class="clear-button" onclick={handleClearLogs}>Clear</button>
+      </div>
     </div>
     <div id="localLogs" class="logs">
-      {#each logs as entry}
+      {#each filteredLogs as entry}
         <div class={`log-entry level-${entry.level}`}>{formatLog(entry)}</div>
       {/each}
     </div>
@@ -62,6 +91,27 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.log-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.log-filter {
+  width: 10rem;
+  font-size: 0.65rem;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #fff;
+  outline: none;
+}
+
+.log-filter.invalid {
+  border-color: #b00020;
+  background-color: #ffeef1;
 }
 
 .clear-button {
