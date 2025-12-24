@@ -46,12 +46,18 @@
   }
 
   function connect() {
+    log("info", "ws", "Connect requested.");
     fetch(`http${secure()}://${config.endpoint}/messages?n=20`, {
       headers: {
         "Authorization": `${config.user}:${config.token}`,
       }
     })
-      .then(response => response.json())
+      .then(response => {
+        if (response.status === 401 || response.status === 403) {
+          log("error", "http", "Unauthorized when loading messages.", { status: response.status });
+        }
+        return response.json();
+      })
       .then(data => {
         messages = data.messages.toReversed().map(convertMessage);
       })
@@ -65,7 +71,12 @@
         "Authorization": `${config.user}:${config.token}`,
       }
     })
-      .then(response => response.json())
+      .then(response => {
+        if (response.status === 401 || response.status === 403) {
+          log("error", "http", "Unauthorized when loading server metadata.", { status: response.status });
+        }
+        return response.json();
+      })
       .then(json => {
         log("info", "http", "Server metadata received.", json);
       })
@@ -78,7 +89,11 @@
     connection.onopen = function(event) {
       inputPlaceholder = "";
       if (connection !== null) {
-        connection.send(`${config.user}:${config.token}`);
+        try {
+          connection.send(`${config.user}:${config.token}`);
+        } catch (error) {
+          log("error", "ws", "Failed to send auth over WebSocket.", error);
+        }
         log("info", "ws", "Connected.");
       }
     }
@@ -138,7 +153,11 @@
         chat: [inputText],
         timestamp: Date.now() / 1000,
       });
-      connection.send(inputText);
+      try {
+        connection.send(inputText);
+      } catch (error) {
+        log("error", "ws", "Failed to send message over WebSocket.", error);
+      }
       inputText = "";
     }
   }
@@ -169,6 +188,7 @@
 
   function handleMessageInputFocus() {
     if (connection === null) {
+      log("info", "ws", "Connect triggered by input focus.");
       connect();
     }
   }
@@ -230,6 +250,7 @@
       blink();
     }
     if (connection === null) {
+      log("info", "ws", "Connect triggered by app resume.");
       connect();
     }
   });
@@ -239,6 +260,9 @@
       if (!permissionGranted) {
         const permission = await requestPermission();
         permissionGranted = permission === "granted";
+        if (!permissionGranted) {
+          log("warn", "notification", "Notification permission denied.");
+        }
       }
       if (permissionGranted) {
         getFCMToken()
