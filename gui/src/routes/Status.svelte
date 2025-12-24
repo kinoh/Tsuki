@@ -112,8 +112,9 @@
   background-color: #eee;
   outline: none;
   border: none;
+  font-family: monospace;
   font-size: 0.6rem;
-  line-height: 0.85rem;
+  line-height: 0.8rem;
   padding: 0.2rem;
   width: 98%;
   height: 10rem;
