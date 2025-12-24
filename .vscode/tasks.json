@@ -11,6 +11,9 @@
         "tauri",
         "dev"
       ],
+      "options": {
+        "cwd": "${workspaceFolder}/gui"
+      },
       "presentation": {
         "clear": true,
         "panel": "shared",
