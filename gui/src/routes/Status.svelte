@@ -60,11 +60,11 @@
       <label for="localLogs">Local logs</label>
       <button class="clear-button" onclick={handleClearLogs}>Clear</button>
     </div>
-    <pre id="localLogs" class="logs">
-{#each logs as entry}
-{formatLog(entry)}
-{/each}
-    </pre>
+    <div id="localLogs" class="logs">
+      {#each logs as entry}
+        <div class="log-entry">{formatLog(entry)}</div>
+      {/each}
+    </div>
   </div>
 </div>
 
@@ -119,6 +119,10 @@
   height: 10rem;
   overflow: scroll;
   margin: 0;
+}
+
+.log-entry {
+  padding: 0.1rem 0;
   white-space: pre-wrap;
 }
 
