@@ -62,7 +62,7 @@
     </div>
     <div id="localLogs" class="logs">
       {#each logs as entry}
-        <div class="log-entry">{formatLog(entry)}</div>
+        <div class={`log-entry level-${entry.level}`}>{formatLog(entry)}</div>
       {/each}
     </div>
   </div>
@@ -125,6 +125,22 @@
 .log-entry {
   padding: 0.1rem 0;
   white-space: pre-wrap;
+}
+
+.level-debug {
+  color: #556;
+}
+
+.level-info {
+  color: #223;
+}
+
+.level-warn {
+  color: #a66a00;
+}
+
+.level-error {
+  color: #b00020;
 }
 
 </style>
