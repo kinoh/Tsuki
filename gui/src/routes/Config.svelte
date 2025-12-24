@@ -30,6 +30,7 @@
       runtimeError = "Set endpoint, token, and user first.";
       return;
     }
+    log("debug", "http", "Runtime config request.");
     fetch(`http${secure()}://${config.endpoint}/config`, {
       headers: {
         "Authorization": `${config.user}:${config.token}`,
@@ -37,6 +38,7 @@
     })
       .then(response => response.json())
       .then(data => {
+        log("debug", "http", "Runtime config payload received.", data);
         runtimeConfig = {
           enableNotification: Boolean(data.enableNotification),
           enableSensory: Boolean(data.enableSensory),
@@ -55,6 +57,7 @@
       return;
     }
     runtimeSaving = true;
+    log("debug", "http", "Runtime config payload sent.", runtimeConfig);
     fetch(`http${secure()}://${config.endpoint}/config`, {
       method: "PUT",
       headers: {
@@ -70,6 +73,7 @@
         return response.json();
       })
       .then(data => {
+        log("debug", "http", "Runtime config payload received.", data);
         runtimeConfig = {
           enableNotification: Boolean(data.enableNotification),
           enableSensory: Boolean(data.enableSensory),

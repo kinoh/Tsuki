@@ -47,6 +47,7 @@
 
   function connect() {
     log("info", "ws", "Connect requested.");
+    log("debug", "http", "Messages request.", { endpoint: config.endpoint, limit: 20 });
     fetch(`http${secure()}://${config.endpoint}/messages?n=20`, {
       headers: {
         "Authorization": `${config.user}:${config.token}`,
@@ -59,6 +60,7 @@
         return response.json();
       })
       .then(data => {
+        log("debug", "http", "Messages payload received.", data);
         messages = data.messages.toReversed().map(convertMessage);
       })
       .catch(error => {
@@ -66,6 +68,7 @@
         log("error", "http", "Failed to load messages.", error);
       });
 
+    log("debug", "http", "Server metadata request.", { endpoint: config.endpoint });
     fetch(`http${secure()}://${config.endpoint}/metadata`, {
       headers: {
         "Authorization": `${config.user}:${config.token}`,
@@ -78,6 +81,7 @@
         return response.json();
       })
       .then(json => {
+        log("debug", "http", "Server metadata payload received.", json);
         log("info", "http", "Server metadata received.", json);
       })
       .catch(error => {
@@ -155,6 +159,7 @@
       });
       try {
         connection.send(inputText);
+        log("debug", "ws", "Message payload sent.", { content: inputText });
       } catch (error) {
         log("error", "ws", "Failed to send message over WebSocket.", error);
       }
@@ -285,6 +290,8 @@
                 return response.json();
               })
               .then(data => {
+                log("debug", "http", "FCM token registration payload.", { token });
+                log("debug", "http", "FCM token registration response.", data);
                 log("info", "notification", "FCM token registered.");
               })
               .catch(error => {
