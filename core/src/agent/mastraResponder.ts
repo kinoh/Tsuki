@@ -59,10 +59,12 @@ export class MastraResponder implements Responder {
 
     await this.usage.recordUsage(response, threadId, ctx.userId, this.agent.name)
 
+    const chatParts = splitConcatenatedJsonObjects(response.text ?? '')
+
     return {
       role: 'assistant',
       user: this.agent.name,
-      chat: [response.text],
+      chat: chatParts,
       timestamp: Math.floor(Date.now() / 1000),
     }
   }
@@ -77,4 +79,85 @@ export class MastraResponder implements Responder {
     }
     return this.respond(synthesized, ctx)
   }
+}
+
+function splitConcatenatedJsonObjects(text: string): string[] {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{')) {
+    return [text]
+  }
+
+  const parts: string[] = []
+  let depth = 0
+  let inString = false
+  let escape = false
+  let segmentStart = -1
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+
+    if (inString) {
+      if (escape) {
+        escape = false
+        continue
+      }
+
+      if (char === '\\') {
+        escape = true
+        continue
+      }
+
+      if (char === '"') {
+        inString = false
+      }
+
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      continue
+    }
+
+    if (char === '{') {
+      if (depth === 0) {
+        segmentStart = i
+      }
+      depth += 1
+      continue
+    }
+
+    if (char === '}') {
+      if (depth > 0) {
+        depth -= 1
+        if (depth === 0 && segmentStart !== -1) {
+          parts.push(text.slice(segmentStart, i + 1))
+          segmentStart = -1
+        }
+      }
+    }
+  }
+
+  if (depth !== 0 || parts.length <= 1) {
+    return [text]
+  }
+
+  const normalized = trimmed.replace(/\s+/g, '')
+  const combined = parts.join('').replace(/\s+/g, '')
+  if (normalized !== combined) {
+    return [text]
+  }
+
+  for (const part of parts) {
+    try {
+      const parsed = JSON.parse(part)
+      if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
+        return [text]
+      }
+    } catch {
+      return [text]
+    }
+  }
+
+  return parts
 }
