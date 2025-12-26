@@ -7,6 +7,7 @@
 - Replaced per-user `RuntimeContext` usage with `RequestContext` for agent instructions and generation options.
 - Updated MCP access to the new tool APIs (`listTools`, `listToolsets`) and direct tool execution signature.
 - Added required `id` fields for LibSQL storage/vector configuration as per new config types.
+- Added direct `ai` dependency aligned with `@ai-sdk/openai@3.x` to fix model type mismatches in `generateText`.
 
 ## Open item
 - `ai` package version is incompatible with `@ai-sdk/openai@3.x` (LanguageModelV1 vs V3). This needs a dependency alignment decision before changing versions.

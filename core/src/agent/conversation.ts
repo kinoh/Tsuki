@@ -48,8 +48,6 @@ export class ConversationManager {
 
       const lastMessage = result.messages[0]
       return lastMessage?.createdAt ?? null
-
-      return null
     } catch (error) {
       appLogger.warn('Failed to get last message time', { error, threadId })
       return null

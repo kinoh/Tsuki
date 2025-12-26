@@ -33,10 +33,9 @@ export class MCPClient {
     if (typeof tool.execute !== 'function') {
       throw new Error(`Tool ${toolName} does not have an executable function`)
     }
-    const result = await tool.execute(params, {
+    return await tool.execute(params, {
       requestContext: new RequestContext(),
     })
-    return result
   }
 }
 
