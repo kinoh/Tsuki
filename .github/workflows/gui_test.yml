@@ -36,6 +36,9 @@ jobs:
   rust:
     runs-on: windows-latest
     steps:
+    - name: Git config for symlinks
+      run: |
+        git config --global core.symlinks false
     - uses: actions/checkout@v4
     - name: Setup Rust
       run: rustup update stable && rustup default stable
