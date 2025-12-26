@@ -1,7 +1,7 @@
 use regex::Regex;
 use rmcp::{
     ErrorData, ServerHandler,
-    handler::server::{router::tool::ToolRouter, tool::Parameters},
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
     schemars::{self, JsonSchema},
     serde_json::json,
@@ -246,6 +246,7 @@ impl StructuredMemoryService {
             content: vec![Content::text(content)],
             structured_content: None,
             is_error: Some(false),
+            meta: None,
         })
     }
 
@@ -312,6 +313,7 @@ impl StructuredMemoryService {
             content: vec![Content::text(response)],
             structured_content: None,
             is_error: Some(false),
+            meta: None,
         })
     }
 
@@ -369,6 +371,7 @@ impl StructuredMemoryService {
             content: vec![Content::text(yaml_string)],
             structured_content: None,
             is_error: Some(false),
+            meta: None,
         })
     }
 }
@@ -379,7 +382,7 @@ impl ServerHandler for StructuredMemoryService {
         ServerInfo {
             instructions: Some("Structured memory MCP server for hierarchical document management with [[link]] syntax. The root document is the main entry point and should contain all primary information. LLM agents should always read and update the root document by default. Only when a specific topic in the root becomes too large or complex, create a subdocument by adding a [[subdocument_id]] link in the root. Subdocuments are for offloading detailed or expanded content; otherwise, keep all content in the root. This design keeps the document tree shallow and the root as the central knowledge hub.".into()),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation { name: env!("CARGO_CRATE_NAME").to_owned(), version: env!("CARGO_PKG_VERSION").to_owned() },
+            server_info: Implementation::from_build_env(),
             ..Default::default()
         }
     }
