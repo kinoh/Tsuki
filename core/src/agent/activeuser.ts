@@ -1,11 +1,11 @@
 import { getUserSpecificMCP, MCPAuthHandler, MCPClient } from '../mastra/mcp'
 import { ResponseMessage, createResponseMessage } from './message'
 import { ConversationManager } from './conversation'
-import { RuntimeContext } from '@mastra/core/runtime-context'
+import { RequestContext } from '@mastra/core/request-context'
 import { UserContext } from './userContext'
 import { Responder } from './mastraResponder'
 import { MessageRouter } from './router'
-import { MastraMessageV2 } from '@mastra/core'
+import { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ConfigService } from '../configService'
 import { appLogger } from '../logger'
 
@@ -49,7 +49,7 @@ export class ActiveUser implements UserContext {
     private config: ConfigService,
     private responder: Responder,
     private router: MessageRouter,
-    private runtimeContext: RuntimeContext<AgentRuntimeContext>,
+    private requestContext: RequestContext<AgentRuntimeContext>,
     private readonly assistantName: string,
     onAuth: MCPAuthHandler | null,
   ) {
@@ -93,11 +93,11 @@ export class ActiveUser implements UserContext {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getToolsets(): Promise<Record<string, Record<string, any>>> {
-    return await this.mcp?.client.getToolsets() ?? {}
+    return await this.mcp?.client.listToolsets() ?? {}
   }
 
-  getRuntimeContext(): RuntimeContext<AgentRuntimeContext> {
-    return this.runtimeContext
+  getRequestContext(): RequestContext<AgentRuntimeContext> {
+    return this.requestContext
   }
 
   async processMessage(input: MessageInput): Promise<void> {
@@ -145,7 +145,7 @@ export class ActiveUser implements UserContext {
   async getMessageHistory(): Promise<string[]> {
     const limit = this.routerHistoryLimit()
     const messages = await this.conversation.getRecentMessages(limit)
-    const formatted = messages.map((message: MastraMessageV2) => createResponseMessage(message, this.assistantName))
+    const formatted = messages.map((message: MastraDBMessage) => createResponseMessage(message, this.assistantName))
     return formatted.map((msg) => {
       const flattened = msg.chat.join(' ').replace(/\s+/g, ' ').trim()
       const truncated = flattened.length > 200 ? `${flattened.slice(0, 200)}…` : flattened

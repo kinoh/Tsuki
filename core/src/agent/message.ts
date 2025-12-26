@@ -1,5 +1,4 @@
-import { MastraMessageV2 } from '@mastra/core'
-import { MastraMessageContentV2 } from '@mastra/core/agent'
+import type { MastraDBMessage, MastraMessageContentV2 } from '@mastra/core/agent/message-list'
 import type { TextUIPart, ReasoningUIPart, ToolInvocationUIPart, SourceUIPart, FileUIPart, StepStartUIPart } from '@ai-sdk/ui-utils'
 
 export interface ResponseMessage {
@@ -48,7 +47,7 @@ function extractTextContent(content: MastraMessageContentV2): string[] {
 }
 
 export function createResponseMessage(
-  message: MastraMessageV2,
+  message: MastraDBMessage,
   agentName: string,
 ): ResponseMessage {
   return {

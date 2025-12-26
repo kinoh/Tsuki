@@ -1,5 +1,5 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
-import { MastraMemory } from '@mastra/core'
+import type { MastraMemory } from '@mastra/core/memory'
 import { TABLE_THREADS } from '@mastra/core/storage'
 import { appLogger } from '../../logger'
 
@@ -172,8 +172,7 @@ export class ThreadResource extends BaseResource {
 
   async delete(id: string): Promise<void> {
     try {
-      const storage = this.agentMemory.storage
-      await storage.deleteThread({ threadId: id })
+      await this.agentMemory.deleteThread(id)
     } catch (error) {
       appLogger.error('Error deleting thread', { error, threadId: id })
       throw error

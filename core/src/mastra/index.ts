@@ -1,17 +1,17 @@
 
-import { Agent, ToolsInput } from '@mastra/core/agent'
+import type { Agent, ToolsInput } from '@mastra/core/agent'
 import { Mastra } from '@mastra/core/mastra'
 import { LibSQLStore } from '@mastra/libsql'
 import { summon } from './agents/tsuki'
 import { getUniversalMCP, MCPClient } from './mcp'
-import { Metric, ToolAction } from '@mastra/core'
+import type { ToolAction } from '@mastra/core/tools'
 import { PinoLogger } from '@mastra/loggers'
 import { ConfigService } from '../configService'
 import { parseLogLevel } from '../logger'
 
 export class MastraInstance {
   constructor(
-    public readonly mastra: Mastra<Record<string, Agent<string, ToolsInput, Record<string, Metric>>>>,
+    public readonly mastra: Mastra<Record<string, Agent<string, ToolsInput>>>,
     public readonly mcp: MCPClient,
   ) {
   }
@@ -23,12 +23,13 @@ export class MastraInstance {
     const logLevel = parseLogLevel(process.env.LOG_LEVEL)
 
     const mcp = getUniversalMCP(config)
-    const tools = await mcp.client.getTools()
+    const tools = await mcp.client.listTools()
 
     const mastra = new Mastra({
       workflows: {},
       agents: { tsuki: summon(dataDir, openAiModel, tools) },
       storage: new LibSQLStore({
+        id: 'mastra-storage',
         url: `file:${dataDir}/mastra.db`,
       }),
       logger: new PinoLogger({
@@ -47,8 +48,8 @@ export class MastraInstance {
 
   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  public getAgent(name: string): Agent<string, Record<string, ToolAction<any, any, any>>, Record<string, Metric>> {
+  public getAgent(name: string): Agent<string, Record<string, ToolAction<any, any, any>>> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return this.mastra.getAgent(name) as Agent<string, Record<string, ToolAction<any, any, any>>, Record<string, Metric>>
+    return this.mastra.getAgent(name) as Agent<string, Record<string, ToolAction<any, any, any>>>
   }
 }

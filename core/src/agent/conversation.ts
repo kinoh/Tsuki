@@ -1,4 +1,5 @@
-import { MastraMemory, MastraMessageV2 } from '@mastra/core'
+import type { MastraMemory } from '@mastra/core/memory'
+import type { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { appLogger } from '../logger'
 
 export class ConversationManager {
@@ -35,22 +36,18 @@ export class ConversationManager {
 
   private async getLastMessageTime(threadId: string): Promise<Date | null> {
     try {
-      const result = await this.memory.query({
+      const result = await this.memory.recall({
         threadId,
-        selectBy: {
-          last: 1,
+        perPage: 1,
+        page: 0,
+        orderBy: {
+          field: 'createdAt',
+          direction: 'DESC',
         },
       })
 
-      if (result.messages.length > 0) {
-        const lastMessage = result.messages[0]
-        // Check if message object has timestamp information
-        // Possible fields: createdAt, timestamp, date, etc.
-        if ('createdAt' in lastMessage && typeof lastMessage.createdAt === 'string') {
-          const timestamp = lastMessage.createdAt
-          return new Date(timestamp)
-        }
-      }
+      const lastMessage = result.messages[0]
+      return lastMessage?.createdAt ?? null
 
       return null
     } catch (error) {
@@ -107,16 +104,19 @@ export class ConversationManager {
     return todayId
   }
 
-  async getRecentMessages(limit = 10): Promise<MastraMessageV2[]> {
+  async getRecentMessages(limit = 10): Promise<MastraDBMessage[]> {
     const threadId = await this.currentThread()
     try {
-      const result = await this.memory.query({
+      const result = await this.memory.recall({
         threadId,
-        selectBy: {
-          last: limit,
+        perPage: limit,
+        page: 0,
+        orderBy: {
+          field: 'createdAt',
+          direction: 'DESC',
         },
-      }) as { messagesV2?: MastraMessageV2[] }
-      const messages = result.messagesV2 ?? []
+      })
+      const messages = result.messages ?? []
       return [...messages].reverse()
     } catch (error) {
       appLogger.warn('Failed to get recent messages', { error, threadId })

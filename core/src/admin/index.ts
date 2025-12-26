@@ -1,7 +1,7 @@
 import AdminJS, { ActionContext, ActionResponse, BaseRecord } from 'adminjs'
 import { Router } from 'express'
 import * as AdminJSExpress from '@adminjs/express'
-import { MastraMemory } from '@mastra/core'
+import type { MastraMemory } from '@mastra/core/memory'
 import { ThreadResource } from './resources/ThreadResource'
 import { MessageResource } from './resources/MessageResource'
 import { StructuredMemoryResource } from './resources/StructuredMemoryResource'

@@ -23,7 +23,7 @@ export async function metadataHandler(req: express.Request, res: express.Respons
     const agent = req.app.locals.agent
     const gitHash = await getGitHash()
     const openaiModel = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
-    const tools = await agent.getTools()
+    const tools = await agent.listTools()
     const mcpTools = Object.keys(tools)
 
     res.json({

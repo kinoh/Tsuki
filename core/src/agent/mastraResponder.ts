@@ -1,4 +1,4 @@
-import type { Agent as MastraAgent } from '@mastra/core'
+import type { Agent as MastraAgent } from '@mastra/core/agent'
 import { MessageInput, MCPNotificationResourceUpdated } from './activeuser'
 import { ResponseMessage } from './message'
 import { UsageStorage } from '../storage/usage'
@@ -40,8 +40,8 @@ export class MastraResponder implements Responder {
 
     const threadId = await ctx.getCurrentThread()
     const memory = await ctx.loadMemory()
-    const runtimeContext = ctx.getRuntimeContext()
-    runtimeContext.set('memory', memory)
+    const requestContext = ctx.getRequestContext()
+    requestContext.set('memory', memory)
     const toolsets = await ctx.getToolsets()
 
     const response = await this.agent.generate(
@@ -52,7 +52,7 @@ export class MastraResponder implements Responder {
           thread: threadId,
           options: { lastMessages: 20 },
         },
-        runtimeContext,
+        requestContext,
         toolsets,
       },
     )

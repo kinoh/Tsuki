@@ -1,5 +1,5 @@
 import express from 'express'
-import { MastraMessageV2 } from '@mastra/core'
+import type { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ResponseMessage, createResponseMessage } from '../../agent/message'
 import { Thread, GetMessagesQuery } from '../types'
 import { appLogger } from '../../logger'
@@ -13,7 +13,7 @@ export async function threadsHandler(req: express.Request, res: express.Response
     return
   }
 
-  const threads = await agentMemory.getThreadsByResourceId({ resourceId: userId }) as Thread[]
+  const { threads } = await agentMemory.listThreadsByResourceId({ resourceId: userId })
   res.json({
     'threads': threads,
   })
@@ -39,15 +39,18 @@ export async function threadByIdHandler(req: express.Request, res: express.Respo
     }
 
     // Get messages
-    const result = await agentMemory.query({
+    const result = await agentMemory.recall({
       threadId,
-      selectBy: {
-        last: 1000,
+      perPage: 1000,
+      page: 0,
+      orderBy: {
+        field: 'createdAt',
+        direction: 'ASC',
       },
-    }) as unknown as { messagesV2: MastraMessageV2[] }
+    })
 
     // Convert to ResponseMessage format
-    const messages: ResponseMessage[] = result.messagesV2.map((message: MastraMessageV2) => {
+    const messages: ResponseMessage[] = result.messages.map((message: MastraDBMessage) => {
       const agentName = agent.name
       return createResponseMessage(message, agentName)
     })
@@ -86,7 +89,7 @@ export async function messagesHandler(req: express.Request, res: express.Respons
     }
 
     // Get all threads for user
-    const threads = await agentMemory.getThreadsByResourceId({ resourceId: userId }) as Thread[]
+    const { threads } = await agentMemory.listThreadsByResourceId({ resourceId: userId })
 
     // Filter threads by userId prefix and sort by date part (descending)
     const userThreads = threads
@@ -118,15 +121,18 @@ export async function messagesHandler(req: express.Request, res: express.Respons
         break
       }
 
-      const result = await agentMemory.query({
+      const result = await agentMemory.recall({
         threadId: thread.id,
-        selectBy: {
-          last: before === undefined ? remainingCount : 1000, // TODO: Fix "before" handling
+        perPage: before === undefined ? remainingCount : 1000, // TODO: Fix "before" handling
+        page: 0,
+        orderBy: {
+          field: 'createdAt',
+          direction: 'ASC',
         },
-      }) as unknown as { messagesV2: MastraMessageV2[] }
+      })
 
       // Convert to ResponseMessage format and add to collection
-      let threadMessages: ResponseMessage[] = result.messagesV2.map((message: MastraMessageV2) => {
+      let threadMessages: ResponseMessage[] = result.messages.map((message: MastraDBMessage) => {
         const agentName = agent.name
         return createResponseMessage(message, agentName)
       })

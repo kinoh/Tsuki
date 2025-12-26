@@ -11,16 +11,17 @@ export function summon(dataDir: string, openAiModel: string, tools: ToolsInput):
   const dbPath = `file:${dataDir}/mastra.db`
 
   return new Agent({
+    id: 'tsuki',
     name: 'Tsuki',
-    instructions: ({ runtimeContext }): string => {
-      const instructions = runtimeContext.get<string, string>('instructions')
+    instructions: ({ requestContext }): string => {
+      const instructions = requestContext.get<string, string>('instructions')
       if (!instructions) {
-        appLogger.warn('Instructions not found in runtime context, using default instructions')
+        appLogger.warn('Instructions not found in request context, using default instructions')
         return 'You are a helpful chatting agent.'
       }
 
       // Append user-specific memory if available
-      const memory = runtimeContext.get<string, string>('memory')
+      const memory = requestContext.get<string, string>('memory')
       if (memory) {
         return `${instructions}\n\n<memory>\n${memory}\n</memory>`
       }
@@ -30,9 +31,11 @@ export function summon(dataDir: string, openAiModel: string, tools: ToolsInput):
     model: openai(openAiModel),
     memory: new Memory({
       storage: new LibSQLStore({
+        id: 'mastra-storage',
         url: dbPath,
       }),
       vector: new LibSQLVector({
+        id: 'mastra-vector',
         connectionUrl: dbPath,
       }),
       embedder: openai.embedding('text-embedding-3-small'),

@@ -1,5 +1,6 @@
-import type { Agent, MastraMemory } from '@mastra/core'
-import { RuntimeContext } from '@mastra/core/runtime-context'
+import type { Agent } from '@mastra/core/agent'
+import type { MastraMemory } from '@mastra/core/memory'
+import { RequestContext } from '@mastra/core/request-context'
 import { ConversationManager } from './conversation'
 import { UsageStorage } from '../storage/usage'
 import { loadPromptFromEnv } from './prompt'
@@ -62,8 +63,8 @@ export class AgentService {
 
     // Create per-user runtime context with common instructions
     // Memory is loaded on-demand in ActiveUser.processMessage
-    const userContext = new RuntimeContext<AgentRuntimeContext>()
-    userContext.set('instructions', this.commonInstructions)
+    const requestContext = new RequestContext<AgentRuntimeContext>()
+    requestContext.set('instructions', this.commonInstructions)
 
     const routerModel = process.env.ROUTER_MODEL ?? 'gpt-4o-mini'
     const router = new AIRouter(routerModel, this.commonInstructions)
@@ -74,7 +75,7 @@ export class AgentService {
       this.config,
       this.responder,
       router,
-      userContext,
+      requestContext,
       this.agent.name,
       null,
     )

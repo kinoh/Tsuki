@@ -1,4 +1,4 @@
-import { MastraStorage } from '@mastra/core'
+import { MastraStorage } from '@mastra/core/storage'
 import { getClient, LibSQLClient } from './libsql'
 import { appLogger } from '../logger'
 
@@ -69,12 +69,12 @@ export class UsageStorage {
   }
 
   async recordUsage(
-    response: { response: { id: string }; usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number } },
+    response: { response: { id?: string }; usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number } },
     threadId: string,
     userId: string,
     agentName: string,
   ): Promise<void> {
-    if (typeof response.usage === 'undefined') {
+    if (typeof response.usage === 'undefined' || typeof response.response.id !== 'string') {
       return
     }
 

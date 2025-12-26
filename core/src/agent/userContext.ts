@@ -1,4 +1,4 @@
-import { RuntimeContext } from '@mastra/core/runtime-context'
+import { RequestContext } from '@mastra/core/request-context'
 import { MCPClient } from '../mastra/mcp'
 import type { AgentRuntimeContext } from './activeuser'
 
@@ -12,5 +12,5 @@ export interface UserContext {
   loadMemory(): Promise<string>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getToolsets(): Promise<Record<string, Record<string, any>>>
-  getRuntimeContext(): RuntimeContext<AgentRuntimeContext>
+  getRequestContext(): RequestContext<AgentRuntimeContext>
 }

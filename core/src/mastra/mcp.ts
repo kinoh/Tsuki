@@ -1,5 +1,5 @@
-import { Tool } from '@mastra/core'
-import { RuntimeContext } from '@mastra/core/di'
+import type { Tool } from '@mastra/core/tools'
+import { RequestContext } from '@mastra/core/request-context'
 import { MCPClient as MastraMCPClient, MCPClientOptions } from '@mastra/mcp'
 import { ConfigService } from '../configService'
 import { appLogger } from '../logger'
@@ -20,7 +20,7 @@ export class MCPClient {
   }
 
   public async callTool(serverName: string, toolName: string, params: Record<string, unknown>): Promise<unknown> {
-    const toolsets = await this.client.getToolsets()
+    const toolsets = await this.client.listToolsets()
     const tools = toolsets[serverName]
     if (tools === undefined) {
       throw new Error(`Tool ${toolName} is not available`)
@@ -33,11 +33,8 @@ export class MCPClient {
     if (typeof tool.execute !== 'function') {
       throw new Error(`Tool ${toolName} does not have an executable function`)
     }
-    const result = await tool.execute({
-      runtimeContext: new RuntimeContext(),
-      context: {
-        ...params,
-      },
+    const result = await tool.execute(params, {
+      requestContext: new RequestContext(),
     })
     return result
   }

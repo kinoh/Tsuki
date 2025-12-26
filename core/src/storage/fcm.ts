@@ -1,4 +1,4 @@
-import { MastraStorage } from '@mastra/core'
+import { MastraStorage } from '@mastra/core/storage'
 import { getClient, LibSQLClient } from './libsql'
 import { appLogger } from '../logger'
 
