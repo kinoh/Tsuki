@@ -151,6 +151,10 @@
       return;
     }
     if (connection !== null) {
+      const payload = JSON.stringify({
+        type: "message",
+        text: inputText,
+      });
       messages.unshift({
         role: "user",
         user: config.user,
@@ -158,7 +162,7 @@
         timestamp: Date.now() / 1000,
       });
       try {
-        connection.send(inputText);
+        connection.send(payload);
         log("debug", "ws", "Message payload sent.", { content: inputText });
       } catch (error) {
         log("error", "ws", "Failed to send message over WebSocket.", error);
