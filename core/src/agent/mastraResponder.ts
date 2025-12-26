@@ -150,8 +150,8 @@ function splitConcatenatedJsonObjects(text: string): string[] {
 
   for (const part of parts) {
     try {
-      const parsed = JSON.parse(part)
-      if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
+      const parsed: unknown = JSON.parse(part)
+      if (!isPlainObject(parsed)) {
         return [text]
       }
     } catch {
@@ -160,4 +160,8 @@ function splitConcatenatedJsonObjects(text: string): string[] {
   }
 
   return parts
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
