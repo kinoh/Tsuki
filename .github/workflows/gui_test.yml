@@ -37,6 +37,7 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: Git config for symlinks
+      working-directory: .
       run: |
         git config --global core.symlinks false
     - uses: actions/checkout@v4
