@@ -25,6 +25,10 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
+    - name: Git config for symlinks
+      working-directory: .
+      run: |
+        git config --global core.symlinks false
     - uses: actions/checkout@v4
     - name: Write capabilities
       working-directory: gui/src-tauri/capabilities
