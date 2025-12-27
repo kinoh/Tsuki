@@ -15,22 +15,22 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@tauri-apps/api": "^2.3.0",
-    "@tauri-apps/plugin-http": "~2",
-    "@tauri-apps/plugin-notification": "^2.2.2",
-    "@tauri-apps/plugin-opener": "^2",
-    "@tauri-plugin-fcm-api": "git@github.com:kinoh/tauri-plugin-fcm.git#ec5e2293fd7e6b30ab3144ef6bdd772ef790e312",
+    "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/plugin-http": "~2.5.4",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "@tauri-apps/plugin-opener": "^2.5.2",
+    "@tauri-plugin-fcm-api": "github:kinoh/tauri-plugin-fcm#ec5e2293fd7e6b30ab3144ef6bdd772ef790e312",
     "tauri-plugin-app-events-api": "^0.2.0"
   },
   "devDependencies": {
     "@dotenvx/dotenvx": "^1.51.2",
-    "@sveltejs/adapter-static": "^3.0.6",
-    "@sveltejs/kit": "^2.20.6",
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@tauri-apps/cli": "^2",
-    "svelte": "^5.0.0",
-    "svelte-check": "^4.0.0",
-    "typescript": "~5.6.2",
-    "vite": "^6.3.6"
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.49.2",
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "@tauri-apps/cli": "^2.9.6",
+    "svelte": "^5.46.1",
+    "svelte-check": "^4.3.5",
+    "typescript": "~5.6.3",
+    "vite": "^6.4.1"
   }
 }
