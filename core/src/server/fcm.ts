@@ -94,6 +94,11 @@ export class FCMManager implements MessageSender {
   }
 
   public async sendMessage(principalUserId: string, message: ResponseMessage): Promise<void> {
+    if (message.role !== 'assistant') {
+      // Only send notifications for assistant messages
+      return
+    }
+
     const chat = message.chat.join(' ')
 
     await this.sendNotification(principalUserId, {
