@@ -40,6 +40,10 @@ tasks:
     desc: Do ps in production
     cmds:
       - docker compose ps
+  exec-*:
+    desc: Execute command in production
+    cmds:
+      - docker compose exec -it {{index .MATCH 0}} sh
   build:
     desc: Do build in production
     cmds:
