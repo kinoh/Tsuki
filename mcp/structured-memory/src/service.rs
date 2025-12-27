@@ -25,6 +25,9 @@ pub struct UpdateDocumentRequest {
     pub content: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EmptyRequest {}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TreeNode {
     children: Vec<String>,
@@ -318,7 +321,10 @@ impl StructuredMemoryService {
     }
 
     #[tool(description = "Returns the full tree structure of all documents and their parent-child relationships in YAML format. Always succeeds.")]
-    pub async fn get_document_tree(&self) -> Result<CallToolResult, ErrorData> {
+    pub async fn get_document_tree(
+        &self,
+        _params: Parameters<EmptyRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
         self.ensure_root_document().await?;
 
         let tree = self.build_tree().await?;
