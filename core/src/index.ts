@@ -18,6 +18,8 @@ async function main(): Promise<void> {
   const runtimeConfigStore = new RuntimeConfigStore(config.dataDir)
   await runtimeConfigStore.load()
   using mastraInstance = await MastraInstance.create(config)
+
+  appLogger.info('Summon agent!')
   const agent = mastraInstance.getAgent('tsuki')
 
   const agentMemory = await agent.getMemory()
@@ -26,8 +28,11 @@ async function main(): Promise<void> {
   }
 
   const usageStorage = new UsageStorage(agentMemory.storage)
+
+  appLogger.info('Creating Agent Service')
   using agentService = await createAgentService(config, agent, agentMemory, usageStorage)
 
+  appLogger.info('Setting up FCM Manager')
   const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
   const fcm = new FCMManager(fcmTokenStorage, runtimeConfigStore)
 
@@ -36,7 +41,7 @@ async function main(): Promise<void> {
     .map((userId) => userId.trim())
     .filter(Boolean)
 
-  // Start AgentService (includes MCP subscriptions)
+  appLogger.info('Starting Agent Service (includes MCP subscriptions)')
   agentService.start(permanentUsers, fcm)
 
   // Sensory service runs inside core; SENSORY_POLL_SECONDS is interpreted in seconds.
@@ -62,6 +67,8 @@ async function main(): Promise<void> {
       sensoryService.stop()
     }
   })
+
+  appLogger.info('Serving...')
 
   await serve(config, agent, agentService, runtimeConfigStore)
 }
