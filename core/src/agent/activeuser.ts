@@ -32,7 +32,7 @@ export interface MessageSender {
 
 export interface MCPNotificationResourceUpdated {
   uri: string
-  title: string
+  title?: string
 }
 
 export interface MCPNotificationHandler {
@@ -178,8 +178,27 @@ export class ActiveUser implements UserContext {
     })
 
     try {
+      let title = notification.title?.trim()
+      if (!title) {
+        const resolved = await this.resolveSchedulerNotificationTitle()
+        if (!resolved) {
+          appLogger.warn('Scheduler notification title not found', {
+            notification,
+            userId: this.userId,
+          })
+          title = 'unknown event'
+        } else {
+          title = resolved
+        }
+      }
+
+      const normalizedNotification: MCPNotificationResourceUpdated = {
+        ...notification,
+        title,
+      }
+
       if (this.responder.handleNotification) {
-        const response = await this.responder.handleNotification(notification, this)
+        const response = await this.responder.handleNotification(normalizedNotification, this)
         await this.sendMessage(response)
         return
       }
@@ -187,11 +206,45 @@ export class ActiveUser implements UserContext {
       await this.processMessage({
         userId: 'system',
         type: 'message',
-        text: `Received scheduler notification: ${notification.title}`,
+        text: `Received scheduler notification: ${title}`,
       })
     } catch (err) {
       appLogger.error(`Error handling scheduler notification for user ${this.userId}`, { error: err, userId: this.userId })
     }
+  }
+
+  private async resolveSchedulerNotificationTitle(): Promise<string | null> {
+    const mcp = this.mcp
+    if (!mcp) {
+      return null
+    }
+
+    try {
+      const response = await mcp.client.resources.read('scheduler', 'fired_schedule://recent') as
+        | { contents?: Array<{ text?: string }> }
+        | undefined
+      const text = response?.contents?.[0]?.text
+      if (!text) {
+        return null
+      }
+
+      const data = JSON.parse(text)
+      if (!Array.isArray(data) || data.length === 0) {
+        return null
+      }
+
+      const last = data[data.length - 1]
+      if (last && typeof last.message === 'string' && last.message.trim()) {
+        return last.message.trim()
+      }
+    } catch (error) {
+      appLogger.warn('Failed to resolve scheduler notification title from fired_schedule resource', {
+        error,
+        userId: this.userId,
+      })
+    }
+
+    return null
   }
 
   public registerMessageSender(channel: MessageChannel, sender: MessageSender, onAuth: MCPAuthHandler | null): void {
