@@ -81,6 +81,7 @@ tasks:
       - mcp/build-scheduler
       - mcp/build-weather
       - mcp/build-metrics
+      - mcp/build-rss
   mcp/build-*:
     desc: Build a MCP server
     vars:
