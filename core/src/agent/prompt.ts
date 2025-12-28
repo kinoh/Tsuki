@@ -20,8 +20,8 @@ async function decryptPrompt(encryptedContent: Buffer, privateKey: string): Prom
     decrypter.addIdentity(identity)
     const decrypted = await decrypter.decrypt(new Uint8Array(encryptedContent), 'text')
     return decrypted
-  } catch (error) {
-    throw new Error(`Failed to decrypt prompt: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  } catch (err) {
+    throw new Error(`Failed to decrypt prompt: ${err instanceof Error ? err.message : 'Unknown error'}`)
   }
 }
 
@@ -32,11 +32,11 @@ async function loadEncryptedPrompt(filePath: string, privateKey: string): Promis
   try {
     const encryptedContent = await readFile(filePath)
     return await decryptPrompt(encryptedContent, privateKey)
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('ENOENT')) {
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('ENOENT')) {
       throw new Error(`Encrypted prompt file not found: ${filePath}`)
     }
-    throw error
+    throw err
   }
 }
 

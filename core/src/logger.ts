@@ -23,28 +23,6 @@ const env = process.env.ENV ?? process.env.NODE_ENV ?? 'development'
 const isProduction = env === 'production'
 const logLevel = parseLogLevel(process.env.LOG_LEVEL)
 
-type LogArgs = Record<string, unknown>
-
-const normalizeArgs = (args: LogArgs): LogArgs => {
-  if (!args || typeof args !== 'object') {
-    return {}
-  }
-
-  if ('err' in args) {
-    return args
-  }
-
-  if ('error' in args) {
-    const { error, ...rest } = args as { error?: unknown }
-    if (error !== undefined) {
-      return { ...rest, err: error }
-    }
-    return rest
-  }
-
-  return args
-}
-
 const prettyStream = isProduction
   ? undefined
   : pretty({
@@ -56,36 +34,10 @@ const prettyStream = isProduction
       singleLine: false,
     })
 
-const baseLogger = pino(
+export const logger = pino(
   {
     name: 'Core',
     level: logLevel,
   },
   prettyStream,
 )
-
-class AppLogger {
-  constructor(private logger: pino.Logger) {}
-
-  child(bindings: LogArgs): AppLogger {
-    return new AppLogger(this.logger.child(bindings))
-  }
-
-  debug(message: string, args: LogArgs = {}): void {
-    this.logger.debug(normalizeArgs(args), message)
-  }
-
-  info(message: string, args: LogArgs = {}): void {
-    this.logger.info(normalizeArgs(args), message)
-  }
-
-  warn(message: string, args: LogArgs = {}): void {
-    this.logger.warn(normalizeArgs(args), message)
-  }
-
-  error(message: string, args: LogArgs = {}): void {
-    this.logger.error(normalizeArgs(args), message)
-  }
-}
-
-export const appLogger = new AppLogger(baseLogger)

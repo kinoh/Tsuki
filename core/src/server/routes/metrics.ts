@@ -1,6 +1,6 @@
 import express from 'express'
 import { UsageStorage } from '../../storage/usage'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 
 export async function metricsHandler(req: express.Request, res: express.Response): Promise<void> {
   try {
@@ -16,8 +16,8 @@ export async function metricsHandler(req: express.Request, res: express.Response
       total_messages: metrics.totalMessages,
       total_threads: metrics.totalThreads,
     })
-  } catch (error) {
-    appLogger.error('Error fetching metrics', { error })
+  } catch (err) {
+    logger.error({ err }, 'Error fetching metrics')
     res.status(500).json({ error: 'Internal server error' })
   }
 }

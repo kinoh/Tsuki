@@ -1,6 +1,6 @@
 import { MessageSender } from './activeuser'
 import { ResponseMessage } from './message'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 export class InternalMessageSender implements MessageSender, AsyncIterable<ResponseMessage> {
   private queue: Array<(value: IteratorResult<ResponseMessage>) => void> = []
@@ -23,15 +23,15 @@ export class InternalMessageSender implements MessageSender, AsyncIterable<Respo
     }
 
     if (this.format === 'json') {
-      appLogger.info(`[${principalUserId}]: ${JSON.stringify(message)}`)
+      logger.info(`[${principalUserId}]: ${JSON.stringify(message)}`)
     } else {
-      appLogger.info(`[${principalUserId}]:`)
-      appLogger.info(`  timestamp: ${message.timestamp}`)
-      appLogger.info(`  role: ${message.role}`)
-      appLogger.info(`  user: ${message.user}`)
-      appLogger.info('  chat:')
+      logger.info(`[${principalUserId}]:`)
+      logger.info(`  timestamp: ${message.timestamp}`)
+      logger.info(`  role: ${message.role}`)
+      logger.info(`  user: ${message.user}`)
+      logger.info('  chat:')
       message.chat.forEach((chat) => {
-        appLogger.info(`    ${chat}`)
+        logger.info(`    ${chat}`)
       })
     }
 

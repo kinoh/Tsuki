@@ -2,7 +2,7 @@ import type { Tool } from '@mastra/core/tools'
 import { RequestContext } from '@mastra/core/request-context'
 import { MCPClient as MastraMCPClient, MCPClientOptions } from '@mastra/mcp'
 import { ConfigService } from '../configService'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 export class MCPClient {
   public readonly client: MastraMCPClient
@@ -12,10 +12,10 @@ export class MCPClient {
   }
 
   [Symbol.dispose](): void {
-    appLogger.info('Closing MCP connection...')
+    logger.info('Closing MCP connection...')
 
     this.client.disconnect().catch((err: unknown) => {
-      appLogger.error('Error disconnecting MCP client', { error: err })
+      logger.error({ err }, 'Error disconnecting MCP client')
     })
   }
 

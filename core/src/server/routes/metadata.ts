@@ -1,5 +1,5 @@
 import express from 'express'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 
 async function getGitHash(): Promise<string | null> {
   // In Docker environment, get from environment variable
@@ -12,8 +12,8 @@ async function getGitHash(): Promise<string | null> {
     const { execSync } = await import('child_process')
     const hash = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
     return hash
-  } catch (error) {
-    appLogger.warn('Failed to get git hash', { error })
+  } catch (err) {
+    logger.warn({ err }, 'Failed to get git hash')
     return null
   }
 }
@@ -31,8 +31,8 @@ export async function metadataHandler(req: express.Request, res: express.Respons
       openai_model: openaiModel,
       mcp_tools: mcpTools,
     })
-  } catch (error) {
-    appLogger.error('Error fetching metadata', { error })
+  } catch (err) {
+    logger.error({ err }, 'Error fetching metadata')
     res.status(500).json({ error: 'Internal server error' })
   }
 }

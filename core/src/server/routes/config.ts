@@ -1,5 +1,5 @@
 import { Request, Response } from 'express'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 import { RuntimeConfigStore, RuntimeConfig } from '../../runtimeConfig'
 
 function getStore(req: Request): RuntimeConfigStore {
@@ -19,8 +19,8 @@ export function configGetHandler(req: Request, res: Response): void {
   try {
     const store = getStore(req)
     res.status(200).json(store.get())
-  } catch (error) {
-    appLogger.error('Error fetching runtime config', { error })
+  } catch (err) {
+    logger.error({ err }, 'Error fetching runtime config')
     res.status(500).json({ error: 'Internal server error' })
   }
 }
@@ -35,8 +35,8 @@ export async function configPutHandler(req: Request, res: Response): Promise<voi
     const store = getStore(req)
     const updated = await store.set(req.body)
     res.status(200).json(updated)
-  } catch (error) {
-    appLogger.error('Error updating runtime config', { error })
+  } catch (err) {
+    logger.error({ err }, 'Error updating runtime config')
     res.status(500).json({ error: 'Internal server error' })
   }
 }

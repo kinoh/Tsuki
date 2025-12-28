@@ -10,7 +10,7 @@ import { FCMManager } from '../server/fcm'
 import { MastraResponder, Responder } from './mastraResponder'
 import { AIRouter } from './aiRouter'
 import { ConfigService } from '../configService'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 export async function createAgentService(config: ConfigService, agent: Agent, memory: MastraMemory, usageStorage: UsageStorage): Promise<AgentService> {
   const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
@@ -43,7 +43,7 @@ export class AgentService {
       this.activateUser(userId)
     }
 
-    appLogger.info('AgentService started with notification subscription')
+    logger.info('AgentService started with notification subscription')
   }
 
   [Symbol.dispose](): void {
@@ -94,14 +94,14 @@ export class AgentService {
   }
 
   registerMessageSender(userId: string, channel: MessageChannel, sender: MessageSender, onAuth: MCPAuthHandler | null): void {
-    appLogger.info(`AgentService: Channel opened: ${channel} for user ${userId}`, { channel, userId })
+    logger.info({ channel, userId }, 'AgentService: Channel opened')
 
     const user = this.activateUser(userId)
     user.registerMessageSender(channel, sender, onAuth)
   }
 
   deregisterMessageSender(userId: string, channel: MessageChannel): void {
-    appLogger.info(`AgentService: Channel closed: ${channel} for user ${userId}`, { channel, userId })
+    logger.info({ channel, userId }, 'AgentService: Channel closed')
 
     const user = this.activateUser(userId)
     user.deregisterMessageSender(channel)

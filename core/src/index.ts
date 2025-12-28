@@ -8,18 +8,18 @@ import { SensoryService } from './agent/sensoryService'
 import { McpSensory } from './agent/sensories/mcpSensory'
 import { ConfigService } from './configService'
 import { RuntimeConfigStore } from './runtimeConfig'
-import { appLogger } from './logger'
+import { logger } from './logger'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {
-  appLogger.info('Starting Tsuki Core Server...')
+  logger.info('Starting Tsuki Core Server...')
 
   const config = new ConfigService()
   const runtimeConfigStore = new RuntimeConfigStore(config.dataDir)
   await runtimeConfigStore.load()
   using mastraInstance = await MastraInstance.create(config)
 
-  appLogger.info('Summon agent!')
+  logger.info('Summon agent!')
   const agent = mastraInstance.getAgent('tsuki')
 
   const agentMemory = await agent.getMemory()
@@ -29,10 +29,10 @@ async function main(): Promise<void> {
 
   const usageStorage = new UsageStorage(agentMemory.storage)
 
-  appLogger.info('Creating Agent Service')
+  logger.info('Creating Agent Service')
   using agentService = await createAgentService(config, agent, agentMemory, usageStorage)
 
-  appLogger.info('Setting up FCM Manager')
+  logger.info('Setting up FCM Manager')
   const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
   const fcm = new FCMManager(fcmTokenStorage, runtimeConfigStore)
 
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     .map((userId) => userId.trim())
     .filter(Boolean)
 
-  appLogger.info('Starting Agent Service (includes MCP subscriptions)')
+  logger.info('Starting Agent Service (includes MCP subscriptions)')
   agentService.start(permanentUsers, fcm)
 
   // Sensory service runs inside core; SENSORY_POLL_SECONDS is interpreted in seconds.
@@ -68,11 +68,11 @@ async function main(): Promise<void> {
     }
   })
 
-  appLogger.info('Serving...')
+  logger.info('Serving...')
 
   await serve(config, agent, agentService, runtimeConfigStore)
 }
 
-main().catch((error: unknown) => {
-  appLogger.error('Unhandled error during startup', { error })
+main().catch((err: unknown) => {
+  logger.error({ err }, 'Unhandled error during startup')
 })

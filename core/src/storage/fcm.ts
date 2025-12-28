@@ -1,14 +1,14 @@
 import { MastraStorage } from '@mastra/core/storage'
 import { getClient, LibSQLClient } from './libsql'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 export class FCMTokenStorage {
   private readonly client: LibSQLClient
 
   constructor(storage: MastraStorage) {
     this.client = getClient(storage)
-    this.initTable().catch((error: unknown) => {
-      appLogger.error('Failed to initialize FCM token storage', { error })
+    this.initTable().catch((err: unknown) => {
+      logger.error({ err }, 'Failed to initialize FCM token storage')
     })
   }
 
@@ -22,9 +22,9 @@ export class FCMTokenStorage {
           PRIMARY KEY (user_id, token)
         )
       `)
-    } catch (error) {
-      appLogger.error('Error creating fcm_tokens table', { error })
-      throw error
+    } catch (err) {
+      logger.error({ err }, 'Error creating fcm_tokens table')
+      throw err
     }
   }
 

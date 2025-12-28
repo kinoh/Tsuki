@@ -4,7 +4,7 @@ import { AgentService } from '../agent/agentService'
 import type { ResponseMessage } from '../agent/message'
 import { MessageSender } from '../agent/activeuser'
 import { clientMessageSchema } from '../shared/wsSchema'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 class ClientConnection {
   constructor(
@@ -24,24 +24,24 @@ export class WebSocketManager implements MessageSender {
     const urlParts = new URL(req.url ?? '', 'http://localhost')
     const user = urlParts?.searchParams.get('user') ?? 'anonymous'
 
-    appLogger.info(`New WebSocket connection: ${user}`, { user })
+    logger.info({ user }, 'New WebSocket connection')
 
     ws.on('message', (data) => {
       void this.handleMessage(ws, data)
     })
 
     ws.on('close', () => {
-      appLogger.info(`WebSocket disconnected: ${user}`, { user })
+      logger.info({ user }, 'WebSocket disconnected')
       this.goodbyeClient(ws)
     })
 
-    ws.on('error', (error) => {
-      appLogger.error(`WebSocket error for ${user}`, { error, user })
+    ws.on('error', (err) => {
+      logger.error({ err, user }, 'WebSocket error')
       this.goodbyeClient(ws)
     })
 
     ws.on('open', () => {
-      appLogger.info(`WebSocket connected: ${user}`, { user })
+      logger.info({ user }, 'WebSocket connected')
     })
   }
 
@@ -84,7 +84,7 @@ export class WebSocketManager implements MessageSender {
         })
       }
     } catch (err) {
-      appLogger.error('WebSocket message parsing error', { error: err })
+      logger.error({ err }, 'WebSocket message parsing error')
       await this.sendMessage(client.user, {
         role: 'system',
         user: 'system',
@@ -112,18 +112,18 @@ export class WebSocketManager implements MessageSender {
       const [user, token] = data.split(':', 2)
       
       if (!user || !token) {
-        appLogger.warn('Invalid auth attempt: broken message', { data })
+        logger.warn({ data }, 'Invalid auth attempt: broken message')
         return null
       }
 
       if (!this.verifyToken(user, token)) {
-        appLogger.warn(`Invalid auth attempt: invalid token for user: ${user}`, { user })
+        logger.warn({ user }, 'Invalid auth attempt: invalid token')
         return null
       }
 
       return new ClientConnection(user)
-    } catch (error) {
-      appLogger.error('Auth parsing error', { error })
+    } catch (err) {
+      logger.error({ err }, 'Auth parsing error')
       return null
     }
   }

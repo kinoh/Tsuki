@@ -2,11 +2,10 @@ import { openai } from '@ai-sdk/openai'
 import { Agent, ToolsInput } from '@mastra/core/agent'
 import { Memory } from '@mastra/memory'
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 
 export function summon(dataDir: string, openAiModel: string, tools: ToolsInput): Agent {
-  appLogger.info(`dataDir: ${dataDir}`, { dataDir })
-  appLogger.info(`openAiModel: ${openAiModel}`, { openAiModel })
+  logger.info({ dataDir, openAiModel }, 'hello, world')
 
   const dbPath = `file:${dataDir}/mastra.db`
 
@@ -16,7 +15,7 @@ export function summon(dataDir: string, openAiModel: string, tools: ToolsInput):
     instructions: ({ requestContext }): string => {
       const instructions = requestContext.get<string, string>('instructions')
       if (!instructions) {
-        appLogger.warn('Instructions not found in request context, using default instructions')
+        logger.warn('Instructions not found in request context, using default instructions')
         return 'You are a helpful chatting agent.'
       }
 

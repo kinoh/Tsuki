@@ -3,7 +3,7 @@ import { openai } from '@ai-sdk/openai'
 import { MessageInput } from './activeuser'
 import { MessageRouter, RouteDecision } from './router'
 import { UserContext } from './userContext'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 // Router prompt is public and only handles routing, not persona.
 const ROUTER_APPEND_INSTRUCTIONS = `
@@ -99,7 +99,7 @@ export class AIRouter implements MessageRouter {
       prompt,
     })
 
-    appLogger.debug('Router output', { text })
+    logger.debug({ text }, 'Router output')
 
     const normalizedText = text.toLowerCase()
     const normalized: RouteDecision['action'] =
@@ -112,7 +112,7 @@ export class AIRouter implements MessageRouter {
       const now = Date.now()
       const oneHour = 60 * 60 * 1000
       if (now - this.lastSensoryRespondTime < oneHour / this.rateLimitSensoryRespondPerHour) {
-        appLogger.info('Router: Sensory response rate-limited', { userId: input.userId })
+        logger.info({ userId: input.userId }, 'Router: Sensory response rate-limited')
         return { action: 'ignore' }
       }
       this.lastSensoryRespondTime = now

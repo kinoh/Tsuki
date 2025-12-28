@@ -1,7 +1,7 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
 import type { MastraMemory } from '@mastra/core/memory'
 import { TABLE_THREADS } from '@mastra/core/storage'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 
 interface Thread {
   id: string
@@ -97,8 +97,8 @@ export class ThreadResource extends BaseResource {
         return Number(result.rows[0].count) || 0
       }
       return 0
-    } catch (error) {
-      appLogger.error('Error counting threads', { error })
+    } catch (err) {
+      logger.error({ err }, 'Error counting threads')
       return 0
     }
   }
@@ -128,8 +128,8 @@ export class ThreadResource extends BaseResource {
       }))
 
       return threads.map(thread => new ThreadRecord(thread, this))
-    } catch (error) {
-      appLogger.error('Error finding threads', { error })
+    } catch (err) {
+      logger.error({ err }, 'Error finding threads')
       return []
     }
   }
@@ -156,8 +156,8 @@ export class ThreadResource extends BaseResource {
       }
 
       return new ThreadRecord(thread, this)
-    } catch (error) {
-      appLogger.error('Error finding thread', { error, threadId: id })
+    } catch (err) {
+      logger.error({ err, threadId: id }, 'Error finding thread')
       return null
     }
   }
@@ -173,9 +173,9 @@ export class ThreadResource extends BaseResource {
   async delete(id: string): Promise<void> {
     try {
       await this.agentMemory.deleteThread(id)
-    } catch (error) {
-      appLogger.error('Error deleting thread', { error, threadId: id })
-      throw error
+    } catch (err) {
+      logger.error({ err, threadId: id }, 'Error deleting thread')
+      throw err
     }
   }
 }

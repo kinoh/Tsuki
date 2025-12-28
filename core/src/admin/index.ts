@@ -6,7 +6,7 @@ import { ThreadResource } from './resources/ThreadResource'
 import { MessageResource } from './resources/MessageResource'
 import { StructuredMemoryResource } from './resources/StructuredMemoryResource'
 import { ConfigService } from '../configService'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 export function createAdminJS(config: ConfigService, agentMemory: MastraMemory): AdminJS {
   const admin = new AdminJS({
@@ -165,16 +165,16 @@ export function createAdminRouter(
   const authenticate = (email: string, password: string): { email: string; role: string } | null => {
     const expectedToken = process.env.WEB_AUTH_TOKEN
     if (typeof expectedToken !== 'string' || expectedToken.trim() === '') {
-      appLogger.error('WEB_AUTH_TOKEN not configured')
+      logger.error('WEB_AUTH_TOKEN not configured')
       return null
     }
 
     if (password === expectedToken) {
-      appLogger.info(`AdminJS login successful for: ${email}`, { email })
+      logger.info({ email }, 'AdminJS login successful')
       return { email, role: 'admin' }
     }
 
-    appLogger.warn(`AdminJS login failed for: ${email}`, { email })
+    logger.warn({ email }, 'AdminJS login failed')
     return null
   }
 

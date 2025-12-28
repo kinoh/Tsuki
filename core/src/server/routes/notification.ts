@@ -1,7 +1,7 @@
 import { Request, Response } from 'express'
 import { FCMTokenStorage } from '../../storage/fcm'
 import { FCMManager } from '../fcm'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 import { RuntimeConfigStore } from '../../runtimeConfig'
 
 interface MutateNotificationTokenPayload {
@@ -16,7 +16,7 @@ export async function notificationTokenHandler(req: Request, res: Response): Pro
     const tokenStorage = new FCMTokenStorage(agentMemory.storage)
 
     if (payload.token === undefined || payload.token.trim() === '') {
-      appLogger.warn('Missing token parameter in request', { userId })
+      logger.warn({ userId }, 'Missing token parameter in request')
       res.status(400).json({ error: 'Missing token parameter' })
       return
     }
@@ -33,7 +33,7 @@ export async function notificationTokenHandler(req: Request, res: Response): Pro
         return
     }
   } catch (err) {
-    appLogger.error('Error handling notification token', { error: err })
+    logger.error({ err }, 'Error handling notification token')
     res.status(500).json({ error: 'Internal server error' })
     return
   }
@@ -52,7 +52,7 @@ export async function notificationTokensHandler(req: Request, res: Response): Pr
 
     res.status(200).json({ tokens })
   } catch (err) {
-    appLogger.error('Error fetching notification tokens', { error: err })
+    logger.error({ err }, 'Error fetching notification tokens')
     res.status(500).json({ error: 'Internal server error' })
     return
   }
@@ -80,7 +80,7 @@ export async function notificationTestHandler(req: Request, res: Response): Prom
 
     await fcm.sendNotification(userId, notification)
   } catch (err) {
-    appLogger.error('Error sending test notification', { error: err })
+    logger.error({ err }, 'Error sending test notification')
     res.status(500).json({ error: 'Internal server error' })
     return
   }

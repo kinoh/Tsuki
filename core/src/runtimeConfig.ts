@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { appLogger } from './logger'
+import { logger } from './logger'
 import type { components } from './shared/openapi'
 
 export type RuntimeConfig = components['schemas']['Config']
@@ -32,13 +32,13 @@ export class RuntimeConfigStore {
       const normalized = parseRuntimeConfig(parsed)
       this.config = normalized
       return this.get()
-    } catch (error) {
-      if (isNotFoundError(error)) {
+    } catch (err) {
+      if (isNotFoundError(err)) {
         await this.persist(this.config)
         return this.get()
       }
 
-      appLogger.error('Failed to load runtime config, restoring defaults', { error })
+      logger.error({ err }, 'Failed to load runtime config, restoring defaults')
       this.config = { ...DEFAULT_CONFIG }
       await this.persist(this.config)
       return this.get()

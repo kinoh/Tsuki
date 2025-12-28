@@ -9,7 +9,7 @@ import { setupRoutes } from './routes/index'
 import { AgentService } from '../agent/agentService'
 import { ConfigService } from '../configService'
 import { RuntimeConfigStore } from '../runtimeConfig'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 export async function serve(
   config: ConfigService,
@@ -61,21 +61,21 @@ export async function serve(
   })
 
   server.listen(2953, () => {
-    appLogger.info('Server ready at: http://localhost:2953')
+    logger.info('Server ready at: http://localhost:2953')
   })
 
   const gracefulShutdown = (): void => {
-    appLogger.info('Shutting down server...')
+    logger.info('Shutting down server...')
     wss.close(() => {
       server.close(() => {
-        appLogger.info('Server closed.')
+        logger.info('Server closed.')
         process.exit(0)
       })
     })
 
     // Force shutdown after 5 seconds
     setTimeout(() => {
-      appLogger.error('Forcing shutdown...')
+      logger.error('Forcing shutdown...')
       process.exit(1)
     }, 5000)
   }

@@ -1,6 +1,6 @@
 import { MastraStorage } from '@mastra/core/storage'
 import { getClient, LibSQLClient } from './libsql'
-import { appLogger } from '../logger'
+import { logger } from '../logger'
 
 export interface UsageData {
   id: string
@@ -24,8 +24,8 @@ export class UsageStorage {
 
   constructor(storage: MastraStorage) {
     this.client = getClient(storage)
-    this.initTable().catch((error: unknown) => {
-      appLogger.error('Failed to initialize usage storage', { error })
+    this.initTable().catch((err: unknown) => {
+      logger.error({ err }, 'Failed to initialize usage storage')
     })
   }
 
@@ -61,10 +61,10 @@ export class UsageStorage {
         ON usage_stats(timestamp)
       `)
 
-      appLogger.info('UsageStorage initialized - using LibSQL persistence')
-    } catch (error) {
-      appLogger.error('Failed to initialize usage_stats table', { error })
-      throw error
+      logger.info('UsageStorage initialized - using LibSQL persistence')
+    } catch (err) {
+      logger.error({ err }, 'Failed to initialize usage_stats table')
+      throw err
     }
   }
 
@@ -100,9 +100,9 @@ export class UsageStorage {
           response.usage.totalTokens ?? 0,
         ],
       })
-    } catch (error) {
-      appLogger.error('Failed to record usage', { error })
-      throw error
+    } catch (err) {
+      logger.error({ err }, 'Failed to record usage')
+      throw err
     }
   }
 
@@ -133,8 +133,8 @@ export class UsageStorage {
         totalMessages: Number(row.total_messages) || 0,
         totalThreads: Number(row.total_threads) || 0,
       }
-    } catch (error) {
-      appLogger.error('Failed to get metrics summary', { error })
+    } catch (err) {
+      logger.error({ err }, 'Failed to get metrics summary')
       // Return default values on error
       return {
         totalUsage: 0,

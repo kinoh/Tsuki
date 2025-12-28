@@ -1,6 +1,6 @@
 import { BaseResource, BaseProperty, BaseRecord, Filter } from 'adminjs'
 import fetch from 'node-fetch'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 
 const API_BASE_URL = 'http://localhost:2953'
 
@@ -98,10 +98,13 @@ export class MessageResource extends BaseResource {
       })
 
       if (!response.ok) {
-        appLogger.error(`API request failed with status ${response.status}`, {
-          status: response.status,
-          threadId,
-        })
+        logger.error(
+          {
+            status: response.status,
+            threadId,
+          },
+          'API request failed',
+        )
         return []
       }
 
@@ -112,8 +115,8 @@ export class MessageResource extends BaseResource {
       }
 
       return data.messages
-    } catch (error) {
-      appLogger.error('Error fetching messages from API', { error, threadId })
+    } catch (err) {
+      logger.error({ err, threadId }, 'Error fetching messages from API')
       return []
     }
   }

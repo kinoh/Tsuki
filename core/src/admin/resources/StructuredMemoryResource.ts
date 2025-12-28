@@ -2,7 +2,7 @@ import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
 import { promises as fs } from 'fs'
 import { join, extname } from 'path'
 import { ConfigService } from '../../configService'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 
 interface StructuredMemoryDocument {
   id: string
@@ -119,14 +119,14 @@ export class StructuredMemoryResource extends BaseResource {
             linkCount,
             modifiedAt: stats.mtime,
           })
-        } catch (error) {
-          appLogger.error(`Error reading file ${filename}`, { error, filename })
+        } catch (err) {
+          logger.error({ err, filename }, 'Error reading file')
         }
       }
       
       return documents
-    } catch (error) {
-      appLogger.error('Error reading structured memory directory', { error })
+    } catch (err) {
+      logger.error({ err }, 'Error reading structured memory directory')
       return []
     }
   }
@@ -135,8 +135,8 @@ export class StructuredMemoryResource extends BaseResource {
     try {
       const documents = await this.readDocuments()
       return documents.length
-    } catch (error) {
-      appLogger.error('Error counting structured memory documents', { error })
+    } catch (err) {
+      logger.error({ err }, 'Error counting structured memory documents')
       return 0
     }
   }
@@ -182,8 +182,8 @@ export class StructuredMemoryResource extends BaseResource {
       documents = documents.slice(offset, offset + limit)
       
       return documents.map(doc => new StructuredMemoryRecord(doc, this))
-    } catch (error) {
-      appLogger.error('Error finding structured memory documents', { error })
+    } catch (err) {
+      logger.error({ err }, 'Error finding structured memory documents')
       return []
     }
   }
@@ -198,8 +198,8 @@ export class StructuredMemoryResource extends BaseResource {
       }
       
       return new StructuredMemoryRecord(document, this)
-    } catch (error) {
-      appLogger.error('Error finding structured memory document', { error, documentId: id })
+    } catch (err) {
+      logger.error({ err, documentId: id }, 'Error finding structured memory document')
       return null
     }
   }

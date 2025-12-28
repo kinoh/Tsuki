@@ -2,7 +2,7 @@ import express from 'express'
 import type { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ResponseMessage, createResponseMessage } from '../../agent/message'
 import { Thread, GetMessagesQuery } from '../types'
-import { appLogger } from '../../logger'
+import { logger } from '../../logger'
 
 export async function threadsHandler(req: express.Request, res: express.Response): Promise<void> {
   const agentMemory = req.app.locals.agentMemory
@@ -56,8 +56,8 @@ export async function threadByIdHandler(req: express.Request, res: express.Respo
     })
 
     res.json({ messages })
-  } catch (error) {
-    appLogger.error('Error fetching thread messages', { error })
+  } catch (err) {
+    logger.error({ err }, 'Error fetching thread messages')
     res.status(500).json({ error: 'Internal server error' })
   }
 }
@@ -153,8 +153,8 @@ export async function messagesHandler(req: express.Request, res: express.Respons
     responseMessages.reverse()
 
     res.json({ messages: responseMessages })
-  } catch (error) {
-    appLogger.error('Error fetching messages', { error })
+  } catch (err) {
+    logger.error({ err }, 'Error fetching messages')
     res.status(500).json({ error: 'Internal server error' })
   }
 }
