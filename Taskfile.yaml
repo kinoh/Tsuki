@@ -89,6 +89,12 @@ tasks:
       - mkdir -p core/bin
       - cd mcp/{{.NAME}} && cargo build --release
       - cp mcp/{{.NAME}}/target/release/{{.NAME}} core/bin/
+  mcp/inspect-*:
+    desc: Inspect a MCP server
+    vars:
+      NAME: '{{index .MATCH 0}}'
+    cmds:
+      - npx @modelcontextprotocol/inspector -e TZ=Asia/Tokyo -e DATA_DIR=/tmp/data core/bin/{{.NAME}}
   setup:
     desc: Setup development environment
     cmds:
