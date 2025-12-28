@@ -41,6 +41,8 @@
     "morgan": "^1.10.1",
     "node-fetch": "^3.3.2",
     "openapi-typescript": "^7.10.1",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.3",
     "rss-mcp-lite": "^1.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
