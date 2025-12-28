@@ -178,10 +178,18 @@ export class ActiveUser implements UserContext {
     })
 
     try {
-      let title = notification.title?.trim()
-      if (!title) {
+      const rawTitle = notification.title
+      let title: string | null = null
+      if (typeof rawTitle === 'string') {
+        const trimmed = rawTitle.trim()
+        if (trimmed.length > 0) {
+          title = trimmed
+        }
+      }
+
+      if (title === null) {
         const resolved = await this.resolveSchedulerNotificationTitle()
-        if (!resolved) {
+        if (resolved === null) {
           appLogger.warn('Scheduler notification title not found', {
             notification,
             userId: this.userId,
@@ -224,18 +232,17 @@ export class ActiveUser implements UserContext {
         | { contents?: Array<{ text?: string }> }
         | undefined
       const text = response?.contents?.[0]?.text
-      if (!text) {
+      if (typeof text !== 'string' || text.trim().length === 0) {
         return null
       }
 
-      const data = JSON.parse(text)
-      if (!Array.isArray(data) || data.length === 0) {
-        return null
-      }
-
-      const last = data[data.length - 1]
-      if (last && typeof last.message === 'string' && last.message.trim()) {
-        return last.message.trim()
+      const data = JSON.parse(text) as Array<{ message?: string }>
+      const last = data.length > 0 ? data[data.length - 1] : null
+      if (last !== null && typeof last.message === 'string') {
+        const trimmed = last.message.trim()
+        if (trimmed.length > 0) {
+          return trimmed
+        }
       }
     } catch (error) {
       appLogger.warn('Failed to resolve scheduler notification title from fired_schedule resource', {
