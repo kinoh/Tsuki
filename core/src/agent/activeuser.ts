@@ -8,6 +8,7 @@ import { MessageRouter } from './router'
 import { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ConfigService } from '../configService'
 import { logger } from '../logger'
+import { log } from 'console'
 
 export type AgentRuntimeContext = {
   instructions: string
@@ -202,6 +203,13 @@ export class ActiveUser implements UserContext {
           )
           title = 'unknown event'
         } else {
+          logger.info(
+            {
+              resolved,
+              userId: this.userId,
+            },
+            'Resolved scheduler notification title',
+          )
           title = resolved
         }
       }
