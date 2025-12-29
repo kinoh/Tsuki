@@ -78,8 +78,14 @@ async function run(): Promise<void> {
 
   const scenario = await loadScenario(scenarioPath)
   const logPath = await ensureLogFile()
-  const destination = pino.destination({ dest: logPath, sync: false })
-  const logger = pino({ level: 'info' }, destination)
+  const fileDestination = pino.destination({ dest: logPath, sync: false })
+  const logger = pino(
+    { level: 'info' },
+    pino.multistream([
+      { stream: process.stdout },
+      { stream: fileDestination },
+    ]),
+  )
 
   logger.info({ event: 'start', scenarioPath })
   logger.info({ event: 'connect', url: WS_URL })
@@ -131,7 +137,7 @@ async function run(): Promise<void> {
 
   ws.on('close', (code, reason) => {
     logger.info({ event: 'closed', code, reason: reason.toString() })
-    destination.end()
+    fileDestination.end()
   })
 }
 
