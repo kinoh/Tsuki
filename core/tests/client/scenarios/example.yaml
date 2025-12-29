@@ -1,0 +1,5 @@
+inputs:
+  - text: "こんにちは"
+  - text: "今日の気分は？"
+  - type: sensory
+    text: "雨の匂いがする"

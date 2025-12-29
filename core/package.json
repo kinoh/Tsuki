@@ -59,7 +59,8 @@
     "eslint": "^9.39.2",
     "mastra": "1.0.0-beta.12",
     "tsup": "^8.5.1",
-    "typescript-eslint": "^8.50.1"
+    "typescript-eslint": "^8.50.1",
+    "yaml": "^2.8.2"
   },
   "pnpm": {
     "overrides": {
