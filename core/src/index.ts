@@ -32,9 +32,12 @@ async function main(): Promise<void> {
   logger.info('Creating Agent Service')
   using agentService = await createAgentService(config, agent, agentMemory, usageStorage)
 
-  logger.info('Setting up FCM Manager')
-  const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
-  const fcm = new FCMManager(fcmTokenStorage, runtimeConfigStore)
+  let fcm: FCMManager | undefined = undefined
+  if (config.isProduction) {
+    logger.info('Setting up FCM Manager')
+    const fcmTokenStorage = new FCMTokenStorage(agentMemory.storage)
+    fcm = new FCMManager(fcmTokenStorage, runtimeConfigStore)
+  }
 
   const permanentUsers = (process.env.PERMANENT_USERS ?? '')
     .split(',')
