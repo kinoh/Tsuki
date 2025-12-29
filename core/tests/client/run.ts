@@ -17,7 +17,14 @@ const WS_URL = process.env.WS_URL ?? 'ws://localhost:2953/'
 const AUTH_TOKEN = process.env.WEB_AUTH_TOKEN ?? 'test-token'
 const USER_NAME = process.env.USER_NAME ?? 'test-user'
 const LOG_DIR = process.env.LOG_DIR ?? path.resolve(process.cwd(), 'tests/client/logs')
-const POST_SEND_WAIT_MS = 5000
+const RESPONSE_TIMEOUT_MS = 5000
+
+type ServerMessage = {
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  user: string
+  chat: string[]
+  timestamp: number
+}
 
 function formatTimestamp(date: Date): string {
   const pad = (value: number): string => value.toString().padStart(2, '0')
@@ -58,6 +65,18 @@ function parseScenario(text: string): Scenario {
   return { inputs: normalized }
 }
 
+function isServerMessage(value: unknown): value is ServerMessage {
+  if (!value || typeof value !== 'object') return false
+  const maybe = value as Record<string, unknown>
+  if (maybe.role !== 'user' && maybe.role !== 'assistant' && maybe.role !== 'system' && maybe.role !== 'tool') {
+    return false
+  }
+  if (typeof maybe.user !== 'string') return false
+  if (!Array.isArray(maybe.chat) || maybe.chat.some((entry) => typeof entry !== 'string')) return false
+  if (typeof maybe.timestamp !== 'number') return false
+  return true
+}
+
 async function ensureLogFile(): Promise<string> {
   await fs.mkdir(LOG_DIR, { recursive: true })
   const fileName = `${formatTimestamp(new Date())}.jsonl`
@@ -93,6 +112,12 @@ async function run(): Promise<void> {
   const ws = new WebSocket(WS_URL)
 
   let closed = false
+  let pendingResponse: {
+    resolve: () => void
+    reject: (error: Error) => void
+    timer: NodeJS.Timeout
+  } | null = null
+
   const closeOnce = (code?: number, reason?: string): void => {
     if (closed) return
     closed = true
@@ -100,9 +125,34 @@ async function run(): Promise<void> {
     ws.close()
   }
 
-  const scheduleExit = (): void => {
-    logger.info({ event: 'post_send_wait', ms: POST_SEND_WAIT_MS })
-    setTimeout(() => closeOnce(), POST_SEND_WAIT_MS)
+  const clearPending = (): void => {
+    if (!pendingResponse) return
+    clearTimeout(pendingResponse.timer)
+    pendingResponse = null
+  }
+
+  const rejectPending = (error: Error): void => {
+    if (!pendingResponse) return
+    const { reject } = pendingResponse
+    clearPending()
+    reject(error)
+  }
+
+  const waitForServerMessage = (timeoutMs: number): Promise<void> => {
+    if (pendingResponse) {
+      return Promise.reject(new Error('Pending response already exists'))
+    }
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingResponse = null
+        reject(new Error(`Timed out waiting for server response after ${timeoutMs}ms`))
+      }, timeoutMs)
+      pendingResponse = { resolve: () => {
+        clearTimeout(timer)
+        pendingResponse = null
+        resolve()
+      }, reject, timer }
+    })
   }
 
   ws.on('open', () => {
@@ -111,20 +161,29 @@ async function run(): Promise<void> {
     ws.send(auth)
     logger.info({ event: 'auth_sent', user: USER_NAME })
 
-    for (const input of scenario.inputs) {
-      const payload = { type: input.type ?? 'message', text: input.text }
-      ws.send(JSON.stringify(payload))
-      logger.info({ event: 'send', payload })
-    }
-
-    scheduleExit()
+    void (async () => {
+      for (const input of scenario.inputs) {
+        const payload = { type: input.type ?? 'message', text: input.text }
+        ws.send(JSON.stringify(payload))
+        logger.info({ event: 'send', payload })
+        await waitForServerMessage(RESPONSE_TIMEOUT_MS)
+      }
+      closeOnce()
+    })().catch((error) => {
+      logger.error({ event: 'scenario_error', message: error.message })
+      process.exitCode = 1
+      closeOnce()
+    })
   })
 
   ws.on('message', (data) => {
     const raw = data.toString()
     try {
-      const parsed = JSON.parse(raw)
+      const parsed = JSON.parse(raw) as unknown
       logger.info({ event: 'receive', message: parsed })
+      if (pendingResponse && isServerMessage(parsed)) {
+        pendingResponse.resolve()
+      }
     } catch {
       logger.info({ event: 'receive', message: raw })
     }
@@ -132,11 +191,13 @@ async function run(): Promise<void> {
 
   ws.on('error', (error) => {
     logger.error({ event: 'error', message: error.message })
+    rejectPending(new Error(error.message))
     closeOnce()
   })
 
   ws.on('close', (code, reason) => {
     logger.info({ event: 'closed', code, reason: reason.toString() })
+    rejectPending(new Error('WebSocket closed'))
     fileDestination.end()
   })
 }
