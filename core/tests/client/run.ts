@@ -182,6 +182,13 @@ async function run(): Promise<void> {
       const parsed = JSON.parse(raw) as unknown
       logger.info({ event: 'receive', message: parsed })
       if (pendingResponse && isServerMessage(parsed)) {
+        if (parsed.chat.includes('Internal error!')) {
+          logger.error({ event: 'server_error', message: 'Internal error!' })
+          process.exitCode = 1
+          rejectPending(new Error('Internal error from server'))
+          closeOnce()
+          return
+        }
         pendingResponse.resolve()
       }
     } catch {
