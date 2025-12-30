@@ -1,0 +1,114 @@
+--- a/dist/chunk-GFALVOBW.cjs
++++ b/dist/chunk-GFALVOBW.cjs
+@@ -10554,36 +10554,54 @@
+     }
+     switch (chunk.type) {
+       case "response-metadata":
+         runState.setState({
+           responseMetadata: {
+             id: chunk.payload.id,
+             timestamp: chunk.payload.timestamp,
+             modelId: chunk.payload.modelId,
+             headers: chunk.payload.headers
+           }
+         });
+         break;
++      case "text-start": {
++        runState.setState({
++          providerOptions: chunk.payload.providerMetadata ?? runState.state.providerOptions
++        });
++        if (isControllerOpen(controller)) {
++          controller.enqueue(chunk);
++        }
++        break;
++      }
+       case "text-delta": {
+         const textDeltasFromState = runState.state.textDeltas;
+         textDeltasFromState.push(chunk.payload.text);
+         runState.setState({
+           textDeltas: textDeltasFromState,
+           isStreaming: true
+         });
+         if (isControllerOpen(controller)) {
+           controller.enqueue(chunk);
+         }
+         break;
+       }
++      case "text-end": {
++        runState.setState({
++          providerOptions: chunk.payload.providerMetadata ?? runState.state.providerOptions
++        });
++        if (isControllerOpen(controller)) {
++          controller.enqueue(chunk);
++        }
++        break;
++      }
+       case "tool-call-input-streaming-start": {
+         const tool2 = tools?.[chunk.payload.toolName] || Object.values(tools || {})?.find((tool3) => `id` in tool3 && tool3.id === chunk.payload.toolName);
+         if (tool2 && "onInputStart" in tool2) {
+           try {
+             await tool2?.onInputStart?.({
+               toolCallId: chunk.payload.toolCallId,
+               messages: messageList.get.input.aiV5.model(),
+               abortSignal: options?.abortSignal
+             });
+           } catch (error2) {
+             logger?.error("Error calling onInputStart", error2);
+           }
+--- a/dist/chunk-2XX35XRX.js
++++ b/dist/chunk-2XX35XRX.js
+@@ -10526,36 +10526,54 @@
+     }
+     switch (chunk.type) {
+       case "response-metadata":
+         runState.setState({
+           responseMetadata: {
+             id: chunk.payload.id,
+             timestamp: chunk.payload.timestamp,
+             modelId: chunk.payload.modelId,
+             headers: chunk.payload.headers
+           }
+         });
+         break;
++      case "text-start": {
++        runState.setState({
++          providerOptions: chunk.payload.providerMetadata ?? runState.state.providerOptions
++        });
++        if (isControllerOpen(controller)) {
++          controller.enqueue(chunk);
++        }
++        break;
++      }
+       case "text-delta": {
+         const textDeltasFromState = runState.state.textDeltas;
+         textDeltasFromState.push(chunk.payload.text);
+         runState.setState({
+           textDeltas: textDeltasFromState,
+           isStreaming: true
+         });
+         if (isControllerOpen(controller)) {
+           controller.enqueue(chunk);
+         }
+         break;
+       }
++      case "text-end": {
++        runState.setState({
++          providerOptions: chunk.payload.providerMetadata ?? runState.state.providerOptions
++        });
++        if (isControllerOpen(controller)) {
++          controller.enqueue(chunk);
++        }
++        break;
++      }
+       case "tool-call-input-streaming-start": {
+         const tool2 = tools?.[chunk.payload.toolName] || Object.values(tools || {})?.find((tool3) => `id` in tool3 && tool3.id === chunk.payload.toolName);
+         if (tool2 && "onInputStart" in tool2) {
+           try {
+             await tool2?.onInputStart?.({
+               toolCallId: chunk.payload.toolCallId,
+               messages: messageList.get.input.aiV5.model(),
+               abortSignal: options?.abortSignal
+             });
+           } catch (error2) {
+             logger?.error("Error calling onInputStart", error2);
+           }
