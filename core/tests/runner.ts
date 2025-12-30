@@ -1,13 +1,11 @@
 import { spawn } from 'node:child_process'
-import fs from 'node:fs/promises'
 import net from 'node:net'
 import { URL } from 'node:url'
 
 const WS_URL = process.env.WS_URL ?? 'ws://localhost:2953/'
-const DATA_DIR = process.env.DATA_DIR ?? './data'
 const TIMEOUT_MS = 60000
 const INTERVAL_MS = 500
-const USAGE = 'Usage: pnpm tsx ./tests/runner.ts [--reset-data] <script> [args...]'
+const USAGE = 'Usage: pnpm tsx ./tests/runner.ts <script> [args...]'
 
 type ChildProc = ReturnType<typeof spawn>
 
@@ -85,28 +83,14 @@ const waitForWs = async (isCoreAlive: () => boolean): Promise<void> => {
   throw new Error(`Timed out waiting for WS: ${WS_URL}`)
 }
 
-const parseArgs = (argv: string[]): { resetData: boolean; script: string; args: string[] } => {
-  let resetData = false
-  let index = 0
-
-  while (index < argv.length && argv[index]?.startsWith('-')) {
-    const arg = argv[index]
-    if (arg === '--reset-data') {
-      resetData = true
-      index += 1
-      continue
-    }
-    throw new Error(`Unknown option: ${arg}`)
-  }
-
-  const script = argv[index]
-  const args = argv.slice(index + 1)
+const parseArgs = (argv: string[]): { script: string; args: string[] } => {
+  const [script, ...args] = argv
   if (!script) throw new Error('Script path is required')
-  return { resetData, script, args }
+  return { script, args }
 }
 
 const main = async (): Promise<void> => {
-  const { resetData, script, args } = parseArgs(process.argv.slice(2))
+  const { script, args } = parseArgs(process.argv.slice(2))
 
   let coreProc: ChildProc | null = null
   let scriptProc: ChildProc | null = null
@@ -120,10 +104,6 @@ const main = async (): Promise<void> => {
   process.on('SIGTERM', () => forward('SIGTERM'))
 
   try {
-    if (resetData) {
-      await fs.rm(DATA_DIR, { recursive: true, force: true })
-    }
-
     coreProc = spawn('pnpm', ['start'], { stdio: 'inherit', env: process.env, detached: true })
     await waitForWs(() => coreProc?.exitCode === null)
 

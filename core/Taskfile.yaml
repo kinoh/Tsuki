@@ -8,4 +8,5 @@ tasks:
     vars:
       SCENARIO: '{{index .MATCH 0}}'
     cmds:
-      - pnpm tsx ./tests/runner.ts --reset-data ./tests/client/run.ts ./tests/client/scenarios/{{.SCENARIO}}.yaml
+      - rm -rf ./data
+      - pnpm tsx ./tests/runner.ts ./tests/client/run.ts ./tests/client/scenarios/{{.SCENARIO}}.yaml
