@@ -13,18 +13,45 @@ type ChildProc = ReturnType<typeof spawn>
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-const waitForExit = (proc: ChildProc): Promise<number | null> => new Promise((resolve) => {
+const waitForExit = (proc: ChildProc, timeoutMs?: number): Promise<number | null> => new Promise((resolve) => {
   if (proc.exitCode !== null) {
     resolve(proc.exitCode)
     return
   }
-  proc.once('exit', (code) => resolve(code))
+  const onExit = (code: number | null): void => {
+    if (timer) clearTimeout(timer)
+    resolve(code)
+  }
+  const timer = timeoutMs
+    ? setTimeout(() => {
+      proc.removeListener('exit', onExit)
+      resolve(proc.exitCode)
+    }, timeoutMs)
+    : null
+  proc.once('exit', onExit)
 })
+
+const killGroup = (pid: number, signal: NodeJS.Signals): boolean => {
+  try {
+    process.kill(-pid, signal)
+    return true
+  } catch {
+    return false
+  }
+}
 
 const stop = async (proc: ChildProc | null): Promise<void> => {
   if (!proc || proc.exitCode !== null) return
-  proc.kill('SIGINT')
-  await waitForExit(proc)
+  const pid = proc.pid
+  if (pid && !killGroup(pid, 'SIGINT')) {
+    proc.kill('SIGINT')
+  }
+  await waitForExit(proc, 5000)
+  if (proc.exitCode !== null) return
+  if (pid && !killGroup(pid, 'SIGTERM')) {
+    proc.kill('SIGTERM')
+  }
+  await waitForExit(proc, 5000)
 }
 
 const waitForWs = async (isCoreAlive: () => boolean): Promise<void> => {
@@ -97,7 +124,7 @@ const main = async (): Promise<void> => {
       await fs.rm(DATA_DIR, { recursive: true, force: true })
     }
 
-    coreProc = spawn('pnpm', ['start'], { stdio: 'inherit', env: process.env })
+    coreProc = spawn('pnpm', ['start'], { stdio: 'inherit', env: process.env, detached: true })
     await waitForWs(() => coreProc?.exitCode === null)
 
     scriptProc = spawn('pnpm', ['tsx', script, ...args], { stdio: 'inherit', env: process.env })
