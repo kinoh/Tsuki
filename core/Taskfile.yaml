@@ -1,0 +1,11 @@
+version: '3'
+
+dotenv: ['.env']
+
+tasks:
+  test-scenario/*:
+    desc: Run core + client scenario after clearing core/data
+    vars:
+      SCENARIO: '{{index .MATCH 0}}'
+    cmds:
+      - pnpm tsx ./tests/runner.ts --reset-data ./tests/client/run.ts ./tests/client/scenarios/{{.SCENARIO}}.yaml

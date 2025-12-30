@@ -1,0 +1,116 @@
+import { spawn } from 'node:child_process'
+import fs from 'node:fs/promises'
+import net from 'node:net'
+import { URL } from 'node:url'
+
+const WS_URL = process.env.WS_URL ?? 'ws://localhost:2953/'
+const DATA_DIR = process.env.DATA_DIR ?? './data'
+const TIMEOUT_MS = 60000
+const INTERVAL_MS = 500
+const USAGE = 'Usage: pnpm tsx ./tests/runner.ts [--reset-data] <script> [args...]'
+
+type ChildProc = ReturnType<typeof spawn>
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+const waitForExit = (proc: ChildProc): Promise<number | null> => new Promise((resolve) => {
+  if (proc.exitCode !== null) {
+    resolve(proc.exitCode)
+    return
+  }
+  proc.once('exit', (code) => resolve(code))
+})
+
+const stop = async (proc: ChildProc | null): Promise<void> => {
+  if (!proc || proc.exitCode !== null) return
+  proc.kill('SIGINT')
+  await waitForExit(proc)
+}
+
+const waitForWs = async (isCoreAlive: () => boolean): Promise<void> => {
+  const url = new URL(WS_URL)
+  const host = url.hostname
+  const port = Number(url.port || (url.protocol === 'wss:' ? 443 : 80))
+
+  const tryConnect = (): Promise<boolean> => new Promise((resolve) => {
+    const socket = net.connect({ host, port })
+    socket.setTimeout(1000)
+    socket.once('connect', () => {
+      socket.end()
+      resolve(true)
+    })
+    socket.once('error', () => resolve(false))
+    socket.once('timeout', () => {
+      socket.destroy()
+      resolve(false)
+    })
+  })
+
+  const start = Date.now()
+  while (Date.now() - start < TIMEOUT_MS) {
+    if (!isCoreAlive()) {
+      throw new Error('core process exited before WS was ready')
+    }
+    if (await tryConnect()) return
+    await sleep(INTERVAL_MS)
+  }
+
+  throw new Error(`Timed out waiting for WS: ${WS_URL}`)
+}
+
+const parseArgs = (argv: string[]): { resetData: boolean; script: string; args: string[] } => {
+  let resetData = false
+  let index = 0
+
+  while (index < argv.length && argv[index]?.startsWith('-')) {
+    const arg = argv[index]
+    if (arg === '--reset-data') {
+      resetData = true
+      index += 1
+      continue
+    }
+    throw new Error(`Unknown option: ${arg}`)
+  }
+
+  const script = argv[index]
+  const args = argv.slice(index + 1)
+  if (!script) throw new Error('Script path is required')
+  return { resetData, script, args }
+}
+
+const main = async (): Promise<void> => {
+  const { resetData, script, args } = parseArgs(process.argv.slice(2))
+
+  let coreProc: ChildProc | null = null
+  let scriptProc: ChildProc | null = null
+
+  const forward = (signal: NodeJS.Signals): void => {
+    scriptProc?.kill(signal)
+    coreProc?.kill(signal)
+  }
+
+  process.on('SIGINT', () => forward('SIGINT'))
+  process.on('SIGTERM', () => forward('SIGTERM'))
+
+  try {
+    if (resetData) {
+      await fs.rm(DATA_DIR, { recursive: true, force: true })
+    }
+
+    coreProc = spawn('pnpm', ['start'], { stdio: 'inherit', env: process.env })
+    await waitForWs(() => coreProc?.exitCode === null)
+
+    scriptProc = spawn('pnpm', ['tsx', script, ...args], { stdio: 'inherit', env: process.env })
+    const exitCode = await waitForExit(scriptProc)
+    process.exitCode = exitCode ?? 1
+  } finally {
+    await stop(scriptProc)
+    await stop(coreProc)
+  }
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error))
+  console.error(USAGE)
+  process.exit(1)
+})
