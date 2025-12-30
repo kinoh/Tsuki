@@ -21,7 +21,11 @@ function extractTextPart(part: MessageContentPart): string | null {
       const detailTexts = part.details
         .filter(detail => detail.type === 'text')
         .map(detail => detail.text)
-      return [...reasoningTexts, ...detailTexts].join('\n')
+      const text = [...reasoningTexts, ...detailTexts].join('\n')
+      if (text.trim() === '') {
+        return null
+      }
+      return `[reasoning]\n${text}`.trim()
     }
 
     case 'tool-invocation':
