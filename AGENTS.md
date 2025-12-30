@@ -19,7 +19,7 @@ Guidance for coding agents working on Tsuki.
   - `src-tauri/`: Tauri shell (Rust) with `src/main.rs`, `lib.rs`, `tauri.conf.json`, `capabilities/`, `icons/`
   - `static/`: packaged static assets
 - `api-specs/`: AsyncAPI for WebSocket protocol
-- `docs/`: design decisions and change logs
+- `docs/`: design decisions and change logs (see docs/README.md for documentation strategy)
 - `docker/`, `compose.yaml`, `Taskfile.yaml`: container and task runner configs
 
 ## System Shape

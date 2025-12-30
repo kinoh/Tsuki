@@ -36,13 +36,5 @@ task deploy  # or docker compose up --build --detach
 
 ### Documentation
 
-- **[CLAUDE.md](CLAUDE.md)**: Development guide and current codebase reference
+- **[AGENTS.md](AGENTS.md)**: Development guide and current codebase reference
 - **[docs/README.md](docs/README.md)**: Design decisions and historical documentation
-
-### Development
-
-See [CLAUDE.md](CLAUDE.md) for:
-- Development commands and workflows
-- Architecture details and file structure
-- API endpoints and configuration
-- Testing and verification procedures

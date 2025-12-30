@@ -4,12 +4,12 @@ This directory contains historical design decisions and detailed implementation 
 
 ## Documentation Strategy
 
-### CLAUDE.md (Root Directory)
+### AGENTS.md (Root Directory)
 - **Purpose**: Quick reference for current codebase state
-- **Audience**: Claude Code AI assistant and developers needing quick orientation
+- **Audience**: AI assistant and developers needing quick orientation
 - **Content**:
   - Project overview and features
-  - Development commands
+  - Important development commands
   - Current architecture and file structure
   - API endpoints
 - **Maintenance**: Keep synchronized with code changes
@@ -33,15 +33,6 @@ Files in this directory follow the format: `YYYYMMDD_feature-name.md`
 - **Historical context**: Date prefix indicates when the decision was made
 - **Searchability**: Easy to find documentation from specific time periods
 - **Archival clarity**: Clearly identifies historical vs. current information
-
-## Current Documents
-
-- `20250721_mastra-backend-implementation.md` - Initial Mastra TypeScript backend implementation
-- `20250723_encrypted-prompt-system.md` - Age encryption system for prompts
-- `20250828_working-memory.md` - Working memory feature implementation
-- `20250905_mcp-resource-subscription.md` - MCP resource subscription guide
-- `20250907_agent-centric-architecture.md` - Agent-centric architecture refactoring
-- `20250918_core-user-distinction.md` - User distinction in agent core
 
 ## When to Add Documentation
 
@@ -73,8 +64,3 @@ Technical specifics for developers
 ## Future Considerations
 Known limitations and potential improvements
 ```
-
-## See Also
-
-- `/CLAUDE.md` - Current codebase reference and quick start guide
-- `/core/src/` - Source code implementation
