@@ -1,8 +1,9 @@
 import type { Agent as MastraAgent } from '@mastra/core/agent'
 import { MessageInput, MCPNotificationResourceUpdated } from './activeuser'
-import { ResponseMessage } from './message'
+import { ResponseMessage, extractTextParts, type MessageContentPart } from './message'
 import { UsageStorage } from '../storage/usage'
 import { UserContext } from './userContext'
+import { ConfigService } from '../configService'
 
 export interface Responder {
   respond(input: MessageInput, ctx: UserContext): Promise<ResponseMessage>
@@ -16,6 +17,7 @@ export class MastraResponder implements Responder {
   constructor(
     private readonly agent: MastraAgent,
     private readonly usage: UsageStorage,
+    private readonly config: ConfigService,
   ) {}
 
   async respond(input: MessageInput, ctx: UserContext): Promise<ResponseMessage> {
@@ -59,7 +61,9 @@ export class MastraResponder implements Responder {
 
     await this.usage.recordUsage(response, threadId, ctx.userId, this.agent.name)
 
-    const chatParts = splitConcatenatedJsonObjects(response.text ?? '')
+    const uiMessages = (response as { response?: { uiMessages?: unknown } }).response?.uiMessages
+    const uiChat = buildChatFromUiMessages(uiMessages, this.config.traceTools)
+    const chatParts = uiChat ?? splitConcatenatedJsonObjects(response.text ?? '')
 
     return {
       role: 'assistant',
@@ -164,4 +168,68 @@ function splitConcatenatedJsonObjects(text: string): string[] {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function buildChatFromUiMessages(
+  uiMessages: unknown,
+  traceTools: boolean,
+): string[] | null {
+  if (!Array.isArray(uiMessages) || uiMessages.length === 0) {
+    return null
+  }
+
+  const chat: string[] = []
+
+  for (const message of uiMessages) {
+    if (!isPlainObject(message)) {
+      continue
+    }
+
+    const role = typeof message.role === 'string' ? message.role : ''
+    if (role !== 'assistant') {
+      continue
+    }
+
+    const parts = extractUiMessageParts(message)
+    if (parts) {
+      chat.push(...extractTextParts(parts, { traceTools }))
+      continue
+    }
+
+    const content = message.content
+    if (typeof content === 'string' && content.trim() !== '') {
+      chat.push(content)
+    }
+  }
+
+  return chat.length > 0 ? chat : null
+}
+
+function extractUiMessageParts(message: Record<string, unknown>): MessageContentPart[] | null {
+  const directParts = message.parts
+  if (isMessageContentPartArray(directParts)) {
+    return directParts
+  }
+
+  const content = message.content
+  if (isMessageContentPartArray(content)) {
+    return content
+  }
+
+  if (isPlainObject(content)) {
+    const nestedParts = content.parts
+    if (isMessageContentPartArray(nestedParts)) {
+      return nestedParts
+    }
+  }
+
+  return null
+}
+
+function isMessageContentPartArray(value: unknown): value is MessageContentPart[] {
+  return Array.isArray(value) && value.every(isMessageContentPart)
+}
+
+function isMessageContentPart(value: unknown): value is MessageContentPart {
+  return isPlainObject(value) && typeof value.type === 'string'
 }

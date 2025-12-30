@@ -6,11 +6,13 @@ export class ConfigService {
   public readonly dataDir: string
   public readonly env: string
   public readonly isProduction: boolean
+  public readonly traceTools: boolean
 
   constructor() {
     this.env = process.env.ENV ?? process.env.NODE_ENV ?? 'development'
     this.isProduction = this.env === 'production'
     this.dataDir = process.env.DATA_DIR ?? './data'
+    this.traceTools = ConfigService.parseBooleanFlag(process.env.TRACE_TOOLS)
 
     this.initDataDir()
   }
@@ -46,5 +48,13 @@ export class ConfigService {
         `tar exited with status ${result.status ?? 'unknown'}`
       throw new Error(`Failed to restore data: ${message}`)
     }
+  }
+
+  private static parseBooleanFlag(value: string | undefined): boolean {
+    if (value === undefined) {
+      return false
+    }
+    const normalized = value.trim().toLowerCase()
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
   }
 }

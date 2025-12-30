@@ -9,6 +9,9 @@ export interface ResponseMessage {
 }
 
 export type MessageContentPart = TextUIPart | ReasoningUIPart | ToolInvocationUIPart | SourceUIPart | FileUIPart | StepStartUIPart
+export type TextExtractionOptions = {
+  traceTools?: boolean
+}
 
 function extractTextPart(part: MessageContentPart): string | null {
   switch (part.type) {
@@ -46,8 +49,92 @@ function extractTextPart(part: MessageContentPart): string | null {
   }
 }
 
-function extractTextContent(content: MastraMessageContentV2): string[] {
-  return content.parts.map(extractTextPart).filter(part => part !== null)
+function isToolInvocationPart(part: MessageContentPart): part is ToolInvocationUIPart {
+  return part.type === 'tool-invocation'
+}
+
+function isToolErrorResult(result: unknown): boolean {
+  if (result === null || typeof result !== 'object') {
+    return false
+  }
+  const record = result as Record<string, unknown>
+  if (record.isError === true || record.error === true) {
+    return true
+  }
+  return false
+}
+
+function safeJsonStringify(value: unknown): string | null {
+  if (typeof value === 'undefined') {
+    return null
+  }
+
+  const seen = new WeakSet<object>()
+  const serialized = JSON.stringify(value, (_key, val) => {
+    if (typeof val === 'bigint') {
+      return val.toString()
+    }
+    if (val !== null && typeof val === 'object') {
+      if (seen.has(val)) {
+        return '[Circular]'
+      }
+      seen.add(val)
+    }
+    return val
+  })
+  return typeof serialized === 'string' ? serialized : null
+}
+
+function extractToolTraceLines(part: ToolInvocationUIPart): string[] {
+  const invocation = part.toolInvocation
+  if (!invocation || typeof invocation !== 'object') {
+    return []
+  }
+
+  const toolName = typeof invocation.toolName === 'string' ? invocation.toolName : 'unknown-tool'
+  const state = invocation.state
+
+  if (state === 'call') {
+    const argsText = safeJsonStringify(invocation.args)
+    return argsText ? [argsText] : []
+  }
+
+  if (state === 'result') {
+    const result = invocation.result
+    const isError = isToolErrorResult(result)
+    const label = `[tool-result] ${toolName}${isError ? ' (error)' : ''}`.trim()
+    const resultText = safeJsonStringify(result)
+    return resultText ? [label, resultText] : [label]
+  }
+
+  return []
+}
+
+export function extractTextParts(
+  parts: MessageContentPart[],
+  options: TextExtractionOptions = {},
+): string[] {
+  const lines: string[] = []
+
+  for (const part of parts) {
+    const text = extractTextPart(part)
+    if (text && text.trim() !== '') {
+      lines.push(text)
+    }
+
+    if (options.traceTools && isToolInvocationPart(part)) {
+      lines.push(...extractToolTraceLines(part))
+    }
+  }
+
+  return lines
+}
+
+export function extractTextContent(
+  content: MastraMessageContentV2,
+  options: TextExtractionOptions = {},
+): string[] {
+  return extractTextParts(content.parts, options)
 }
 
 export function createResponseMessage(

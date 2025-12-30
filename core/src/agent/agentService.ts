@@ -30,7 +30,7 @@ export class AgentService {
     private usageStorage: UsageStorage,
     private commonInstructions: string,
   ) {
-    this.responder = new MastraResponder(agent, usageStorage)
+    this.responder = new MastraResponder(agent, usageStorage, config)
   }
 
   start(permanentUsers: string[], fcm?: FCMManager): void {
