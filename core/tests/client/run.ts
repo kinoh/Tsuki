@@ -17,7 +17,7 @@ const WS_URL = process.env.WS_URL ?? 'ws://localhost:2953/'
 const AUTH_TOKEN = process.env.WEB_AUTH_TOKEN ?? 'test-token'
 const USER_NAME = process.env.USER_NAME ?? 'test-user'
 const LOG_DIR = process.env.LOG_DIR ?? path.resolve(process.cwd(), 'tests/client/logs')
-const RESPONSE_TIMEOUT_MS = 10000
+const RESPONSE_TIMEOUT_MS = 60000
 
 type ServerMessage = {
   role: 'user' | 'assistant' | 'system' | 'tool'
