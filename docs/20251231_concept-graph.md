@@ -36,7 +36,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - Translate Core requests into Memgraph writes and reads.
   - Apply ranking internally; manage arousal updates; set updated timestamps.
 - Graph model (logical)
-  - Concept node: identifier (concept text), latest affect values (valence, arousal), updated timestamp
+  - Concept node: identifier (concept text), valence, arousal_level, accessed_at
   - Episode node: summary (time is embedded in summary or represented elsewhere, not as a timestamp property)
   - Edges: Concept->Episode (mentions/related), Concept->Concept with type in {is-a, part-of, evokes}
 - Compose integration
@@ -47,25 +47,28 @@ The existing structured-memory store is not well-suited for concept networks tha
 - General
   - Concept strings are used as-is (no normalization).
   - LLM-facing time is local time; Core converts to unix_ms before calling MCP.
-  - updated_at is set by MCP; source and confidence are omitted.
+  - accessed_at is set by MCP; source and confidence are omitted.
   - Arousal is managed by MCP and not explicitly updated by Core.
+  - arousal = arousal_level * exp(-(now - accessed_at) / tau), with tau defaulting to 1 day.
 - concept.upsert
   - params: { concept: string }
   - returns: { concept_id: string, created: boolean }
 - concept.update_affect
   - params: { concept: string, valence_delta: number }  # delta in [-1.0, 1.0]
-  - returns: { concept_id: string, valence: number, arousal: number, updated_at: number }
+  - returns: { concept_id: string, valence: number, arousal: number, accessed_at: number }
+  - notes: valence is clamped; accessed_at/arousal_level update only if new arousal >= current arousal.
 - episode.add
-  - params: { summary: string, timestamp: number, concepts: string[] }
+  - params: { summary: string, concepts: string[] }
   - returns: { episode_id: string, linked_concepts: string[] }
 - relation.add
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { relation_id: string }
 - recall.query
   - params: { seeds: string[], max_hop: number }
-  - returns: { propositions: Array<{ text: string, score: number }> }
+  - returns: { propositions: Array<{ text: string, score: number, valence: number | null }> }
   - notes: relation types are mapped to DB-safe labels (e.g., "is-a" -> "IS_A"); propositions use a fixed
     text form, including episodes as "apple evokes <episode summary>".
+  - notes: each recalled concept may update arousal_level using hop_decay if it raises arousal.
 
 ## Future Considerations
 - Data migration strategy from structured-memory to Memgraph.
