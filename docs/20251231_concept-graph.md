@@ -30,20 +30,44 @@ The existing structured-memory store is not well-suited for concept networks tha
 ## Implementation Details
 - Core responsibilities
   - Run LLM-based affect evaluation from conversation logs.
-  - Send concept updates, episodic summaries, and scoring criteria to the MCP service.
+  - Send concept updates, episodic summaries, and affect deltas to the MCP service.
   - Request recall queries and consume ranked results.
 - MCP memory service (Rust)
   - Translate Core requests into Memgraph writes and reads.
-  - Apply ranking using scoring criteria provided by Core.
+  - Apply ranking internally; manage arousal updates; set updated timestamps.
 - Graph model (logical)
-  - Concept node: identifier (concept text), latest affect values, updated timestamp, source
-  - Episode node: summary, timestamp, source
+  - Concept node: identifier (concept text), latest affect values (valence, arousal), updated timestamp
+  - Episode node: summary (time is embedded in summary or represented elsewhere, not as a timestamp property)
   - Edges: Concept->Episode (mentions/related), Concept->Concept with type in {is-a, part-of, evokes}
 - Compose integration
   - Add Memgraph service with persistent volume.
   - Add MCP service that connects to Memgraph via Bolt.
 
+### MCP Interface (draft)
+- General
+  - Concept strings are used as-is (no normalization).
+  - LLM-facing time is local time; Core converts to unix_ms before calling MCP.
+  - updated_at is set by MCP; source and confidence are omitted.
+  - Arousal is managed by MCP and not explicitly updated by Core.
+- concept.upsert
+  - params: { concept: string }
+  - returns: { concept_id: string, created: boolean }
+- concept.update_affect
+  - params: { concept: string, valence_delta: number }  # delta in [-1.0, 1.0]
+  - returns: { concept_id: string, valence: number, arousal: number, updated_at: number }
+- episode.add
+  - params: { summary: string, timestamp: number, concepts: string[] }
+  - returns: { episode_id: string, linked_concepts: string[] }
+- relation.add
+  - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
+  - returns: { relation_id: string }
+- recall.query
+  - params: { seeds: string[], max_hop: number }
+  - returns: { propositions: Array<{ text: string, score: number }> }
+  - notes: relation types are mapped to DB-safe labels (e.g., "is-a" -> "IS_A"); propositions use a fixed
+    text form, including episodes as "apple evokes <episode summary>".
+
 ## Future Considerations
 - Data migration strategy from structured-memory to Memgraph.
-- Optional richer metadata on episodes (message ID, confidence) if recall quality requires it.
+- Optional richer metadata on episodes (message ID) if recall quality requires it.
 - Relation type expansion or normalization if concept graph usage grows.
