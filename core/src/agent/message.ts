@@ -13,6 +13,10 @@ export type TextExtractionOptions = {
   traceTools?: boolean
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
 function isToolErrorResult(result: unknown): boolean {
   if (result === null || typeof result !== 'object') {
     return false
@@ -40,18 +44,20 @@ function safeJsonStringify(value: unknown): string | null {
   }
 
   const seen = new WeakSet<object>()
-  const serialized = JSON.stringify(value, (_key, val) => {
+  const replacer = (_key: string, val: unknown): unknown => {
     if (typeof val === 'bigint') {
       return val.toString()
     }
     if (val !== null && typeof val === 'object') {
-      if (seen.has(val)) {
+      const obj = val
+      if (seen.has(obj)) {
         return '[Circular]'
       }
-      seen.add(val)
+      seen.add(obj)
     }
     return val
-  })
+  }
+  const serialized = JSON.stringify(value, replacer)
   return typeof serialized === 'string' ? serialized : null
 }
 
@@ -65,15 +71,20 @@ function extractTextPart(
     if (typeof toolName === 'string' && toolName.trim() !== '') {
       label = `${label} ${toolName}`
     }
-    const resultPayload = part.toolInvocation?.result
+    const invocation = part.toolInvocation as
+      | { state?: unknown; result?: unknown; args?: unknown }
+      | { state?: unknown }
+      | undefined
+    const resultPayload = invocation && 'result' in invocation ? invocation.result : undefined
     if (isToolErrorResult(resultPayload)) {
       label = `${label} (error)`
     }
-    if (options.traceTools) {
-      const state = part.toolInvocation?.state
-      const payload = state === 'result' ? resultPayload : part.toolInvocation?.args
+    if (options.traceTools === true) {
+      const state = typeof invocation?.state === 'string' ? invocation.state : ''
+      const argsPayload = invocation && 'args' in invocation ? invocation.args : undefined
+      const payload = state === 'result' ? resultPayload : argsPayload
       const json = safeJsonStringify(payload)
-      if (json) {
+      if (json !== null) {
         label = `${label} ${json}`
       }
     }
@@ -86,14 +97,14 @@ function extractTextPart(
     if (isToolErrorResult(outputPayload)) {
       label = `${label} (error)`
     }
-    if (options.traceTools) {
+    if (options.traceTools === true) {
       const state = (part as { state?: unknown }).state
       const isResult = state === 'output-available'
       const payload = isResult
         ? outputPayload
         : (part as { input?: unknown }).input
       const json = safeJsonStringify(payload)
-      if (json) {
+      if (json !== null) {
         label = `${label} ${json}`
       }
     }
@@ -116,9 +127,13 @@ function extractTextPart(
         : (typeof raw.text === 'string' ? raw.text : '')
       const details = Array.isArray(raw.details) ? raw.details : []
       const detailTexts = details
-        .filter(detail => detail && typeof detail === 'object' && (detail as { type?: unknown }).type === 'text')
-        .map(detail => (detail as { text?: unknown }).text)
-        .filter(text => typeof text === 'string') as string[]
+        .filter((detail): detail is { type: 'text'; text: string } => {
+          if (!isPlainObject(detail)) {
+            return false
+          }
+          return detail.type === 'text' && typeof detail.text === 'string'
+        })
+        .map(detail => detail.text)
       const text = [reasoningText, ...detailTexts].filter(item => item.trim() !== '').join('\n')
       if (text.trim() === '') {
         return null
@@ -154,7 +169,14 @@ export function extractTextContent(
   content: MastraMessageContentV2,
   options: TextExtractionOptions = {},
 ): string[] {
-  return extractTextParts(content.parts, options)
+  const parts = Array.isArray(content.parts)
+    ? content.parts.filter(isMessageContentPart)
+    : []
+  return extractTextParts(parts, options)
+}
+
+function isMessageContentPart(value: unknown): value is MessageContentPart {
+  return isPlainObject(value) && typeof value.type === 'string'
 }
 
 export function createResponseMessage(
