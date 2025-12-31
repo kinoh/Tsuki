@@ -38,5 +38,15 @@ services:
       retries: 3
       start_period: 40s
 
+  memgraph:
+    image: memgraph/memgraph
+    command: ["--data-directory=/data/memgraph"]
+    volumes:
+      # NOTE: Ensure /data/memgraph is owned by uid 101 gid 103 (memgraph user).
+      - core-data:/data
+    ports:
+      - "7687:7687"
+    restart: always
+
 volumes:
   core-data:
