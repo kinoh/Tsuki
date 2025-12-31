@@ -7,6 +7,7 @@ import { parse } from 'yaml'
 type InputItem = {
   text: string
   type?: 'message' | 'sensory'
+  timeout_ms?: number
 }
 
 type Scenario = {
@@ -52,14 +53,21 @@ function parseScenario(text: string): Scenario {
     if (!item || typeof item !== 'object') {
       throw new Error(`inputs[${index}] must be an object`)
     }
-    const { text, type } = item as { text?: unknown; type?: unknown }
+    const { text, type, timeout_ms } = item as { text?: unknown; type?: unknown; timeout_ms?: unknown }
     if (typeof text !== 'string' || text.trim().length === 0) {
       throw new Error(`inputs[${index}].text must be a non-empty string`)
     }
     if (type !== undefined && type !== 'message' && type !== 'sensory') {
       throw new Error(`inputs[${index}].type must be "message" or "sensory"`)
     }
-    return { text, type: (type as 'message' | 'sensory' | undefined) ?? 'message' }
+    if (timeout_ms !== undefined && (typeof timeout_ms !== 'number' || !Number.isFinite(timeout_ms) || timeout_ms <= 0)) {
+      throw new Error(`inputs[${index}].timeout_ms must be a positive number`)
+    }
+    return {
+      text,
+      type: (type as 'message' | 'sensory' | undefined) ?? 'message',
+      timeout_ms: timeout_ms as number | undefined,
+    }
   })
 
   return { inputs: normalized }
@@ -166,7 +174,8 @@ async function run(): Promise<void> {
         const payload = { type: input.type ?? 'message', text: input.text }
         ws.send(JSON.stringify(payload))
         logger.info({ event: 'send', payload })
-        await waitForServerMessage(RESPONSE_TIMEOUT_MS)
+        const timeoutMs = input.timeout_ms ?? RESPONSE_TIMEOUT_MS
+        await waitForServerMessage(timeoutMs)
       }
       closeOnce()
     })().catch((error) => {

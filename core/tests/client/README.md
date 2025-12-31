@@ -36,9 +36,12 @@ inputs:
   - text: "今日の気分は？"
   - type: sensory
     text: "雨の匂いがする"
+  - text: "長い処理が必要な入力"
+    timeout_ms: 120000
 ```
 
 - `type`の指定が無い場合は`type: message`として送る
+- `timeout_ms` がある場合はその入力に対する待機時間として使う
 
 ## 期待する挙動
 - `inputs` を上から順に送信
