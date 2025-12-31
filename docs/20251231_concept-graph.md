@@ -50,20 +50,20 @@ The existing structured-memory store is not well-suited for concept networks tha
   - accessed_at is set by MCP; source and confidence are omitted.
   - Arousal is managed by MCP and not explicitly updated by Core.
   - arousal = arousal_level * exp(-(now - accessed_at) / tau), with tau defaulting to 1 day.
-- concept.upsert
+- concept_upsert
   - params: { concept: string }
   - returns: { concept_id: string, created: boolean }
-- concept.update_affect
+- concept_update_affect
   - params: { concept: string, valence_delta: number }  # delta in [-1.0, 1.0]
   - returns: { concept_id: string, valence: number, arousal: number, accessed_at: number }
   - notes: valence is clamped; accessed_at/arousal_level update only if new arousal >= current arousal.
-- episode.add
+- episode_add
   - params: { summary: string, concepts: string[], valence: number }
   - returns: { episode_id: string, linked_concepts: string[], valence: number }
-- relation.add
+- relation_add
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { relation_id: string }
-- recall.query
+- recall_query
   - params: { seeds: string[], max_hop: number }
   - returns: { propositions: Array<{ text: string, score: number, valence: number | null }> }
   - notes: relation types are mapped to DB-safe labels (e.g., "is-a" -> "IS_A"); propositions use a fixed
