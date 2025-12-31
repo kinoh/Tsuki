@@ -8,22 +8,24 @@ const INTERVAL_MS = 500
 const USAGE = 'Usage: pnpm tsx ./tests/runner.ts <script> [args...]'
 
 type ChildProc = ReturnType<typeof spawn>
+type ExitResult = { code: number | null; signal: NodeJS.Signals | null }
+type StopResult = { exit: ExitResult; sentSignal: NodeJS.Signals | null }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-const waitForExit = (proc: ChildProc, timeoutMs?: number): Promise<number | null> => new Promise((resolve) => {
-  if (proc.exitCode !== null) {
-    resolve(proc.exitCode)
+const waitForExit = (proc: ChildProc, timeoutMs?: number): Promise<ExitResult> => new Promise((resolve) => {
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    resolve({ code: proc.exitCode, signal: proc.signalCode })
     return
   }
-  const onExit = (code: number | null): void => {
+  const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
     if (timer) clearTimeout(timer)
-    resolve(code)
+    resolve({ code, signal })
   }
   const timer = timeoutMs
     ? setTimeout(() => {
       proc.removeListener('exit', onExit)
-      resolve(proc.exitCode)
+      resolve({ code: proc.exitCode, signal: proc.signalCode })
     }, timeoutMs)
     : null
   proc.once('exit', onExit)
@@ -38,18 +40,27 @@ const killGroup = (pid: number, signal: NodeJS.Signals): boolean => {
   }
 }
 
-const stop = async (proc: ChildProc | null): Promise<void> => {
-  if (!proc || proc.exitCode !== null) return
+const stop = async (proc: ChildProc | null): Promise<StopResult | null> => {
+  if (!proc) return null
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    return { exit: { code: proc.exitCode, signal: proc.signalCode }, sentSignal: null }
+  }
   const pid = proc.pid
+  let sentSignal: NodeJS.Signals | null = null
   if (pid && !killGroup(pid, 'SIGINT')) {
     proc.kill('SIGINT')
   }
-  await waitForExit(proc, 5000)
-  if (proc.exitCode !== null) return
+  sentSignal = 'SIGINT'
+  let exit = await waitForExit(proc, 5000)
+  if (exit.code !== null || exit.signal !== null) {
+    return { exit, sentSignal }
+  }
   if (pid && !killGroup(pid, 'SIGTERM')) {
     proc.kill('SIGTERM')
   }
-  await waitForExit(proc, 5000)
+  sentSignal = 'SIGTERM'
+  exit = await waitForExit(proc, 5000)
+  return { exit, sentSignal }
 }
 
 const waitForWs = async (isCoreAlive: () => boolean): Promise<void> => {
@@ -108,11 +119,18 @@ const main = async (): Promise<void> => {
     await waitForWs(() => coreProc?.exitCode === null)
 
     scriptProc = spawn('pnpm', ['tsx', script, ...args], { stdio: 'inherit', env: process.env })
-    const exitCode = await waitForExit(scriptProc)
-    process.exitCode = exitCode ?? 1
+    const exitResult = await waitForExit(scriptProc)
+    process.exitCode = exitResult.code ?? 1
   } finally {
     await stop(scriptProc)
-    await stop(coreProc)
+    const coreStop = await stop(coreProc)
+    if (coreStop && coreStop.exit.code !== null && coreStop.exit.code !== 0) {
+      // Ignore SIGINT sent by us
+      const ignoreSignal = coreStop.sentSignal === 'SIGINT' && coreStop.exit.signal === 'SIGINT'
+      if (!ignoreSignal) {
+        process.exitCode = process.exitCode && process.exitCode !== 0 ? process.exitCode : 1
+      }
+    }
   }
 }
 
