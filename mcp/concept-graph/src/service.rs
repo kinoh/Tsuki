@@ -110,8 +110,12 @@ impl ConceptGraphService {
         val.max(min).min(max)
     }
 
-    fn hop_decay(hop: u32) -> f64 {
-        0.5_f64.powi(hop as i32)
+    fn hop_decay(hop: u32, forward: bool) -> f64 {
+        if forward {
+            0.5_f64.powi((hop.saturating_sub(1)) as i32)
+        } else {
+            0.5_f64.powi(hop as i32)
+        }
     }
 
     fn arousal(&self, level: f64, accessed_at: i64, now: i64) -> f64 {
@@ -659,7 +663,6 @@ impl ConceptGraphService {
             }
 
             let next_hop = hop + 1;
-            let hop_decay = Self::hop_decay(next_hop);
 
             let relations = self.fetch_relations(&concept).await?;
             for edge in relations {
@@ -667,7 +670,8 @@ impl ConceptGraphService {
                     continue;
                 }
 
-                let target = if edge.from == concept {
+                let forward = edge.from == concept;
+                let target = if forward {
                     edge.to.clone()
                 } else {
                     edge.from.clone()
@@ -676,7 +680,9 @@ impl ConceptGraphService {
                 if let Some(target_state) =
                     self.get_concept_state_cached(&mut cache, &target, now).await?
                 {
-                    let arousal = self.arousal(target_state.arousal_level, target_state.accessed_at, now);
+                    let hop_decay = Self::hop_decay(next_hop, forward);
+                    let arousal =
+                        self.arousal(target_state.arousal_level, target_state.accessed_at, now);
                     let score = arousal * hop_decay;
                     let text = format!(
                         "{} {} {}",
@@ -716,6 +722,7 @@ impl ConceptGraphService {
                 if let Some(concept_state) =
                     self.get_concept_state_cached(&mut cache, &concept, now).await?
                 {
+                    let hop_decay = Self::hop_decay(next_hop, true);
                     let arousal =
                         self.arousal(concept_state.arousal_level, concept_state.accessed_at, now);
                     let score = arousal * hop_decay;

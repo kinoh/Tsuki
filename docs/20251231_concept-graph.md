@@ -69,6 +69,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - notes: relation types are mapped to DB-safe labels (e.g., "is-a" -> "IS_A"); propositions use a fixed
     text form, including episodes as "apple evokes <episode summary>".
   - notes: each recalled concept may update arousal_level using hop_decay if it raises arousal.
+  - notes: hop_decay is directional (forward: 0.5^(hop-1), reverse: 0.5^hop).
 
 ## Future Considerations
 - Data migration strategy from structured-memory to Memgraph.
