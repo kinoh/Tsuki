@@ -92,7 +92,7 @@ impl ConceptGraphService {
         password: String,
         arousal_tau_ms: f64,
     ) -> Result<Self, Box<dyn Error>> {
-        let graph = Graph::new(uri, user, password).await?;
+        let graph = Graph::new(uri, user, password)?;
         let tau = if arousal_tau_ms > 0.0 { arousal_tau_ms } else { 1.0 };
         Ok(Self {
             tool_router: Self::tool_router(),
@@ -127,11 +127,11 @@ impl ConceptGraphService {
     }
 
     fn invalid_params(message: &str, detail: serde_json::Value) -> ErrorData {
-        ErrorData::invalid_params(message, Some(detail))
+        ErrorData::invalid_params(message.to_string(), Some(detail))
     }
 
     fn internal_error(message: &str, err: impl ToString) -> ErrorData {
-        ErrorData::internal_error(message, Some(json!({"reason": err.to_string()})))
+        ErrorData::internal_error(message.to_string(), Some(json!({"reason": err.to_string()})))
     }
 
     fn normalize_concept(&self, concept: &str) -> Option<String> {
@@ -526,7 +526,7 @@ impl ConceptGraphService {
              ON CREATE SET c.valence = $concept_valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at\n\
              MERGE (c)-[:EVOKES]->(e)",
         )
-        .param("id", &episode_id)
+        .param("id", episode_id.as_str())
         .param("summary", summary)
         .param("episode_valence", episode_valence)
         .param("concepts", concepts.clone())
@@ -592,9 +592,9 @@ impl ConceptGraphService {
         );
 
         let query = query(query_text.as_str())
-            .param("from", &from)
-            .param("to", &to)
-            .param("id", &relation_id)
+            .param("from", from.as_str())
+            .param("to", to.as_str())
+            .param("id", relation_id.as_str())
             .param("valence", DEFAULT_VALENCE)
             .param("arousal_level", DEFAULT_AROUSAL_LEVEL)
             .param("accessed_at", now);
