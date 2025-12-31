@@ -37,7 +37,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - Apply ranking internally; manage arousal updates; set updated timestamps.
 - Graph model (logical)
   - Concept node: identifier (concept text), valence, arousal_level, accessed_at
-  - Episode node: summary (time is embedded in summary or represented elsewhere, not as a timestamp property)
+  - Episode node: summary, valence (time is embedded in summary or represented elsewhere, not as a timestamp property)
   - Edges: Concept->Episode (mentions/related), Concept->Concept with type in {is-a, part-of, evokes}
 - Compose integration
   - Add Memgraph service with persistent volume.
@@ -58,8 +58,8 @@ The existing structured-memory store is not well-suited for concept networks tha
   - returns: { concept_id: string, valence: number, arousal: number, accessed_at: number }
   - notes: valence is clamped; accessed_at/arousal_level update only if new arousal >= current arousal.
 - episode.add
-  - params: { summary: string, concepts: string[] }
-  - returns: { episode_id: string, linked_concepts: string[] }
+  - params: { summary: string, concepts: string[], valence: number }
+  - returns: { episode_id: string, linked_concepts: string[], valence: number }
 - relation.add
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { relation_id: string }

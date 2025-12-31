@@ -33,6 +33,7 @@ pub struct ConceptUpdateAffectRequest {
 pub struct EpisodeAddRequest {
     pub summary: String,
     pub concepts: Vec<String>,
+    pub valence: f64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -74,6 +75,7 @@ struct RelationEdge {
 struct EpisodeEntry {
     id: String,
     summary: String,
+    valence: f64,
 }
 
 #[derive(Clone)]
@@ -333,7 +335,7 @@ impl ConceptGraphService {
     async fn fetch_episodes(&self, concept: &str) -> Result<Vec<EpisodeEntry>, ErrorData> {
         let query = query(
             "MATCH (c:Concept {name: $name})-[:EVOKES]->(e:Episode)\n\
-             RETURN e.id AS id, e.summary AS summary",
+             RETURN e.id AS id, e.summary AS summary, e.valence AS valence",
         )
         .param("name", concept);
 
@@ -345,7 +347,12 @@ impl ConceptGraphService {
         while let Ok(Some(row)) = result.next().await {
             let id: String = row.get("id").unwrap_or_default();
             let summary: String = row.get("summary").unwrap_or_default();
-            episodes.push(EpisodeEntry { id, summary });
+            let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
+            episodes.push(EpisodeEntry {
+                id,
+                summary,
+                valence,
+            });
         }
 
         Ok(episodes)
@@ -509,19 +516,21 @@ impl ConceptGraphService {
 
         let now = Self::now_ms();
         let episode_id = Uuid::new_v4().to_string();
+        let episode_valence = Self::clamp(request.valence, -1.0, 1.0);
 
         let query = query(
-            "CREATE (e:Episode {id: $id, summary: $summary})\n\
+            "CREATE (e:Episode {id: $id, summary: $summary, valence: $episode_valence})\n\
              WITH e\n\
              UNWIND $concepts AS concept\n\
              MERGE (c:Concept {name: concept})\n\
-             ON CREATE SET c.valence = $valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at\n\
+             ON CREATE SET c.valence = $concept_valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at\n\
              MERGE (c)-[:EVOKES]->(e)",
         )
         .param("id", &episode_id)
         .param("summary", summary)
+        .param("episode_valence", episode_valence)
         .param("concepts", concepts.clone())
-        .param("valence", DEFAULT_VALENCE)
+        .param("concept_valence", DEFAULT_VALENCE)
         .param("arousal_level", DEFAULT_AROUSAL_LEVEL)
         .param("accessed_at", now);
 
@@ -536,6 +545,7 @@ impl ConceptGraphService {
         let result = json!({
             "episode_id": episode_id,
             "linked_concepts": concepts,
+            "valence": episode_valence,
         });
 
         Ok(CallToolResult {
@@ -732,7 +742,7 @@ impl ConceptGraphService {
                         let proposition = Proposition {
                             text: text.clone(),
                             score,
-                            valence: Some(concept_state.valence),
+                            valence: Some(episode.valence),
                         };
                         let entry = propositions.entry(text).or_insert(proposition);
                         if score > entry.score {
