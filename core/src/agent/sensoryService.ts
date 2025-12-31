@@ -4,6 +4,7 @@ import { logger } from '../logger'
 type SensoryPollerConfig = {
   userIds: string[]
   pollSeconds: number
+  immediate?: boolean
 }
 
 export type SensorySample = {
@@ -26,6 +27,7 @@ export class SensoryService {
   private timer: NodeJS.Timeout | null = null
   private readonly pollSeconds: number
   private readonly userIds: string[]
+  private readonly immediate: boolean
   private readonly fetchers: SensoryFetcher[] = []
   private readonly lastValues: Map<string, string> = new Map()
 
@@ -35,6 +37,7 @@ export class SensoryService {
   ) {
     this.pollSeconds = Math.max(1, config.pollSeconds)
     this.userIds = config.userIds.filter(Boolean)
+    this.immediate = config.immediate ?? false
   }
 
   registerFetcher(fetcher: SensoryFetcher): typeof this {
@@ -52,6 +55,12 @@ export class SensoryService {
         logger.error({ err }, 'SensoryService: poll error')
       })
     }, this.pollSeconds * 1000)
+
+    if (this.immediate) {
+      this.emitSensory().catch((err: unknown) => {
+        logger.error({ err }, 'SensoryService: poll error')
+      })
+    }
   }
 
   stop(): void {

@@ -49,9 +49,11 @@ async function main(): Promise<void> {
 
   // Sensory service runs inside core; SENSORY_POLL_SECONDS is interpreted in seconds.
   const sensoryPollSeconds = Number(process.env.SENSORY_POLL_SECONDS ?? '60')
+  const sensoryPollImmediate = process.env.SENSORY_POLL_IMMEDIATE === '1'
   using sensoryService = new SensoryService(agentService, {
     userIds: permanentUsers,
     pollSeconds: sensoryPollSeconds,
+    immediate: sensoryPollImmediate,
   })
     .registerFetcher(new McpSensory(mastraInstance.mcp, 'rss', 'get_articles', {
     n: 5,
