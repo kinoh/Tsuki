@@ -42,6 +42,14 @@ export class MCPClient {
 export function getUniversalMCP(config: ConfigService): MCPClient {
   return new MCPClient({
     servers: {
+      concept_graph: {
+        command: './bin/concept-graph',
+        args: [],
+        env: {
+          DATA_DIR: `${config.dataDir}/concept_graph`,
+          TZ: process.env.TZ ?? 'Asia/Tokyo',
+        },
+      },
       rss: {
         command: './bin/rss',
         args: [],

@@ -77,6 +77,7 @@ tasks:
   mcp/build:
     desc: Build all MCP servers
     deps:
+      - mcp/build-concept-graph
       - mcp/build-structured-memory
       - mcp/build-scheduler
       - mcp/build-weather
@@ -113,3 +114,7 @@ tasks:
       - docker compose cp core:/data /tmp/tsuki-backup-{{.TIMESTAMP}}
       - tar czf {{.BACKUP_DIR}}/tsuki-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-{{.TIMESTAMP}} .
       - rm -rf /tmp/tsuki-backup-{{.TIMESTAMP}}
+  local/clean-data:
+    desc: Reset local development data
+    cmds:
+      - echo "MATCH (n) DETACH DELETE n;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole

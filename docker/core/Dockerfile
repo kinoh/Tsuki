@@ -8,11 +8,19 @@ RUN apk add --no-cache musl-dev \
     && rustup target add x86_64-unknown-linux-musl
 
 # Copy Rust source code
+COPY mcp/concept-graph ./mcp/concept-graph
 COPY mcp/structured-memory ./mcp/structured-memory
 COPY mcp/scheduler ./mcp/scheduler
 COPY mcp/weather ./mcp/weather
 COPY mcp/metrics ./mcp/metrics
 COPY mcp/rss ./mcp/rss
+
+# Build concept-graph with caching
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/mcp/concept-graph/target \
+    cd mcp/concept-graph && \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/concept-graph /build/concept-graph
 
 # Build structured-memory with caching
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

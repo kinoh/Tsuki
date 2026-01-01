@@ -9,4 +9,5 @@ tasks:
       SCENARIO: '{{index .MATCH 0}}'
     cmds:
       - rm -rf ./data
+      - task -t ../Taskfile.yaml local/clean-data
       - pnpm tsx ./tests/runner.ts ./tests/client/run.ts ./tests/client/scenarios/{{.SCENARIO}}.yaml
