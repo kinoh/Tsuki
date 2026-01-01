@@ -28,6 +28,9 @@ Creates the concept if missing. Uses the concept string as-is.
 Arguments:
 - concept: string
 
+Notes:
+- newly created concepts start with arousal_level = 0.5.
+
 Returns:
 - concept_id: string
 - created: boolean
@@ -59,6 +62,9 @@ Arguments:
 - concepts: string[]
 - valence: number
 
+Notes:
+- concepts created indirectly here start with arousal_level = 0.25.
+
 Returns:
 - episode_id: string
 - linked_concepts: string[]
@@ -75,6 +81,7 @@ Arguments:
 Notes:
 - relation types are mapped to DB-safe labels (e.g., "is-a" -> "IS_A").
 - tautologies (from == to) are rejected.
+- concepts created indirectly here start with arousal_level = 0.25.
 
 Returns:
 - relation_id: string

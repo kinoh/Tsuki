@@ -53,6 +53,7 @@ The existing structured-memory store is not well-suited for concept networks tha
 - concept_upsert
   - params: { concept: string }
   - returns: { concept_id: string, created: boolean }
+  - notes: newly created concepts start with arousal_level = 0.5.
 - concept_update_affect
   - params: { concept: string, valence_delta: number }  # delta in [-1.0, 1.0]
   - returns: { concept_id: string, valence: number, arousal: number, accessed_at: number }
@@ -60,9 +61,11 @@ The existing structured-memory store is not well-suited for concept networks tha
 - episode_add
   - params: { summary: string, concepts: string[], valence: number }
   - returns: { episode_id: string, linked_concepts: string[], valence: number }
+  - notes: concepts created indirectly here start with arousal_level = 0.25.
 - relation_add
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { relation_id: string }
+  - notes: concepts created indirectly here start with arousal_level = 0.25.
 - recall_query
   - params: { seeds: string[], max_hop: number }
   - returns: { propositions: Array<{ text: string, score: number, valence: number | null }> }

@@ -16,6 +16,8 @@ use uuid::Uuid;
 
 const DEFAULT_VALENCE: f64 = 0.0;
 const DEFAULT_AROUSAL_LEVEL: f64 = 0.0;
+const INITIAL_AROUSAL_UPSERT: f64 = 0.5;
+const INITIAL_AROUSAL_INDIRECT: f64 = 0.25;
 const DEFAULT_ACCESSED_AT: i64 = 0;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -164,7 +166,12 @@ impl ConceptGraphService {
         }
     }
 
-    async fn ensure_concept(&self, concept: &str, now: i64) -> Result<(), ErrorData> {
+    async fn ensure_concept(
+        &self,
+        concept: &str,
+        now: i64,
+        initial_arousal_level: f64,
+    ) -> Result<(), ErrorData> {
         let query = query(
             "MERGE (c:Concept {name: $name})\n\
              ON CREATE SET c.valence = $valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at\n\
@@ -172,7 +179,7 @@ impl ConceptGraphService {
         )
         .param("name", concept)
         .param("valence", DEFAULT_VALENCE)
-        .param("arousal_level", DEFAULT_AROUSAL_LEVEL)
+        .param("arousal_level", initial_arousal_level)
         .param("accessed_at", now);
 
         let mut result = self.graph.execute(query).await.map_err(|e| {
@@ -422,7 +429,8 @@ impl ConceptGraphService {
         let now = Self::now_ms();
 
         if !exists {
-            self.ensure_concept(&concept, now).await?;
+            self.ensure_concept(&concept, now, INITIAL_AROUSAL_UPSERT)
+                .await?;
         }
 
         let result = json!({
@@ -449,9 +457,11 @@ impl ConceptGraphService {
             .ok_or_else(|| Self::invalid_params("Error: concept: empty", json!({})))?;
 
         let now = Self::now_ms();
+        let new_arousal_level = Self::clamp(request.valence_delta.abs(), 0.0, 1.0);
 
         if !self.concept_exists(&concept).await? {
-            self.ensure_concept(&concept, now).await?;
+            self.ensure_concept(&concept, now, new_arousal_level)
+                .await?;
         }
 
         let current = self
@@ -464,7 +474,6 @@ impl ConceptGraphService {
             });
 
         let new_valence = Self::clamp(current.valence + request.valence_delta, -1.0, 1.0);
-        let new_arousal_level = Self::clamp(request.valence_delta.abs(), 0.0, 1.0);
         let current_arousal = self.arousal(current.arousal_level, current.accessed_at, now);
 
         let update_arousal = new_arousal_level >= current_arousal;
@@ -523,7 +532,7 @@ impl ConceptGraphService {
              WITH e\n\
              UNWIND $concepts AS concept\n\
              MERGE (c:Concept {name: concept})\n\
-             ON CREATE SET c.valence = $concept_valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at\n\
+             ON CREATE SET c.valence = $concept_valence, c.arousal_level = $concept_arousal_level, c.accessed_at = $accessed_at\n\
              MERGE (c)-[:EVOKES]->(e)",
         )
         .param("id", episode_id.as_str())
@@ -531,7 +540,7 @@ impl ConceptGraphService {
         .param("episode_valence", episode_valence)
         .param("concepts", concepts.clone())
         .param("concept_valence", DEFAULT_VALENCE)
-        .param("arousal_level", DEFAULT_AROUSAL_LEVEL)
+        .param("concept_arousal_level", INITIAL_AROUSAL_INDIRECT)
         .param("accessed_at", now);
 
         let mut result = self.graph.execute(query).await.map_err(|e| {
@@ -596,7 +605,7 @@ impl ConceptGraphService {
             .param("to", to.as_str())
             .param("id", relation_id.as_str())
             .param("valence", DEFAULT_VALENCE)
-            .param("arousal_level", DEFAULT_AROUSAL_LEVEL)
+            .param("arousal_level", INITIAL_AROUSAL_INDIRECT)
             .param("accessed_at", now);
 
         let mut result = self.graph.execute(query).await.map_err(|e| {
