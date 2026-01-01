@@ -301,11 +301,11 @@ impl ConceptGraphService {
         Ok(())
     }
 
-    async fn episode_exists(&self, episode_id: &str) -> Result<bool, ErrorData> {
+    async fn episode_exists(&self, episode_name: &str) -> Result<bool, ErrorData> {
         let query = query(
-            "MATCH (e:Episode {id: $id}) RETURN count(e) AS count",
+            "MATCH (e:Episode {name: $name}) RETURN count(e) AS count",
         )
-        .param("id", episode_id);
+        .param("name", episode_name);
 
         let mut result = self.graph.execute(query).await.map_err(|e| {
             Self::internal_error("Failed to check episode", e)
@@ -465,7 +465,7 @@ impl ConceptGraphService {
     async fn fetch_episodes(&self, concept: &str) -> Result<Vec<EpisodeEntry>, ErrorData> {
         let query = query(
             "MATCH (c:Concept {name: $name})-[:EVOKES]->(e:Episode)\n\
-             RETURN e.id AS id, e.summary AS summary, e.valence AS valence",
+             RETURN e.name AS id, e.summary AS summary, e.valence AS valence",
         )
         .param("name", concept);
 
@@ -680,14 +680,14 @@ impl ConceptGraphService {
             .execute_with_retry(
                 || {
                     query(
-                        "CREATE (e:Episode {id: $id, summary: $summary, valence: $episode_valence})\n\
+                        "CREATE (e:Episode {name: $name, summary: $summary, valence: $episode_valence})\n\
                          WITH e\n\
                          UNWIND $concepts AS concept\n\
                          MERGE (c:Concept {name: concept})\n\
                          ON CREATE SET c.valence = $concept_valence, c.arousal_level = $concept_arousal_level, c.accessed_at = $accessed_at\n\
                          MERGE (c)-[:EVOKES]->(e)",
                     )
-                    .param("id", episode_id_value.as_str())
+                    .param("name", episode_id_value.as_str())
                     .param("summary", summary_value.as_str())
                     .param("episode_valence", episode_valence)
                     .param("concepts", concepts_value.clone())

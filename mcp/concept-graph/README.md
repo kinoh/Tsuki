@@ -17,7 +17,7 @@ LLM-driven agents.
 ## Data Model (Logical)
 
 - Concept: name, valence, arousal_level, accessed_at
-- Episode: id, summary, valence
+- Episode: name, summary, valence
 - Relations: Concept->Concept with type in {is-a, part-of, evokes}
 - Episode links: Concept->Episode using EVOKES
 
@@ -69,6 +69,7 @@ Arguments:
 Notes:
 - concepts created indirectly here start with arousal_level = 0.25.
 - episode_id is "YYYYMMDD/<keyword>" using the first concept as keyword; duplicates add "-2", "-3", etc.
+- episode_id is stored as Episode.name in Memgraph (for GUI visibility).
 
 Returns:
 - episode_id: string
