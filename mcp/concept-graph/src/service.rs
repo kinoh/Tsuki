@@ -14,13 +14,15 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_VALENCE: f64 = 0.0;
 const DEFAULT_AROUSAL_LEVEL: f64 = 0.0;
 const INITIAL_AROUSAL_UPSERT: f64 = 0.5;
 const INITIAL_AROUSAL_INDIRECT: f64 = 0.25;
 const DEFAULT_ACCESSED_AT: i64 = 0;
+const CONFLICT_RETRY_MAX: usize = 3;
+const CONFLICT_RETRY_BACKOFF_MS: u64 = 50;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ConceptUpsertRequest {
@@ -155,6 +157,59 @@ impl ConceptGraphService {
         ErrorData::internal_error(message.to_string(), Some(json!({"reason": err.to_string()})))
     }
 
+    fn is_conflict_error(err: &impl ToString) -> bool {
+        err.to_string()
+            .contains("Cannot resolve conflicting transactions")
+    }
+
+    async fn wait_retry(attempt: usize) {
+        let backoff = CONFLICT_RETRY_BACKOFF_MS.saturating_mul(attempt as u64);
+        tokio::time::sleep(Duration::from_millis(backoff)).await;
+    }
+
+    async fn execute_with_retry<F>(
+        &self,
+        mut make_query: F,
+        context: &str,
+    ) -> Result<Option<neo4rs::Row>, ErrorData>
+    where
+        F: FnMut() -> neo4rs::Query,
+    {
+        for attempt in 0..CONFLICT_RETRY_MAX {
+            let query = make_query();
+            let mut result = match self.graph.execute(query).await {
+                Ok(result) => result,
+                Err(err) => {
+                    let should_retry =
+                        Self::is_conflict_error(&err) && attempt + 1 < CONFLICT_RETRY_MAX;
+                    if should_retry {
+                        Self::wait_retry(attempt + 1).await;
+                        continue;
+                    }
+                    return Err(Self::internal_error(context, err));
+                }
+            };
+
+            match result.next().await {
+                Ok(row) => return Ok(row),
+                Err(err) => {
+                    let should_retry =
+                        Self::is_conflict_error(&err) && attempt + 1 < CONFLICT_RETRY_MAX;
+                    if should_retry {
+                        Self::wait_retry(attempt + 1).await;
+                        continue;
+                    }
+                    return Err(Self::internal_error(context, err));
+                }
+            }
+        }
+
+        Err(Self::internal_error(
+            context,
+            "Conflict retry limit exceeded",
+        ))
+    }
+
     fn normalize_concept(&self, concept: &str) -> Option<String> {
         let trimmed = concept.trim();
         if trimmed.is_empty() {
@@ -203,23 +258,24 @@ impl ConceptGraphService {
         now: i64,
         initial_arousal_level: f64,
     ) -> Result<(), ErrorData> {
-        let query = query(
-            "MERGE (c:Concept {name: $name})\n\
-             ON CREATE SET c.valence = $valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at\n\
-             RETURN c.name AS name",
-        )
-        .param("name", concept)
-        .param("valence", DEFAULT_VALENCE)
-        .param("arousal_level", initial_arousal_level)
-        .param("accessed_at", now);
-
-        let mut result = self.graph.execute(query).await.map_err(|e| {
-            Self::internal_error("Failed to ensure concept", e)
-        })?;
-
-        if let Err(e) = result.next().await {
-            return Err(Self::internal_error("Failed to ensure concept", e));
-        }
+        let name = concept.to_string();
+        let arousal_level = initial_arousal_level;
+        let _ = self
+            .execute_with_retry(
+                || {
+                    query(
+                        "MERGE (c:Concept {name: $name})\n\
+                         ON CREATE SET c.valence = $valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at\n\
+                         RETURN c.name AS name",
+                    )
+                    .param("name", name.as_str())
+                    .param("valence", DEFAULT_VALENCE)
+                    .param("arousal_level", arousal_level)
+                    .param("accessed_at", now)
+                },
+                "Failed to ensure concept",
+            )
+            .await?;
 
         Ok(())
     }
@@ -319,37 +375,40 @@ impl ConceptGraphService {
         }
         query_text.push_str(" RETURN c.valence AS valence, c.arousal_level AS arousal_level, c.accessed_at AS accessed_at");
 
-        let mut query = query(query_text.as_str())
-            .param("name", concept)
-            .param("valence", valence);
+        let name = concept.to_string();
+        let row = self
+            .execute_with_retry(
+                || {
+                    let mut query = query(query_text.as_str())
+                        .param("name", name.as_str())
+                        .param("valence", valence);
 
-        if let Some(level) = arousal_level {
-            query = query.param("arousal_level", level);
-        }
-        if let Some(accessed_at) = accessed_at {
-            query = query.param("accessed_at", accessed_at);
-        }
+                    if let Some(level) = arousal_level {
+                        query = query.param("arousal_level", level);
+                    }
+                    if let Some(accessed_at) = accessed_at {
+                        query = query.param("accessed_at", accessed_at);
+                    }
 
-        let mut result = self.graph.execute(query).await.map_err(|e| {
-            Self::internal_error("Failed to update concept", e)
+                    query
+                },
+                "Failed to update concept",
+            )
+            .await?;
+
+        let row = row.ok_or_else(|| {
+            Self::internal_error("Failed to update concept", "empty result")
         })?;
 
-        if let Ok(Some(row)) = result.next().await {
-            let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
-            let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
-            let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+        let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
+        let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
+        let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
 
-            Ok(ConceptState {
-                valence,
-                arousal_level,
-                accessed_at,
-            })
-        } else {
-            Err(Self::internal_error(
-                "Failed to update concept",
-                "empty result",
-            ))
-        }
+        Ok(ConceptState {
+            valence,
+            arousal_level,
+            accessed_at,
+        })
     }
 
     async fn fetch_relations(&self, concept: &str) -> Result<Vec<RelationEdge>, ErrorData> {
@@ -591,29 +650,31 @@ impl ConceptGraphService {
         let base_id = format!("{}/{}", date_prefix, keyword);
         let episode_id = self.next_episode_id(&base_id).await?;
 
-        let query = query(
-            "CREATE (e:Episode {id: $id, summary: $summary, valence: $episode_valence})\n\
-             WITH e\n\
-             UNWIND $concepts AS concept\n\
-             MERGE (c:Concept {name: concept})\n\
-             ON CREATE SET c.valence = $concept_valence, c.arousal_level = $concept_arousal_level, c.accessed_at = $accessed_at\n\
-             MERGE (c)-[:EVOKES]->(e)",
-        )
-        .param("id", episode_id.as_str())
-        .param("summary", summary)
-        .param("episode_valence", episode_valence)
-        .param("concepts", concepts.clone())
-        .param("concept_valence", DEFAULT_VALENCE)
-        .param("concept_arousal_level", INITIAL_AROUSAL_INDIRECT)
-        .param("accessed_at", now);
-
-        let mut result = self.graph.execute(query).await.map_err(|e| {
-            Self::internal_error("Failed to add episode", e)
-        })?;
-
-        if let Err(e) = result.next().await {
-            return Err(Self::internal_error("Failed to add episode", e));
-        }
+        let summary_value = summary.to_string();
+        let concepts_value = concepts.clone();
+        let episode_id_value = episode_id.clone();
+        let _ = self
+            .execute_with_retry(
+                || {
+                    query(
+                        "CREATE (e:Episode {id: $id, summary: $summary, valence: $episode_valence})\n\
+                         WITH e\n\
+                         UNWIND $concepts AS concept\n\
+                         MERGE (c:Concept {name: concept})\n\
+                         ON CREATE SET c.valence = $concept_valence, c.arousal_level = $concept_arousal_level, c.accessed_at = $accessed_at\n\
+                         MERGE (c)-[:EVOKES]->(e)",
+                    )
+                    .param("id", episode_id_value.as_str())
+                    .param("summary", summary_value.as_str())
+                    .param("episode_valence", episode_valence)
+                    .param("concepts", concepts_value.clone())
+                    .param("concept_valence", DEFAULT_VALENCE)
+                    .param("concept_arousal_level", INITIAL_AROUSAL_INDIRECT)
+                    .param("accessed_at", now)
+                },
+                "Failed to add episode",
+            )
+            .await?;
 
         let result = json!({
             "episode_id": episode_id,
@@ -662,20 +723,21 @@ impl ConceptGraphService {
             rel = relation_label,
         );
 
-        let query = query(query_text.as_str())
-            .param("from", from.as_str())
-            .param("to", to.as_str())
-            .param("valence", DEFAULT_VALENCE)
-            .param("arousal_level", INITIAL_AROUSAL_INDIRECT)
-            .param("accessed_at", now);
-
-        let mut result = self.graph.execute(query).await.map_err(|e| {
-            Self::internal_error("Failed to add relation", e)
-        })?;
-
-        if let Err(e) = result.next().await {
-            return Err(Self::internal_error("Failed to add relation", e));
-        }
+        let from_value = from.clone();
+        let to_value = to.clone();
+        let _ = self
+            .execute_with_retry(
+                || {
+                    query(query_text.as_str())
+                        .param("from", from_value.as_str())
+                        .param("to", to_value.as_str())
+                        .param("valence", DEFAULT_VALENCE)
+                        .param("arousal_level", INITIAL_AROUSAL_INDIRECT)
+                        .param("accessed_at", now)
+                },
+                "Failed to add relation",
+            )
+            .await?;
 
         let result = json!({
             "from": from,
