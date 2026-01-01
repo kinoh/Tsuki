@@ -21,6 +21,9 @@ const DEFAULT_AROUSAL_LEVEL: f64 = 0.0;
 const INITIAL_AROUSAL_UPSERT: f64 = 0.5;
 const INITIAL_AROUSAL_INDIRECT: f64 = 0.25;
 const DEFAULT_ACCESSED_AT: i64 = 0;
+const DEFAULT_RELATION_WEIGHT: f64 = 0.25;
+const RELATION_WEIGHT_ALPHA: f64 = 0.2;
+const REVERSE_PENALTY: f64 = 0.5;
 const CONFLICT_RETRY_MAX: usize = 3;
 const CONFLICT_RETRY_BACKOFF_MS: u64 = 50;
 
@@ -91,6 +94,7 @@ struct RelationEdge {
     from: String,
     to: String,
     relation_type: String,
+    weight: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -142,12 +146,8 @@ impl ConceptGraphService {
         val.max(min).min(max)
     }
 
-    fn hop_decay(hop: u32, forward: bool) -> f64 {
-        if forward {
-            0.5_f64.powi((hop.saturating_sub(1)) as i32)
-        } else {
-            0.5_f64.powi(hop as i32)
-        }
+    fn hop_decay(hop: u32) -> f64 {
+        0.5_f64.powi((hop.saturating_sub(1)) as i32)
     }
 
     fn arousal(&self, level: f64, accessed_at: i64, now: i64) -> f64 {
@@ -430,9 +430,10 @@ impl ConceptGraphService {
 
         let outgoing = query(
             "MATCH (c:Concept {name: $name})-[r:IS_A|PART_OF|EVOKES]->(d:Concept)\n\
-             RETURN c.name AS from, d.name AS to, type(r) AS type",
+             RETURN c.name AS from, d.name AS to, type(r) AS type, coalesce(r.weight, $default_weight) AS weight",
         )
-        .param("name", concept);
+        .param("name", concept)
+        .param("default_weight", DEFAULT_RELATION_WEIGHT);
 
         let mut result = self.graph.execute(outgoing).await.map_err(|e| {
             Self::internal_error("Failed to load relations", e)
@@ -442,18 +443,21 @@ impl ConceptGraphService {
             let from: String = row.get("from").unwrap_or_default();
             let to: String = row.get("to").unwrap_or_default();
             let relation_type: String = row.get("type").unwrap_or_default();
+            let weight: f64 = row.get("weight").unwrap_or(DEFAULT_RELATION_WEIGHT);
             edges.push(RelationEdge {
                 from,
                 to,
                 relation_type,
+                weight,
             });
         }
 
         let incoming = query(
             "MATCH (c:Concept {name: $name})<-[r:IS_A|PART_OF|EVOKES]-(d:Concept)\n\
-             RETURN d.name AS from, c.name AS to, type(r) AS type",
+             RETURN d.name AS from, c.name AS to, type(r) AS type, coalesce(r.weight, $default_weight) AS weight",
         )
-        .param("name", concept);
+        .param("name", concept)
+        .param("default_weight", DEFAULT_RELATION_WEIGHT);
 
         let mut result = self.graph.execute(incoming).await.map_err(|e| {
             Self::internal_error("Failed to load relations", e)
@@ -463,10 +467,12 @@ impl ConceptGraphService {
             let from: String = row.get("from").unwrap_or_default();
             let to: String = row.get("to").unwrap_or_default();
             let relation_type: String = row.get("type").unwrap_or_default();
+            let weight: f64 = row.get("weight").unwrap_or(DEFAULT_RELATION_WEIGHT);
             edges.push(RelationEdge {
                 from,
                 to,
                 relation_type,
+                weight,
             });
         }
 
@@ -794,6 +800,7 @@ impl ConceptGraphService {
              MERGE (b:Concept {{name: $to}})\n\
              ON CREATE SET b.valence = $valence, b.arousal_level = $arousal_level, b.accessed_at = $accessed_at\n\
              MERGE (a)-[r:{rel}]->(b)\n\
+             SET r.weight = CASE WHEN r.weight IS NULL THEN $weight ELSE 1 - (1 - r.weight) * (1 - $alpha) END\n\
              RETURN type(r) AS type",
             rel = relation_label,
         );
@@ -809,6 +816,8 @@ impl ConceptGraphService {
                         .param("valence", DEFAULT_VALENCE)
                         .param("arousal_level", INITIAL_AROUSAL_INDIRECT)
                         .param("accessed_at", now)
+                        .param("weight", DEFAULT_RELATION_WEIGHT)
+                        .param("alpha", RELATION_WEIGHT_ALPHA)
                 },
                 "Failed to add relation",
             )
@@ -897,10 +906,11 @@ impl ConceptGraphService {
                 if let Some(target_state) =
                     self.get_concept_state_cached(&mut cache, &target, now).await?
                 {
-                    let hop_decay = Self::hop_decay(next_hop, forward);
+                    let hop_decay = Self::hop_decay(next_hop);
+                    let direction_penalty = if forward { 1.0 } else { REVERSE_PENALTY };
                     let arousal =
                         self.arousal(target_state.arousal_level, target_state.accessed_at, now);
-                    let score = arousal * hop_decay;
+                    let score = arousal * hop_decay * direction_penalty * edge.weight;
                     let text = format!(
                         "{} {} {}",
                         edge.from,
@@ -939,7 +949,7 @@ impl ConceptGraphService {
                 if let Some(concept_state) =
                     self.get_concept_state_cached(&mut cache, &concept, now).await?
                 {
-                    let hop_decay = Self::hop_decay(next_hop, true);
+                    let hop_decay = Self::hop_decay(next_hop);
                     let arousal =
                         self.arousal(concept_state.arousal_level, concept_state.accessed_at, now);
                     let score = arousal * hop_decay;

@@ -38,7 +38,7 @@ The existing structured-memory store is not well-suited for concept networks tha
 - Graph model (logical)
   - Concept node: identifier (concept text), valence, arousal_level, accessed_at
   - Episode node: name, summary, valence (time is embedded in summary or represented elsewhere, not as a timestamp property)
-  - Edges: Concept->Episode (mentions/related), Concept->Concept with type in {is-a, part-of, evokes}
+  - Edges: Concept->Episode (mentions/related), Concept->Concept with type in {is-a, part-of, evokes} and weight
 - Compose integration
   - Add Memgraph service with persistent volume.
   - Add MCP service that connects to Memgraph via Bolt.
@@ -70,6 +70,8 @@ The existing structured-memory store is not well-suited for concept networks tha
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { from: string, to: string, type: string }
   - notes: concepts created indirectly here start with arousal_level = 0.25.
+  - notes: relation weight starts at 0.25 and is strengthened on repeated relation_add
+    (weight = 1 - (1 - weight) * (1 - 0.2)).
 - concept_search
   - params: { keywords: string[], limit?: number }
   - returns: { concepts: string[] }
@@ -79,8 +81,9 @@ The existing structured-memory store is not well-suited for concept networks tha
   - returns: { propositions: Array<{ text: string, score: number, valence: number | null }> }
   - notes: relation types are mapped to DB-safe labels (e.g., "is-a" -> "IS_A"); propositions use a fixed
     text form, including episodes as "apple evokes <episode summary>".
+  - notes: score = arousal * hop_decay * weight (for concept relations).
+  - notes: hop_decay = 0.5^(hop-1); reverse relations apply a fixed 0.5 penalty.
   - notes: each recalled concept may update arousal_level using hop_decay if it raises arousal.
-  - notes: hop_decay is directional (forward: 0.5^(hop-1), reverse: 0.5^hop).
 
 ## Future Considerations
 - Data migration strategy from structured-memory to Memgraph.

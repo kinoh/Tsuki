@@ -18,7 +18,7 @@ LLM-driven agents.
 
 - Concept: name, valence, arousal_level, accessed_at
 - Episode: name, summary, valence
-- Relations: Concept->Concept with type in {is-a, part-of, evokes}
+- Relations: Concept->Concept with type in {is-a, part-of, evokes}, weight
 - Episode links: Concept->Episode using EVOKES
 
 Notes:
@@ -88,6 +88,8 @@ Notes:
 - relation types are mapped to DB-safe labels (e.g., "is-a" -> "IS_A").
 - tautologies (from == to) are rejected.
 - concepts created indirectly here start with arousal_level = 0.25.
+- relation weight is created at 0.25 and strengthened on repeated relation_add
+  (weight = 1 - (1 - weight) * (1 - 0.2)).
 
 Returns:
 - from: string
@@ -118,7 +120,8 @@ Arguments:
 Notes:
 - propositions use a fixed text form, including episodes as
   "apple evokes <episode summary>".
-- hop_decay is directional (forward: 0.5^(hop-1), reverse: 0.5^hop).
+- score = arousal * hop_decay * weight (for concept relations).
+- hop_decay = 0.5^(hop-1); reverse relations apply a fixed 0.5 penalty.
 - for recall, new arousal_level = hop_decay and may update arousal if it raises.
 
 Returns:
