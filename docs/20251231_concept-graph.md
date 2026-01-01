@@ -48,6 +48,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - Concept strings are used as-is (no normalization).
   - LLM-facing time is local time; Core converts to unix_ms before calling MCP.
   - MCP uses TZ to derive local dates for episode_id.
+  - MCP ensures a unique constraint on Concept(name) at startup; startup fails if existing data violates it.
   - accessed_at is set by MCP; source and confidence are omitted.
   - Arousal is managed by MCP and not explicitly updated by Core.
   - arousal = arousal_level * exp(-(now - accessed_at) / tau), with tau defaulting to 1 day.

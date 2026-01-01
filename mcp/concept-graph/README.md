@@ -21,6 +21,9 @@ LLM-driven agents.
 - Relations: Concept->Concept with type in {is-a, part-of, evokes}
 - Episode links: Concept->Episode using EVOKES
 
+Notes:
+- MCP ensures a unique constraint on Concept(name) at startup; startup fails if existing data violates it.
+
 ## Tools
 
 ### concept_upsert

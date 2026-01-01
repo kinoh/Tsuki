@@ -110,6 +110,7 @@ impl ConceptGraphService {
         arousal_tau_ms: f64,
     ) -> Result<Self, Box<dyn Error>> {
         let graph = Graph::new(uri, user, password)?;
+        Self::ensure_constraints(&graph).await?;
         let tau = if arousal_tau_ms > 0.0 { arousal_tau_ms } else { 1.0 };
         let timezone_str = env::var("TZ")
             .map_err(|_| "TZ environment variable is required")?;
@@ -252,6 +253,26 @@ impl ConceptGraphService {
         utc.with_timezone(&self.timezone).format("%Y%m%d").to_string()
     }
 
+    async fn ensure_constraints(graph: &Graph) -> Result<(), Box<dyn Error>> {
+        let query = query(
+            "CREATE CONSTRAINT ON (c:Concept) ASSERT c.name IS UNIQUE",
+        );
+        match graph.execute(query).await {
+            Ok(mut result) => {
+                let _ = result.next().await;
+                Ok(())
+            }
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("already exists") {
+                    Ok(())
+                } else {
+                    Err(Box::new(err))
+                }
+            }
+        }
+    }
+
     async fn ensure_concept(
         &self,
         concept: &str,
@@ -278,24 +299,6 @@ impl ConceptGraphService {
             .await?;
 
         Ok(())
-    }
-
-    async fn concept_exists(&self, concept: &str) -> Result<bool, ErrorData> {
-        let query = query(
-            "MATCH (c:Concept {name: $name}) RETURN count(c) AS count",
-        )
-        .param("name", concept);
-
-        let mut result = self.graph.execute(query).await.map_err(|e| {
-            Self::internal_error("Failed to check concept", e)
-        })?;
-
-        if let Ok(Some(row)) = result.next().await {
-            let count: i64 = row.get("count").unwrap_or(0);
-            Ok(count > 0)
-        } else {
-            Ok(false)
-        }
     }
 
     async fn episode_exists(&self, episode_id: &str) -> Result<bool, ErrorData> {
@@ -545,17 +548,39 @@ impl ConceptGraphService {
             .normalize_concept(&request.concept)
             .ok_or_else(|| Self::invalid_params("Error: concept: empty", json!({})))?;
 
-        let exists = self.concept_exists(&concept).await?;
         let now = Self::now_ms();
 
-        if !exists {
-            self.ensure_concept(&concept, now, INITIAL_AROUSAL_UPSERT)
-                .await?;
-        }
+        let name = concept.to_string();
+        let row = self
+            .execute_with_retry(
+                || {
+                    query(
+                        "MERGE (c:Concept {name: $name})\n\
+                         ON CREATE SET c.valence = $valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at, c._created = true\n\
+                         ON MATCH SET c._created = false\n\
+                         WITH c, c._created AS created\n\
+                         REMOVE c._created\n\
+                         RETURN created AS created",
+                    )
+                    .param("name", name.as_str())
+                    .param("valence", DEFAULT_VALENCE)
+                    .param("arousal_level", INITIAL_AROUSAL_UPSERT)
+                    .param("accessed_at", now)
+                },
+                "Failed to upsert concept",
+            )
+            .await?;
+
+        let created = row
+            .ok_or_else(|| {
+                Self::internal_error("Failed to upsert concept", "empty result")
+            })?
+            .get("created")
+            .unwrap_or(false);
 
         let result = json!({
             "concept_id": concept,
-            "created": !exists,
+            "created": created,
         });
 
         Ok(CallToolResult {
@@ -579,10 +604,8 @@ impl ConceptGraphService {
         let now = Self::now_ms();
         let new_arousal_level = Self::clamp(request.valence_delta.abs(), 0.0, 1.0);
 
-        if !self.concept_exists(&concept).await? {
-            self.ensure_concept(&concept, now, new_arousal_level)
-                .await?;
-        }
+        self.ensure_concept(&concept, now, new_arousal_level)
+            .await?;
 
         let current = self
             .fetch_concept_state(&concept, now)
