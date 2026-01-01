@@ -58,6 +58,17 @@ services:
         condition: service_completed_successfully
     restart: always
 
+  memgraph-lab:
+    image: memgraph/lab
+    environment:
+      QUICK_CONNECT_MG_HOST: memgraph
+      QUICK_CONNECT_MG_PORT: 7687
+    ports:
+      - "3000:3000"
+    depends_on:
+      - memgraph
+    restart: always
+
 volumes:
   core-data:
   memgraph-data:
