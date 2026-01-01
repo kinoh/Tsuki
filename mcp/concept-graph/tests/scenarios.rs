@@ -18,9 +18,6 @@ struct PropositionOut {
 }
 
 async fn connect_service() -> ConceptGraphService {
-    if env::var("TZ").is_err() {
-        env::set_var("TZ", "UTC");
-    }
     let uri = env::var("MEMGRAPH_URI").unwrap_or_else(|_| "bolt://localhost:7687".to_string());
     let user = env::var("MEMGRAPH_USER").unwrap_or_default();
     let password = env::var("MEMGRAPH_PASSWORD").unwrap_or_default();
