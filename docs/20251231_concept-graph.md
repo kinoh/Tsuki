@@ -37,7 +37,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - Apply ranking internally; manage arousal updates; set updated timestamps.
 - Graph model (logical)
   - Concept node: identifier (concept text), valence, arousal_level, accessed_at
-  - Episode node: name, summary, valence (time is embedded in summary or represented elsewhere, not as a timestamp property)
+  - Episode node: name, summary, valence, arousal_level, accessed_at (time is embedded in summary or represented elsewhere, not as a timestamp property)
   - Edges: Concept->Episode (mentions/related), Concept->Concept with type in {is-a, part-of, evokes} and weight
 - Compose integration
   - Add Memgraph service with persistent volume.
@@ -56,16 +56,19 @@ The existing structured-memory store is not well-suited for concept networks tha
   - params: { concept: string }
   - returns: { concept_id: string, created: boolean }
   - notes: newly created concepts start with arousal_level = 0.5.
-- concept_update_affect
-  - params: { concept: string, valence_delta: number }  # delta in [-1.0, 1.0]
-  - returns: { concept_id: string, valence: number, arousal: number, accessed_at: number }
+- update_affect
+  - params: { target: string, valence_delta: number }  # delta in [-1.0, 1.0]
+  - returns: { concept_id or episode_id: string, valence: number, arousal: number, accessed_at: number }
   - notes: valence is clamped; accessed_at/arousal_level update only if new arousal >= current arousal.
+  - notes: if target matches an Episode name, updates the episode; otherwise updates a concept (creating it if missing).
 - episode_add
-  - params: { summary: string, concepts: string[], valence: number }
+  - params: { summary: string, concepts: string[] }
   - returns: { episode_id: string, linked_concepts: string[], valence: number }
   - notes: concepts created indirectly here start with arousal_level = 0.25.
+  - notes: episodes are created with valence = 0.0 and arousal_level = 0.5.
   - notes: episode_id is "YYYYMMDD/<keyword>" using the first concept as keyword; duplicates add "-2", "-3", etc.
   - notes: episode_id is stored as Episode.name in Memgraph for GUI visibility.
+  - notes: episode_id is also de-duplicated against Concept names.
 - relation_add
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { from: string, to: string, type: string }

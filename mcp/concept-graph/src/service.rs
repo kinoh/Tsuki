@@ -33,8 +33,9 @@ pub struct ConceptUpsertRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct ConceptUpdateAffectRequest {
-    pub concept: String,
+pub struct UpdateAffectRequest {
+    #[schemars(description = "Concept or Episode name.")]
+    pub target: String,
     pub valence_delta: f64,
 }
 
@@ -43,7 +44,6 @@ pub struct EpisodeAddRequest {
     pub summary: String,
     #[schemars(description = "First concept is used as the episode keyword for id generation.")]
     pub concepts: Vec<String>,
-    pub valence: f64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -84,6 +84,13 @@ pub struct Proposition {
 
 #[derive(Debug, Clone)]
 struct ConceptState {
+    valence: f64,
+    arousal_level: f64,
+    accessed_at: i64,
+}
+
+#[derive(Debug, Clone)]
+struct EpisodeState {
     valence: f64,
     arousal_level: f64,
     accessed_at: i64,
@@ -312,6 +319,24 @@ impl ConceptGraphService {
         Ok(())
     }
 
+    async fn concept_exists(&self, name: &str) -> Result<bool, ErrorData> {
+        let query = query(
+            "MATCH (c:Concept {name: $name}) RETURN count(c) AS count",
+        )
+        .param("name", name);
+
+        let mut result = self.graph.execute(query).await.map_err(|e| {
+            Self::internal_error("Failed to check concept", e)
+        })?;
+
+        if let Ok(Some(row)) = result.next().await {
+            let count: i64 = row.get("count").unwrap_or(0);
+            Ok(count > 0)
+        } else {
+            Ok(false)
+        }
+    }
+
     async fn episode_exists(&self, episode_name: &str) -> Result<bool, ErrorData> {
         let query = query(
             "MATCH (e:Episode {name: $name}) RETURN count(e) AS count",
@@ -334,7 +359,9 @@ impl ConceptGraphService {
         let mut candidate = base.to_string();
         let mut suffix = 2;
         loop {
-            if !self.episode_exists(&candidate).await? {
+            if !self.episode_exists(&candidate).await?
+                && !self.concept_exists(&candidate).await?
+            {
                 return Ok(candidate);
             }
             candidate = format!("{}-{}", base, suffix);
@@ -419,6 +446,90 @@ impl ConceptGraphService {
         let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
 
         Ok(ConceptState {
+            valence,
+            arousal_level,
+            accessed_at,
+        })
+    }
+
+    async fn fetch_episode_state(
+        &self,
+        episode: &str,
+        now: i64,
+    ) -> Result<Option<EpisodeState>, ErrorData> {
+        let query = query(
+            "MATCH (e:Episode {name: $name})\n\
+             RETURN e.valence AS valence, e.arousal_level AS arousal_level, e.accessed_at AS accessed_at",
+        )
+        .param("name", episode);
+
+        let mut result = self.graph.execute(query).await.map_err(|e| {
+            Self::internal_error("Failed to load episode", e)
+        })?;
+
+        if let Ok(Some(row)) = result.next().await {
+            let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
+            let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
+            let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+            let accessed_at = if accessed_at > 0 { accessed_at } else { now };
+
+            Ok(Some(EpisodeState {
+                valence,
+                arousal_level,
+                accessed_at,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn update_episode_state(
+        &self,
+        episode: &str,
+        valence: f64,
+        arousal_level: Option<f64>,
+        accessed_at: Option<i64>,
+    ) -> Result<EpisodeState, ErrorData> {
+        let mut query_text =
+            String::from("MATCH (e:Episode {name: $name}) SET e.valence = $valence");
+        if arousal_level.is_some() {
+            query_text.push_str(", e.arousal_level = $arousal_level");
+        }
+        if accessed_at.is_some() {
+            query_text.push_str(", e.accessed_at = $accessed_at");
+        }
+        query_text.push_str(" RETURN e.valence AS valence, e.arousal_level AS arousal_level, e.accessed_at AS accessed_at");
+
+        let name = episode.to_string();
+        let row = self
+            .execute_with_retry(
+                || {
+                    let mut query = query(query_text.as_str())
+                        .param("name", name.as_str())
+                        .param("valence", valence);
+
+                    if let Some(level) = arousal_level {
+                        query = query.param("arousal_level", level);
+                    }
+                    if let Some(accessed_at) = accessed_at {
+                        query = query.param("accessed_at", accessed_at);
+                    }
+
+                    query
+                },
+                "Failed to update episode",
+            )
+            .await?;
+
+        let row = row.ok_or_else(|| {
+            Self::internal_error("Failed to update episode", "empty result")
+        })?;
+
+        let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
+        let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
+        let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+
+        Ok(EpisodeState {
             valence,
             arousal_level,
             accessed_at,
@@ -650,23 +761,61 @@ impl ConceptGraphService {
     }
 
     #[tool(description = "Adjusts valence by delta and conditionally updates arousal level.")]
-    pub async fn concept_update_affect(
+    pub async fn update_affect(
         &self,
-        params: Parameters<ConceptUpdateAffectRequest>,
+        params: Parameters<UpdateAffectRequest>,
     ) -> Result<CallToolResult, ErrorData> {
         let request = params.0;
-        let concept = self
-            .normalize_concept(&request.concept)
-            .ok_or_else(|| Self::invalid_params("Error: concept: empty", json!({})))?;
+        let target = self
+            .normalize_concept(&request.target)
+            .ok_or_else(|| Self::invalid_params("Error: target: empty", json!({})))?;
 
         let now = Self::now_ms();
         let new_arousal_level = Self::clamp(request.valence_delta.abs(), 0.0, 1.0);
 
-        self.ensure_concept(&concept, now, new_arousal_level)
+        if self.episode_exists(&target).await? {
+            let current = self
+                .fetch_episode_state(&target, now)
+                .await?
+                .unwrap_or(EpisodeState {
+                    valence: DEFAULT_VALENCE,
+                    arousal_level: DEFAULT_AROUSAL_LEVEL,
+                    accessed_at: now,
+                });
+
+            let new_valence = Self::clamp(current.valence + request.valence_delta, -1.0, 1.0);
+            let current_arousal = self.arousal(current.arousal_level, current.accessed_at, now);
+
+            let update_arousal = new_arousal_level >= current_arousal;
+            let updated = if update_arousal {
+                self.update_episode_state(&target, new_valence, Some(new_arousal_level), Some(now))
+                    .await?
+            } else {
+                self.update_episode_state(&target, new_valence, None, None).await?
+            };
+
+            let arousal = self.arousal(updated.arousal_level, updated.accessed_at, now);
+
+            let result = json!({
+                "episode_id": target,
+                "valence": updated.valence,
+                "arousal": arousal,
+                "accessed_at": updated.accessed_at,
+            });
+
+            return Ok(CallToolResult {
+                content: vec![Content::text(result.to_string())],
+                structured_content: Some(result),
+                is_error: Some(false),
+                meta: None,
+            });
+        }
+
+        self.ensure_concept(&target, now, new_arousal_level)
             .await?;
 
         let current = self
-            .fetch_concept_state(&concept, now)
+            .fetch_concept_state(&target, now)
             .await?
             .unwrap_or(ConceptState {
                 valence: DEFAULT_VALENCE,
@@ -679,16 +828,16 @@ impl ConceptGraphService {
 
         let update_arousal = new_arousal_level >= current_arousal;
         let updated = if update_arousal {
-            self.update_concept_state(&concept, new_valence, Some(new_arousal_level), Some(now))
+            self.update_concept_state(&target, new_valence, Some(new_arousal_level), Some(now))
                 .await?
         } else {
-            self.update_concept_state(&concept, new_valence, None, None).await?
+            self.update_concept_state(&target, new_valence, None, None).await?
         };
 
         let arousal = self.arousal(updated.arousal_level, updated.accessed_at, now);
 
         let result = json!({
-            "concept_id": concept,
+            "concept_id": target,
             "valence": updated.valence,
             "arousal": arousal,
             "accessed_at": updated.accessed_at,
@@ -725,7 +874,8 @@ impl ConceptGraphService {
         }
 
         let now = Self::now_ms();
-        let episode_valence = Self::clamp(request.valence, -1.0, 1.0);
+        let episode_valence = DEFAULT_VALENCE;
+        let episode_arousal_level = INITIAL_AROUSAL_UPSERT;
         let keyword = concepts[0].clone();
         let date_prefix = self.format_local_date(now);
         let base_id = format!("{}/{}", date_prefix, keyword);
@@ -738,7 +888,7 @@ impl ConceptGraphService {
             .execute_with_retry(
                 || {
                     query(
-                        "CREATE (e:Episode {name: $name, summary: $summary, valence: $episode_valence})\n\
+                        "CREATE (e:Episode {name: $name, summary: $summary, valence: $episode_valence, arousal_level: $episode_arousal_level, accessed_at: $accessed_at})\n\
                          WITH e\n\
                          UNWIND $concepts AS concept\n\
                          MERGE (c:Concept {name: concept})\n\
@@ -748,6 +898,7 @@ impl ConceptGraphService {
                     .param("name", episode_id_value.as_str())
                     .param("summary", summary_value.as_str())
                     .param("episode_valence", episode_valence)
+                    .param("episode_arousal_level", episode_arousal_level)
                     .param("concepts", concepts_value.clone())
                     .param("concept_valence", DEFAULT_VALENCE)
                     .param("concept_arousal_level", INITIAL_AROUSAL_INDIRECT)

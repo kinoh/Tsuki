@@ -17,7 +17,7 @@ LLM-driven agents.
 ## Data Model (Logical)
 
 - Concept: name, valence, arousal_level, accessed_at
-- Episode: name, summary, valence
+- Episode: name, summary, valence, arousal_level, accessed_at
 - Relations: Concept->Concept with type in {is-a, part-of, evokes}, weight
 - Episode links: Concept->Episode using EVOKES
 
@@ -39,11 +39,11 @@ Returns:
 - concept_id: string
 - created: boolean
 
-### concept_update_affect
+### update_affect
 Adjusts valence by delta and conditionally updates arousal_level/accessed_at.
 
 Arguments:
-- concept: string
+- target: string
 - valence_delta: number  # delta in [-1.0, 1.0]
 
 Notes:
@@ -51,9 +51,10 @@ Notes:
 - arousal = arousal_level * exp(-(now - accessed_at) / tau)
 - arousal_level/accessed_at update only if new arousal >= current arousal.
 - update_affect uses new arousal_level = abs(valence_delta).
+- if target matches an Episode name, updates the episode; otherwise updates a concept (creating it if missing).
 
 Returns:
-- concept_id: string
+- concept_id or episode_id: string
 - valence: number
 - arousal: number
 - accessed_at: number
@@ -64,12 +65,13 @@ Adds an episode summary and links it to concepts.
 Arguments:
 - summary: string
 - concepts: string[]
-- valence: number
 
 Notes:
 - concepts created indirectly here start with arousal_level = 0.25.
+- episodes are created with valence = 0.0 and arousal_level = 0.5.
 - episode_id is "YYYYMMDD/<keyword>" using the first concept as keyword; duplicates add "-2", "-3", etc.
 - episode_id is stored as Episode.name in Memgraph (for GUI visibility).
+- episode_id is also de-duplicated against Concept names.
 
 Returns:
 - episode_id: string
@@ -134,13 +136,13 @@ Returns:
 - concept_upsert: { concept: "fruit" }
 
 2) Update affect
-- concept_update_affect: { concept: "apple", valence_delta: 0.7 }
+- update_affect: { target: "apple", valence_delta: 0.7 }
 
 3) Add relation
 - relation_add: { from: "apple", to: "fruit", type: "is-a" }
 
 4) Add episode
-- episode_add: { summary: "Bought apples at the market", concepts: ["apple"], valence: 0.2 }
+- episode_add: { summary: "Bought apples at the market", concepts: ["apple"] }
 
 5) Recall
 - recall_query: { seeds: ["apple"], max_hop: 2 }

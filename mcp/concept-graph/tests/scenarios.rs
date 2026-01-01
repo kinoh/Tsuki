@@ -1,6 +1,6 @@
 use concept_graph::service::{
-    ConceptGraphService, ConceptUpdateAffectRequest, ConceptUpsertRequest, EpisodeAddRequest,
-    ConceptSearchRequest, RecallQueryRequest, RelationAddRequest, RelationType,
+    ConceptGraphService, ConceptSearchRequest, ConceptUpsertRequest, EpisodeAddRequest,
+    RecallQueryRequest, RelationAddRequest, RelationType, UpdateAffectRequest,
 };
 use futures_util::FutureExt;
 use neo4rs::{query, Graph};
@@ -126,15 +126,15 @@ async fn scenario_directional_hop_decay() {
             .expect("concept_upsert fruit");
 
         service
-            .concept_update_affect(Parameters(ConceptUpdateAffectRequest {
-                concept: apple.clone(),
+            .update_affect(Parameters(UpdateAffectRequest {
+                target: apple.clone(),
                 valence_delta: 1.0,
             }))
             .await
             .expect("update_affect apple");
         service
-            .concept_update_affect(Parameters(ConceptUpdateAffectRequest {
-                concept: fruit.clone(),
+            .update_affect(Parameters(UpdateAffectRequest {
+                target: fruit.clone(),
                 valence_delta: 1.0,
             }))
             .await
@@ -198,8 +198,8 @@ async fn scenario_update_affect_does_not_lower_arousal() {
 
     with_cleanup(&graph, &tag, || async {
         service
-            .concept_update_affect(Parameters(ConceptUpdateAffectRequest {
-                concept: concept.clone(),
+            .update_affect(Parameters(UpdateAffectRequest {
+                target: concept.clone(),
                 valence_delta: 0.8,
             }))
             .await
@@ -209,8 +209,8 @@ async fn scenario_update_affect_does_not_lower_arousal() {
             fetch_concept_state(&graph, &concept).await.expect("state 1");
 
         service
-            .concept_update_affect(Parameters(ConceptUpdateAffectRequest {
-                concept: concept.clone(),
+            .update_affect(Parameters(UpdateAffectRequest {
+                target: concept.clone(),
                 valence_delta: 0.1,
             }))
             .await
@@ -243,21 +243,36 @@ async fn scenario_episode_valence_is_returned() {
 
     with_cleanup(&graph, &tag, || async {
         service
-            .concept_update_affect(Parameters(ConceptUpdateAffectRequest {
-                concept: concept.clone(),
+            .update_affect(Parameters(UpdateAffectRequest {
+                target: concept.clone(),
                 valence_delta: 0.6,
             }))
             .await
             .expect("update_affect");
 
-        service
+        let episode_result = service
             .episode_add(Parameters(EpisodeAddRequest {
                 summary: summary.clone(),
                 concepts: vec![concept.clone()],
-                valence: -0.4,
             }))
             .await
             .expect("episode_add");
+
+        let episode_id = episode_result
+            .structured_content
+            .as_ref()
+            .and_then(|value| value.get("episode_id"))
+            .and_then(|value| value.as_str())
+            .expect("episode_id")
+            .to_string();
+
+        service
+            .update_affect(Parameters(UpdateAffectRequest {
+                target: episode_id.clone(),
+                valence_delta: -0.4,
+            }))
+            .await
+            .expect("update_affect episode");
 
         let recall = service
             .recall_query(Parameters(RecallQueryRequest {
@@ -331,8 +346,8 @@ async fn scenario_concept_search_matches_keywords_and_arousal() {
             .expect("concept_upsert high");
 
         service
-            .concept_update_affect(Parameters(ConceptUpdateAffectRequest {
-                concept: high_concept.clone(),
+            .update_affect(Parameters(UpdateAffectRequest {
+                target: high_concept.clone(),
                 valence_delta: 1.0,
             }))
             .await
