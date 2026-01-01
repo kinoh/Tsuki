@@ -39,11 +39,20 @@ pub struct EpisodeAddRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum RelationType {
+    IsA,
+    PartOf,
+    Evokes,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct RelationAddRequest {
     pub from: String,
     pub to: String,
     #[serde(rename = "type")]
-    pub relation_type: String,
+    #[schemars(description = "Allowed: is-a, part-of, evokes.")]
+    pub relation_type: RelationType,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -145,15 +154,11 @@ impl ConceptGraphService {
         }
     }
 
-    fn map_relation_type(&self, relation_type: &str) -> Result<&'static str, ErrorData> {
+    fn map_relation_type(&self, relation_type: &RelationType) -> &'static str {
         match relation_type {
-            "is-a" => Ok("IS_A"),
-            "part-of" => Ok("PART_OF"),
-            "evokes" => Ok("EVOKES"),
-            _ => Err(Self::invalid_params(
-                "Error: type: invalid",
-                json!({"type": relation_type}),
-            )),
+            RelationType::IsA => "IS_A",
+            RelationType::PartOf => "PART_OF",
+            RelationType::Evokes => "EVOKES",
         }
     }
 
@@ -585,7 +590,7 @@ impl ConceptGraphService {
             ));
         }
 
-        let relation_label = self.map_relation_type(&request.relation_type)?;
+        let relation_label = self.map_relation_type(&request.relation_type);
         let relation_id = Uuid::new_v4().to_string();
         let now = Self::now_ms();
 
