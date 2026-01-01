@@ -1,3 +1,5 @@
+use chrono::{TimeZone, Utc};
+use chrono_tz::Tz;
 use neo4rs::{Graph, query};
 use rmcp::{
     ErrorData, ServerHandler,
@@ -9,10 +11,10 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::env;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
 
 const DEFAULT_VALENCE: f64 = 0.0;
 const DEFAULT_AROUSAL_LEVEL: f64 = 0.0;
@@ -34,6 +36,7 @@ pub struct ConceptUpdateAffectRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EpisodeAddRequest {
     pub summary: String,
+    #[schemars(description = "First concept is used as the episode keyword for id generation.")]
     pub concepts: Vec<String>,
     pub valence: f64,
 }
@@ -94,6 +97,7 @@ pub struct ConceptGraphService {
     tool_router: ToolRouter<Self>,
     graph: Arc<Graph>,
     arousal_tau_ms: f64,
+    timezone: Tz,
 }
 
 impl ConceptGraphService {
@@ -105,10 +109,16 @@ impl ConceptGraphService {
     ) -> Result<Self, Box<dyn Error>> {
         let graph = Graph::new(uri, user, password)?;
         let tau = if arousal_tau_ms > 0.0 { arousal_tau_ms } else { 1.0 };
+        let timezone_str = env::var("TZ")
+            .map_err(|_| "TZ environment variable is required")?;
+        let timezone = timezone_str
+            .parse::<Tz>()
+            .map_err(|e| format!("Invalid timezone in TZ environment variable: {}", e))?;
         Ok(Self {
             tool_router: Self::tool_router(),
             graph: Arc::new(graph),
             arousal_tau_ms: tau,
+            timezone,
         })
     }
 
@@ -179,6 +189,14 @@ impl ConceptGraphService {
         }
     }
 
+    fn format_local_date(&self, now_ms: i64) -> String {
+        let utc = Utc
+            .timestamp_millis_opt(now_ms)
+            .single()
+            .unwrap_or_else(|| Utc.timestamp_millis_opt(0).unwrap());
+        utc.with_timezone(&self.timezone).format("%Y%m%d").to_string()
+    }
+
     async fn ensure_concept(
         &self,
         concept: &str,
@@ -221,6 +239,36 @@ impl ConceptGraphService {
             Ok(count > 0)
         } else {
             Ok(false)
+        }
+    }
+
+    async fn episode_exists(&self, episode_id: &str) -> Result<bool, ErrorData> {
+        let query = query(
+            "MATCH (e:Episode {id: $id}) RETURN count(e) AS count",
+        )
+        .param("id", episode_id);
+
+        let mut result = self.graph.execute(query).await.map_err(|e| {
+            Self::internal_error("Failed to check episode", e)
+        })?;
+
+        if let Ok(Some(row)) = result.next().await {
+            let count: i64 = row.get("count").unwrap_or(0);
+            Ok(count > 0)
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn next_episode_id(&self, base: &str) -> Result<String, ErrorData> {
+        let mut candidate = base.to_string();
+        let mut suffix = 2;
+        loop {
+            if !self.episode_exists(&candidate).await? {
+                return Ok(candidate);
+            }
+            candidate = format!("{}-{}", base, suffix);
+            suffix += 1;
         }
     }
 
@@ -537,8 +585,11 @@ impl ConceptGraphService {
         }
 
         let now = Self::now_ms();
-        let episode_id = Uuid::new_v4().to_string();
         let episode_valence = Self::clamp(request.valence, -1.0, 1.0);
+        let keyword = concepts[0].clone();
+        let date_prefix = self.format_local_date(now);
+        let base_id = format!("{}/{}", date_prefix, keyword);
+        let episode_id = self.next_episode_id(&base_id).await?;
 
         let query = query(
             "CREATE (e:Episode {id: $id, summary: $summary, valence: $episode_valence})\n\

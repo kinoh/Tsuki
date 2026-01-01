@@ -12,11 +12,12 @@ LLM-driven agents.
 - MEMGRAPH_USER (optional)
 - MEMGRAPH_PASSWORD (optional)
 - AROUSAL_TAU_MS (default: 86400000)
+- TZ (required, e.g. Asia/Tokyo)
 
 ## Data Model (Logical)
 
 - Concept: name, valence, arousal_level, accessed_at
-- Episode: summary, valence
+- Episode: id, summary, valence
 - Relations: Concept->Concept with type in {is-a, part-of, evokes}
 - Episode links: Concept->Episode using EVOKES
 
@@ -64,6 +65,7 @@ Arguments:
 
 Notes:
 - concepts created indirectly here start with arousal_level = 0.25.
+- episode_id is "YYYYMMDD/<keyword>" using the first concept as keyword; duplicates add "-2", "-3", etc.
 
 Returns:
 - episode_id: string

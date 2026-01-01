@@ -47,6 +47,7 @@ The existing structured-memory store is not well-suited for concept networks tha
 - General
   - Concept strings are used as-is (no normalization).
   - LLM-facing time is local time; Core converts to unix_ms before calling MCP.
+  - MCP uses TZ to derive local dates for episode_id.
   - accessed_at is set by MCP; source and confidence are omitted.
   - Arousal is managed by MCP and not explicitly updated by Core.
   - arousal = arousal_level * exp(-(now - accessed_at) / tau), with tau defaulting to 1 day.
@@ -62,6 +63,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - params: { summary: string, concepts: string[], valence: number }
   - returns: { episode_id: string, linked_concepts: string[], valence: number }
   - notes: concepts created indirectly here start with arousal_level = 0.25.
+  - notes: episode_id is "YYYYMMDD/<keyword>" using the first concept as keyword; duplicates add "-2", "-3", etc.
 - relation_add
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { from: string, to: string, type: string }

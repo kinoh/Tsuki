@@ -1,6 +1,6 @@
 use concept_graph::service::{
     ConceptGraphService, ConceptUpdateAffectRequest, ConceptUpsertRequest, EpisodeAddRequest,
-    RecallQueryRequest, RelationAddRequest,
+    RecallQueryRequest, RelationAddRequest, RelationType,
 };
 use neo4rs::{query, Graph};
 use rmcp::handler::server::wrapper::Parameters;
@@ -18,6 +18,9 @@ struct PropositionOut {
 }
 
 async fn connect_service() -> ConceptGraphService {
+    if env::var("TZ").is_err() {
+        env::set_var("TZ", "UTC");
+    }
     let uri = env::var("MEMGRAPH_URI").unwrap_or_else(|_| "bolt://localhost:7687".to_string());
     let user = env::var("MEMGRAPH_USER").unwrap_or_default();
     let password = env::var("MEMGRAPH_PASSWORD").unwrap_or_default();
@@ -115,7 +118,7 @@ async fn scenario_directional_hop_decay() {
         .relation_add(Parameters(RelationAddRequest {
             from: apple.clone(),
             to: fruit.clone(),
-            relation_type: "is-a".to_string(),
+            relation_type: RelationType::IsA,
         }))
         .await
         .expect("relation_add");
@@ -256,7 +259,7 @@ async fn scenario_relation_tautology_is_rejected() {
         .relation_add(Parameters(RelationAddRequest {
             from: concept.clone(),
             to: concept.clone(),
-            relation_type: "is-a".to_string(),
+            relation_type: RelationType::IsA,
         }))
         .await;
 
