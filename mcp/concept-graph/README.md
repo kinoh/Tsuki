@@ -84,7 +84,9 @@ Notes:
 - concepts created indirectly here start with arousal_level = 0.25.
 
 Returns:
-- relation_id: string
+- from: string
+- to: string
+- type: string
 
 ### recall_query
 Recalls propositions from seed concepts up to max_hop.

@@ -162,6 +162,14 @@ impl ConceptGraphService {
         }
     }
 
+    fn render_relation_type_input(relation_type: &RelationType) -> &'static str {
+        match relation_type {
+            RelationType::IsA => "is-a",
+            RelationType::PartOf => "part-of",
+            RelationType::Evokes => "evokes",
+        }
+    }
+
     fn render_relation_type(&self, relation_type: &str) -> &'static str {
         match relation_type {
             "IS_A" => "is-a",
@@ -591,7 +599,6 @@ impl ConceptGraphService {
         }
 
         let relation_label = self.map_relation_type(&request.relation_type);
-        let relation_id = Uuid::new_v4().to_string();
         let now = Self::now_ms();
 
         let query_text = format!(
@@ -600,15 +607,13 @@ impl ConceptGraphService {
              MERGE (b:Concept {{name: $to}})\n\
              ON CREATE SET b.valence = $valence, b.arousal_level = $arousal_level, b.accessed_at = $accessed_at\n\
              MERGE (a)-[r:{rel}]->(b)\n\
-             SET r.id = coalesce(r.id, $id)\n\
-             RETURN r.id AS id",
+             RETURN type(r) AS type",
             rel = relation_label,
         );
 
         let query = query(query_text.as_str())
             .param("from", from.as_str())
             .param("to", to.as_str())
-            .param("id", relation_id.as_str())
             .param("valence", DEFAULT_VALENCE)
             .param("arousal_level", INITIAL_AROUSAL_INDIRECT)
             .param("accessed_at", now);
@@ -617,14 +622,14 @@ impl ConceptGraphService {
             Self::internal_error("Failed to add relation", e)
         })?;
 
-        let id = if let Ok(Some(row)) = result.next().await {
-            row.get("id").unwrap_or(relation_id.clone())
-        } else {
-            relation_id.clone()
-        };
+        if let Err(e) = result.next().await {
+            return Err(Self::internal_error("Failed to add relation", e));
+        }
 
         let result = json!({
-            "relation_id": id,
+            "from": from,
+            "to": to,
+            "type": Self::render_relation_type_input(&request.relation_type),
         });
 
         Ok(CallToolResult {

@@ -64,7 +64,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - notes: concepts created indirectly here start with arousal_level = 0.25.
 - relation_add
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
-  - returns: { relation_id: string }
+  - returns: { from: string, to: string, type: string }
   - notes: concepts created indirectly here start with arousal_level = 0.25.
 - recall_query
   - params: { seeds: string[], max_hop: number }
