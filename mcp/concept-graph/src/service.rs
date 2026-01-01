@@ -10,7 +10,7 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
@@ -64,6 +64,12 @@ pub struct RelationAddRequest {
 pub struct RecallQueryRequest {
     pub seeds: Vec<String>,
     pub max_hop: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConceptSearchRequest {
+    pub keywords: Vec<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -251,6 +257,11 @@ impl ConceptGraphService {
             .single()
             .unwrap_or_else(|| Utc.timestamp_millis_opt(0).unwrap());
         utc.with_timezone(&self.timezone).format("%Y%m%d").to_string()
+    }
+
+    fn clamp_limit(limit: Option<u32>, default_limit: u32, max_limit: u32) -> u32 {
+        let value = limit.unwrap_or(default_limit).max(1);
+        value.min(max_limit)
     }
 
     async fn ensure_constraints(graph: &Graph) -> Result<(), Box<dyn Error>> {
@@ -533,6 +544,47 @@ impl ConceptGraphService {
         }
 
         Ok(())
+    }
+
+    async fn fetch_arousal_ranked(
+        &self,
+        exclude: &HashSet<String>,
+        limit: u32,
+        now: i64,
+    ) -> Result<Vec<String>, ErrorData> {
+        let query = query(
+            "MATCH (c:Concept)\n\
+             RETURN c.name AS name, c.arousal_level AS arousal_level, c.accessed_at AS accessed_at",
+        );
+
+        let mut result = self.graph.execute(query).await.map_err(|e| {
+            Self::internal_error("Failed to load concepts for arousal ranking", e)
+        })?;
+
+        let mut scored = Vec::new();
+        while let Ok(Some(row)) = result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if name.is_empty() || exclude.contains(&name) {
+                continue;
+            }
+            let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
+            let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+            let arousal = self.arousal(arousal_level, accessed_at, now);
+            scored.push((name, arousal));
+        }
+
+        scored.sort_by(|a, b| {
+            match b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal) {
+                std::cmp::Ordering::Equal => a.0.cmp(&b.0),
+                ordering => ordering,
+            }
+        });
+
+        Ok(scored
+            .into_iter()
+            .take(limit as usize)
+            .map(|(name, _)| name)
+            .collect())
     }
 }
 
@@ -913,6 +965,79 @@ impl ConceptGraphService {
         items.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
         let result = json!({"propositions": items});
+
+        Ok(CallToolResult {
+            content: vec![Content::text(result.to_string())],
+            structured_content: Some(result),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    #[tool(description = "Searches concepts by keyword (partial match) and fills with arousal-ranked concepts if needed.")]
+    pub async fn concept_search(
+        &self,
+        params: Parameters<ConceptSearchRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = params.0;
+        let mut keywords = Vec::new();
+        for keyword in &request.keywords {
+            if let Some(normalized) = self.normalize_concept(keyword) {
+                keywords.push(normalized);
+            }
+        }
+
+        let limit = Self::clamp_limit(request.limit, 50, 200) as usize;
+        let now = Self::now_ms();
+
+        let mut concepts = Vec::new();
+        let mut seen = HashSet::new();
+
+        if !keywords.is_empty() {
+            let query = query(
+                "UNWIND $keywords AS kw\n\
+                 MATCH (c:Concept)\n\
+                 WHERE toLower(c.name) CONTAINS toLower(kw)\n\
+                 RETURN DISTINCT c.name AS name\n\
+                 ORDER BY name\n\
+                 LIMIT $limit",
+            )
+            .param("keywords", keywords.clone())
+            .param("limit", limit as i64);
+
+            let mut result = self.graph.execute(query).await.map_err(|e| {
+                Self::internal_error("Failed to search concepts", e)
+            })?;
+
+            while let Ok(Some(row)) = result.next().await {
+                let name: String = row.get("name").unwrap_or_default();
+                if name.is_empty() || seen.contains(&name) {
+                    continue;
+                }
+                seen.insert(name.clone());
+                concepts.push(name);
+                if concepts.len() >= limit {
+                    break;
+                }
+            }
+        }
+
+        if concepts.len() < limit {
+            let remaining = (limit - concepts.len()) as u32;
+            let fallback = self.fetch_arousal_ranked(&seen, remaining, now).await?;
+            for name in fallback {
+                if concepts.len() >= limit {
+                    break;
+                }
+                if seen.insert(name.clone()) {
+                    concepts.push(name);
+                }
+            }
+        }
+
+        let result = json!({
+            "concepts": concepts,
+        });
 
         Ok(CallToolResult {
             content: vec![Content::text(result.to_string())],

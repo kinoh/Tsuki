@@ -70,6 +70,10 @@ The existing structured-memory store is not well-suited for concept networks tha
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { from: string, to: string, type: string }
   - notes: concepts created indirectly here start with arousal_level = 0.25.
+- concept_search
+  - params: { keywords: string[], limit?: number }
+  - returns: { concepts: string[] }
+  - notes: partial name match (case-insensitive); if insufficient, fills with arousal-ranked concepts.
 - recall_query
   - params: { seeds: string[], max_hop: number }
   - returns: { propositions: Array<{ text: string, score: number, valence: number | null }> }

@@ -94,6 +94,20 @@ Returns:
 - to: string
 - type: string
 
+### concept_search
+Searches concepts by keyword (partial match) and fills with arousal-ranked concepts if needed.
+
+Arguments:
+- keywords: string[]
+- limit: number (optional; default 50, max 200)
+
+Notes:
+- keywords are matched by partial name (case-insensitive).
+- if matches are fewer than limit, fills remaining slots with arousal-ranked concepts.
+
+Returns:
+- concepts: string[]
+
 ### recall_query
 Recalls propositions from seed concepts up to max_hop.
 
