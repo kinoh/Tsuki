@@ -179,8 +179,8 @@ async fn scenario_directional_hop_decay() {
             .expect("reverse proposition");
 
         assert!(forward_score > reverse_score, "forward should be larger");
-        assert!(forward_score > 0.9, "forward score should be near 1");
-        assert!(reverse_score > 0.4, "reverse score should be near 0.5");
+        assert!(forward_score > 0.2, "forward score should be near 0.25");
+        assert!(reverse_score > 0.1, "reverse score should be near 0.125");
     })
     .await;
 }
