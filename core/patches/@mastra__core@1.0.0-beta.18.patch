@@ -55,6 +55,75 @@
            } catch (error2) {
              logger?.error("Error calling onInputStart", error2);
            }
+@@ -10538,7 +10538,29 @@
+-    if (chunk.type !== "reasoning-start" && chunk.type !== "reasoning-delta" && chunk.type !== "reasoning-end" && chunk.type !== "redacted-reasoning" && chunk.type !== "reasoning-signature" && chunk.type !== "response-metadata" && runState.state.isReasoning) {
+-      runState.setState({
+-        isReasoning: false,
+-        reasoningDeltas: []
+-      });
+-    }
++    if (chunk.type !== "reasoning-start" && chunk.type !== "reasoning-delta" && chunk.type !== "reasoning-end" && chunk.type !== "redacted-reasoning" && chunk.type !== "reasoning-signature" && chunk.type !== "response-metadata" && runState.state.isReasoning) {
++      const providerMetadata = runState.state.providerOptions;
++      if (providerMetadata || runState.state.reasoningDeltas.length > 0) {
++        const message = {
++          id: messageId,
++          role: "assistant",
++          content: {
++            format: 2,
++            parts: [
++              {
++                type: "reasoning",
++                reasoning: "",
++                details: [{ type: "text", text: runState.state.reasoningDeltas.join("") }],
++                ...providerMetadata ? { providerMetadata } : {}
++              }
++            ]
++          },
++          createdAt: /* @__PURE__ */ new Date()
++        };
++        messageList.add(message, "response");
++      }
++      runState.setState({
++        isReasoning: false,
++        reasoningDeltas: [],
++        providerOptions: void 0
++      });
++    }
+@@ -10684,6 +10706,13 @@
+       case "reasoning-end": {
++        if (!runState.state.isReasoning && runState.state.reasoningDeltas.length === 0 && !runState.state.providerOptions) {
++          if (isControllerOpen(controller)) {
++            controller.enqueue(chunk);
++          }
++          break;
++        }
+         const message = {
+           id: messageId,
+           role: "assistant",
+           content: {
+             format: 2,
+             parts: [
+               {
+                 type: "reasoning",
+                 reasoning: "",
+                 details: [{ type: "text", text: runState.state.reasoningDeltas.join("") }],
+                 providerMetadata: chunk.payload.providerMetadata ?? runState.state.providerOptions
+               }
+             ]
+           },
+           createdAt: /* @__PURE__ */ new Date()
+         };
+         messageList.add(message, "response");
+         runState.setState({
+           isReasoning: false,
+           reasoningDeltas: [],
+           providerOptions: void 0
+         });
+         if (isControllerOpen(controller)) {
+           controller.enqueue(chunk);
+         }
+         break;
+       }
 --- a/dist/chunk-2XX35XRX.js
 +++ b/dist/chunk-2XX35XRX.js
 @@ -10526,36 +10526,54 @@
@@ -112,3 +181,73 @@
            } catch (error2) {
              logger?.error("Error calling onInputStart", error2);
            }
+
+@@ -10510,7 +10510,29 @@
+-    if (chunk.type !== "reasoning-start" && chunk.type !== "reasoning-delta" && chunk.type !== "reasoning-end" && chunk.type !== "redacted-reasoning" && chunk.type !== "reasoning-signature" && chunk.type !== "response-metadata" && runState.state.isReasoning) {
+-      runState.setState({
+-        isReasoning: false,
+-        reasoningDeltas: []
+-      });
+-    }
++    if (chunk.type !== "reasoning-start" && chunk.type !== "reasoning-delta" && chunk.type !== "reasoning-end" && chunk.type !== "redacted-reasoning" && chunk.type !== "reasoning-signature" && chunk.type !== "response-metadata" && runState.state.isReasoning) {
++      const providerMetadata = runState.state.providerOptions;
++      if (providerMetadata || runState.state.reasoningDeltas.length > 0) {
++        const message = {
++          id: messageId,
++          role: "assistant",
++          content: {
++            format: 2,
++            parts: [
++              {
++                type: "reasoning",
++                reasoning: "",
++                details: [{ type: "text", text: runState.state.reasoningDeltas.join("") }],
++                ...providerMetadata ? { providerMetadata } : {}
++              }
++            ]
++          },
++          createdAt: /* @__PURE__ */ new Date()
++        };
++        messageList.add(message, "response");
++      }
++      runState.setState({
++        isReasoning: false,
++        reasoningDeltas: [],
++        providerOptions: void 0
++      });
++    }
+@@ -10652,6 +10674,13 @@
+       case "reasoning-end": {
++        if (!runState.state.isReasoning && runState.state.reasoningDeltas.length === 0 && !runState.state.providerOptions) {
++          if (isControllerOpen(controller)) {
++            controller.enqueue(chunk);
++          }
++          break;
++        }
+         const message = {
+           id: messageId,
+           role: "assistant",
+           content: {
+             format: 2,
+             parts: [
+               {
+                 type: "reasoning",
+                 reasoning: "",
+                 details: [{ type: "text", text: runState.state.reasoningDeltas.join("") }],
+                 providerMetadata: chunk.payload.providerMetadata ?? runState.state.providerOptions
+               }
+             ]
+           },
+           createdAt: /* @__PURE__ */ new Date()
+         };
+         messageList.add(message, "response");
+         runState.setState({
+           isReasoning: false,
+           reasoningDeltas: [],
+           providerOptions: void 0
+         });
+         if (isControllerOpen(controller)) {
+           controller.enqueue(chunk);
+         }
+         break;
+       }
