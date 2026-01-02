@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_VALENCE: f64 = 0.0;
@@ -75,6 +75,12 @@ pub struct ConceptSearchRequest {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetTimeRequest {
+    #[schemars(description = "Unix time in milliseconds. <= 0 resets to real time.")]
+    pub now_ms: i64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Proposition {
     pub text: String,
@@ -117,6 +123,7 @@ pub struct ConceptGraphService {
     graph: Arc<Graph>,
     arousal_tau_ms: f64,
     timezone: Tz,
+    time_override_ms: Arc<Mutex<Option<i64>>>,
 }
 
 impl ConceptGraphService {
@@ -125,6 +132,7 @@ impl ConceptGraphService {
         user: String,
         password: String,
         arousal_tau_ms: f64,
+        enable_set_time: bool,
     ) -> Result<Self, Box<dyn Error>> {
         let graph = Graph::new(uri, user, password)?;
         Self::ensure_constraints(&graph).await?;
@@ -134,15 +142,25 @@ impl ConceptGraphService {
         let timezone = timezone_str
             .parse::<Tz>()
             .map_err(|e| format!("Invalid timezone in TZ environment variable: {}", e))?;
+        let mut tool_router = Self::tool_router();
+        if !enable_set_time {
+            tool_router.remove_route("set_time");
+        }
         Ok(Self {
-            tool_router: Self::tool_router(),
+            tool_router,
             graph: Arc::new(graph),
             arousal_tau_ms: tau,
             timezone,
+            time_override_ms: Arc::new(Mutex::new(None)),
         })
     }
 
-    fn now_ms() -> i64 {
+    fn now_ms(&self) -> i64 {
+        if let Ok(guard) = self.time_override_ms.lock() {
+            if let Some(value) = *guard {
+                return value;
+            }
+        }
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as i64)
@@ -707,6 +725,33 @@ impl ConceptGraphService {
 
 #[tool_router]
 impl ConceptGraphService {
+    #[tool(description = "Sets internal clock. now_ms is unix ms; <= 0 resets to real time.")]
+    pub async fn set_time(
+        &self,
+        params: Parameters<SetTimeRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let request = params.0;
+        let reset = request.now_ms <= 0;
+        let applied = if reset { None } else { Some(request.now_ms) };
+        let mut guard = self
+            .time_override_ms
+            .lock()
+            .map_err(|_| Self::internal_error("Failed to set time", "lock poisoned"))?;
+        *guard = applied;
+
+        let result = json!({
+            "now_ms": applied,
+            "reset": reset,
+        });
+
+        Ok(CallToolResult {
+            content: vec![Content::text(result.to_string())],
+            structured_content: Some(result),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
     #[tool(description = "Creates the concept if missing. Uses the concept string as-is.")]
     pub async fn concept_upsert(
         &self,
@@ -717,7 +762,7 @@ impl ConceptGraphService {
             .normalize_concept(&request.concept)
             .ok_or_else(|| Self::invalid_params("Error: concept: empty", json!({})))?;
 
-        let now = Self::now_ms();
+        let now = self.now_ms();
 
         let name = concept.to_string();
         let row = self
@@ -770,7 +815,7 @@ impl ConceptGraphService {
             .normalize_concept(&request.target)
             .ok_or_else(|| Self::invalid_params("Error: target: empty", json!({})))?;
 
-        let now = Self::now_ms();
+        let now = self.now_ms();
         let new_arousal_level = Self::clamp(request.valence_delta.abs(), 0.0, 1.0);
 
         if self.episode_exists(&target).await? {
@@ -873,7 +918,7 @@ impl ConceptGraphService {
             return Err(Self::invalid_params("Error: concepts: empty", json!({}))); 
         }
 
-        let now = Self::now_ms();
+        let now = self.now_ms();
         let episode_valence = DEFAULT_VALENCE;
         let episode_arousal_level = INITIAL_AROUSAL_UPSERT;
         let keyword = concepts[0].clone();
@@ -893,7 +938,9 @@ impl ConceptGraphService {
                          UNWIND $concepts AS concept\n\
                          MERGE (c:Concept {name: concept})\n\
                          ON CREATE SET c.valence = $concept_valence, c.arousal_level = $concept_arousal_level, c.accessed_at = $accessed_at\n\
-                         MERGE (c)-[:EVOKES]->(e)",
+                         MERGE (c)-[r:EVOKES]->(e)\n\
+                         ON CREATE SET r.weight = $relation_weight\n\
+                         ON MATCH SET r.weight = coalesce(r.weight, $relation_weight)",
                     )
                     .param("name", episode_id_value.as_str())
                     .param("summary", summary_value.as_str())
@@ -903,6 +950,7 @@ impl ConceptGraphService {
                     .param("concept_valence", DEFAULT_VALENCE)
                     .param("concept_arousal_level", INITIAL_AROUSAL_INDIRECT)
                     .param("accessed_at", now)
+                    .param("relation_weight", DEFAULT_RELATION_WEIGHT)
                 },
                 "Failed to add episode",
             )
@@ -943,7 +991,7 @@ impl ConceptGraphService {
         }
 
         let relation_label = self.map_relation_type(&request.relation_type);
-        let now = Self::now_ms();
+        let now = self.now_ms();
 
         let query_text = format!(
             "MERGE (a:Concept {{name: $from}})\n\
@@ -1021,7 +1069,7 @@ impl ConceptGraphService {
             });
         }
 
-        let now = Self::now_ms();
+        let now = self.now_ms();
         let mut cache: HashMap<String, ConceptState> = HashMap::new();
         let mut visited: HashMap<String, u32> = HashMap::new();
         let mut queue: VecDeque<(String, u32)> = VecDeque::new();
@@ -1149,7 +1197,7 @@ impl ConceptGraphService {
         }
 
         let limit = Self::clamp_limit(request.limit, 50, 200) as usize;
-        let now = Self::now_ms();
+        let now = self.now_ms();
 
         let mut concepts = Vec::new();
         let mut seen = HashSet::new();

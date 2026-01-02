@@ -92,3 +92,14 @@ The existing structured-memory store is not well-suited for concept networks tha
 - Data migration strategy from structured-memory to Memgraph.
 - Optional richer metadata on episodes (message ID) if recall quality requires it.
 - Relation type expansion or normalization if concept graph usage grows.
+
+## Initial Data Backfill (ad hoc)
+- Run in an isolated environment/process from production to avoid clock/tool conflicts.
+- Use an ad hoc script under `core/scripts` to fetch message history for a specific user.
+- Retrieve messages by thread (via `threadById`-equivalent flow) and process them in chunks.
+- Keep the stepwise pipeline (整理 -> 検索 -> 作成 -> update_affect) to avoid long single-call timeouts.
+- Introduce a `set_time` tool that is exposed only when a runtime option is explicitly provided
+  (e.g., start the MCP server with `--enable-set-time`).
+  - When used, `set_time` sets the internal clock to the chunk end timestamp (unix ms).
+  - If not provided, the MCP service continues to use real-time `now`.
+- Idempotency is not guaranteed; run after resetting the concept graph.

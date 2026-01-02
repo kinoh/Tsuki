@@ -25,7 +25,7 @@ async fn connect_service() -> ConceptGraphService {
     let uri = env::var("MEMGRAPH_URI").unwrap_or_else(|_| "bolt://localhost:7687".to_string());
     let user = env::var("MEMGRAPH_USER").unwrap_or_default();
     let password = env::var("MEMGRAPH_PASSWORD").unwrap_or_default();
-    ConceptGraphService::connect(uri, user, password, TAU_MS)
+    ConceptGraphService::connect(uri, user, password, TAU_MS, false)
         .await
         .expect("connect concept graph service")
 }

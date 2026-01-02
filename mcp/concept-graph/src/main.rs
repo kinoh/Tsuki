@@ -15,8 +15,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(86_400_000.0);
+    let enable_set_time = env::args().any(|arg| arg == "--enable-set-time");
 
-    let service = ConceptGraphService::connect(uri, user, password, arousal_tau_ms).await?;
+    let service = ConceptGraphService::connect(
+        uri,
+        user,
+        password,
+        arousal_tau_ms,
+        enable_set_time,
+    )
+    .await?;
 
     println!("start server, connect to standard input/output");
 
