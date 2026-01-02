@@ -24,8 +24,7 @@ const DEFAULT_ACCESSED_AT: i64 = 0;
 const DEFAULT_RELATION_WEIGHT: f64 = 0.25;
 const RELATION_WEIGHT_ALPHA: f64 = 0.2;
 const REVERSE_PENALTY: f64 = 0.5;
-const CONFLICT_RETRY_MAX: usize = 3;
-const CONFLICT_RETRY_BACKOFF_MS: u64 = 50;
+const EXTENDED_RETRY_DELAYS_MS: [u64; 3] = [20, 40, 80];
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ConceptUpsertRequest {
@@ -189,14 +188,42 @@ impl ConceptGraphService {
         ErrorData::internal_error(message.to_string(), Some(json!({"reason": err.to_string()})))
     }
 
-    fn is_conflict_error(err: &impl ToString) -> bool {
-        err.to_string()
-            .contains("Cannot resolve conflicting transactions")
+    fn is_retryable_error(message: &str) -> bool {
+        let msg = message.to_lowercase();
+        let patterns = [
+            "cannot resolve conflicting transactions",
+            "unique constraint violation",
+            "deadlock",
+            "lock",
+            "timeout",
+            "timed out",
+            "temporarily unavailable",
+            "service unavailable",
+            "connection reset",
+            "connection refused",
+            "connection error",
+            "connection closed",
+            "broken pipe",
+            "transport",
+            "i/o error",
+            "io error",
+        ];
+        patterns.iter().any(|pattern| msg.contains(pattern))
     }
 
-    async fn wait_retry(attempt: usize) {
-        let backoff = CONFLICT_RETRY_BACKOFF_MS.saturating_mul(attempt as u64);
-        tokio::time::sleep(Duration::from_millis(backoff)).await;
+    fn jitter_multiplier() -> f64 {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.subsec_nanos())
+            .unwrap_or(0);
+        let rand = (nanos % 1000) as f64 / 1000.0;
+        0.5 + rand
+    }
+
+    async fn wait_retry_with_jitter(base_ms: u64) {
+        let jitter = Self::jitter_multiplier();
+        let delay = ((base_ms as f64) * jitter).round() as u64;
+        tokio::time::sleep(Duration::from_millis(delay)).await;
     }
 
     async fn execute_with_retry<F>(
@@ -207,38 +234,40 @@ impl ConceptGraphService {
     where
         F: FnMut() -> neo4rs::Query,
     {
-        for attempt in 0..CONFLICT_RETRY_MAX {
+        for attempt in 0..=EXTENDED_RETRY_DELAYS_MS.len() {
             let query = make_query();
             let mut result = match self.graph.execute(query).await {
                 Ok(result) => result,
                 Err(err) => {
-                    let should_retry =
-                        Self::is_conflict_error(&err) && attempt + 1 < CONFLICT_RETRY_MAX;
+                    let message = err.to_string();
+                    let should_retry = attempt < EXTENDED_RETRY_DELAYS_MS.len()
+                        && Self::is_retryable_error(&message);
                     if should_retry {
-                        Self::wait_retry(attempt + 1).await;
+                        Self::wait_retry_with_jitter(EXTENDED_RETRY_DELAYS_MS[attempt]).await;
                         continue;
                     }
-                    return Err(Self::internal_error(context, err));
+                    return Err(Self::internal_error(context, message));
                 }
             };
 
             match result.next().await {
                 Ok(row) => return Ok(row),
                 Err(err) => {
-                    let should_retry =
-                        Self::is_conflict_error(&err) && attempt + 1 < CONFLICT_RETRY_MAX;
+                    let message = err.to_string();
+                    let should_retry = attempt < EXTENDED_RETRY_DELAYS_MS.len()
+                        && Self::is_retryable_error(&message);
                     if should_retry {
-                        Self::wait_retry(attempt + 1).await;
+                        Self::wait_retry_with_jitter(EXTENDED_RETRY_DELAYS_MS[attempt]).await;
                         continue;
                     }
-                    return Err(Self::internal_error(context, err));
+                    return Err(Self::internal_error(context, message));
                 }
             }
         }
 
         Err(Self::internal_error(
             context,
-            "Conflict retry limit exceeded",
+            "Extended retry limit exceeded",
         ))
     }
 
