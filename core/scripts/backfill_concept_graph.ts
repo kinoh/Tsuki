@@ -40,13 +40,23 @@ const STEP2_PROMPT = [
 ].join('\n')
 
 const STEP3_PROMPT = [
-  'Step 3: 作成',
-  '- 抽出結果を concept graph に反映（concept_upsert / relation_add / episode_add）',
+  'Step 3: 概念と関係の作成',
+  '- 抽出結果を concept graph に反映（concept_upsert / relation_add のみ）',
+  '- episode_add はこのステップでは実行しない',
   '- 文章出力は不要',
 ].join('\n')
 
 const STEP4_PROMPT = [
-  'Step 4: update_affect',
+  'Step 4: エピソード作成',
+  '- Step 1 のエピソード候補に基づいて episode_add を実行',
+  '- 1エピソード = 1話題にする（まとめすぎない）',
+  '- 使う概念は少数に絞る（目安: 3〜7）',
+  '- Step 2/3 で決めた概念名に合わせる',
+  '- 文章出力は不要',
+].join('\n')
+
+const STEP5_PROMPT = [
+  'Step 5: update_affect',
   '- valenceの値（-1.0〜1.0）は以下を目安にする',
   '  - -1.0: 強烈な拒否/損失/不快',
   '  - -0.8: かなりの不満/緊張',
@@ -402,19 +412,26 @@ async function main(): Promise<void> {
 
       const step1Prompt = `${STEP1_PROMPT}\n\n対象ログ (${chunk.startDay}〜${chunk.endDay}):\n${chunkLogs}`
       const step1Result = await runStep(agent, requestContext, toolsets, step1Prompt, 'Step 1')
+      let stepContext = `${step1Prompt}\n\nStep 1 結果:\n${step1Result.text}`
 
       console.log(`set_time: ${chunkEndMs}`)
       const setTimeResult = await mcp.callTool('concept_graph', 'set_time', { now_ms: chunkEndMs })
       console.log(`set_time result:\n${safeJson(setTimeResult)}`)
 
-      const step2Prompt = `${STEP2_PROMPT}\n\nStep 1 結果:\n${step1Result.text}`
+      const step2Prompt = `${stepContext}\n\n${STEP2_PROMPT}`
       const step2Result = await runStep(agent, requestContext, toolsets, step2Prompt, 'Step 2')
+      stepContext = `${step2Prompt}\n\nStep 2 結果:\n${step2Result.text}`
 
-      const step3Prompt = `${STEP3_PROMPT}\n\nStep 2 結果:\n${step2Result.text}`
-      await runStep(agent, requestContext, toolsets, step3Prompt, 'Step 3')
+      const step3Prompt = `${stepContext}\n\n${STEP3_PROMPT}`
+      const step3Result = await runStep(agent, requestContext, toolsets, step3Prompt, 'Step 3')
+      stepContext = `${step3Prompt}\n\nStep 3 結果:\n${step3Result.text}`
 
-      const step4Prompt = `${STEP4_PROMPT}\n\nStep 1 結果:\n${step1Result.text}\n\nStep 2 結果:\n${step2Result.text}`
-      await runStep(agent, requestContext, toolsets, step4Prompt, 'Step 4')
+      const step4Prompt = `${stepContext}\n\n${STEP4_PROMPT}`
+      const step4Result = await runStep(agent, requestContext, toolsets, step4Prompt, 'Step 4')
+      stepContext = `${step4Prompt}\n\nStep 4 結果:\n${step4Result.text}`
+
+      const step5Prompt = `${stepContext}\n\n${STEP5_PROMPT}`
+      await runStep(agent, requestContext, toolsets, step5Prompt, 'Step 5')
     }
 
     console.log('set_time reset')
