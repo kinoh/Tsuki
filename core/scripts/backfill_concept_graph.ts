@@ -11,6 +11,7 @@ type CliOptions = {
   userId: string
   daysPerChunk: number
   maxChunks?: number
+  sinceChunk?: number
 }
 
 type LogEntry = {
@@ -77,7 +78,7 @@ const STEP5_PROMPT = [
 ].join('\n')
 
 function printUsage(): void {
-  console.log('Usage: pnpm tsx core/scripts/backfill_concept_graph.ts --user-id <id> --days-per-chunk <n> [--max-chunks <n>]')
+  console.log('Usage: pnpm tsx core/scripts/backfill_concept_graph.ts --user-id <id> --days-per-chunk <n> [--max-chunks <n>] [--since-chunk <n>]')
 }
 
 function parseArgs(): CliOptions {
@@ -85,6 +86,7 @@ function parseArgs(): CliOptions {
   let userId: string | null = null
   let daysPerChunk: number | null = null
   let maxChunks: number | null = null
+  let sinceChunk: number | null = null
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]
@@ -102,6 +104,12 @@ function parseArgs(): CliOptions {
     if (arg === '--max-chunks') {
       const raw = args[i + 1]
       maxChunks = raw ? Number(raw) : NaN
+      i += 1
+      continue
+    }
+    if (arg === '--since-chunk') {
+      const raw = args[i + 1]
+      sinceChunk = raw ? Number(raw) : NaN
       i += 1
       continue
     }
@@ -126,11 +134,17 @@ function parseArgs(): CliOptions {
     printUsage()
     process.exit(1)
   }
+  if (sinceChunk !== null && (!Number.isFinite(sinceChunk) || sinceChunk <= 0)) {
+    console.error('Error: --since-chunk must be a positive number')
+    printUsage()
+    process.exit(1)
+  }
 
   return {
     userId: userId.trim(),
     daysPerChunk,
     maxChunks: maxChunks === null ? undefined : maxChunks,
+    sinceChunk: sinceChunk === null ? undefined : sinceChunk,
   }
 }
 
@@ -358,7 +372,7 @@ async function ensureMastraDb(dataDir: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const { userId, daysPerChunk, maxChunks } = parseArgs()
+  const { userId, daysPerChunk, maxChunks, sinceChunk } = parseArgs()
   const dataDir = process.env.DATA_DIR ?? './data'
   const openAiModel = process.env.OPENAI_MODEL ?? 'gpt-5-mini'
   const timeZone = process.env.TZ ?? 'Asia/Tokyo'
@@ -401,7 +415,9 @@ async function main(): Promise<void> {
 
     const chunks = buildChunks(entries, daysPerChunk, timeZone)
     const totalChunks = chunks.length
-    const runChunks = maxChunks ? Math.min(maxChunks, totalChunks) : totalChunks
+    const startIndex = sinceChunk ? Math.min(sinceChunk - 1, totalChunks) : 0
+    const remainingChunks = totalChunks - startIndex
+    const runChunks = maxChunks ? Math.min(maxChunks, remainingChunks) : remainingChunks
     console.log(`User: ${userId}`)
     console.log(`Model: ${openAiModel}`)
     console.log(`Data dir: ${dataDir}`)
@@ -410,10 +426,13 @@ async function main(): Promise<void> {
     if (maxChunks) {
       console.log(`Max chunks: ${maxChunks}`)
     }
+    if (sinceChunk) {
+      console.log(`Since chunk: ${sinceChunk}`)
+    }
     console.log(`Chunks: ${runChunks}/${totalChunks}`)
 
     for (let index = 0; index < runChunks; index += 1) {
-      const chunk = chunks[index]
+      const chunk = chunks[startIndex + index]
       const chunkLogs = chunk.messages
         .map((entry) => `${entry.role}: ${entry.text}`)
         .join('\n')
@@ -422,7 +441,8 @@ async function main(): Promise<void> {
         continue
       }
 
-      console.log(`\n[${index + 1}/${runChunks}] ${chunk.startDay} -> ${chunk.endDay} (${chunk.messages.length} messages)`)
+      const chunkNumber = startIndex + index + 1
+      console.log(`\n[${chunkNumber}/${totalChunks}] ${chunk.startDay} -> ${chunk.endDay} (${chunk.messages.length} messages)`)
       console.log(`Chunk end: ${new Date(chunkEndMs).toISOString()} (${chunkEndMs})`)
 
       const step1Prompt = `${STEP1_PROMPT}\n\n対象ログ (${chunk.startDay}〜${chunk.endDay}):\n${chunkLogs}`
