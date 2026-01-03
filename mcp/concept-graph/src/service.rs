@@ -170,6 +170,14 @@ impl ConceptGraphService {
         val.max(min).min(max)
     }
 
+    fn round_score(value: f64) -> f64 {
+        if !value.is_finite() {
+            return value;
+        }
+        let factor = 1_000_000.0_f64;
+        (value * factor).round() / factor
+    }
+
     fn hop_decay(hop: u32) -> f64 {
         0.5_f64.powi((hop.saturating_sub(1)) as i32)
     }
@@ -1201,6 +1209,9 @@ impl ConceptGraphService {
 
         let mut items: Vec<Proposition> = propositions.into_values().collect();
         items.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        for item in &mut items {
+            item.score = Self::round_score(item.score);
+        }
 
         let result = json!({"propositions": items});
 
