@@ -1,7 +1,7 @@
 # Concept Graph Memory
 
 ## Overview
-Introduce a concept-centric memory system backed by Memgraph and accessed via an external MCP service. Core remains responsible for LLM-based affect evaluation and for supplying scoring criteria, while the MCP service handles persistence and graph queries.
+Introduce a concept-centric memory system backed by Memgraph and accessed via an external MCP service. Core remains responsible for LLM-based affect evaluation and for sending valence deltas, while the MCP service handles persistence, arousal updates, and recall ranking.
 
 ## Problem Statement
 The existing structured-memory store is not well-suited for concept networks that combine affect values, episodic summaries, and semantic relations. We need a graph-first memory representation that is easy to query for associative recall and can evolve without tightly coupling Core to a specific database.
@@ -9,7 +9,7 @@ The existing structured-memory store is not well-suited for concept networks tha
 ## Solution
 - Use Memgraph as the graph database, managed via Docker Compose.
 - Provide a Rust MCP service that exposes a minimal memory interface for Core.
-- Keep affect evaluation and recall scoring criteria in Core, and pass computed criteria to the MCP service for ranking.
+- Keep affect evaluation in Core, and delegate arousal + recall scoring to the MCP service.
 - Model concepts as the primary nodes, with episodes and relations attached to concepts.
 - No user separation; the graph is shared.
 - Data migration from the current structured-memory store is deferred.
@@ -17,7 +17,7 @@ The existing structured-memory store is not well-suited for concept networks tha
 ## Design Decisions
 - External MCP service instead of in-process storage to minimize Core dependencies and maintain clean layering.
 - Affect values stored as latest properties on Concept nodes rather than separate nodes, to avoid unnatural graph shapes.
-- Episodic memory stored as summarized text plus minimal metadata (timestamp, source).
+- Episodic memory stored as summarized text plus minimal metadata; accessed_at is tracked for arousal decay, while event time lives in the summary.
 - Fixed concept relation types: is-a, part-of, evokes.
   - **is-a** is an asymmetric inclusion relation grounded in similarity; it encodes abstraction level and inheritance
     with minimal notation, enabling compact taxonomy and generalization queries.
@@ -37,11 +37,17 @@ The existing structured-memory store is not well-suited for concept networks tha
   - Apply ranking internally; manage arousal updates; set updated timestamps.
 - Graph model (logical)
   - Concept node: identifier (concept text), valence, arousal_level, accessed_at
-  - Episode node: name, summary, valence, arousal_level, accessed_at (time is embedded in summary or represented elsewhere, not as a timestamp property)
-  - Edges: Concept->Episode (mentions/related), Concept->Concept with type in {is-a, part-of, evokes} and weight
+  - Episode node: name, summary, valence, arousal_level, accessed_at (event time is embedded in summary; accessed_at is for arousal decay)
+  - Edges: Concept->Episode (EVOKES), Concept->Concept with type in {is-a, part-of, evokes} and weight
 - Compose integration
   - Add Memgraph service with persistent volume.
-  - Add MCP service that connects to Memgraph via Bolt.
+  - Core launches the MCP service binary via stdio; the MCP service connects to Memgraph via Bolt.
+
+## Operations (Local)
+- `task memgraph/local-clean` resets Memgraph data.
+- `task memgraph/local-backup` creates a snapshot under `./backup/memgraph`.
+- `task memgraph/local-restore/<snapshot>` or `task memgraph/local-restore/latest` restores Memgraph snapshots.
+- `task local-reset` runs Memgraph restore + core data reset for a full local reset.
 
 ### MCP Interface (draft)
 - General
@@ -50,8 +56,15 @@ The existing structured-memory store is not well-suited for concept networks tha
   - MCP uses TZ to derive local dates for episode_id.
   - MCP ensures a unique constraint on Concept(name) at startup; startup fails if existing data violates it.
   - accessed_at is set by MCP; source and confidence are omitted.
-  - Arousal is managed by MCP and not explicitly updated by Core.
+  - Arousal is managed by MCP; Core only supplies valence deltas.
   - arousal = arousal_level * exp(-(now - accessed_at) / tau), with tau defaulting to 1 day.
+  - recall scores are rounded to 6 decimal places for stability.
+  - set_time is available only when launched with `--enable-set-time`.
+    - now_ms <= 0 resets to real time.
+- set_time
+  - params: { now_ms: number }
+  - returns: { now_ms: number | null, reset: boolean }
+  - notes: internal clock override for backfill; not exposed without `--enable-set-time`.
 - concept_upsert
   - params: { concept: string }
   - returns: { concept_id: string, created: boolean }
@@ -60,6 +73,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - params: { target: string, valence_delta: number }  # delta in [-1.0, 1.0]
   - returns: { concept_id or episode_id: string, valence: number, arousal: number, accessed_at: number }
   - notes: valence is clamped; accessed_at/arousal_level update only if new arousal >= current arousal.
+  - notes: new arousal_level = abs(valence_delta).
   - notes: if target matches an Episode name, updates the episode; otherwise updates a concept (creating it if missing).
 - episode_add
   - params: { summary: string, concepts: string[] }
@@ -72,12 +86,14 @@ The existing structured-memory store is not well-suited for concept networks tha
 - relation_add
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { from: string, to: string, type: string }
+  - notes: tautologies (from == to) are rejected.
   - notes: concepts created indirectly here start with arousal_level = 0.25.
   - notes: relation weight starts at 0.25 and is strengthened on repeated relation_add
     (weight = 1 - (1 - weight) * (1 - 0.2)).
 - concept_search
   - params: { keywords: string[], limit?: number }
   - returns: { concepts: string[] }
+  - notes: limit defaults to 50 and maxes at 200.
   - notes: partial name match (case-insensitive); if insufficient, fills with arousal-ranked concepts.
 - recall_query
   - params: { seeds: string[], max_hop: number }
@@ -87,6 +103,7 @@ The existing structured-memory store is not well-suited for concept networks tha
   - notes: score = arousal * hop_decay * weight (for concept relations).
   - notes: hop_decay = 0.5^(hop-1); reverse relations apply a fixed 0.5 penalty.
   - notes: each recalled concept may update arousal_level using hop_decay if it raises arousal.
+  - notes: scores are rounded to 6 decimals.
 
 ## Future Considerations
 - Data migration strategy from structured-memory to Memgraph.
@@ -95,9 +112,10 @@ The existing structured-memory store is not well-suited for concept networks tha
 
 ## Initial Data Backfill (ad hoc)
 - Run in an isolated environment/process from production to avoid clock/tool conflicts.
-- Use an ad hoc script under `core/scripts` to fetch message history for a specific user.
+- Use `core/scripts/backfill_concept_graph.ts` to fetch message history for a specific user.
+  - `pnpm tsx core/scripts/backfill_concept_graph.ts --user-id <id> --days-per-chunk <n> [--max-chunks <n>] [--since-chunk <n>]`
 - Retrieve messages by thread (via `threadById`-equivalent flow) and process them in chunks.
-- Keep the stepwise pipeline (整理 -> 検索 -> 作成 -> update_affect) to avoid long single-call timeouts.
+- Keep the stepwise pipeline (整理 -> 検索 -> 概念/関係作成 -> エピソード作成 -> update_affect) to avoid long single-call timeouts.
 - Introduce a `set_time` tool that is exposed only when a runtime option is explicitly provided
   (e.g., start the MCP server with `--enable-set-time`).
   - When used, `set_time` sets the internal clock to the chunk end timestamp (unix ms).
