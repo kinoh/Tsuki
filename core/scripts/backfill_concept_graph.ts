@@ -4,6 +4,8 @@ import { summon } from '../src/mastra/agents/tsuki'
 import { RequestContext } from '@mastra/core/request-context'
 import type { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { createResponseMessage } from '../src/agent/message'
+import { PinoLogger } from '@mastra/loggers'
+import { parseLogLevel } from '../src/logger'
 
 type CliOptions = {
   userId: string
@@ -262,11 +264,18 @@ async function runStep(
   toolsets: unknown,
   prompt: string,
   stepLabel: string,
+  logger: PinoLogger,
 ): Promise<{ text: string }> {
   const startedAt = Date.now()
   const response = await agent.generate(
     [{ role: 'user', content: prompt }],
-    { requestContext, toolsets },
+    {
+      requestContext,
+      toolsets,
+      onError: (error: unknown) => {
+        logger.error(`${stepLabel} stream error: ${safeJson(error)}`)
+      },
+    },
   )
   const durationMs = Date.now() - startedAt
   const text = response.text?.trim() ?? ''
@@ -353,6 +362,11 @@ async function main(): Promise<void> {
   const dataDir = process.env.DATA_DIR ?? './data'
   const openAiModel = process.env.OPENAI_MODEL ?? 'gpt-5-mini'
   const timeZone = process.env.TZ ?? 'Asia/Tokyo'
+  const logLevel = parseLogLevel(process.env.LOG_LEVEL)
+  const logger = new PinoLogger({
+    name: 'backfill-concept-graph',
+    level: logLevel,
+  })
 
   await ensureMastraDb(dataDir)
 
@@ -412,7 +426,7 @@ async function main(): Promise<void> {
       console.log(`Chunk end: ${new Date(chunkEndMs).toISOString()} (${chunkEndMs})`)
 
       const step1Prompt = `${STEP1_PROMPT}\n\n対象ログ (${chunk.startDay}〜${chunk.endDay}):\n${chunkLogs}`
-      const step1Result = await runStep(agent, requestContext, toolsets, step1Prompt, 'Step 1')
+      const step1Result = await runStep(agent, requestContext, toolsets, step1Prompt, 'Step 1', logger)
       let stepContext = `${step1Prompt}\n\nStep 1 結果:\n${step1Result.text}`
 
       console.log(`set_time: ${chunkEndMs}`)
@@ -420,19 +434,19 @@ async function main(): Promise<void> {
       console.log(`set_time result:\n${safeJson(setTimeResult)}`)
 
       const step2Prompt = `${stepContext}\n\n${STEP2_PROMPT}`
-      const step2Result = await runStep(agent, requestContext, toolsets, step2Prompt, 'Step 2')
+      const step2Result = await runStep(agent, requestContext, toolsets, step2Prompt, 'Step 2', logger)
       stepContext = `${step2Prompt}\n\nStep 2 結果:\n${step2Result.text}`
 
       const step3Prompt = `${stepContext}\n\n${STEP3_PROMPT}`
-      const step3Result = await runStep(agent, requestContext, toolsets, step3Prompt, 'Step 3')
+      const step3Result = await runStep(agent, requestContext, toolsets, step3Prompt, 'Step 3', logger)
       stepContext = `${step3Prompt}\n\nStep 3 結果:\n${step3Result.text}`
 
       const step4Prompt = `${stepContext}\n\n${STEP4_PROMPT}`
-      const step4Result = await runStep(agent, requestContext, toolsets, step4Prompt, 'Step 4')
+      const step4Result = await runStep(agent, requestContext, toolsets, step4Prompt, 'Step 4', logger)
       stepContext = `${step4Prompt}\n\nStep 4 結果:\n${step4Result.text}`
 
       const step5Prompt = `${stepContext}\n\n${STEP5_PROMPT}`
-      await runStep(agent, requestContext, toolsets, step5Prompt, 'Step 5')
+      await runStep(agent, requestContext, toolsets, step5Prompt, 'Step 5', logger)
     }
 
     console.log('set_time reset')
