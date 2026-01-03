@@ -114,7 +114,25 @@ tasks:
       - docker compose cp core:/data /tmp/tsuki-backup-{{.TIMESTAMP}}
       - tar czf {{.BACKUP_DIR}}/tsuki-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-{{.TIMESTAMP}} .
       - rm -rf /tmp/tsuki-backup-{{.TIMESTAMP}}
-  local/clean-data:
-    desc: Reset local development data
+  memgraph/local-clean:
+    desc: Reset local memgraph database
     cmds:
       - echo "MATCH (n) DETACH DELETE n;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole
+  memgraph/local-backup:
+    desc: Backup memgraph database
+    vars:
+      BACKUP_DIR: ${BACKUP_DIR:-./backup}/memgraph
+      BACKUP_FILE_PATH:
+        sh: 'echo "CREATE SNAPSHOT;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole -output_format csv | tail -1 | tr -d \"'
+    cmds:
+      - mkdir -p {{.BACKUP_DIR}}
+      - DOCKER_HOST="" docker compose cp memgraph:{{.BACKUP_FILE_PATH}} {{.BACKUP_DIR}}/
+  memgraph/local-restore/*:
+    desc: Restore memgraph database
+    vars:
+      BACKUP_DIR: ${BACKUP_DIR:-./backup}/memgraph
+      BACKUP_FILE_NAME: '{{index .MATCH 0}}'
+    cmds:
+      - DOCKER_HOST="" docker compose cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}
+      - DOCKER_HOST="" docker compose exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}
+      - echo "RECOVER SNAPSHOT '/data/snapshots/{{.BACKUP_FILE_NAME}}' FORCE;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole
