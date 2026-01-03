@@ -127,6 +127,13 @@ tasks:
     cmds:
       - mkdir -p {{.BACKUP_DIR}}
       - DOCKER_HOST="" docker compose cp memgraph:{{.BACKUP_FILE_PATH}} {{.BACKUP_DIR}}/
+  memgraph/local-restore/latest:
+    desc: Restore latest memgraph database
+    vars:
+      BACKUP_FILE_NAME:
+        sh: 'ls -t ${BACKUP_DIR:-./backup}/memgraph | head -1'
+    cmds:
+      - task memgraph/local-restore/{{.BACKUP_FILE_NAME}}
   memgraph/local-restore/*:
     desc: Restore memgraph database
     vars:
@@ -136,3 +143,9 @@ tasks:
       - DOCKER_HOST="" docker compose cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}
       - DOCKER_HOST="" docker compose exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}
       - echo "RECOVER SNAPSHOT '/data/snapshots/{{.BACKUP_FILE_NAME}}' FORCE;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole
+  local-reset:
+    desc: Reset local data
+    cmds:
+      - task memgraph/local-clean
+      - task memgraph/local-restore/latest
+      - task -t core/Taskfile.yaml reset-data
