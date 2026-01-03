@@ -3,6 +3,14 @@ version: '3'
 dotenv: ['.env']
 
 tasks:
+  reset-data:
+    desc: Reset core/data to initial state
+    vars:
+      DATA_BACKUP: '{{.DEBUG_INIT_DATA_BACKUP}}'
+    cmds:
+      - rm -rf ./data
+      - mkdir -p ./data
+      - tar -xzf {{.DATA_BACKUP}} -C ./data
   test-scenario/*:
     desc: Run core + client scenario after clearing core/data
     vars:
