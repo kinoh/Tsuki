@@ -45,7 +45,7 @@ pub struct EpisodeAddRequest {
     pub concepts: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RelationType {
     IsA,
@@ -1030,16 +1030,54 @@ impl ConceptGraphService {
         let relation_label = self.map_relation_type(&request.relation_type);
         let now = self.now_ms();
 
-        let query_text = format!(
-            "MERGE (a:Concept {{name: $from}})\n\
-             ON CREATE SET a.valence = $valence, a.arousal_level = $arousal_level, a.accessed_at = $accessed_at\n\
-             MERGE (b:Concept {{name: $to}})\n\
-             ON CREATE SET b.valence = $valence, b.arousal_level = $arousal_level, b.accessed_at = $accessed_at\n\
-             MERGE (a)-[r:{rel}]->(b)\n\
-             SET r.weight = CASE WHEN r.weight IS NULL THEN $weight ELSE 1 - (1 - r.weight) * (1 - $alpha) END\n\
-             RETURN type(r) AS type",
-            rel = relation_label,
-        );
+        let from_is_episode = self.episode_exists(&from).await?;
+        let to_is_episode = self.episode_exists(&to).await?;
+
+        if request.relation_type != RelationType::Evokes && (from_is_episode || to_is_episode) {
+            return Err(Self::invalid_params(
+                "Error: relation: episode endpoint not allowed",
+                json!({"from": from, "to": to, "type": Self::render_relation_type_input(&request.relation_type)}),
+            ));
+        }
+
+        let query_text = match (from_is_episode, to_is_episode) {
+            (false, false) => format!(
+                "MERGE (a:Concept {{name: $from}})\n\
+                 ON CREATE SET a.valence = $valence, a.arousal_level = $arousal_level, a.accessed_at = $accessed_at\n\
+                 MERGE (b:Concept {{name: $to}})\n\
+                 ON CREATE SET b.valence = $valence, b.arousal_level = $arousal_level, b.accessed_at = $accessed_at\n\
+                 MERGE (a)-[r:{rel}]->(b)\n\
+                 SET r.weight = CASE WHEN r.weight IS NULL THEN $weight ELSE 1 - (1 - r.weight) * (1 - $alpha) END\n\
+                 RETURN type(r) AS type",
+                rel = relation_label,
+            ),
+            (false, true) => format!(
+                "MATCH (b:Episode {{name: $to}})\n\
+                 MERGE (a:Concept {{name: $from}})\n\
+                 ON CREATE SET a.valence = $valence, a.arousal_level = $arousal_level, a.accessed_at = $accessed_at\n\
+                 MERGE (a)-[r:{rel}]->(b)\n\
+                 SET r.weight = CASE WHEN r.weight IS NULL THEN $weight ELSE 1 - (1 - r.weight) * (1 - $alpha) END\n\
+                 RETURN type(r) AS type",
+                rel = relation_label,
+            ),
+            (true, false) => format!(
+                "MATCH (a:Episode {{name: $from}})\n\
+                 MERGE (b:Concept {{name: $to}})\n\
+                 ON CREATE SET b.valence = $valence, b.arousal_level = $arousal_level, b.accessed_at = $accessed_at\n\
+                 MERGE (a)-[r:{rel}]->(b)\n\
+                 SET r.weight = CASE WHEN r.weight IS NULL THEN $weight ELSE 1 - (1 - r.weight) * (1 - $alpha) END\n\
+                 RETURN type(r) AS type",
+                rel = relation_label,
+            ),
+            (true, true) => format!(
+                "MATCH (a:Episode {{name: $from}})\n\
+                 MATCH (b:Episode {{name: $to}})\n\
+                 MERGE (a)-[r:{rel}]->(b)\n\
+                 SET r.weight = CASE WHEN r.weight IS NULL THEN $weight ELSE 1 - (1 - r.weight) * (1 - $alpha) END\n\
+                 RETURN type(r) AS type",
+                rel = relation_label,
+            ),
+        };
 
         let from_value = from.clone();
         let to_value = to.clone();

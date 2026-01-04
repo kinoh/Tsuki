@@ -319,6 +319,167 @@ async fn scenario_relation_tautology_is_rejected() {
 
 #[tokio::test]
 #[serial]
+async fn scenario_relation_add_supports_episode_evokes() {
+    let tag = format!("test__{}", Uuid::new_v4());
+    let concept = format!("concept__{}", tag);
+    let summary_one = format!("episode one {}", tag);
+    let summary_two = format!("episode two {}", tag);
+
+    let graph = connect_graph().await;
+    cleanup(&graph, &tag).await;
+
+    let service = connect_service().await;
+
+    with_cleanup(&graph, &tag, || async {
+        service
+            .concept_upsert(Parameters(ConceptUpsertRequest {
+                concept: concept.clone(),
+            }))
+            .await
+            .expect("concept_upsert");
+
+        let episode_one = service
+            .episode_add(Parameters(EpisodeAddRequest {
+                summary: summary_one.clone(),
+                concepts: vec![concept.clone()],
+            }))
+            .await
+            .expect("episode_add one");
+        let episode_one_id = episode_one
+            .structured_content
+            .as_ref()
+            .and_then(|value| value.get("episode_id"))
+            .and_then(|value| value.as_str())
+            .expect("episode_id one")
+            .to_string();
+
+        let episode_two = service
+            .episode_add(Parameters(EpisodeAddRequest {
+                summary: summary_two.clone(),
+                concepts: vec![concept.clone()],
+            }))
+            .await
+            .expect("episode_add two");
+        let episode_two_id = episode_two
+            .structured_content
+            .as_ref()
+            .and_then(|value| value.get("episode_id"))
+            .and_then(|value| value.as_str())
+            .expect("episode_id two")
+            .to_string();
+
+        service
+            .relation_add(Parameters(RelationAddRequest {
+                from: concept.clone(),
+                to: episode_one_id.clone(),
+                relation_type: RelationType::Evokes,
+            }))
+            .await
+            .expect("relation_add concept->episode");
+
+        service
+            .relation_add(Parameters(RelationAddRequest {
+                from: concept.clone(),
+                to: episode_one_id.clone(),
+                relation_type: RelationType::Evokes,
+            }))
+            .await
+            .expect("relation_add concept->episode again");
+
+        let weight_query = query(
+            "MATCH (c:Concept {name: $from})-[r:EVOKES]->(e:Episode {name: $to})\n\
+             RETURN r.weight AS weight",
+        )
+        .param("from", concept.as_str())
+        .param("to", episode_one_id.as_str());
+
+        let mut result = graph.execute(weight_query).await.expect("weight query");
+        let row = result.next().await.expect("weight row");
+        let weight: f64 = row
+            .expect("weight row present")
+            .get("weight")
+            .unwrap_or(0.0);
+        assert!(weight > 0.25, "weight should be strengthened");
+
+        service
+            .relation_add(Parameters(RelationAddRequest {
+                from: episode_one_id.clone(),
+                to: episode_two_id.clone(),
+                relation_type: RelationType::Evokes,
+            }))
+            .await
+            .expect("relation_add episode->episode");
+
+        let episode_weight_query = query(
+            "MATCH (a:Episode {name: $from})-[r:EVOKES]->(b:Episode {name: $to})\n\
+             RETURN r.weight AS weight",
+        )
+        .param("from", episode_one_id.as_str())
+        .param("to", episode_two_id.as_str());
+
+        let mut result = graph.execute(episode_weight_query).await.expect("episode weight query");
+        let row = result.next().await.expect("episode weight row");
+        let weight: f64 = row
+            .expect("episode weight row present")
+            .get("weight")
+            .unwrap_or(0.0);
+        assert!(weight >= 0.25, "episode weight should be set");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn scenario_relation_add_rejects_episode_is_a() {
+    let tag = format!("test__{}", Uuid::new_v4());
+    let concept = format!("concept__{}", tag);
+    let summary = format!("episode reject {}", tag);
+
+    let graph = connect_graph().await;
+    cleanup(&graph, &tag).await;
+
+    let service = connect_service().await;
+
+    with_cleanup(&graph, &tag, || async {
+        service
+            .concept_upsert(Parameters(ConceptUpsertRequest {
+                concept: concept.clone(),
+            }))
+            .await
+            .expect("concept_upsert");
+
+        let episode_result = service
+            .episode_add(Parameters(EpisodeAddRequest {
+                summary: summary.clone(),
+                concepts: vec![concept.clone()],
+            }))
+            .await
+            .expect("episode_add");
+        let episode_id = episode_result
+            .structured_content
+            .as_ref()
+            .and_then(|value| value.get("episode_id"))
+            .and_then(|value| value.as_str())
+            .expect("episode_id")
+            .to_string();
+
+        let result = service
+            .relation_add(Parameters(RelationAddRequest {
+                from: episode_id.clone(),
+                to: concept.clone(),
+                relation_type: RelationType::IsA,
+            }))
+            .await;
+
+        assert!(result.is_err(), "episode is-a should error");
+        let err = result.err().expect("error present");
+        assert!(err.message.contains("episode endpoint"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn scenario_concept_search_matches_keywords_and_arousal() {
     let tag = format!("test__{}", Uuid::new_v4());
     let match_concept = format!("match__{}", tag);
