@@ -141,7 +141,7 @@ impl ShellExecService {
             })?,
         };
 
-        let (mut stdout_bytes, stdout_truncated) = stdout_task
+        let (stdout_bytes, stdout_truncated) = stdout_task
             .await
             .map_err(|err| {
                 ErrorData::internal_error(

@@ -6,7 +6,7 @@ use std::error::Error;
 async fn main() -> Result<(), Box<dyn Error>> {
     let service = ShellExecService::from_env()?;
 
-    println!("start server, connect to standard input/output");
+    eprintln!("start server, connect to standard input/output");
 
     let service = service.serve(stdio()).await?;
     let reason = service.waiting().await?;
