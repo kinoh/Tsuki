@@ -3,6 +3,7 @@
 .devcontainer
 .vscode
 docker
+!docker/sandbox/entrypoint.sh
 target
 
 .pnpm-store
