@@ -148,6 +148,15 @@ tasks:
     desc: Reset local memgraph database
     cmds:
       - echo "MATCH (n) DETACH DELETE n;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole
+  sandbox/backup:
+    desc: Backup sandbox data
+    vars:
+      TIMESTAMP:
+        sh: date +%Y%m%d%H%M%S
+    cmds:
+      - docker compose cp sandbox:/work /tmp/tsuki-backup-sandbox
+      - tar czf ./backup/tsuki-sandbox-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-sandbox .
+      - rm -rf /tmp/tsuki-backup-sandbox
   local-reset:
     desc: Reset local data
     cmds:
