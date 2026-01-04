@@ -94,6 +94,11 @@ services:
           cpus: "1"
           memory: "512M"
 
+  voicevox-engine:
+    image: voicevox/voicevox_engine:cpu-0.25.0
+    ports:
+      - "50021:50021"
+
 volumes:
   core-data:
   memgraph-data:
