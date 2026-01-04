@@ -28,6 +28,12 @@ tasks:
     desc: Start production
     cmds:
       - '{{.DOCKER_COMPOSE}} up --detach --remove-orphans'
+  rebuild-*:
+    desc: Start production
+    vars:
+      SERVICE: '{{index .MATCH 0}}'
+    cmds:
+      - '{{.DOCKER_COMPOSE}} up --detach --build {{.SERVICE}}'
   down:
     desc: Stop production
     cmds:
