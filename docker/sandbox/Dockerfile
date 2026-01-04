@@ -38,7 +38,6 @@ COPY --from=builder /app/mcp/shell-exec/target/release/shell-exec /usr/local/bin
 COPY docker/sandbox/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-USER sandbox
 WORKDIR /work
 
 ENV MCP_HTTP_BIND=0.0.0.0:8000 \

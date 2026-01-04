@@ -8,4 +8,4 @@ else
   echo "warning: /etc/resolv.conf is not writable" >&2
 fi
 
-exec shell-exec
+exec su -s /bin/sh sandbox -c shell-exec
