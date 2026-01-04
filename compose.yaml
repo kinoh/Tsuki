@@ -81,6 +81,8 @@ services:
       MCP_HTTP_PATH: "/mcp"
     volumes:
       - sandbox-work:/work
+    ports:
+      - "8000:8000"
     restart: always
     runtime: runsc
     deploy:
