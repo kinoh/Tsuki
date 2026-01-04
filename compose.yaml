@@ -30,6 +30,9 @@ services:
       - core-data:/data
     ports:
       - "2953:2953"
+    depends_on:
+      - memgraph
+      - sandbox
     restart: always
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').request({port: 2953, path: '/'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1)).end()"]
