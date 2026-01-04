@@ -55,40 +55,6 @@ type ShellExecResult = {
   elapsed_ms: number
 }
 
-function parseShellExecResult(payload: unknown): ShellExecResult | null {
-  if (payload === null || typeof payload !== 'object') {
-    return null
-  }
-
-  const maybe = payload as {
-    structured_content?: unknown
-    content?: Array<{ text?: string }>
-  }
-
-  if (maybe.structured_content !== null && typeof maybe.structured_content === 'object') {
-    const content = maybe.structured_content as ShellExecResult
-    if (typeof content.stdout === 'string' && typeof content.stderr === 'string') {
-      return content
-    }
-  }
-
-  const text = maybe.content?.[0]?.text
-  if (typeof text !== 'string' || text.length === 0) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(text) as ShellExecResult
-    if (typeof parsed.stdout === 'string' && typeof parsed.stderr === 'string') {
-      return parsed
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to parse shell-exec response')
-  }
-
-  return null
-}
-
 function shellQuote(value: string): string {
   const singleQuote = '\''
   const replacement = singleQuote + '"' + singleQuote + '"' + singleQuote
@@ -101,7 +67,16 @@ async function runShellCommand(mcp: MCPClient, command: string): Promise<ShellEx
     command,
     timeout_ms: PROMPT_MEMORY_TIMEOUT_MS,
   })
-  return parseShellExecResult(response)
+  if (response === null || typeof response !== 'object') {
+    return null
+  }
+
+  const result = response as ShellExecResult
+  if (typeof result.stdout !== 'string' || typeof result.stderr !== 'string') {
+    return null
+  }
+
+  return result
 }
 
 async function listPromptFiles(mcp: MCPClient): Promise<string[]> {
