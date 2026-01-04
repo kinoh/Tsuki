@@ -72,10 +72,15 @@ services:
       - management
 
   sandbox:
-    image: ubuntu:24.04
-    command: ["sh", "-c", "echo nameserver 1.1.1.1 > /etc/resolv.conf && sleep infinity"]
+    build:
+      context: .
+      dockerfile: docker/sandbox/Dockerfile
+    environment:
+      MCP_EXEC_MAX_OUTPUT_BYTES: "40000"
+      MCP_HTTP_BIND: "0.0.0.0:8000"
+      MCP_HTTP_PATH: "/mcp"
     volumes:
-      - sandbox-data:/home/ubuntu
+      - sandbox-work:/work
     restart: always
     runtime: runsc
     deploy:
@@ -87,4 +92,4 @@ services:
 volumes:
   core-data:
   memgraph-data:
-  sandbox-data:
+  sandbox-work:
