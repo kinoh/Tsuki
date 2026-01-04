@@ -12,6 +12,7 @@
 - Core depends on the `voicevox-engine` service in compose to ensure startup order.
 - HTTP route: `POST /tts` with `{ "message": "..." }` payload.
 - Environment defaults for VoiceVox: `VOICEVOX_ENDPOINT`, `VOICEVOX_SPEAKER`, `VOICEVOX_TIMEOUT_MS`.
+- `tts` route derives VoiceVox endpoint using `config.isProduction` when `VOICEVOX_ENDPOINT` is unset.
 
 ## Notes
 - Future core HTTP route will call VoiceVox `audio_query` -> `synthesis` using internal defaults.

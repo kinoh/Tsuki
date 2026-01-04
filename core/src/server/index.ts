@@ -29,6 +29,7 @@ export async function serve(
   app.locals.agent = agent
   app.locals.agentMemory = agentMemory
   app.locals.runtimeConfigStore = runtimeConfigStore
+  app.locals.config = config
 
   // Middlewares
   app.use(morgan((tokens, req, res) => {

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express'
 import fetch, { type RequestInit, type Response as FetchResponse } from 'node-fetch'
 import { logger } from '../../logger'
+import { ConfigService } from '../../configService'
 
 type TTSRequest = {
   message: string,
@@ -8,9 +9,36 @@ type TTSRequest = {
 
 type AudioQuery = Record<string, unknown>
 
-const DEFAULT_VOICEVOX_ENDPOINT = 'http://voicevox-engine:50021'
 const DEFAULT_VOICEVOX_SPEAKER = 1
 const DEFAULT_VOICEVOX_TIMEOUT_MS = 10000
+
+function getConfig(req: Request): ConfigService {
+  return req.app.locals.config as ConfigService
+}
+
+function getVoicevoxEndpoint(isProduction: boolean): string {
+  const raw = process.env.VOICEVOX_ENDPOINT
+  const endpoint = typeof raw === 'string' && raw.trim().length > 0
+    ? raw.trim()
+    : (isProduction ? 'http://voicevox-engine:50021' : 'http://localhost:50021')
+  return endpoint.replace(/\/$/, '')
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === '') {
+    return fallback
+  }
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function getVoicevoxSpeaker(): number {
+  return parsePositiveInt(process.env.VOICEVOX_SPEAKER, DEFAULT_VOICEVOX_SPEAKER)
+}
+
+function getVoicevoxTimeoutMs(): number {
+  return parsePositiveInt(process.env.VOICEVOX_TIMEOUT_MS, DEFAULT_VOICEVOX_TIMEOUT_MS)
+}
 
 function isTTSRequest(payload: unknown): payload is TTSRequest {
   if (payload === null || typeof payload !== 'object') {
@@ -19,23 +47,6 @@ function isTTSRequest(payload: unknown): payload is TTSRequest {
 
   const candidate = payload as Record<string, unknown>
   return typeof candidate.message === 'string'
-}
-
-function getVoicevoxEndpoint(): string {
-  const raw = process.env.VOICEVOX_ENDPOINT ?? DEFAULT_VOICEVOX_ENDPOINT
-  return raw.replace(/\/$/, '')
-}
-
-function getVoicevoxSpeaker(): number {
-  const raw = process.env.VOICEVOX_SPEAKER ?? DEFAULT_VOICEVOX_SPEAKER.toString()
-  const parsed = Number.parseInt(raw, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_VOICEVOX_SPEAKER
-}
-
-function getVoicevoxTimeoutMs(): number {
-  const raw = process.env.VOICEVOX_TIMEOUT_MS ?? DEFAULT_VOICEVOX_TIMEOUT_MS.toString()
-  const parsed = Number.parseInt(raw, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_VOICEVOX_TIMEOUT_MS
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<FetchResponse> {
@@ -69,7 +80,8 @@ export async function ttsHandler(req: Request, res: Response): Promise<void> {
     return
   }
 
-  const endpoint = getVoicevoxEndpoint()
+  const config = getConfig(req)
+  const endpoint = getVoicevoxEndpoint(config.isProduction)
   const speaker = getVoicevoxSpeaker()
   const timeoutMs = getVoicevoxTimeoutMs()
 
