@@ -62,7 +62,7 @@ impl ShellExecService {
             Err(err) => {
                 return Err(ErrorData::invalid_params(
                     "Error: config: invalid MCP_EXEC_LOG_FULL_OUTPUT",
-                    Some(json!({\"reason\": err.to_string()})),
+                    Some(json!({"reason": err.to_string()})),
                 ));
             }
         };
@@ -71,14 +71,14 @@ impl ShellExecService {
             Ok(value) => value.parse::<usize>().map_err(|_| {
                 ErrorData::invalid_params(
                     "Error: config: invalid MCP_EXEC_LOG_OUTPUT_BYTES",
-                    Some(json!({\"value\": value})),
+                    Some(json!({"value": value})),
                 )
             })?,
             Err(env::VarError::NotPresent) => DEFAULT_LOG_OUTPUT_BYTES,
             Err(err) => {
                 return Err(ErrorData::invalid_params(
                     "Error: config: invalid MCP_EXEC_LOG_OUTPUT_BYTES",
-                    Some(json!({\"reason\": err.to_string()})),
+                    Some(json!({"reason": err.to_string()})),
                 ));
             }
         };
