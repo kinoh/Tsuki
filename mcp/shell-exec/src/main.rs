@@ -1,16 +1,33 @@
-use rmcp::{transport::stdio, ServiceExt};
+use rmcp::transport::streamable_http_server::{
+    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+};
 use shell_exec::service::ShellExecService;
-use std::error::Error;
+use std::{env, error::Error, io};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let service = ShellExecService::from_env()?;
+    let bind = env::var("MCP_HTTP_BIND").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
+    let mut path = env::var("MCP_HTTP_PATH").unwrap_or_else(|_| "/mcp".to_string());
+    if !path.starts_with('/') {
+        path = format!("/{}", path);
+    }
 
-    eprintln!("start server, connect to standard input/output");
+    let service = ShellExecService::from_env().map_err(|err| {
+        io::Error::new(io::ErrorKind::Other, err.message.to_string())
+    })?;
+    let service_factory = move || Ok(service.clone());
+    let service = StreamableHttpService::new(
+        service_factory,
+        LocalSessionManager::default().into(),
+        StreamableHttpServerConfig::default(),
+    );
 
-    let service = service.serve(stdio()).await?;
-    let reason = service.waiting().await?;
-    eprintln!("MCP server stopped: {:?}", reason);
+    let router = axum::Router::new().nest_service(&path, service);
+    let listener = tokio::net::TcpListener::bind(&bind).await?;
+
+    eprintln!("start server, bind={} path={}", bind, path);
+
+    axum::serve(listener, router).await?;
 
     Ok(())
 }

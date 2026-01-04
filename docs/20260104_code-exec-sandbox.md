@@ -29,6 +29,8 @@ Run a dedicated MCP server inside a gVisor container and connect to it from core
   - Execute via direct argv (prefer direct argv to avoid shell injection).
   - Enforce output limit by truncating stdout/stderr to N bytes and indicating truncation.
   - Enforce timeout via process kill.
+- **Transport**:
+  - Use streamable HTTP transport (`/mcp`) instead of stdio to allow containerized access.
 - **Core integration**:
   - Add a new MCP server entry that connects to the sandbox MCP endpoint.
   - Configure max output size via env (e.g., `MCP_EXEC_MAX_OUTPUT_BYTES`).
