@@ -19,23 +19,23 @@ tasks:
   deploy:
     desc: Deploy to production
     cmds:
-      - {{.DOCKER_COMPOSE}} up --build --detach
+      - '{{.DOCKER_COMPOSE}} up --build --detach'
   deploy-core:
     desc: Deploy core service
     cmds:
-      - {{.DOCKER_COMPOSE}} up core --build --detach
+      - '{{.DOCKER_COMPOSE}} up core --build --detach'
   up:
     desc: Start production
     cmds:
-      - {{.DOCKER_COMPOSE}} up --detach --remove-orphans
+      - '{{.DOCKER_COMPOSE}} up --detach --remove-orphans'
   down:
     desc: Stop production
     cmds:
-      - {{.DOCKER_COMPOSE}} down
+      - '{{.DOCKER_COMPOSE}} down'
   restart:
     desc: Restart in production
     cmds:
-      - {{.DOCKER_COMPOSE}} restart
+      - '{{.DOCKER_COMPOSE}} restart'
   wait:
     desc: Wait for core service health
     cmds:
@@ -48,27 +48,27 @@ tasks:
   ps:
     desc: Do ps in production
     cmds:
-      - {{.DOCKER_COMPOSE}} ps
+      - '{{.DOCKER_COMPOSE}} ps'
   exec-*:
     desc: Execute command in production
     cmds:
-      - {{.DOCKER_COMPOSE}} exec -it {{index .MATCH 0}} sh
+      - '{{.DOCKER_COMPOSE}} exec -it {{index .MATCH 0}} sh'
   build:
     desc: Do build in production
     cmds:
-      - {{.DOCKER_COMPOSE}} build
+      - '{{.DOCKER_COMPOSE}} build'
   build-*:
     desc: Do build in production
     vars:
       SERVICE: '{{index .MATCH 0}}'
     cmds:
-      - {{.DOCKER_COMPOSE}} build {{.SERVICE}}
+      - '{{.DOCKER_COMPOSE}} build {{.SERVICE}}'
   log-*:
     desc: Show log in production
     vars:
       SERVICE: '{{index .MATCH 0}}'
     cmds:
-      - {{.DOCKER_COMPOSE}} logs --tail=100 {{.SERVICE}}
+      - '{{.DOCKER_COMPOSE}} logs --tail=100 {{.SERVICE}}'
   download_model:
     desc: Download Vosk model
     cmds:
@@ -125,7 +125,7 @@ tasks:
       BACKUP_DIR: ${BACKUP_DIR:-./backup}
     cmds:
       - mkdir -p {{.BACKUP_DIR}}
-      - {{.DOCKER_COMPOSE}} cp core:/data /tmp/tsuki-backup-{{.TIMESTAMP}}
+      - '{{.DOCKER_COMPOSE}} cp core:/data /tmp/tsuki-backup-{{.TIMESTAMP}}'
       - tar czf {{.BACKUP_DIR}}/tsuki-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-{{.TIMESTAMP}} .
       - rm -rf /tmp/tsuki-backup-{{.TIMESTAMP}}
   memgraph/backup:
@@ -136,7 +136,7 @@ tasks:
         sh: 'echo "CREATE SNAPSHOT;" | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole -output_format csv | tail -1 | tr -d \"'
     cmds:
       - mkdir -p {{.BACKUP_DIR}}
-      - {{.DOCKER_COMPOSE}} cp memgraph:{{.BACKUP_FILE_PATH}} {{.BACKUP_DIR}}/
+      - '{{.DOCKER_COMPOSE}} cp memgraph:{{.BACKUP_FILE_PATH}} {{.BACKUP_DIR}}/'
   memgraph/restore/latest:
     desc: Restore latest memgraph database
     vars:
@@ -150,9 +150,9 @@ tasks:
       BACKUP_DIR: ${BACKUP_DIR:-./backup}/memgraph
       BACKUP_FILE_NAME: '{{index .MATCH 0}}'
     cmds:
-      - {{.DOCKER_COMPOSE}} cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}
-      - {{.DOCKER_COMPOSE}} exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}
-      - echo "RECOVER SNAPSHOT '/data/snapshots/{{.BACKUP_FILE_NAME}}' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole
+      - '{{.DOCKER_COMPOSE}} cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}'
+      - '{{.DOCKER_COMPOSE}} exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}'
+      - 'echo "RECOVER SNAPSHOT ''/data/snapshots/{{.BACKUP_FILE_NAME}}'' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole'
   memgraph/local-clean:
     desc: Reset local memgraph database
     cmds:
@@ -163,7 +163,7 @@ tasks:
       TIMESTAMP:
         sh: date +%Y%m%d%H%M%S
     cmds:
-      - {{.DOCKER_COMPOSE}} cp sandbox:/work /tmp/tsuki-backup-sandbox
+      - '{{.DOCKER_COMPOSE}} cp sandbox:/work /tmp/tsuki-backup-sandbox'
       - tar czf ./backup/tsuki-sandbox-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-sandbox .
       - rm -rf /tmp/tsuki-backup-sandbox
   local-reset:

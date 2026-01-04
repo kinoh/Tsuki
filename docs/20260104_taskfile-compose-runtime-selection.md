@@ -19,6 +19,7 @@ Add `compose.dev.yaml` with `runtime: runc` for the `sandbox` service and switch
   - Empty `DOCKER_HOST` → `docker compose -f compose.yaml -f compose.dev.yaml`
   - Set `DOCKER_HOST` → `docker compose`
 - All Taskfile Compose commands now reference `{{.DOCKER_COMPOSE}}`.
+- Compose commands are wrapped in YAML single-quoted strings to avoid `{{...}}` being misread as a mapping.
 - `compose.dev.yaml` overrides only the sandbox runtime to `runc`.
 
 ## Future Considerations
