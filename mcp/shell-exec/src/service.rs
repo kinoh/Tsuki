@@ -67,12 +67,16 @@ impl ShellExecService {
             ));
         }
 
-        let mut command = Command::new(&request.command);
-        command
-            .args(request.args.unwrap_or_default())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let mut command = if let Some(args) = request.args {
+            let mut cmd = Command::new(&request.command);
+            cmd.args(args);
+            cmd
+        } else {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", &request.command]);
+            cmd
+        };
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let mut child = command.spawn().map_err(|err| {
             ErrorData::internal_error(
