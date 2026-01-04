@@ -8,6 +8,12 @@ import { MessageRouter } from './router'
 import { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ConfigService } from '../configService'
 import { logger } from '../logger'
+import { readdir, readFile } from 'node:fs/promises'
+import { join, relative } from 'node:path'
+
+const PROMPT_MEMORY_DIR = '/work/prompts'
+const PROMPT_MEMORY_EXTENSION = '.md'
+const PROMPT_MEMORY_MAX_BYTES = 4 * 1024
 
 export type AgentRuntimeContext = {
   instructions: string
@@ -37,6 +43,69 @@ export interface MCPNotificationResourceUpdated {
 
 export interface MCPNotificationHandler {
   handleSchedulerNotification(userId: string, notification: MCPNotificationResourceUpdated): Promise<void>
+}
+
+async function listPromptFiles(rootDir: string): Promise<string[]> {
+  const files: string[] = []
+  const pending: string[] = [rootDir]
+
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current) {
+      continue
+    }
+
+    let entries: Awaited<ReturnType<typeof readdir>>
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch (err) {
+      logger.warn({ err, path: current }, 'Failed to read prompt memory directory')
+      continue
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(current, entry.name)
+      if (entry.isDirectory()) {
+        pending.push(fullPath)
+        continue
+      }
+      if (!entry.isFile() || !entry.name.endsWith(PROMPT_MEMORY_EXTENSION)) {
+        continue
+      }
+      files.push(fullPath)
+    }
+  }
+
+  return files
+    .map((filePath) => relative(rootDir, filePath))
+    .sort((a, b) => a.localeCompare(b))
+}
+
+async function loadPromptMemory(rootDir: string): Promise<string> {
+  const relativeFiles = await listPromptFiles(rootDir)
+  if (relativeFiles.length === 0) {
+    return ''
+  }
+
+  const sections: string[] = []
+  for (const relativePath of relativeFiles) {
+    const fullPath = join(rootDir, relativePath)
+    try {
+      const buffer = await readFile(fullPath)
+      const truncated = buffer.length > PROMPT_MEMORY_MAX_BYTES
+      const content = (truncated ? buffer.subarray(0, PROMPT_MEMORY_MAX_BYTES) : buffer)
+        .toString('utf8')
+        .trimEnd()
+      const warning = truncated
+        ? `WARNING: truncated to ${PROMPT_MEMORY_MAX_BYTES} bytes\n`
+        : ''
+      sections.push(`# ${relativePath}\n${warning}${content}\n---`)
+    } catch (err) {
+      logger.warn({ err, path: fullPath }, 'Failed to read prompt memory file')
+    }
+  }
+
+  return sections.join('\n')
 }
 
 export class ActiveUser implements UserContext {
@@ -74,13 +143,7 @@ export class ActiveUser implements UserContext {
 
   async loadMemory(): Promise<string> {
     try {
-      const response = await this.mcp?.callTool(
-        'structured-memory',
-        'read_document',
-        {},
-      ) as { content: { text: string }[] } | undefined
-
-      return response?.content[0]?.text ?? ''
+      return await loadPromptMemory(PROMPT_MEMORY_DIR)
     } catch (err) {
       logger.warn({ err, userId: this.userId }, 'Failed to load memory')
       return ''
