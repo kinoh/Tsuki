@@ -10,6 +10,8 @@
 ### Environment Variables
 
 - `MCP_EXEC_MAX_OUTPUT_BYTES` (optional): Maximum combined output size (stdout + stderr) in bytes. Defaults to `40000`.
+- `MCP_EXEC_LOG_FULL_OUTPUT` (optional): When set to `1`, log full stdout/stderr up to the output limit.
+- `MCP_EXEC_LOG_OUTPUT_BYTES` (optional): Number of bytes to log from stdout/stderr when full logging is disabled. Defaults to `2048`.
 - `MCP_HTTP_BIND` (optional): Bind address for the HTTP server. Defaults to `0.0.0.0:8000`.
 - `MCP_HTTP_PATH` (optional): HTTP path for MCP endpoint. Defaults to `/mcp`.
 

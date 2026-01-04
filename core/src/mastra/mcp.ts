@@ -50,6 +50,9 @@ export function getUniversalMCP(config: ConfigService): MCPClient {
           TZ: process.env.TZ ?? 'Asia/Tokyo',
         },
       },
+      shell_exec: {
+        url: new URL(config.isProduction ? 'http://sandbox:8000/mcp' : 'http://localhost:8000/mcp'),
+      },
       rss: {
         command: './bin/rss',
         args: [],

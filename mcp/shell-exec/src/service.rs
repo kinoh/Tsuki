@@ -16,6 +16,7 @@ use tokio::{
 };
 
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 40_000;
+const DEFAULT_LOG_OUTPUT_BYTES: usize = 2048;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ExecuteRequest {
@@ -33,6 +34,8 @@ pub struct ExecuteRequest {
 pub struct ShellExecService {
     tool_router: ToolRouter<Self>,
     max_output_bytes: usize,
+    log_output_bytes: usize,
+    log_full_output: bool,
 }
 
 impl ShellExecService {
@@ -53,9 +56,38 @@ impl ShellExecService {
             }
         };
 
+        let log_full_output = match env::var("MCP_EXEC_LOG_FULL_OUTPUT") {
+            Ok(value) => value == "1",
+            Err(env::VarError::NotPresent) => false,
+            Err(err) => {
+                return Err(ErrorData::invalid_params(
+                    "Error: config: invalid MCP_EXEC_LOG_FULL_OUTPUT",
+                    Some(json!({\"reason\": err.to_string()})),
+                ));
+            }
+        };
+
+        let log_output_bytes = match env::var("MCP_EXEC_LOG_OUTPUT_BYTES") {
+            Ok(value) => value.parse::<usize>().map_err(|_| {
+                ErrorData::invalid_params(
+                    "Error: config: invalid MCP_EXEC_LOG_OUTPUT_BYTES",
+                    Some(json!({\"value\": value})),
+                )
+            })?,
+            Err(env::VarError::NotPresent) => DEFAULT_LOG_OUTPUT_BYTES,
+            Err(err) => {
+                return Err(ErrorData::invalid_params(
+                    "Error: config: invalid MCP_EXEC_LOG_OUTPUT_BYTES",
+                    Some(json!({\"reason\": err.to_string()})),
+                ));
+            }
+        };
+
         Ok(Self {
             tool_router: Self::tool_router(),
             max_output_bytes,
+            log_output_bytes,
+            log_full_output,
         })
     }
 
@@ -181,12 +213,42 @@ impl ShellExecService {
             "output_truncated": output_truncated,
         });
 
+        self.log_execution(&request.command, &stdout_bytes, &stderr_bytes, status.code(), timed_out);
+
         Ok(CallToolResult {
             content: vec![Content::text(result.to_string())],
             structured_content: Some(result),
             is_error: Some(false),
             meta: None,
         })
+    }
+
+    fn log_execution(
+        &self,
+        command: &str,
+        stdout_bytes: &[u8],
+        stderr_bytes: &[u8],
+        exit_code: Option<i32>,
+        timed_out: bool,
+    ) {
+        let limit = if self.log_full_output {
+            self.max_output_bytes
+        } else {
+            self.log_output_bytes
+        };
+        let stdout_preview = preview_bytes(stdout_bytes, limit);
+        let stderr_preview = preview_bytes(stderr_bytes, limit);
+
+        eprintln!(
+            "shell-exec: command=\"{}\" exit_code={:?} timed_out={} stdout_bytes={} stderr_bytes={} stdout_preview=\"{}\" stderr_preview=\"{}\"",
+            command,
+            exit_code,
+            timed_out,
+            stdout_bytes.len(),
+            stderr_bytes.len(),
+            stdout_preview,
+            stderr_preview
+        );
     }
 }
 
@@ -251,4 +313,14 @@ async fn read_stream_limited<R: AsyncRead + Unpin>(
     }
 
     Ok((buffer, truncated))
+}
+
+fn preview_bytes(bytes: &[u8], limit: usize) -> String {
+    let mut out = String::new();
+    let take = bytes.len().min(limit);
+    out.push_str(&String::from_utf8_lossy(&bytes[..take]));
+    if bytes.len() > limit {
+        out.push_str("...");
+    }
+    out
 }
