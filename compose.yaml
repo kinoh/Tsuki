@@ -68,6 +68,8 @@ services:
     depends_on:
       - memgraph
     restart: always
+    profiles:
+      - management
 
 volumes:
   core-data:
