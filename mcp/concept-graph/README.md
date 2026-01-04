@@ -19,7 +19,7 @@ LLM-driven agents.
 - Concept: name, valence, arousal_level, accessed_at
 - Episode: name, summary, valence, arousal_level, accessed_at
 - Relations: Concept->Concept with type in {is-a, part-of, evokes}, weight
-- Episode links: Concept->Episode using EVOKES
+- Episode links: EVOKES may connect Concept/Episode nodes
 
 Notes:
 - MCP ensures a unique constraint on Concept(name) at startup; startup fails if existing data violates it.
@@ -49,7 +49,7 @@ Arguments:
 Notes:
 - valence is clamped to [-1, 1].
 - arousal = arousal_level * exp(-(now - accessed_at) / tau)
-- arousal_level/accessed_at update only if new arousal >= current arousal.
+- arousal_level/accessed_at update only if new arousal does not decrease.
 - update_affect uses new arousal_level = abs(valence_delta).
 - if target matches an Episode name, updates the episode; otherwise updates a concept (creating it if missing).
 
@@ -79,7 +79,7 @@ Returns:
 - valence: number
 
 ### relation_add
-Adds a relation between two concepts.
+Adds a relation between nodes.
 
 Arguments:
 - from: string
@@ -89,6 +89,8 @@ Arguments:
 Notes:
 - relation types are mapped to DB-safe labels (e.g., "is-a" -> "IS_A").
 - tautologies (from == to) are rejected.
+- is-a / part-of are only allowed between Concepts.
+- EVOKES is allowed between Concept/Episode nodes.
 - concepts created indirectly here start with arousal_level = 0.25.
 - relation weight is created at 0.25 and strengthened on repeated relation_add
   (weight = 1 - (1 - weight) * (1 - 0.2)).
@@ -123,8 +125,9 @@ Notes:
 - propositions use a fixed text form, including episodes as
   "apple evokes <episode summary>".
 - score = arousal * hop_decay * weight (for concept relations).
-- hop_decay = 0.5^(hop-1); reverse relations apply a fixed 0.5 penalty.
-- for recall, new arousal_level = hop_decay and may update arousal if it raises.
+- hop_decay = 0.5^(hop-1); reverse relations apply a fixed 0.5 penalty (effective 0.5^hop).
+- for recall, new arousal_level = hop_decay and updates only if arousal does not decrease.
+- scores are rounded to 6 decimals.
 
 Returns:
 - propositions: Array<{ text: string, score: number, valence: number | null }>
