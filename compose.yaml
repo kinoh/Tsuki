@@ -71,6 +71,20 @@ services:
     profiles:
       - management
 
+  sandbox:
+    image: ubuntu:24.04
+    command: ["sh", "-c", "echo nameserver 1.1.1.1 > /etc/resolv.conf && sleep infinity"]
+    volumes:
+      - sandbox-data:/home/ubuntu
+    restart: always
+    runtime: runsc
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "512M"
+
 volumes:
   core-data:
   memgraph-data:
+  sandbox-data:
