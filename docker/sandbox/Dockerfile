@@ -11,7 +11,23 @@ RUN cargo build --release
 FROM ubuntu:24.04
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    dnsutils \
+    findutils \
+    gzip \
+    iputils-ping \
+    less \
+    lsof \
+    openssl \
+    procps \
+    sed \
+    tar \
+    unzip \
+    wget \
+    xz-utils \
+    zip \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash sandbox \
