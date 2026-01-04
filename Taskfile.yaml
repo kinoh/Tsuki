@@ -18,7 +18,7 @@ tasks:
   up:
     desc: Start production
     cmds:
-      - docker compose up --detach --remove-orphans
+      - docker compose up --detach --remove-orphans memgraph
   down:
     desc: Stop production
     cmds:
@@ -103,7 +103,12 @@ tasks:
       - cd core && pnpm install
       - task: mcp/build
   backup:
-    desc: Backup database
+    desc: Backup all data
+    cmds:
+      - task core/backup
+      - task memgraph/backup
+  core/backup:
+    desc: Backup core data
     vars:
       DOCKER_HOST: ${DOCKER_HOST}
       TIMESTAMP:
@@ -114,38 +119,38 @@ tasks:
       - docker compose cp core:/data /tmp/tsuki-backup-{{.TIMESTAMP}}
       - tar czf {{.BACKUP_DIR}}/tsuki-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-{{.TIMESTAMP}} .
       - rm -rf /tmp/tsuki-backup-{{.TIMESTAMP}}
-  memgraph/local-clean:
-    desc: Reset local memgraph database
-    cmds:
-      - echo "MATCH (n) DETACH DELETE n;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole
-  memgraph/local-backup:
+  memgraph/backup:
     desc: Backup memgraph database
     vars:
       BACKUP_DIR: ${BACKUP_DIR:-./backup}/memgraph
       BACKUP_FILE_PATH:
-        sh: 'echo "CREATE SNAPSHOT;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole -output_format csv | tail -1 | tr -d \"'
+        sh: 'echo "CREATE SNAPSHOT;" | docker compose exec -T memgraph mgconsole -output_format csv | tail -1 | tr -d \"'
     cmds:
       - mkdir -p {{.BACKUP_DIR}}
-      - DOCKER_HOST="" docker compose cp memgraph:{{.BACKUP_FILE_PATH}} {{.BACKUP_DIR}}/
-  memgraph/local-restore/latest:
+      - docker compose cp memgraph:{{.BACKUP_FILE_PATH}} {{.BACKUP_DIR}}/
+  memgraph/restore/latest:
     desc: Restore latest memgraph database
     vars:
       BACKUP_FILE_NAME:
         sh: 'ls -t ${BACKUP_DIR:-./backup}/memgraph | head -1'
     cmds:
-      - task memgraph/local-restore/{{.BACKUP_FILE_NAME}}
-  memgraph/local-restore/*:
+      - task memgraph/restore/{{.BACKUP_FILE_NAME}}
+  memgraph/restore/*:
     desc: Restore memgraph database
     vars:
       BACKUP_DIR: ${BACKUP_DIR:-./backup}/memgraph
       BACKUP_FILE_NAME: '{{index .MATCH 0}}'
     cmds:
-      - DOCKER_HOST="" docker compose cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}
-      - DOCKER_HOST="" docker compose exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}
-      - echo "RECOVER SNAPSHOT '/data/snapshots/{{.BACKUP_FILE_NAME}}' FORCE;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole
+      - docker compose cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}
+      - docker compose exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}
+      - echo "RECOVER SNAPSHOT '/data/snapshots/{{.BACKUP_FILE_NAME}}' FORCE;" | docker compose exec -T memgraph mgconsole
+  memgraph/local-clean:
+    desc: Reset local memgraph database
+    cmds:
+      - echo "MATCH (n) DETACH DELETE n;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole
   local-reset:
     desc: Reset local data
     cmds:
       - task memgraph/local-clean
-      - task memgraph/local-restore/latest
+      - DOCKER_HOST="" task memgraph/restore/latest
       - task -t core/Taskfile.yaml reset-data
