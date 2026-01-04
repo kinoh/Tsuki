@@ -14,6 +14,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
+RUN echo "nameserver 1.1.1.1" > /etc/resolv.conf
+
 RUN useradd -m -s /bin/bash sandbox \
   && mkdir -p /work \
   && chown -R sandbox:sandbox /work
