@@ -110,6 +110,7 @@ impl ShellExecService {
         };
         command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
+        let started_at = time::Instant::now();
         let mut child = command.spawn().map_err(|err| {
             ErrorData::internal_error(
                 "Error: execute: spawn failed",
@@ -176,6 +177,7 @@ impl ShellExecService {
                 )
             })?,
         };
+        let elapsed_ms = started_at.elapsed().as_millis() as u64;
 
         let (stdout_bytes, stdout_truncated) = stdout_task
             .await
@@ -211,9 +213,17 @@ impl ShellExecService {
             "stdout_truncated": stdout_truncated,
             "stderr_truncated": stderr_truncated,
             "output_truncated": output_truncated,
+            "elapsed_ms": elapsed_ms,
         });
 
-        self.log_execution(&request.command, &stdout_bytes, &stderr_bytes, status.code(), timed_out);
+        self.log_execution(
+            &request.command,
+            &stdout_bytes,
+            &stderr_bytes,
+            status.code(),
+            timed_out,
+            elapsed_ms,
+        );
 
         Ok(CallToolResult {
             content: vec![Content::text(result.to_string())],
@@ -230,6 +240,7 @@ impl ShellExecService {
         stderr_bytes: &[u8],
         exit_code: Option<i32>,
         timed_out: bool,
+        elapsed_ms: u64,
     ) {
         let limit = if self.log_full_output {
             self.max_output_bytes
@@ -240,10 +251,11 @@ impl ShellExecService {
         let stderr_preview = preview_bytes(stderr_bytes, limit);
 
         eprintln!(
-            "shell-exec: command=\"{}\" exit_code={:?} timed_out={} stdout_bytes={} stderr_bytes={} stdout_preview=\"{}\" stderr_preview=\"{}\"",
+            "shell-exec: command=\"{}\" exit_code={:?} timed_out={} elapsed_ms={} stdout_bytes={} stderr_bytes={} stdout_preview=\"{}\" stderr_preview=\"{}\"",
             command,
             exit_code,
             timed_out,
+            elapsed_ms,
             stdout_bytes.len(),
             stderr_bytes.len(),
             stdout_preview,
