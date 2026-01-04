@@ -46,7 +46,7 @@ export function getUniversalMCP(config: ConfigService): MCPClient {
         command: './bin/concept-graph',
         args: [],
         env: {
-          DATA_DIR: `${config.dataDir}/concept_graph`,
+          MEMGRAPH_URI: config.isProduction ? 'bolt://memgraph:7687' : 'bolt://localhost:7687',
           TZ: process.env.TZ ?? 'Asia/Tokyo',
         },
       },
