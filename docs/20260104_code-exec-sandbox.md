@@ -16,6 +16,7 @@ Run a dedicated MCP server inside a gVisor container and connect to it from core
   - CPU/memory enforced via compose limits.
   - No input size limit at the MCP layer.
   - Output size capped by byte count (approximate 10K token cap; no expensive tokenization).
+- **Persistence**: Only paths backed by Docker volumes are persisted; the container itself is not read-only.
 - **Interface**: Provide a single MCP tool (`execute`) with `command`, `args`, optional `stdin`, and `timeout_ms`.
 
 ## Implementation Details
@@ -23,7 +24,7 @@ Run a dedicated MCP server inside a gVisor container and connect to it from core
   - `code-sandbox` service with `runtime: runsc`.
   - Run the MCP server inside the container (e.g., `./bin/code-exec`).
   - Use a dedicated volume for working directory (e.g., `sandbox-work:/work`).
-  - Keep `read_only: true` if possible, otherwise isolate writes to `/work`.
+  - Allow writes in the container, but persist only volume-backed paths such as `/work`.
 - **MCP server behavior**:
   - Execute via direct argv (prefer direct argv to avoid shell injection).
   - Enforce output limit by truncating stdout/stderr to N bytes and indicating truncation.
