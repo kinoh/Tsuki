@@ -5,6 +5,7 @@ import { metricsHandler } from './metrics'
 import { metadataHandler } from './metadata'
 import { notificationTestHandler, notificationTokenHandler, notificationTokensHandler } from './notification'
 import { configGetHandler, configPutHandler } from './config'
+import { ttsHandler } from './tts'
 
 function rootHandler(req: express.Request, res: express.Response): void {
   res.json({
@@ -21,6 +22,7 @@ export function setupRoutes(app: express.Application): void {
   app.get('/metadata', authMiddleware, metadataHandler)
   app.get('/config', authMiddleware, configGetHandler)
   app.put('/config', authMiddleware, configPutHandler)
+  app.post('/tts', authMiddleware, ttsHandler)
   app.put('/notification/token', authMiddleware, notificationTokenHandler)
   app.delete('/notification/token', authMiddleware, notificationTokenHandler)
   app.get('/notification/tokens', authMiddleware, notificationTokensHandler)
