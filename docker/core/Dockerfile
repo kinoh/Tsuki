@@ -100,6 +100,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 RUN pnpm config set script-shell /bin/sh
 
 # Copy mcp binaries from build stage
+COPY --from=rust-builder --chown=tsuki:nodejs /build/concept-graph ./bin/concept-graph
 COPY --from=rust-builder --chown=tsuki:nodejs /build/structured-memory ./bin/structured-memory
 COPY --from=rust-builder --chown=tsuki:nodejs /build/scheduler ./bin/scheduler
 COPY --from=rust-builder --chown=tsuki:nodejs /build/weather ./bin/weather
