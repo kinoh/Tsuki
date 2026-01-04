@@ -8,12 +8,11 @@ import { MessageRouter } from './router'
 import { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ConfigService } from '../configService'
 import { logger } from '../logger'
-import { readdir, readFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
 
 const PROMPT_MEMORY_DIR = '/work/prompts'
 const PROMPT_MEMORY_EXTENSION = '.md'
 const PROMPT_MEMORY_MAX_BYTES = 4 * 1024
+const PROMPT_MEMORY_TIMEOUT_MS = 5_000
 
 export type AgentRuntimeContext = {
   instructions: string
@@ -45,64 +44,125 @@ export interface MCPNotificationHandler {
   handleSchedulerNotification(userId: string, notification: MCPNotificationResourceUpdated): Promise<void>
 }
 
-async function listPromptFiles(rootDir: string): Promise<string[]> {
-  const files: string[] = []
-  const pending: string[] = [rootDir]
+type ShellExecResult = {
+  stdout: string
+  stderr: string
+  exit_code: number | null
+  timed_out: boolean
+  stdout_truncated: boolean
+  stderr_truncated: boolean
+  output_truncated: boolean
+  elapsed_ms: number
+}
 
-  while (pending.length > 0) {
-    const current = pending.pop()
-    if (!current) {
-      continue
-    }
+function parseShellExecResult(payload: unknown): ShellExecResult | null {
+  if (payload === null || typeof payload !== 'object') {
+    return null
+  }
 
-    let entries: Awaited<ReturnType<typeof readdir>>
-    try {
-      entries = await readdir(current, { withFileTypes: true })
-    } catch (err) {
-      logger.warn({ err, path: current }, 'Failed to read prompt memory directory')
-      continue
-    }
+  const maybe = payload as {
+    structured_content?: unknown
+    content?: Array<{ text?: string }>
+  }
 
-    for (const entry of entries) {
-      const fullPath = join(current, entry.name)
-      if (entry.isDirectory()) {
-        pending.push(fullPath)
-        continue
-      }
-      if (!entry.isFile() || !entry.name.endsWith(PROMPT_MEMORY_EXTENSION)) {
-        continue
-      }
-      files.push(fullPath)
+  if (maybe.structured_content !== null && typeof maybe.structured_content === 'object') {
+    const content = maybe.structured_content as ShellExecResult
+    if (typeof content.stdout === 'string' && typeof content.stderr === 'string') {
+      return content
     }
   }
 
-  return files
-    .map((filePath) => relative(rootDir, filePath))
-    .sort((a, b) => a.localeCompare(b))
+  const text = maybe.content?.[0]?.text
+  if (typeof text !== 'string' || text.length === 0) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(text) as ShellExecResult
+    if (typeof parsed.stdout === 'string' && typeof parsed.stderr === 'string') {
+      return parsed
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to parse shell-exec response')
+  }
+
+  return null
 }
 
-async function loadPromptMemory(rootDir: string): Promise<string> {
-  const relativeFiles = await listPromptFiles(rootDir)
+function shellQuote(value: string): string {
+  const singleQuote = '\''
+  const replacement = singleQuote + '"' + singleQuote + '"' + singleQuote
+  const escaped = value.replace(/'/g, replacement)
+  return singleQuote + escaped + singleQuote
+}
+
+async function runShellCommand(mcp: MCPClient, command: string): Promise<ShellExecResult | null> {
+  const response = await mcp.callTool('shell_exec', 'execute', {
+    command,
+    timeout_ms: PROMPT_MEMORY_TIMEOUT_MS,
+  })
+  return parseShellExecResult(response)
+}
+
+async function listPromptFiles(mcp: MCPClient): Promise<string[]> {
+  const command = [
+    `if [ ! -d ${shellQuote(PROMPT_MEMORY_DIR)} ]; then exit 0; fi`,
+    `cd ${shellQuote(PROMPT_MEMORY_DIR)} && find . -type f -name ${shellQuote(`*${PROMPT_MEMORY_EXTENSION}`)} -print | sort`,
+  ].join('; ')
+  const result = await runShellCommand(mcp, command)
+  if (!result) {
+    logger.warn('Failed to list prompt memory files')
+    return []
+  }
+  if (result.exit_code !== 0) {
+    logger.warn({ stderr: result.stderr }, 'Prompt memory listing failed')
+    return []
+  }
+
+  return result.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^\.\//, ''))
+}
+
+async function loadPromptMemory(mcp: MCPClient): Promise<string> {
+  const relativeFiles = await listPromptFiles(mcp)
   if (relativeFiles.length === 0) {
     return ''
   }
 
   const sections: string[] = []
   for (const relativePath of relativeFiles) {
-    const fullPath = join(rootDir, relativePath)
-    try {
-      const buffer = await readFile(fullPath)
-      const truncated = buffer.length > PROMPT_MEMORY_MAX_BYTES
-      const content = (truncated ? buffer.subarray(0, PROMPT_MEMORY_MAX_BYTES) : buffer)
-        .toString('utf8')
-        .trimEnd()
-      const warning = truncated
-        ? `WARNING: truncated to ${PROMPT_MEMORY_MAX_BYTES} bytes\n`
-        : ''
-      sections.push(`# ${relativePath}\n${warning}${content}\n---`)
-    } catch (err) {
-      logger.warn({ err, path: fullPath }, 'Failed to read prompt memory file')
+    const normalizedPath = relativePath.replace(/^\.\//, '')
+    const quotedPath = shellQuote(`./${normalizedPath}`)
+    const command = `cd ${shellQuote(PROMPT_MEMORY_DIR)} && wc -c < ${quotedPath} && head -c ${PROMPT_MEMORY_MAX_BYTES} ${quotedPath}`
+    const result = await runShellCommand(mcp, command)
+    if (!result || result.exit_code !== 0) {
+      logger.warn({ stderr: result?.stderr, path: normalizedPath }, 'Failed to read prompt memory file')
+      continue
     }
+
+    const stdout = result.stdout.replace(/\r\n/g, '\n')
+    const newlineIndex = stdout.indexOf('\n')
+    if (newlineIndex === -1) {
+      logger.warn({ path: normalizedPath }, 'Prompt memory file output missing size header')
+      continue
+    }
+
+    const sizeText = stdout.slice(0, newlineIndex).trim()
+    const size = Number.parseInt(sizeText, 10)
+    if (!Number.isFinite(size)) {
+      logger.warn({ path: normalizedPath, sizeText }, 'Prompt memory file size parse failed')
+      continue
+    }
+
+    const content = stdout.slice(newlineIndex + 1).trimEnd()
+    const truncated = size > PROMPT_MEMORY_MAX_BYTES
+    const warning = truncated
+      ? `WARNING: truncated to ${PROMPT_MEMORY_MAX_BYTES} bytes\n`
+      : ''
+    sections.push(`# ${normalizedPath}\n${warning}${content}\n---`)
   }
 
   return sections.join('\n')
@@ -120,6 +180,7 @@ export class ActiveUser implements UserContext {
     private router: MessageRouter,
     private requestContext: RequestContext<AgentRuntimeContext>,
     private readonly assistantName: string,
+    private readonly universalMcp: MCPClient,
     onAuth: MCPAuthHandler | null,
   ) {
     this.mcp = getUserSpecificMCP(config, userId)
@@ -143,7 +204,7 @@ export class ActiveUser implements UserContext {
 
   async loadMemory(): Promise<string> {
     try {
-      return await loadPromptMemory(PROMPT_MEMORY_DIR)
+      return await loadPromptMemory(this.universalMcp)
     } catch (err) {
       logger.warn({ err, userId: this.userId }, 'Failed to load memory')
       return ''

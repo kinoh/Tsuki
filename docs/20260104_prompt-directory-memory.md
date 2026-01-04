@@ -15,10 +15,11 @@ Load prompt memory from a directory and inject it into the agent prompt as a con
 - Sort by relative path (lexicographic order) for stable prompt composition.
 - Cap each file at 4KB per user direction; if exceeded, truncate and insert an explicit warning line in the prompt content.
 - Format each section as `# <relative/path>` followed by content, then `---` to delimit sections.
+- Use the shell-exec MCP server to read prompt files because `/work` lives in the sandbox container.
 
 ## Implementation Details
-- `ActiveUser.loadMemory()` now reads prompt files instead of calling `structured-memory`.
-- A small recursive loader collects relative paths, reads file content, applies truncation, and assembles the final prompt string.
+- `ActiveUser.loadMemory()` now uses the shell-exec MCP server instead of calling `structured-memory`.
+- The loader lists prompt files via shell commands, reads each file with a size header, applies truncation, and assembles the final prompt string.
 - Read errors are logged and skipped to avoid blocking the response flow.
 
 ## Future Considerations
