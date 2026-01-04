@@ -69,12 +69,6 @@ tasks:
       SERVICE: '{{index .MATCH 0}}'
     cmds:
       - '{{.DOCKER_COMPOSE}} logs --tail=100 {{.SERVICE}}'
-  download_model:
-    desc: Download Vosk model
-    cmds:
-      - curl -sSfL -o /tmp/vosk-model-ja.zip https://alphacephei.com/vosk/models/vosk-model-ja-0.22.zip
-      - unzip /tmp/vosk-model-ja.zip -d /var/vosk/
-      - rm /tmp/vosk-model-ja.zip
   decrypt_prompt:
     desc: Decrypt prompt file
     cmds:
@@ -153,10 +147,6 @@ tasks:
       - '{{.DOCKER_COMPOSE}} cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}'
       - '{{.DOCKER_COMPOSE}} exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}'
       - 'echo "RECOVER SNAPSHOT ''/data/snapshots/{{.BACKUP_FILE_NAME}}'' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole'
-  memgraph/local-clean:
-    desc: Reset local memgraph database
-    cmds:
-      - echo "MATCH (n) DETACH DELETE n;" | DOCKER_HOST="" docker compose exec -T memgraph mgconsole
   sandbox/backup:
     desc: Backup sandbox data
     vars:
@@ -166,9 +156,3 @@ tasks:
       - '{{.DOCKER_COMPOSE}} cp sandbox:/work /tmp/tsuki-backup-sandbox'
       - tar czf ./backup/tsuki-sandbox-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-sandbox .
       - rm -rf /tmp/tsuki-backup-sandbox
-  local-reset:
-    desc: Reset local data
-    cmds:
-      - task memgraph/local-clean
-      - DOCKER_HOST="" task memgraph/restore/latest
-      - task -t core/Taskfile.yaml reset-data
