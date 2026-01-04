@@ -38,7 +38,9 @@ The existing structured-memory store is not well-suited for concept networks tha
 - Graph model (logical)
   - Concept node: identifier (concept text), valence, arousal_level, accessed_at
   - Episode node: name, summary, valence, arousal_level, accessed_at (event time is embedded in summary; accessed_at is for arousal decay)
-  - Edges: Concept->Episode (EVOKES), Concept->Concept with type in {is-a, part-of, evokes} and weight
+  - Edges:
+    - Concept->Concept with type in {is-a, part-of, evokes} and weight
+    - EVOKES can connect Concept/Episode nodes (Concept->Episode, Episode->Concept, Episode->Episode)
 - Compose integration
   - Add Memgraph service with persistent volume.
   - Core launches the MCP service binary via stdio; the MCP service connects to Memgraph via Bolt.
@@ -87,6 +89,8 @@ The existing structured-memory store is not well-suited for concept networks tha
   - params: { from: string, to: string, type: "is-a" | "part-of" | "evokes" }
   - returns: { from: string, to: string, type: string }
   - notes: tautologies (from == to) are rejected.
+  - notes: is-a / part-of are only allowed between Concepts.
+  - notes: EVOKES is allowed between Concept/Episode nodes (Concept->Episode, Episode->Concept, Episode->Episode).
   - notes: concepts created indirectly here start with arousal_level = 0.25.
   - notes: relation weight starts at 0.25 and is strengthened on repeated relation_add
     (weight = 1 - (1 - weight) * (1 - 0.2)).
