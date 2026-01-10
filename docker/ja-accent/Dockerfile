@@ -1,10 +1,16 @@
-FROM ubuntu:latest AS source
+FROM debian:bookworm-slim AS source
 
 RUN apt-get update && apt-get install -y git
 
 RUN git clone --depth 1 https://github.com/kinoh/ja-accent.git /ja-accent
 
-FROM ubuntu:latest AS build
+FROM debian:bookworm-slim AS build
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        g++ \
+        make && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y build-essential
 
@@ -16,7 +22,8 @@ RUN tar -xzf CRF++-0.58.tar.gz && \
     sh ./configure && \
     make && \
     make install && \
-    make clean
+    cd /app && \
+    rm -rf CRF++-0.58 CRF++-0.58.tar.gz
 
 COPY --from=source /ja-accent/packages/mecab-0.996.tar.gz ./
 RUN tar -xzf mecab-0.996.tar.gz && \
@@ -24,13 +31,16 @@ RUN tar -xzf mecab-0.996.tar.gz && \
     ./configure && \
     make && \
     make install && \
-    make clean
+    cd /app && \
+    rm -rf mecab-0.996 mecab-0.996.tar.gz
 
-FROM python:3.13 AS runtime
+FROM python:3.13-slim AS runtime
 
 WORKDIR /usr/src/app
 
-RUN apt-get update && apt-get install -y unzip
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl unzip && \
+    rm -rf /var/lib/apt/lists/*
 
 # By downloading, you agree to the UniDic license terms.
 # See https://clrd.ninjal.ac.jp/unidic/download.html#unidic_csj
