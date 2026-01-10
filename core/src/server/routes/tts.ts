@@ -7,13 +7,22 @@ type TTSRequest = {
   message: string,
 }
 
+type Accent = Record<string, unknown>
 type AudioQuery = Record<string, unknown>
 
-const DEFAULT_VOICEVOX_SPEAKER = 1
+const DEFAULT_VOICEVOX_SPEAKER = 10
 const DEFAULT_VOICEVOX_TIMEOUT_MS = 10000
 
 function getConfig(req: Request): ConfigService {
   return req.app.locals.config as ConfigService
+}
+
+function getJaAccentEndpoint(isProduction: boolean): string {
+  const raw = process.env.JA_ACCENT_ENDPOINT
+  const endpoint = typeof raw === 'string' && raw.trim().length > 0
+    ? raw.trim()
+    : (isProduction ? 'http://ja-accent:2954' : 'http://localhost:2954')
+  return endpoint.replace(/\/$/, '')
 }
 
 function getVoicevoxEndpoint(isProduction: boolean): string {
@@ -86,19 +95,44 @@ export async function ttsHandler(req: Request, res: Response): Promise<void> {
   const timeoutMs = getVoicevoxTimeoutMs()
 
   try {
-    const queryUrl = new URL('/audio_query', endpoint)
-    queryUrl.searchParams.set('speaker', speaker.toString())
-    queryUrl.searchParams.set('text', message)
+    const accentUrl = new URL('/accent', getJaAccentEndpoint(config.isProduction))
+    const accentResponse = await fetchWithTimeout(
+      accentUrl.toString(),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 'text': message }),
+      },
+      timeoutMs,
+    )
+    const accent = await accentResponse.json() as Accent
 
-    const queryResponse = await fetchWithTimeout(queryUrl.toString(), { method: 'POST' }, timeoutMs)
-    if (!queryResponse.ok) {
-      const body = await safeReadText(queryResponse)
-      logger.error({ status: queryResponse.status, body }, 'VoiceVox audio_query failed')
-      res.status(502).json({ error: 'VoiceVox audio query failed' })
+    const phrasesUrl = new URL('/accent_phrases', endpoint)
+    phrasesUrl.searchParams.set('speaker', speaker.toString())
+    phrasesUrl.searchParams.set('text', accent.accent as string)
+    phrasesUrl.searchParams.set('is_kana', 'true')
+
+    const phrasesResponse = await fetchWithTimeout(phrasesUrl.toString(), { method: 'POST' }, timeoutMs)
+    if (!phrasesResponse.ok) {
+      const body = await safeReadText(phrasesResponse)
+      logger.error({ status: phrasesResponse.status, body }, 'VoiceVox accent_phrases failed')
+      res.status(502).json({ error: 'VoiceVox accent_phrases failed' })
       return
     }
 
-    const query = await queryResponse.json() as AudioQuery
+    const query = {
+      'accent_phrases': await phrasesResponse.json(),
+    } as AudioQuery
+
+    query.speedScale = 1.15
+    query.pitchScale = -0.02
+    query.intonationScale = 1.4
+    query.volumeScale = 1.0
+    query.pauseLengthScale = 0.4
+    query.prePhonemeLength = 0
+    query.postPhonemeLength = 0
+    query.outputSamplingRate = 24000
+    query.outputStereo = false
 
     const synthUrl = new URL('/synthesis', endpoint)
     synthUrl.searchParams.set('speaker', speaker.toString())

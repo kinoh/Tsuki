@@ -34,6 +34,7 @@ services:
       - memgraph
       - sandbox
       - voicevox-engine
+      - ja-accent
     restart: always
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').request({port: 2953, path: '/'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1)).end()"]
@@ -99,6 +100,11 @@ services:
     image: voicevox/voicevox_engine:cpu-0.25.0
     ports:
       - "50021:50021"
+
+  ja-accent:
+    image: ja-accent
+    ports:
+      - "2954:2954"
 
 volumes:
   core-data:
