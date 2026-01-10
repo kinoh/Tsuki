@@ -102,7 +102,9 @@ services:
       - "50021:50021"
 
   ja-accent:
-    image: ja-accent
+    build:
+      context: ./docker/ja-accent
+      dockerfile: Dockerfile
     ports:
       - "2954:2954"
 
