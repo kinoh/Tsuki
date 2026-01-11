@@ -107,6 +107,8 @@ export async function ttsHandler(req: Request, res: Response): Promise<void> {
     )
     const accent = await accentResponse.json() as Accent
 
+    logger.info({ message, accent: accent.accent }, 'Generated accent from ja-accent')
+
     const phrasesUrl = new URL('/accent_phrases', endpoint)
     phrasesUrl.searchParams.set('speaker', speaker.toString())
     phrasesUrl.searchParams.set('text', accent.accent as string)
@@ -165,8 +167,8 @@ export async function ttsHandler(req: Request, res: Response): Promise<void> {
     res.send(audioBuffer)
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      logger.error({ err }, 'VoiceVox request timed out')
-      res.status(504).json({ error: 'VoiceVox request timed out' })
+      logger.error({ err }, 'TTS request timed out')
+      res.status(504).json({ error: 'TTS request timed out' })
       return
     }
 
