@@ -18,6 +18,5 @@ tasks:
   local-reset:
     desc: Reset local data
     cmds:
-      - task memgraph/local-clean
       - task -t Taskfile.yaml memgraph/restore/latest
       - task -t core/Taskfile.yaml reset-data
