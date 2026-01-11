@@ -61,8 +61,8 @@ export async function serve(
     wsmanager.handleConnection(ws, req)
   })
 
-  server.listen(2953, () => {
-    logger.info('Server ready at: http://localhost:2953')
+  server.listen(config.serverPort, () => {
+    logger.info(`Server ready at: http://localhost:${config.serverPort}`)
   })
 
   const gracefulShutdown = (): void => {

@@ -61,7 +61,7 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
         },
       },
       {
-        resource: new MessageResource(agentMemory),
+        resource: new MessageResource(config),
         options: {
           id: 'messages',
           navigation: {

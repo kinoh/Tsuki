@@ -3,7 +3,8 @@
 import { WebSocket } from 'ws';
 import * as readline from 'readline';
 
-const WS_URL = process.env.WS_URL || 'ws://localhost:2953/';
+const PORT = process.env.PORT || '2953';
+const WS_URL = process.env.WS_URL || `ws://localhost:${PORT}/`;
 const AUTH_TOKEN = process.env.WEB_AUTH_TOKEN || 'test-token';
 const USER_NAME = process.env.USER_NAME || 'test-user';
 

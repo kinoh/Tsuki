@@ -6,12 +6,14 @@ export class ConfigService {
   public readonly dataDir: string
   public readonly env: string
   public readonly isProduction: boolean
+  public readonly serverPort: number
   public readonly traceTools: boolean
 
   constructor() {
     this.env = process.env.ENV ?? process.env.NODE_ENV ?? 'development'
     this.isProduction = this.env === 'production'
     this.dataDir = process.env.DATA_DIR ?? './data'
+    this.serverPort = Number(process.env.PORT ?? 2953)
     this.traceTools = ConfigService.parseBooleanFlag(process.env.TRACE_TOOLS)
 
     this.initDataDir()

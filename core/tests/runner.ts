@@ -2,7 +2,8 @@ import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { URL } from 'node:url'
 
-const WS_URL = process.env.WS_URL ?? 'ws://localhost:2953/'
+const PORT = process.env.PORT ?? '2953'
+const WS_URL = process.env.WS_URL ?? `ws://localhost:${PORT}/`
 const TIMEOUT_MS = 60000
 const INTERVAL_MS = 500
 const USAGE = 'Usage: pnpm tsx ./tests/runner.ts <script> [args...]'

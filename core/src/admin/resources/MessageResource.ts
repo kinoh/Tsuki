@@ -1,8 +1,7 @@
 import { BaseResource, BaseProperty, BaseRecord, Filter } from 'adminjs'
 import fetch from 'node-fetch'
 import { logger } from '../../logger'
-
-const API_BASE_URL = 'http://localhost:2953'
+import { ConfigService } from '../../configService'
 
 // Utility to get the auth token from environment variables
 function getAuthToken(): string {
@@ -71,6 +70,13 @@ class MessageRecord extends BaseRecord {
 }
 
 export class MessageResource extends BaseResource {
+  private readonly apiBaseUrl: string
+
+  constructor(private config: ConfigService) {
+    super()
+    this.apiBaseUrl = `http://localhost:${this.config.serverPort}`
+  }
+
   id(): string {
     return 'messages'
   }
@@ -93,7 +99,7 @@ export class MessageResource extends BaseResource {
   private async fetchMessages(threadId: string): Promise<ResponseMessage[]> {
     try {
       const token = getAuthToken()
-      const response = await fetch(`${API_BASE_URL}/threads/${threadId}`, {
+      const response = await fetch(`${this.apiBaseUrl}/threads/${threadId}`, {
         headers: { 'Authorization': `admin:${token}` },
       })
 
