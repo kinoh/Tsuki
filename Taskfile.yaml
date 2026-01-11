@@ -162,3 +162,20 @@ tasks:
       - '{{.DOCKER_COMPOSE}} cp sandbox:/work /tmp/tsuki-backup-sandbox'
       - tar czf ./backup/tsuki-sandbox-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-sandbox .
       - rm -rf /tmp/tsuki-backup-sandbox
+  sandbox/restore/latest:
+    desc: Restore latest sandbox data
+    vars:
+      BACKUP_FILE_PATH:
+        sh: 'find ./backup -name "tsuki-sandbox-backup-*.tar.gz" | sort | tail -1'
+    cmds:
+      - task sandbox/restore/{{.BACKUP_FILE_PATH}}
+  sandbox/restore/*:
+    desc: Restore sandbox data
+    vars:
+      BACKUP_FILE_PATH: '{{index .MATCH 0}}'
+    cmds:
+      - '{{.DOCKER_COMPOSE}} exec sandbox rm -rf /work/*'
+      - mkdir -p /tmp/tsuki-backup-sandbox
+      - tar xzf {{.BACKUP_FILE_PATH}} -C /tmp/tsuki-backup-sandbox
+      - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-sandbox/. sandbox:/work'
+      - rm -rf /tmp/tsuki-backup-sandbox
