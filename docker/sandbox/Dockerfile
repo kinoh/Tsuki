@@ -16,16 +16,19 @@ RUN apt-get update \
     curl \
     dnsutils \
     findutils \
+    git \
     gzip \
     iputils-ping \
     less \
     lsof \
     openssl \
+    patch \
     procps \
     sed \
     tar \
     unzip \
     wget \
+    whois \
     xz-utils \
     zip \
   && rm -rf /var/lib/apt/lists/*
