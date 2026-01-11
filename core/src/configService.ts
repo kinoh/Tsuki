@@ -7,12 +7,14 @@ export class ConfigService {
   public readonly env: string
   public readonly isProduction: boolean
   public readonly traceTools: boolean
+  public readonly timeZone: string
 
   constructor() {
     this.env = process.env.ENV ?? process.env.NODE_ENV ?? 'development'
     this.isProduction = this.env === 'production'
     this.dataDir = process.env.DATA_DIR ?? './data'
     this.traceTools = ConfigService.parseBooleanFlag(process.env.TRACE_TOOLS)
+    this.timeZone = process.env.TZ ?? 'Asia/Tokyo'
 
     this.initDataDir()
   }
