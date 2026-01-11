@@ -54,7 +54,6 @@ The tool returns JSON with the following fields:
   "timed_out": false,
   "stdout_truncated": false,
   "stderr_truncated": false,
-  "output_truncated": false,
   "elapsed_ms": 12
 }
 ```

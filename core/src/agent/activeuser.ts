@@ -52,7 +52,6 @@ type ShellExecResult = {
   timed_out: boolean
   stdout_truncated: boolean
   stderr_truncated: boolean
-  output_truncated: boolean
   elapsed_ms: number
 }
 
