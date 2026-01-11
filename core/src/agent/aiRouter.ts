@@ -81,7 +81,7 @@ export class AIRouter implements MessageRouter {
     }
 
     const history = await ctx.getMessageHistory()
-    const memory = await ctx.loadMemory()
+    const memory = await ctx.loadPersonality()
     const sensoryLog = this.getSensoryLog() || 'none'
 
     // Sensory inputs are gated by the router model.

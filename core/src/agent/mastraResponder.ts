@@ -58,9 +58,9 @@ export class MastraResponder implements Responder {
     }
 
     const threadId = await ctx.getCurrentThread()
-    const memory = await ctx.loadMemory()
+    const personality = await ctx.loadPersonality()
     const requestContext = ctx.getRequestContext()
-    requestContext.set('memory', memory)
+    requestContext.set('personality', personality)
     const toolsets = await ctx.getToolsets()
 
     const response = await this.agent.generate(

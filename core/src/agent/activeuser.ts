@@ -9,14 +9,15 @@ import { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ConfigService } from '../configService'
 import { logger } from '../logger'
 
-const PROMPT_MEMORY_DIR = '/work/prompts'
-const PROMPT_MEMORY_EXTENSION = '.md'
-const PROMPT_MEMORY_MAX_BYTES = 4 * 1024
+const PROMPT_MEMORY_PATH = '/work/prompts/personality.md'
+const PROMPT_MEMORY_MAX_LENGTH = 4 * 1024
 const PROMPT_MEMORY_TIMEOUT_MS = 5_000
 
 export type AgentRuntimeContext = {
+  /** The personality of the agent */
+  personality: string
+  /** Describe the agent's response format */
   instructions: string
-  memory?: string
 }
 
 export type MessageChannel = 'websocket' | 'fcm' | 'internal'
@@ -55,13 +56,6 @@ type ShellExecResult = {
   elapsed_ms: number
 }
 
-function shellQuote(value: string): string {
-  const singleQuote = '\''
-  const replacement = singleQuote + '"' + singleQuote + '"' + singleQuote
-  const escaped = value.replace(/'/g, replacement)
-  return singleQuote + escaped + singleQuote
-}
-
 async function runShellCommand(mcp: MCPClient, command: string): Promise<ShellExecResult | null> {
   const response = await mcp.callTool('shell_exec', 'execute', {
     command,
@@ -79,68 +73,26 @@ async function runShellCommand(mcp: MCPClient, command: string): Promise<ShellEx
   return result
 }
 
-async function listPromptFiles(mcp: MCPClient): Promise<string[]> {
-  const command = [
-    `if [ ! -d ${shellQuote(PROMPT_MEMORY_DIR)} ]; then exit 0; fi`,
-    `cd ${shellQuote(PROMPT_MEMORY_DIR)} && find . -type f -name ${shellQuote(`*${PROMPT_MEMORY_EXTENSION}`)} -print | sort`,
-  ].join('; ')
-  const result = await runShellCommand(mcp, command)
-  if (!result) {
-    logger.warn('Failed to list prompt memory files')
-    return []
-  }
-  if (result.exit_code !== 0) {
-    logger.warn({ stderr: result.stderr }, 'Prompt memory listing failed')
-    return []
-  }
-
-  return result.stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.replace(/^\.\//, ''))
-}
-
 async function loadPromptMemory(mcp: MCPClient): Promise<string> {
-  const relativeFiles = await listPromptFiles(mcp)
-  if (relativeFiles.length === 0) {
+  const command = `cat ${PROMPT_MEMORY_PATH}`
+  const result = await runShellCommand(mcp, command)
+  if (!result || result.exit_code !== 0) {
+    logger.warn({ stderr: result?.stderr, path: PROMPT_MEMORY_PATH }, 'Failed to read prompt memory file')
     return ''
   }
 
-  const sections: string[] = []
-  for (const relativePath of relativeFiles) {
-    const normalizedPath = relativePath.replace(/^\.\//, '')
-    const quotedPath = shellQuote(`./${normalizedPath}`)
-    const command = `cd ${shellQuote(PROMPT_MEMORY_DIR)} && wc -c < ${quotedPath} && head -c ${PROMPT_MEMORY_MAX_BYTES} ${quotedPath}`
-    const result = await runShellCommand(mcp, command)
-    if (!result || result.exit_code !== 0) {
-      logger.warn({ stderr: result?.stderr, path: normalizedPath }, 'Failed to read prompt memory file')
-      continue
-    }
+  const stdout = result.stdout.replace(/\r\n/g, '\n')
+  const newlineIndex = stdout.indexOf('\n')
 
-    const stdout = result.stdout.replace(/\r\n/g, '\n')
-    const newlineIndex = stdout.indexOf('\n')
-    if (newlineIndex === -1) {
-      logger.warn({ path: normalizedPath }, 'Prompt memory file output missing size header')
-      continue
-    }
+  const size = result.stdout.length
 
-    const sizeText = stdout.slice(0, newlineIndex).trim()
-    const size = Number.parseInt(sizeText, 10)
-    if (!Number.isFinite(size)) {
-      logger.warn({ path: normalizedPath, sizeText }, 'Prompt memory file size parse failed')
-      continue
-    }
+  const content = stdout.slice(newlineIndex + 1).trimEnd()
+  const truncated = size > PROMPT_MEMORY_MAX_LENGTH
+  const warning = truncated
+    ? `WARNING: truncated to ${PROMPT_MEMORY_MAX_LENGTH} bytes\n`
+    : ''
 
-    const content = stdout.slice(newlineIndex + 1).trimEnd()
-    const truncated = size > PROMPT_MEMORY_MAX_BYTES
-    const warning = truncated
-      ? `WARNING: truncated to ${PROMPT_MEMORY_MAX_BYTES} bytes\n`
-      : ''
-    sections.push(`# ${normalizedPath}\n${warning}${content}\n---`)
-  }
-
-  return sections.join('\n')
+  return `${warning}${content}`
 }
 
 export class ActiveUser implements UserContext {
@@ -177,7 +129,7 @@ export class ActiveUser implements UserContext {
     return this.mcp
   }
 
-  async loadMemory(): Promise<string> {
+  async loadPersonality(): Promise<string> {
     try {
       return await loadPromptMemory(this.universalMcp)
     } catch (err) {
