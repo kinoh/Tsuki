@@ -159,7 +159,7 @@ tasks:
       TIMESTAMP:
         sh: date +%Y%m%d%H%M%S
     cmds:
-      - '{{.DOCKER_COMPOSE}} cp sandbox:/work /tmp/tsuki-backup-sandbox'
+      - '{{.DOCKER_COMPOSE}} cp sandbox:/memory /tmp/tsuki-backup-sandbox'
       - tar czf ./backup/tsuki-sandbox-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-sandbox .
       - rm -rf /tmp/tsuki-backup-sandbox
   sandbox/restore/latest:
@@ -174,8 +174,8 @@ tasks:
     vars:
       BACKUP_FILE_PATH: '{{index .MATCH 0}}'
     cmds:
-      - '{{.DOCKER_COMPOSE}} exec sandbox rm -rf /work/*'
+      - '{{.DOCKER_COMPOSE}} exec sandbox rm -rf /memory/*'
       - mkdir -p /tmp/tsuki-backup-sandbox
       - tar xzf {{.BACKUP_FILE_PATH}} -C /tmp/tsuki-backup-sandbox
-      - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-sandbox/. sandbox:/work'
+      - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-sandbox/. sandbox:/memory'
       - rm -rf /tmp/tsuki-backup-sandbox

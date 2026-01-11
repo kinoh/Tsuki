@@ -34,14 +34,14 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash sandbox \
-  && mkdir -p /work \
-  && chown -R sandbox:sandbox /work
+  && mkdir -p /wormemoryk \
+  && chown -R sandbox:sandbox /memory
 
 COPY --from=builder /app/mcp/shell-exec/target/release/shell-exec /usr/local/bin/shell-exec
 COPY docker/sandbox/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-WORKDIR /work
+WORKDIR /memory
 
 ENV MCP_HTTP_BIND=0.0.0.0:8000 \
     MCP_HTTP_PATH=/mcp

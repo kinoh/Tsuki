@@ -83,7 +83,7 @@ services:
       MCP_HTTP_BIND: "0.0.0.0:8000"
       MCP_HTTP_PATH: "/mcp"
     volumes:
-      - sandbox-work:/work
+      - sandbox-data:/memory
     ports:
       - "8000:8000"
     restart: always
@@ -97,4 +97,4 @@ services:
 volumes:
   core-data:
   memgraph-data:
-  sandbox-work:
+  sandbox-data:

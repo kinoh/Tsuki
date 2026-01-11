@@ -9,7 +9,7 @@ import { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ConfigService } from '../configService'
 import { logger } from '../logger'
 
-const PROMPT_MEMORY_PATH = '/work/prompts/personality.md'
+const PROMPT_MEMORY_PATH = '/memory/prompts/personality.md'
 const PROMPT_MEMORY_MAX_LENGTH = 4 * 1024
 const PROMPT_MEMORY_TIMEOUT_MS = 5_000
 
