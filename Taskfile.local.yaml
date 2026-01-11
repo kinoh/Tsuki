@@ -18,6 +18,6 @@ tasks:
   local-reset:
     desc: Reset local data
     cmds:
-      - task -t core/Taskfile.yaml sandbox/restore/latest
+      - task -t Taskfile.yaml sandbox/restore/latest
       - task -t Taskfile.yaml memgraph/restore/latest
       - task -t core/Taskfile.yaml reset-data
