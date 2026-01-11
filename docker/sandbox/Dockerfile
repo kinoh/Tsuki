@@ -34,7 +34,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash sandbox \
-  && mkdir -p /wormemoryk \
+  && mkdir -p /memory \
   && chown -R sandbox:sandbox /memory
 
 COPY --from=builder /app/mcp/shell-exec/target/release/shell-exec /usr/local/bin/shell-exec
