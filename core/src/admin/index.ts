@@ -23,7 +23,7 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
           id: 'threads',
           navigation: {
             name: 'Thread Management',
-            icon: 'MessageSquare',
+            icon: 'MessageCircle',
           },
           listProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
           showProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
@@ -92,7 +92,7 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
           id: 'concepts',
           navigation: {
             name: 'Concept Graph',
-            icon: 'Brain',
+            icon: 'Share2',
           },
           listProperties: ['name', 'valence', 'arousalLevel', 'accessedAt'],
           showProperties: ['name', 'valence', 'arousalLevel', 'accessedAt'],
@@ -127,7 +127,7 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
           id: 'episodes',
           navigation: {
             name: 'Concept Graph',
-            icon: 'Brain',
+            icon: 'Share2',
           },
           listProperties: ['name', 'summary', 'valence', 'arousalLevel', 'accessedAt'],
           showProperties: ['name', 'summary', 'valence', 'arousalLevel', 'accessedAt'],
@@ -148,7 +148,7 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
           id: 'relations',
           navigation: {
             name: 'Concept Graph',
-            icon: 'Brain',
+            icon: 'Share2',
           },
           listProperties: ['from', 'to', 'type', 'weight'],
           showProperties: ['from', 'to', 'type', 'weight'],
@@ -169,7 +169,7 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
           id: 'sandbox-memory',
           navigation: {
             name: 'Sandbox Memory',
-            icon: 'Folder',
+            icon: 'Box',
           },
           listProperties: ['path', 'size', 'modifiedAt'],
           showProperties: ['path', 'size', 'modifiedAt', 'content'],
