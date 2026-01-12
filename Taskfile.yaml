@@ -19,11 +19,13 @@ tasks:
   deploy:
     desc: Deploy to production
     cmds:
-      - '{{.DOCKER_COMPOSE}} up --build --detach sandbox'
-  deploy-core:
-    desc: Deploy core service
+      - '{{.DOCKER_COMPOSE}} up --build --detach'
+  deploy-*:
+    desc: Deploy a service
+    vars:
+      SERVICE: '{{index .MATCH 0}}'
     cmds:
-      - '{{.DOCKER_COMPOSE}} up core --build --detach'
+      - '{{.DOCKER_COMPOSE}} up {{.SERVICE}} --build --detach'
   up:
     desc: Start production
     cmds:
