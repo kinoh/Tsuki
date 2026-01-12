@@ -1,4 +1,5 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
+import neo4j from 'neo4j-driver'
 import { ConceptGraphClient } from './ConceptGraphClient'
 
 interface ConceptEntry {
@@ -119,7 +120,7 @@ export class ConceptResource extends BaseResource {
        RETURN c.name AS name, c.valence AS valence, c.arousal_level AS arousal_level, c.accessed_at AS accessed_at
        ORDER BY ${orderColumn} ${orderDirection}
        SKIP $offset LIMIT $limit`,
-      { offset, limit },
+      { offset: neo4j.int(offset), limit: neo4j.int(limit) },
     )
 
     const concepts: ConceptEntry[] = rows.map(row => ({

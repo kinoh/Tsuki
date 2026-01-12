@@ -65,15 +65,20 @@ function toRelativePath(root: string, filePath: string): string {
 }
 
 function encodeRecordId(relativePath: string): string {
-  return encodeURIComponent(relativePath)
+  return relativePath.replace(/\|/g, '||').replace(/\//g, '|')
 }
 
 function decodeRecordId(id: string): string | null {
-  try {
-    return decodeURIComponent(id)
-  } catch {
-    return null
+  if (!id.includes('|')) {
+    return id
   }
+  const placeholder = '\u0000'
+  const protectedValue = id.replace(/\|\|/g, placeholder)
+  if (protectedValue.includes('|')) {
+    const restored = protectedValue.replace(/\|/g, '/')
+    return restored.replace(new RegExp(placeholder, 'g'), '|')
+  }
+  return protectedValue.replace(new RegExp(placeholder, 'g'), '|')
 }
 
 function resolveSandboxPath(root: string, relativePath: string): string | null {

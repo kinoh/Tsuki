@@ -1,4 +1,5 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
+import neo4j from 'neo4j-driver'
 import { ConceptGraphClient } from './ConceptGraphClient'
 
 interface RelationEntry {
@@ -157,7 +158,7 @@ export class RelationResource extends BaseResource {
        RETURN a.name AS from, b.name AS to, type(r) AS type, r.weight AS weight
        ORDER BY ${orderColumn} ${orderDirection}
        SKIP $offset LIMIT $limit`,
-      { offset, limit },
+      { offset: neo4j.int(offset), limit: neo4j.int(limit) },
     )
 
     const relations: RelationEntry[] = rows.map(row => {

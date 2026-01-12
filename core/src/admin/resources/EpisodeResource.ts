@@ -1,4 +1,5 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
+import neo4j from 'neo4j-driver'
 import { ConceptGraphClient } from './ConceptGraphClient'
 
 interface EpisodeEntry {
@@ -122,7 +123,7 @@ export class EpisodeResource extends BaseResource {
        RETURN e.name AS name, e.summary AS summary, e.valence AS valence, e.arousal_level AS arousal_level, e.accessed_at AS accessed_at
        ORDER BY ${orderColumn} ${orderDirection}
        SKIP $offset LIMIT $limit`,
-      { offset, limit },
+      { offset: neo4j.int(offset), limit: neo4j.int(limit) },
     )
 
     const episodes: EpisodeEntry[] = rows.map(row => ({
