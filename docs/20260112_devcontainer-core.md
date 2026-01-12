@@ -18,6 +18,7 @@ Switch the core devcontainer to a lightweight compose override that mounts the f
 - Keep compose networking (no host network) so service discovery uses `memgraph` and `sandbox` hostnames.
 - Introduce `MEMGRAPH_URI` and `SANDBOX_MCP_URL` as explicit overrides to remove `isProduction` branching for endpoints.
 - Install `pnpm` in the user prefix via `postCreateCommand` to avoid image rebuilds and avoid version pinning.
+- Use the `common-utils` devcontainer feature to provide git and common CLI tools without custom images.
 
 ## Implementation Details
 - `.devcontainer/compose.yaml` overrides `core` with:
@@ -26,6 +27,7 @@ Switch the core devcontainer to a lightweight compose override that mounts the f
   - `core-data` and `sandbox-data` mounts preserved.
   - environment overrides for `NODE_ENV`, `MEMGRAPH_URI`, and `SANDBOX_MCP_URL`.
 - `.devcontainer/devcontainer.json` installs `pnpm` on container creation via `postCreateCommand`, sets `NPM_CONFIG_PREFIX=/home/node/.npm-global`, and defines an explicit `PATH` that keeps `/usr/local/bin` while adding `/home/node/.npm-global/bin` to avoid losing the default entrypoint.
+- `.devcontainer/devcontainer.json` enables `ghcr.io/devcontainers/features/common-utils:2`.
 - `ConfigService` now exposes `memgraphUri` and `sandboxMcpUrl`, used by the MCP client configuration.
 
 ## Future Considerations

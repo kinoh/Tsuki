@@ -6,6 +6,9 @@
   "shutdownAction": "stopCompose",
   "remoteUser": "node",
   "postCreateCommand": "npm -g i pnpm",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {}
+  },
   "containerEnv": {
     "NPM_CONFIG_PREFIX": "/home/node/.npm-global",
     "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/node/.npm-global/bin"
