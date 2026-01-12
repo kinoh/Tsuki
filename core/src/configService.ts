@@ -14,12 +14,8 @@ export class ConfigService {
   constructor() {
     this.env = process.env.ENV ?? process.env.NODE_ENV ?? 'development'
     this.isProduction = this.env === 'production'
-    this.memgraphUri =
-      process.env.MEMGRAPH_URI ??
-      (this.isProduction ? 'bolt://memgraph:7687' : 'bolt://localhost:7687')
-    this.sandboxMcpUrl =
-      process.env.SANDBOX_MCP_URL ??
-      (this.isProduction ? 'http://sandbox:8000/mcp' : 'http://localhost:8000/mcp')
+    this.memgraphUri = process.env.MEMGRAPH_URI ?? 'bolt://memgraph:7687'
+    this.sandboxMcpUrl = process.env.SANDBOX_MCP_URL ?? 'http://sandbox:8000/mcp'
     this.dataDir = process.env.DATA_DIR ?? './data'
     this.traceTools = ConfigService.parseBooleanFlag(process.env.TRACE_TOOLS)
     this.timeZone = process.env.TZ ?? 'Asia/Tokyo'
