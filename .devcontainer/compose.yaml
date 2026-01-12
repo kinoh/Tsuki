@@ -4,10 +4,10 @@ services:
       dockerfile: .devcontainer/Dockerfile
     image: node:22-bookworm
     command: ["sleep", "infinity"]
-    working_dir: /workspaces/tsuki/core
     environment: !reset []
     volumes:
       - .:/workspaces/tsuki:cached
+      - ../tsuki-work1:/workspaces/tsuki-work1:cached
       - core-data:/data
       - sandbox-data:/memory:ro
     stdin_open: true

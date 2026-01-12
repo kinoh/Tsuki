@@ -1,6 +1,6 @@
 {
-  "name": "tsuki-core",
-  "workspaceFolder": "/workspaces/tsuki",
+  "name": "${localWorkspaceFolderBasename}",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "dockerComposeFile": ["../compose.yaml", "../compose.dev.yaml", "./compose.yaml"],
   "service": "core",
   "shutdownAction": "stopCompose",
