@@ -23,22 +23,6 @@ interface LibSQLClient {
   }>
 }
 
-interface UsageSummary {
-  totalTokens: number
-  inputTokens: number
-  outputTokens: number
-  reasoningTokens: number
-  cachedInputTokens: number
-}
-
-const EMPTY_USAGE_SUMMARY: UsageSummary = {
-  totalTokens: 0,
-  inputTokens: 0,
-  outputTokens: 0,
-  reasoningTokens: 0,
-  cachedInputTokens: 0,
-}
-
 function toNumber(value: string | number | null | undefined): number {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : 0
@@ -48,6 +32,35 @@ function toNumber(value: string | number | null | undefined): number {
     return Number.isFinite(parsed) ? parsed : 0
   }
   return 0
+}
+
+function toPositiveInt(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+  return Math.max(0, Math.floor(parsed))
+}
+
+const SORT_COLUMN_BY_PROPERTY: Record<string, string> = {
+  id: 't.id',
+  resourceId: 't.resourceId',
+  title: 't.title',
+  createdAt: 't.createdAt',
+  updatedAt: 't.updatedAt',
+  totalTokens: 'totalTokens',
+  inputTokens: 'inputTokens',
+  outputTokens: 'outputTokens',
+  reasoningTokens: 'reasoningTokens',
+  cachedInputTokens: 'cachedInputTokens',
+}
+
+function isSortableProperty(propertyName: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SORT_COLUMN_BY_PROPERTY, propertyName)
+}
+
+function toSortDirection(value: unknown): 'asc' | 'desc' {
+  return value === 'asc' ? 'asc' : 'desc'
 }
 
 class ThreadProperty extends BaseProperty {
@@ -75,7 +88,7 @@ class ThreadProperty extends BaseProperty {
   }
 
   isSortable(): boolean {
-    return this.propertyName === 'id'
+    return isSortableProperty(this.propertyName)
   }
 
   isId(): boolean {
@@ -126,43 +139,6 @@ export class ThreadResource extends BaseResource {
     return properties.find(prop => prop.path() === path) || null
   }
 
-  private async fetchUsageSummaries(threadIds: string[]): Promise<Map<string, UsageSummary>> {
-    if (threadIds.length === 0) {
-      return new Map()
-    }
-
-    const placeholders = threadIds.map(() => '?').join(', ')
-    const result = await this.client.execute({
-      sql: `
-        SELECT
-          thread_id,
-          COALESCE(SUM(total_tokens), 0) AS total_tokens,
-          COALESCE(SUM(input_tokens), 0) AS input_tokens,
-          COALESCE(SUM(output_tokens), 0) AS output_tokens,
-          COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-          COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens
-        FROM usage_stats
-        WHERE thread_id IN (${placeholders})
-        GROUP BY thread_id
-      `,
-      args: threadIds,
-    })
-
-    const summaries = new Map<string, UsageSummary>()
-    for (const row of result.rows) {
-      const threadId = String(row.thread_id)
-      summaries.set(threadId, {
-        totalTokens: toNumber(row.total_tokens),
-        inputTokens: toNumber(row.input_tokens),
-        outputTokens: toNumber(row.output_tokens),
-        reasoningTokens: toNumber(row.reasoning_tokens),
-        cachedInputTokens: toNumber(row.cached_input_tokens),
-      })
-    }
-
-    return summaries
-  }
-
   async count(): Promise<number> {
     try {
       const result = await this.client.execute(`SELECT COUNT(*) as count FROM ${TABLE_THREADS}`)
@@ -179,21 +155,43 @@ export class ThreadResource extends BaseResource {
 
   async find(_filters: unknown, options: unknown): Promise<BaseRecord[]> {
     try {
-      const optionsObj = options as { limit?: number; offset?: number } | undefined
-      const limit = optionsObj?.limit ?? 10
-      const offset = optionsObj?.offset ?? 0
+      const optionsObj = options as {
+        limit?: number
+        offset?: number
+        sort?: { sortBy?: string; direction?: 'asc' | 'desc' }
+      } | undefined
+      const limit = toPositiveInt(optionsObj?.limit, 10)
+      const offset = toPositiveInt(optionsObj?.offset, 0)
+      const sortBy = typeof optionsObj?.sort?.sortBy === 'string' ? optionsObj?.sort?.sortBy : 'createdAt'
+      const sortColumn = isSortableProperty(sortBy) ? SORT_COLUMN_BY_PROPERTY[sortBy] : SORT_COLUMN_BY_PROPERTY.createdAt
+      const sortDirection = toSortDirection(optionsObj?.sort?.direction)
 
       const result = await this.client.execute({
-        sql: `SELECT * FROM ${TABLE_THREADS} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
+        sql: `
+          SELECT
+            t.id,
+            t.resourceId,
+            t.title,
+            t.metadata,
+            t.createdAt,
+            t.updatedAt,
+            COALESCE(SUM(u.total_tokens), 0) AS totalTokens,
+            COALESCE(SUM(u.input_tokens), 0) AS inputTokens,
+            COALESCE(SUM(u.output_tokens), 0) AS outputTokens,
+            COALESCE(SUM(u.reasoning_tokens), 0) AS reasoningTokens,
+            COALESCE(SUM(u.cached_input_tokens), 0) AS cachedInputTokens
+          FROM ${TABLE_THREADS} t
+          LEFT JOIN usage_stats u ON u.thread_id = t.id
+          GROUP BY t.id, t.resourceId, t.title, t.metadata, t.createdAt, t.updatedAt
+          ORDER BY ${sortColumn} ${sortDirection}
+          LIMIT ? OFFSET ?
+        `,
         args: [limit, offset],
       })
 
       if (result.rows.length === 0) {
         return []
       }
-
-      const threadIds = result.rows.map(row => String(row.id))
-      const usageSummaries = await this.fetchUsageSummaries(threadIds)
 
       const threads: Thread[] = result.rows.map((row) => ({
         id: String(row.id),
@@ -202,7 +200,11 @@ export class ThreadResource extends BaseResource {
         metadata: typeof row.metadata === 'string' && row.metadata !== '' ? String(row.metadata) : null,
         createdAt: String(row.createdAt),
         updatedAt: String(row.updatedAt),
-        ...(usageSummaries.get(String(row.id)) ?? EMPTY_USAGE_SUMMARY),
+        totalTokens: toNumber(row.totalTokens),
+        inputTokens: toNumber(row.inputTokens),
+        outputTokens: toNumber(row.outputTokens),
+        reasoningTokens: toNumber(row.reasoningTokens),
+        cachedInputTokens: toNumber(row.cachedInputTokens),
       }))
 
       return threads.map(thread => new ThreadRecord(thread, this))
@@ -215,7 +217,24 @@ export class ThreadResource extends BaseResource {
   async findOne(id: string): Promise<BaseRecord | null> {
     try {
       const result = await this.client.execute({
-        sql: `SELECT * FROM ${TABLE_THREADS} WHERE id = ?`,
+        sql: `
+          SELECT
+            t.id,
+            t.resourceId,
+            t.title,
+            t.metadata,
+            t.createdAt,
+            t.updatedAt,
+            COALESCE(SUM(u.total_tokens), 0) AS totalTokens,
+            COALESCE(SUM(u.input_tokens), 0) AS inputTokens,
+            COALESCE(SUM(u.output_tokens), 0) AS outputTokens,
+            COALESCE(SUM(u.reasoning_tokens), 0) AS reasoningTokens,
+            COALESCE(SUM(u.cached_input_tokens), 0) AS cachedInputTokens
+          FROM ${TABLE_THREADS} t
+          LEFT JOIN usage_stats u ON u.thread_id = t.id
+          WHERE t.id = ?
+          GROUP BY t.id, t.resourceId, t.title, t.metadata, t.createdAt, t.updatedAt
+        `,
         args: [id],
       })
 
@@ -224,7 +243,6 @@ export class ThreadResource extends BaseResource {
       }
 
       const row = result.rows[0]
-      const usageSummaries = await this.fetchUsageSummaries([String(row.id)])
       const thread: Thread = {
         id: String(row.id),
         resourceId: String(row.resourceId),
@@ -232,7 +250,11 @@ export class ThreadResource extends BaseResource {
         metadata: typeof row.metadata === 'string' && row.metadata !== '' ? String(row.metadata) : null,
         createdAt: String(row.createdAt),
         updatedAt: String(row.updatedAt),
-        ...(usageSummaries.get(String(row.id)) ?? EMPTY_USAGE_SUMMARY),
+        totalTokens: toNumber(row.totalTokens),
+        inputTokens: toNumber(row.inputTokens),
+        outputTokens: toNumber(row.outputTokens),
+        reasoningTokens: toNumber(row.reasoningTokens),
+        cachedInputTokens: toNumber(row.cachedInputTokens),
       }
 
       return new ThreadRecord(thread, this)

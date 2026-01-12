@@ -11,6 +11,7 @@ The admin UI lacked visibility into token usage at both the thread and message l
 - Expose per-message usage for assistant messages, showing totals in list views and full usage details in show views.
 
 ## Design Decisions
+- Thread usage is loaded with a single query that joins usage_stats for aggregation and sorting.
 - Message usage is matched to assistant messages by chronological order within a thread.
 - Non-assistant messages show empty usage fields.
 - Usage retrieval failures fall back to showing messages without usage rather than failing the view.
