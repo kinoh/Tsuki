@@ -9,7 +9,7 @@ services:
       MEMGRAPH_URI: bolt://memgraph:7687
       SANDBOX_MCP_URL: http://sandbox:8000/mcp
     volumes:
-      - ..:/workspaces/tsuki:cached
+      - .:/workspaces/tsuki:cached
       - core-data:/data
       - sandbox-data:/memory:ro
     stdin_open: true
