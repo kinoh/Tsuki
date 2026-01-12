@@ -1,6 +1,6 @@
 services:
   core:
-    build: null
+    build: !reset null
     image: node:22-bullseye
     command: ["sleep", "infinity"]
     working_dir: /workspaces/tsuki/core
