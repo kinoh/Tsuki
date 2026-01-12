@@ -1,7 +1,7 @@
 import { MastraStorage } from '@mastra/core/storage'
 
 export interface LibSQLClient {
-  execute: (params: string | { sql: string; args: (string | number)[] }) => Promise<{
+  execute: (params: string | { sql: string; args: Array<string | number | null> }) => Promise<{
     rows: Array<Record<string, string | number>>
   }>
 }
