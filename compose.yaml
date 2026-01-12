@@ -22,12 +22,13 @@ services:
       PROMETHEUS_BASE_URL: ${PROMETHEUS_BASE_URL}
       PROMETHEUS_BASIC_AUTH_USERNAME: ${PROMETHEUS_BASIC_AUTH_USERNAME}
       PROMETHEUS_BASIC_AUTH_PASSWORD: ${PROMETHEUS_BASIC_AUTH_PASSWORD}
-      OPENAI_MODEL: gpt-4.1
+      OPENAI_MODEL: gpt-5.2
       AGENT_NAME: tsuki
       PERMANENT_USERS: kino
       ADMIN_JS_TMP_DIR: /tmp/.adminjs
     volumes:
       - core-data:/data
+      - sandbox-data:/memory:ro
     ports:
       - "2953:2953"
     depends_on:
@@ -81,11 +82,11 @@ services:
       context: .
       dockerfile: docker/sandbox/Dockerfile
     environment:
-      MCP_EXEC_MAX_OUTPUT_BYTES: "40000"
+      MCP_EXEC_MAX_OUTPUT_BYTES: "1000"
       MCP_HTTP_BIND: "0.0.0.0:8000"
       MCP_HTTP_PATH: "/mcp"
     volumes:
-      - sandbox-work:/work
+      - sandbox-data:/memory
     ports:
       - "8000:8000"
     restart: always
@@ -111,4 +112,4 @@ services:
 volumes:
   core-data:
   memgraph-data:
-  sandbox-work:
+  sandbox-data:

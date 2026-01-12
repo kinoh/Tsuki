@@ -1,0 +1,56 @@
+version: '3'
+
+dotenv: ['.env', 'core/.env']
+
+env:
+  GIT_HASH:
+    sh: git rev-parse HEAD
+  DOCKER_HOST: ""
+
+vars:
+  DOCKER_COMPOSE: docker compose -f compose.yaml -f compose.dev.yaml
+
+tasks:
+  local-reset:
+    desc: Reset local data
+    cmds:
+      - task -t Taskfile.yaml sandbox/restore/latest
+      - task -t Taskfile.yaml memgraph/restore/latest
+      - task -t core/Taskfile.yaml reset-data
+  memgraph/restore/latest:
+    desc: Restore latest memgraph database
+    vars:
+      BACKUP_FILE_NAME:
+        sh: 'ls -t ${BACKUP_DIR:-./backup}/memgraph | head -1'
+    cmds:
+      - task memgraph/restore/{{.BACKUP_FILE_NAME}}
+  memgraph/restore/*:
+    desc: Restore memgraph database
+    vars:
+      BACKUP_DIR: ${BACKUP_DIR:-./backup}/memgraph
+      BACKUP_FILE_NAME: '{{index .MATCH 0}}'
+    cmds:
+      - '{{.DOCKER_COMPOSE}} cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}'
+      - '{{.DOCKER_COMPOSE}} exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}'
+      - 'echo "RECOVER SNAPSHOT ''/data/snapshots/{{.BACKUP_FILE_NAME}}'' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole'
+  memgraph/local-clean:
+    desc: Reset local memgraph database
+    cmds:
+      - 'echo "MATCH (n) DETACH DELETE n;" | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole'
+  sandbox/restore/latest:
+    desc: Restore latest sandbox data
+    vars:
+      BACKUP_FILE_PATH:
+        sh: 'find ./backup -name "tsuki-sandbox-backup-*.tar.gz" | sort | tail -1'
+    cmds:
+      - task sandbox/restore/{{.BACKUP_FILE_PATH}}
+  sandbox/restore/*:
+    desc: Restore sandbox data
+    vars:
+      BACKUP_FILE_PATH: '{{index .MATCH 0}}'
+    cmds:
+      - '{{.DOCKER_COMPOSE}} exec sandbox rm -rf /memory/*'
+      - mkdir -p /tmp/tsuki-backup-sandbox
+      - tar xzf {{.BACKUP_FILE_PATH}} -C /tmp/tsuki-backup-sandbox
+      - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-sandbox/. sandbox:/memory'
+      - rm -rf /tmp/tsuki-backup-sandbox

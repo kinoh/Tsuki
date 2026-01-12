@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   const usageStorage = new UsageStorage(agentMemory.storage)
 
   logger.info('Creating Agent Service')
-  using agentService = await createAgentService(config, agent, agentMemory, usageStorage)
+  using agentService = await createAgentService(config, agent, agentMemory, usageStorage, mastraInstance.mcp)
 
   let fcm: FCMManager | undefined = undefined
   if (config.isProduction) {

@@ -1,18 +1,14 @@
 services:
   core:
-    image: tsuki-dev
     build:
-      context: .devcontainer/
-      dockerfile: Dockerfile
-      args:
-        GIT_HASH: local
-    command: []
+      dockerfile: .devcontainer/Dockerfile
+    image: node:22-bookworm
+    command: ["sleep", "infinity"]
+    working_dir: /workspaces/tsuki/core
+    environment: !reset []
     volumes:
-      - .:/workspace:cached
-      - devcontainer-data:/home/vscode:cached
-    network_mode: host
+      - .:/workspaces/tsuki:cached
+      - core-data:/data
+      - sandbox-data:/memory:ro
     stdin_open: true
     tty: true
-
-volumes:
-  devcontainer-data:

@@ -10,6 +10,11 @@ interface Thread {
   metadata: string | null
   createdAt: string
   updatedAt: string
+  totalTokens: number
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cachedInputTokens: number
 }
 
 interface LibSQLClient {
@@ -18,10 +23,50 @@ interface LibSQLClient {
   }>
 }
 
+function toNumber(value: string | number | null | undefined): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
+function toPositiveInt(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+  return Math.max(0, Math.floor(parsed))
+}
+
+const SORT_COLUMN_BY_PROPERTY: Record<string, string> = {
+  id: 't.id',
+  resourceId: 't.resourceId',
+  title: 't.title',
+  createdAt: 't.createdAt',
+  updatedAt: 't.updatedAt',
+  totalTokens: 'totalTokens',
+  inputTokens: 'inputTokens',
+  outputTokens: 'outputTokens',
+  reasoningTokens: 'reasoningTokens',
+  cachedInputTokens: 'cachedInputTokens',
+}
+
+function isSortableProperty(propertyName: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SORT_COLUMN_BY_PROPERTY, propertyName)
+}
+
+function toSortDirection(value: unknown): 'asc' | 'desc' {
+  return value === 'asc' ? 'asc' : 'desc'
+}
+
 class ThreadProperty extends BaseProperty {
   constructor(
     private propertyName: string,
-    private propertyType: 'string' | 'datetime' | 'reference' = 'string',
+    private propertyType: 'string' | 'datetime' | 'reference' | 'number' = 'string',
   ) {
     super({ path: propertyName, type: propertyType })
   }
@@ -43,7 +88,7 @@ class ThreadProperty extends BaseProperty {
   }
 
   isSortable(): boolean {
-    return this.propertyName === 'id'
+    return isSortableProperty(this.propertyName)
   }
 
   isId(): boolean {
@@ -81,6 +126,11 @@ export class ThreadResource extends BaseResource {
       new ThreadProperty('title', 'string'),
       new ThreadProperty('createdAt', 'datetime'),
       new ThreadProperty('updatedAt', 'datetime'),
+      new ThreadProperty('totalTokens', 'number'),
+      new ThreadProperty('inputTokens', 'number'),
+      new ThreadProperty('outputTokens', 'number'),
+      new ThreadProperty('reasoningTokens', 'number'),
+      new ThreadProperty('cachedInputTokens', 'number'),
     ]
   }
 
@@ -105,12 +155,37 @@ export class ThreadResource extends BaseResource {
 
   async find(_filters: unknown, options: unknown): Promise<BaseRecord[]> {
     try {
-      const optionsObj = options as { limit?: number; offset?: number } | undefined
-      const limit = optionsObj?.limit ?? 10
-      const offset = optionsObj?.offset ?? 0
+      const optionsObj = options as {
+        limit?: number
+        offset?: number
+        sort?: { sortBy?: string; direction?: 'asc' | 'desc' }
+      } | undefined
+      const limit = toPositiveInt(optionsObj?.limit, 10)
+      const offset = toPositiveInt(optionsObj?.offset, 0)
+      const sortBy = typeof optionsObj?.sort?.sortBy === 'string' ? optionsObj?.sort?.sortBy : 'createdAt'
+      const sortColumn = isSortableProperty(sortBy) ? SORT_COLUMN_BY_PROPERTY[sortBy] : SORT_COLUMN_BY_PROPERTY.createdAt
+      const sortDirection = toSortDirection(optionsObj?.sort?.direction)
 
       const result = await this.client.execute({
-        sql: `SELECT * FROM ${TABLE_THREADS} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
+        sql: `
+          SELECT
+            t.id,
+            t.resourceId,
+            t.title,
+            t.metadata,
+            t.createdAt,
+            t.updatedAt,
+            COALESCE(SUM(u.total_tokens), 0) AS totalTokens,
+            COALESCE(SUM(u.input_tokens), 0) AS inputTokens,
+            COALESCE(SUM(u.output_tokens), 0) AS outputTokens,
+            COALESCE(SUM(u.reasoning_tokens), 0) AS reasoningTokens,
+            COALESCE(SUM(u.cached_input_tokens), 0) AS cachedInputTokens
+          FROM ${TABLE_THREADS} t
+          LEFT JOIN usage_stats u ON u.thread_id = t.id
+          GROUP BY t.id, t.resourceId, t.title, t.metadata, t.createdAt, t.updatedAt
+          ORDER BY ${sortColumn} ${sortDirection}
+          LIMIT ? OFFSET ?
+        `,
         args: [limit, offset],
       })
 
@@ -125,6 +200,11 @@ export class ThreadResource extends BaseResource {
         metadata: typeof row.metadata === 'string' && row.metadata !== '' ? String(row.metadata) : null,
         createdAt: String(row.createdAt),
         updatedAt: String(row.updatedAt),
+        totalTokens: toNumber(row.totalTokens),
+        inputTokens: toNumber(row.inputTokens),
+        outputTokens: toNumber(row.outputTokens),
+        reasoningTokens: toNumber(row.reasoningTokens),
+        cachedInputTokens: toNumber(row.cachedInputTokens),
       }))
 
       return threads.map(thread => new ThreadRecord(thread, this))
@@ -137,7 +217,24 @@ export class ThreadResource extends BaseResource {
   async findOne(id: string): Promise<BaseRecord | null> {
     try {
       const result = await this.client.execute({
-        sql: `SELECT * FROM ${TABLE_THREADS} WHERE id = ?`,
+        sql: `
+          SELECT
+            t.id,
+            t.resourceId,
+            t.title,
+            t.metadata,
+            t.createdAt,
+            t.updatedAt,
+            COALESCE(SUM(u.total_tokens), 0) AS totalTokens,
+            COALESCE(SUM(u.input_tokens), 0) AS inputTokens,
+            COALESCE(SUM(u.output_tokens), 0) AS outputTokens,
+            COALESCE(SUM(u.reasoning_tokens), 0) AS reasoningTokens,
+            COALESCE(SUM(u.cached_input_tokens), 0) AS cachedInputTokens
+          FROM ${TABLE_THREADS} t
+          LEFT JOIN usage_stats u ON u.thread_id = t.id
+          WHERE t.id = ?
+          GROUP BY t.id, t.resourceId, t.title, t.metadata, t.createdAt, t.updatedAt
+        `,
         args: [id],
       })
 
@@ -153,6 +250,11 @@ export class ThreadResource extends BaseResource {
         metadata: typeof row.metadata === 'string' && row.metadata !== '' ? String(row.metadata) : null,
         createdAt: String(row.createdAt),
         updatedAt: String(row.updatedAt),
+        totalTokens: toNumber(row.totalTokens),
+        inputTokens: toNumber(row.inputTokens),
+        outputTokens: toNumber(row.outputTokens),
+        reasoningTokens: toNumber(row.reasoningTokens),
+        cachedInputTokens: toNumber(row.cachedInputTokens),
       }
 
       return new ThreadRecord(thread, this)

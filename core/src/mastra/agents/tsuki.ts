@@ -19,13 +19,13 @@ export function summon(dataDir: string, openAiModel: string, tools: ToolsInput):
         return 'You are a helpful chatting agent.'
       }
 
-      // Append user-specific memory if available
-      const memory = requestContext.get<string, string>('memory')
-      if (memory) {
-        return `${instructions}\n\n<memory>\n${memory}\n</memory>`
+      const personality = requestContext.get<string, string>('personality')
+      if (!personality) {
+        logger.error('No personality, no spirit')
+        throw new Error('No personality found')
       }
 
-      return instructions
+      return `${personality}\n\n${instructions}\n`
     },
     model: openai(openAiModel),
     memory: new Memory({

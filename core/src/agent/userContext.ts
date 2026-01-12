@@ -9,7 +9,7 @@ export interface UserContext {
 
   getCurrentThread(): Promise<string>
   getMessageHistory(): Promise<string[]>
-  loadMemory(): Promise<string>
+  loadPersonality(): Promise<string>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getToolsets(): Promise<Record<string, Record<string, any>>>
   getRequestContext(): RequestContext<AgentRuntimeContext>

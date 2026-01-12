@@ -1,6 +1,6 @@
 import type { Agent as MastraAgent } from '@mastra/core/agent'
 import { MessageInput, MCPNotificationResourceUpdated } from './activeuser'
-import { ResponseMessage, extractTextParts, type MessageContentPart } from './message'
+import { ResponseMessage, UserTextMessage, extractTextParts, type MessageContentPart } from './message'
 import { UsageStorage } from '../storage/usage'
 import { UserContext } from './userContext'
 import { ConfigService } from '../configService'
@@ -27,7 +27,24 @@ export class MastraResponder implements Responder {
     > = []
 
     if (input.text?.trim()) {
-      contentParts.push({ type: 'text', text: input.text })
+      const t = new Date()
+      const timestamp = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: this.config.timeZone,
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }).format(t)
+
+      const textData: UserTextMessage = {
+        timestamp,
+        user: input.userId,
+        text: input.text,
+      }
+      contentParts.push({ type: 'text', text: JSON.stringify(textData) })
     }
 
     if (input.images && input.images.length > 0) {
@@ -41,9 +58,9 @@ export class MastraResponder implements Responder {
     }
 
     const threadId = await ctx.getCurrentThread()
-    const memory = await ctx.loadMemory()
+    const personality = await ctx.loadPersonality()
     const requestContext = ctx.getRequestContext()
-    requestContext.set('memory', memory)
+    requestContext.set('personality', personality)
     const toolsets = await ctx.getToolsets()
 
     const response = await this.agent.generate(
@@ -59,7 +76,7 @@ export class MastraResponder implements Responder {
       },
     )
 
-    await this.usage.recordUsage(response, threadId, ctx.userId, this.agent.name)
+    await this.usage.recordUsage(response, threadId, input.userId, this.agent.name)
 
     const uiMessages = (response as { response?: { uiMessages?: unknown } }).response?.uiMessages
     const uiChat = buildChatFromUiMessages(uiMessages, this.config.traceTools)

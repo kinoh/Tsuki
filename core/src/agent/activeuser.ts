@@ -1,3 +1,4 @@
+import { promises as fs } from 'fs'
 import { getUserSpecificMCP, MCPAuthHandler, MCPClient } from '../mastra/mcp'
 import { ResponseMessage, createResponseMessage } from './message'
 import { ConversationManager } from './conversation'
@@ -9,9 +10,14 @@ import { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ConfigService } from '../configService'
 import { logger } from '../logger'
 
+const PROMPT_MEMORY_PATH = '/memory/prompts/personality.md'
+const PROMPT_MEMORY_MAX_LENGTH = 4 * 1024
+
 export type AgentRuntimeContext = {
+  /** The personality of the agent */
+  personality: string
+  /** Describe the agent's response format */
   instructions: string
-  memory?: string
 }
 
 export type MessageChannel = 'websocket' | 'fcm' | 'internal'
@@ -37,6 +43,32 @@ export interface MCPNotificationResourceUpdated {
 
 export interface MCPNotificationHandler {
   handleSchedulerNotification(userId: string, notification: MCPNotificationResourceUpdated): Promise<void>
+}
+
+async function loadPromptMemory(): Promise<string> {
+  let buffer: Buffer
+  try {
+    buffer = await fs.readFile(PROMPT_MEMORY_PATH)
+  } catch (err) {
+    logger.warn({ err, path: PROMPT_MEMORY_PATH }, 'Failed to read prompt memory file')
+    return ''
+  }
+
+  const stdout = buffer.toString('utf-8').replace(/\r\n/g, '\n')
+  const newlineIndex = stdout.indexOf('\n')
+  const size = buffer.length
+
+  let content = stdout.slice(newlineIndex + 1).trimEnd()
+  const truncated = size > PROMPT_MEMORY_MAX_LENGTH
+  const warning = truncated
+    ? `WARNING: truncated to ${PROMPT_MEMORY_MAX_LENGTH} bytes\n`
+    : ''
+
+  if (truncated) {
+    content = content.slice(0, PROMPT_MEMORY_MAX_LENGTH)
+  }
+
+  return `${warning}${content}`
 }
 
 export class ActiveUser implements UserContext {
@@ -72,15 +104,9 @@ export class ActiveUser implements UserContext {
     return this.mcp
   }
 
-  async loadMemory(): Promise<string> {
+  async loadPersonality(): Promise<string> {
     try {
-      const response = await this.mcp?.callTool(
-        'structured-memory',
-        'read_document',
-        {},
-      ) as { content: { text: string }[] } | undefined
-
-      return response?.content[0]?.text ?? ''
+      return await loadPromptMemory()
     } catch (err) {
       logger.warn({ err, userId: this.userId }, 'Failed to load memory')
       return ''

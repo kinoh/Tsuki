@@ -5,17 +5,23 @@ import { ConversationManager } from './conversation'
 import { UsageStorage } from '../storage/usage'
 import { loadPromptFromEnv } from './prompt'
 import { ActiveUser, AgentRuntimeContext, MessageChannel, MessageInput, MessageSender } from './activeuser'
-import { MCPAuthHandler } from '../mastra/mcp'
+import { MCPAuthHandler, MCPClient } from '../mastra/mcp'
 import { FCMManager } from '../server/fcm'
 import { MastraResponder, Responder } from './mastraResponder'
 import { AIRouter } from './aiRouter'
 import { ConfigService } from '../configService'
 import { logger } from '../logger'
 
-export async function createAgentService(config: ConfigService, agent: Agent, memory: MastraMemory, usageStorage: UsageStorage): Promise<AgentService> {
+export async function createAgentService(
+  config: ConfigService,
+  agent: Agent,
+  memory: MastraMemory,
+  usageStorage: UsageStorage,
+  mcp: MCPClient,
+): Promise<AgentService> {
   const instructions = await loadPromptFromEnv('src/prompts/initial.txt.encrypted')
 
-  return new AgentService(config, agent, memory, usageStorage, instructions)
+  return new AgentService(config, agent, memory, usageStorage, instructions, mcp)
 }
 
 export class AgentService {
@@ -29,6 +35,7 @@ export class AgentService {
     private memory: MastraMemory,
     private usageStorage: UsageStorage,
     private commonInstructions: string,
+    private readonly mcp: MCPClient,
   ) {
     this.responder = new MastraResponder(agent, usageStorage, config)
   }

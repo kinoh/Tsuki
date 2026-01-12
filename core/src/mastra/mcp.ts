@@ -46,12 +46,12 @@ export function getUniversalMCP(config: ConfigService): MCPClient {
         command: './bin/concept-graph',
         args: [],
         env: {
-          MEMGRAPH_URI: config.isProduction ? 'bolt://memgraph:7687' : 'bolt://localhost:7687',
+          MEMGRAPH_URI: config.memgraphUri,
           TZ: process.env.TZ ?? 'Asia/Tokyo',
         },
       },
       shell_exec: {
-        url: new URL(config.isProduction ? 'http://sandbox:8000/mcp' : 'http://localhost:8000/mcp'),
+        url: new URL(config.sandboxMcpUrl),
       },
       rss: {
         command: './bin/rss',
@@ -89,14 +89,6 @@ export function getUserSpecificMCP(config: ConfigService, clientId: string): MCP
   return new MCPClient({
     id: clientId,
     servers: {
-      'structured-memory': {
-        command: './bin/structured-memory',
-        args: [],
-        env: {
-          DATA_DIR: `${config.dataDir}/${clientId}__structured_memory`,
-          ROOT_TEMPLATE: '# メモ帳\n',
-        },
-      },
       scheduler: {
         command: './bin/scheduler',
         args: [],

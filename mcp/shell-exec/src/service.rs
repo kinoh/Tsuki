@@ -196,12 +196,10 @@ impl ShellExecService {
                 )
             })??;
 
-        let mut output_truncated = stdout_truncated || stderr_truncated;
         if stdout_bytes.len() + stderr_bytes.len() > max_output_bytes {
             let allowed = max_output_bytes.saturating_sub(stdout_bytes.len());
             if stderr_bytes.len() > allowed {
                 stderr_bytes.truncate(allowed);
-                output_truncated = true;
             }
         }
 
@@ -212,7 +210,6 @@ impl ShellExecService {
             "timed_out": timed_out,
             "stdout_truncated": stdout_truncated,
             "stderr_truncated": stderr_truncated,
-            "output_truncated": output_truncated,
             "elapsed_ms": elapsed_ms,
         });
 

@@ -7,14 +7,20 @@ export class ConfigService {
   public readonly env: string
   public readonly isProduction: boolean
   public readonly serverPort: number
+  public readonly memgraphUri: string
+  public readonly sandboxMcpUrl: string
   public readonly traceTools: boolean
+  public readonly timeZone: string
 
   constructor() {
     this.env = process.env.ENV ?? process.env.NODE_ENV ?? 'development'
     this.isProduction = this.env === 'production'
+    this.memgraphUri = process.env.MEMGRAPH_URI ?? 'bolt://memgraph:7687'
+    this.sandboxMcpUrl = process.env.SANDBOX_MCP_URL ?? 'http://sandbox:8000/mcp'
     this.dataDir = process.env.DATA_DIR ?? './data'
     this.serverPort = Number(process.env.PORT ?? 2953)
     this.traceTools = ConfigService.parseBooleanFlag(process.env.TRACE_TOOLS)
+    this.timeZone = process.env.TZ ?? 'Asia/Tokyo'
 
     this.initDataDir()
   }

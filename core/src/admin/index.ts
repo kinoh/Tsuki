@@ -4,11 +4,17 @@ import * as AdminJSExpress from '@adminjs/express'
 import type { MastraMemory } from '@mastra/core/memory'
 import { ThreadResource } from './resources/ThreadResource'
 import { MessageResource } from './resources/MessageResource'
-import { StructuredMemoryResource } from './resources/StructuredMemoryResource'
+import { ConceptGraphClient } from './resources/ConceptGraphClient'
+import { ConceptResource } from './resources/ConceptResource'
+import { EpisodeResource } from './resources/EpisodeResource'
+import { RelationResource } from './resources/RelationResource'
+import { SandboxMemoryResource } from './resources/SandboxMemoryResource'
 import { ConfigService } from '../configService'
 import { logger } from '../logger'
 
 export function createAdminJS(config: ConfigService, agentMemory: MastraMemory): AdminJS {
+  const conceptGraphClient = new ConceptGraphClient(config)
+
   const admin = new AdminJS({
     resources: [
       {
@@ -17,10 +23,21 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
           id: 'threads',
           navigation: {
             name: 'Thread Management',
-            icon: 'MessageSquare',
+            icon: 'MessageCircle',
           },
-          listProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
-          showProperties: ['id', 'resourceId', 'title', 'createdAt', 'updatedAt'],
+          listProperties: ['id', 'resourceId', 'title', 'totalTokens', 'createdAt', 'updatedAt'],
+          showProperties: [
+            'id',
+            'resourceId',
+            'title',
+            'inputTokens',
+            'outputTokens',
+            'totalTokens',
+            'reasoningTokens',
+            'cachedInputTokens',
+            'createdAt',
+            'updatedAt',
+          ],
           actions: {
             new: {
               isVisible: false,
@@ -61,14 +78,25 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
         },
       },
       {
-        resource: new MessageResource(config),
+        resource: new MessageResource(config, agentMemory),
         options: {
           id: 'messages',
           navigation: {
             name: 'Thread Management',
           },
-          listProperties: ['id', 'role', 'user', 'chat', 'timestamp'],
-          showProperties: ['id', 'role', 'user', 'chat', 'timestamp'],
+          listProperties: ['id', 'role', 'user', 'totalTokens', 'chat', 'timestamp'],
+          showProperties: [
+            'id',
+            'role',
+            'user',
+            'inputTokens',
+            'outputTokens',
+            'totalTokens',
+            'reasoningTokens',
+            'cachedInputTokens',
+            'chat',
+            'timestamp',
+          ],
           actions: {
             new: { isVisible: false },
             edit: { isVisible: false },
@@ -81,15 +109,15 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
         },
       },
       {
-        resource: new StructuredMemoryResource(config),
+        resource: new ConceptResource(conceptGraphClient),
         options: {
-          id: 'structured-memory',
+          id: 'concepts',
           navigation: {
-            name: 'Structured Memory',
-            icon: 'FileText',
+            name: 'Concept Graph',
+            icon: 'Share2',
           },
-          listProperties: ['id', 'filename', 'size', 'linkCount', 'modifiedAt'],
-          showProperties: ['id', 'filename', 'content', 'size', 'linkCount', 'modifiedAt'],
+          listProperties: ['name', 'valence', 'arousalLevel', 'accessedAt'],
+          showProperties: ['name', 'valence', 'arousalLevel', 'accessedAt'],
           actions: {
             new: {
               isVisible: false,
@@ -108,6 +136,69 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
               isVisible: true,
               isAccessible: true,
             },
+          },
+          sort: {
+            sortBy: 'accessedAt',
+            direction: 'desc' as const,
+          },
+        },
+      },
+      {
+        resource: new EpisodeResource(conceptGraphClient),
+        options: {
+          id: 'episodes',
+          navigation: {
+            name: 'Concept Graph',
+            icon: 'Share2',
+          },
+          listProperties: ['name', 'summary', 'valence', 'arousalLevel', 'accessedAt'],
+          showProperties: ['name', 'summary', 'valence', 'arousalLevel', 'accessedAt'],
+          actions: {
+            new: { isVisible: false },
+            edit: { isVisible: false },
+            delete: { isVisible: false },
+          },
+          sort: {
+            sortBy: 'accessedAt',
+            direction: 'desc' as const,
+          },
+        },
+      },
+      {
+        resource: new RelationResource(conceptGraphClient),
+        options: {
+          id: 'relations',
+          navigation: {
+            name: 'Concept Graph',
+            icon: 'Share2',
+          },
+          listProperties: ['from', 'to', 'type', 'weight'],
+          showProperties: ['from', 'to', 'type', 'weight'],
+          actions: {
+            new: { isVisible: false },
+            edit: { isVisible: false },
+            delete: { isVisible: false },
+          },
+          sort: {
+            sortBy: 'from',
+            direction: 'asc' as const,
+          },
+        },
+      },
+      {
+        resource: new SandboxMemoryResource(),
+        options: {
+          id: 'sandbox-memory',
+          navigation: {
+            name: 'Sandbox Memory',
+            icon: 'Box',
+          },
+          listProperties: ['path', 'size', 'modifiedAt'],
+          showProperties: ['path', 'size', 'modifiedAt', 'content'],
+          actions: {
+            new: { isVisible: false },
+            edit: { isVisible: false },
+            delete: { isVisible: false },
           },
           sort: {
             sortBy: 'modifiedAt',
@@ -129,7 +220,10 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
         en: {
           labels: {
             threads: 'Threads',
-            'structured-memory': 'Documents',
+            concepts: 'Concepts',
+            episodes: 'Episodes',
+            relations: 'Relations',
+            'sandbox-memory': 'Sandbox Files',
           },
           properties: {
             id: 'ID',
@@ -137,10 +231,23 @@ export function createAdminJS(config: ConfigService, agentMemory: MastraMemory):
             title: 'Title',
             createdAt: 'Created Date',
             updatedAt: 'Updated Date',
-            filename: 'Filename',
+            inputTokens: 'Input Tokens',
+            outputTokens: 'Output Tokens',
+            totalTokens: 'Total Tokens',
+            reasoningTokens: 'Reasoning Tokens',
+            cachedInputTokens: 'Cached Input Tokens',
+            name: 'Name',
+            summary: 'Summary',
+            valence: 'Valence',
+            arousalLevel: 'Arousal Level',
+            accessedAt: 'Accessed Date',
+            from: 'From',
+            to: 'To',
+            type: 'Type',
+            weight: 'Weight',
+            path: 'Path',
             content: 'Content',
             size: 'Size (bytes)',
-            linkCount: 'Link Count',
             modifiedAt: 'Modified Date',
           },
           messages: {

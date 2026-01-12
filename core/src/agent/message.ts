@@ -1,6 +1,13 @@
 import type { MastraDBMessage, MastraMessageContentV2 } from '@mastra/core/agent/message-list'
 import type { TextUIPart, ReasoningUIPart, ToolInvocationUIPart, SourceUIPart, FileUIPart, StepStartUIPart } from '@ai-sdk/ui-utils'
 
+// User message serialized as text part
+export interface UserTextMessage {
+  user: string
+  text: string
+  timestamp: string
+}
+
 export interface ResponseMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   user: string

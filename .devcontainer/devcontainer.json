@@ -1,6 +1,15 @@
 {
-	"name": "tsuki",
-	"workspaceFolder": "/workspace",
-    "dockerComposeFile": ["../compose.yaml", "./compose.yaml"],
-    "service": "core"
+  "name": "tsuki-core",
+  "workspaceFolder": "/workspaces/tsuki",
+  "dockerComposeFile": ["../compose.yaml", "../compose.dev.yaml", "./compose.yaml"],
+  "service": "core",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "node",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {}
+  },
+  "containerEnv": {
+    "NPM_CONFIG_PREFIX": "/home/node/.npm-global",
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/node/.npm-global/bin"
+  }
 }

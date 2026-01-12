@@ -1,4 +1,5 @@
 import { BaseResource, BaseProperty, BaseRecord, Filter } from 'adminjs'
+import type { MastraMemory } from '@mastra/core/memory'
 import fetch from 'node-fetch'
 import { logger } from '../../logger'
 import { ConfigService } from '../../configService'
@@ -19,12 +20,52 @@ interface ResponseMessage {
   user: string,
   chat: string[],
   timestamp: number,
+  inputTokens: number | null,
+  outputTokens: number | null,
+  totalTokens: number | null,
+  reasoningTokens: number | null,
+  cachedInputTokens: number | null,
+}
+
+type ApiMessage = Omit<ResponseMessage, keyof UsageEntry>
+
+interface UsageEntry {
+  inputTokens: number | null
+  outputTokens: number | null
+  totalTokens: number | null
+  reasoningTokens: number | null
+  cachedInputTokens: number | null
+}
+
+interface LibSQLClient {
+  execute: (query: string | { sql: string; args: (string | number)[] }) => Promise<{
+    rows: Array<Record<string, string | number>>
+  }>
+}
+
+const EMPTY_USAGE_ENTRY: UsageEntry = {
+  inputTokens: null,
+  outputTokens: null,
+  totalTokens: null,
+  reasoningTokens: null,
+  cachedInputTokens: null,
+}
+
+function toNumberOrNull(value: string | number | null | undefined): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
 }
 
 class MessageProperty extends BaseProperty {
   constructor(
     private propertyName: string,
-    private propertyType: 'string' | 'datetime' | 'richtext' = 'string',
+    private propertyType: 'string' | 'datetime' | 'richtext' | 'number' = 'string',
   ) {
     super({ path: propertyName, type: propertyType })
   }
@@ -72,9 +113,17 @@ class MessageRecord extends BaseRecord {
 export class MessageResource extends BaseResource {
   private readonly apiBaseUrl: string
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly agentMemory: MastraMemory,
+  ) {
     super()
     this.apiBaseUrl = `http://localhost:${this.config.serverPort}`
+  }
+
+  private get client(): LibSQLClient {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+    return (this.agentMemory.storage as any).client as LibSQLClient
   }
 
   id(): string {
@@ -88,6 +137,11 @@ export class MessageResource extends BaseResource {
       new MessageProperty('user', 'string'),
       new MessageProperty('chat', 'string'),
       new MessageProperty('timestamp', 'datetime'),
+      new MessageProperty('totalTokens', 'number'),
+      new MessageProperty('inputTokens', 'number'),
+      new MessageProperty('outputTokens', 'number'),
+      new MessageProperty('reasoningTokens', 'number'),
+      new MessageProperty('cachedInputTokens', 'number'),
     ]
   }
 
@@ -114,17 +168,60 @@ export class MessageResource extends BaseResource {
         return []
       }
 
-      const data = await response.json() as { messages: ResponseMessage[] }
+      const data = await response.json() as { messages: ApiMessage[] }
+      let usageEntries: UsageEntry[] = []
+      try {
+        usageEntries = await this.fetchUsageEntries(threadId)
+      } catch (err) {
+        logger.error({ err, threadId }, 'Error fetching usage entries')
+      }
+      let usageIndex = 0
 
       for (let i = 0; i < data.messages.length; i++) {
-        data.messages[i].id = `${threadId}-${i.toString().padStart(3, '0')}`
+        const baseMessage = data.messages[i]
+        const messageWithId = {
+          ...baseMessage,
+          id: `${threadId}-${i.toString().padStart(3, '0')}`,
+        }
+        if (baseMessage.role === 'assistant') {
+          const usage = usageEntries[usageIndex] ?? EMPTY_USAGE_ENTRY
+          data.messages[i] = { ...messageWithId, ...usage }
+          usageIndex += 1
+        } else {
+          data.messages[i] = { ...messageWithId, ...EMPTY_USAGE_ENTRY }
+        }
       }
 
-      return data.messages
+      return data.messages as ResponseMessage[]
     } catch (err) {
       logger.error({ err, threadId }, 'Error fetching messages from API')
       return []
     }
+  }
+
+  private async fetchUsageEntries(threadId: string): Promise<UsageEntry[]> {
+    const result = await this.client.execute({
+      sql: `
+        SELECT
+          input_tokens,
+          output_tokens,
+          total_tokens,
+          reasoning_tokens,
+          cached_input_tokens
+        FROM usage_stats
+        WHERE thread_id = ?
+        ORDER BY created_at ASC
+      `,
+      args: [threadId],
+    })
+
+    return result.rows.map(row => ({
+      inputTokens: toNumberOrNull(row.input_tokens),
+      outputTokens: toNumberOrNull(row.output_tokens),
+      totalTokens: toNumberOrNull(row.total_tokens),
+      reasoningTokens: toNumberOrNull(row.reasoning_tokens),
+      cachedInputTokens: toNumberOrNull(row.cached_input_tokens),
+    }))
   }
 
   async count(filter: Filter): Promise<number> {
@@ -160,7 +257,14 @@ export class MessageResource extends BaseResource {
     }
 
     const messages = await this.fetchMessages(threadId)
-    const message = messages[parseInt(messageId)]
+    const index = Number.parseInt(messageId, 10)
+    if (!Number.isFinite(index)) {
+      return null
+    }
+    if (index < 0 || index >= messages.length) {
+      return null
+    }
+    const message = messages[index]
 
     return new MessageRecord(message, this)
   }
