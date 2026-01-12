@@ -4,5 +4,6 @@
   "dockerComposeFile": ["../compose.yaml", "../compose.dev.yaml", "./compose.yaml"],
   "service": "core",
   "shutdownAction": "stopCompose",
-  "remoteUser": "node"
+  "remoteUser": "node",
+  "postCreateCommand": "npm -g i pnpm"
 }
