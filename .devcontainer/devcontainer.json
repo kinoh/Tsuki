@@ -5,8 +5,9 @@
   "service": "core",
   "shutdownAction": "stopCompose",
   "remoteUser": "node",
-  "postCreateCommand": "npm config set prefix \"$HOME/.npm-global\" && npm -g i pnpm",
-  "remoteEnv": {
-    "PATH": "${containerEnv:PATH}:${containerEnv:HOME}/.npm-global/bin"
+  "postCreateCommand": "npm -g i pnpm",
+  "containerEnv": {
+    "NPM_CONFIG_PREFIX": "/home/node/.npm-global",
+    "PATH": "${containerEnv:PATH}:/home/node/.npm-global/bin"
   }
 }

@@ -17,7 +17,7 @@ Switch the core devcontainer to a lightweight compose override that mounts the f
 - Use the stock `node:22-bullseye` image and `sleep infinity` to avoid rebuilds and keep the container focused on mounts/networking.
 - Keep compose networking (no host network) so service discovery uses `memgraph` and `sandbox` hostnames.
 - Introduce `MEMGRAPH_URI` and `SANDBOX_MCP_URL` as explicit overrides to remove `isProduction` branching for endpoints.
-- Install `pnpm` in the user prefix (`$HOME/.npm-global`) via `postCreateCommand` to avoid image rebuilds and avoid version pinning.
+- Install `pnpm` in the user prefix via `postCreateCommand` to avoid image rebuilds and avoid version pinning.
 
 ## Implementation Details
 - `.devcontainer/compose.yaml` overrides `core` with:
@@ -25,7 +25,7 @@ Switch the core devcontainer to a lightweight compose override that mounts the f
   - repo mount `.:/workspaces/tsuki` (compose paths resolve from repo root, so `..` was incorrect).
   - `core-data` and `sandbox-data` mounts preserved.
   - environment overrides for `NODE_ENV`, `MEMGRAPH_URI`, and `SANDBOX_MCP_URL`.
-- `.devcontainer/devcontainer.json` installs `pnpm` on container creation via `postCreateCommand` and extends `PATH` with `$HOME/.npm-global/bin`.
+- `.devcontainer/devcontainer.json` installs `pnpm` on container creation via `postCreateCommand`, sets `NPM_CONFIG_PREFIX=/home/node/.npm-global`, and extends `PATH` with `/home/node/.npm-global/bin`.
 - `ConfigService` now exposes `memgraphUri` and `sandboxMcpUrl`, used by the MCP client configuration.
 
 ## Future Considerations
