@@ -20,6 +20,7 @@ Extend the core AdminJS panel to remove structured-memory and add read-only view
 - Read prompt memory directly from `/memory` instead of using `shell_exec` to keep core independent of the sandbox tool.
 - Use `neo4j-driver` for Bolt access from the admin backend.
 - Truncate sandbox file content at 128 KB with a warning to avoid oversized admin payloads.
+- Encode sandbox file IDs with URL encoding to keep AdminJS routing stable when paths contain `/`.
 
 ## Implementation Details
 - Add a Bolt client (`neo4j-driver`) in core to query Memgraph using `MEMGRAPH_URI`, `MEMGRAPH_USER`, and `MEMGRAPH_PASSWORD`.
@@ -27,6 +28,7 @@ Extend the core AdminJS panel to remove structured-memory and add read-only view
   - Concept: name, valence, arousal_level, accessed_at.
   - Episode: name, summary, valence, arousal_level, accessed_at.
   - Relation: from, to, type, weight.
+  - Pagination parameters are normalized to integers before querying Memgraph.
 - Add a sandbox memory resource that:
   - Recursively lists files under `/memory`.
   - Shows file content, size, and modified time.

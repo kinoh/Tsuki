@@ -9,6 +9,14 @@ interface EpisodeEntry {
   accessedAt: Date
 }
 
+function toPositiveInt(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value), 10)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+  return Math.max(0, Math.floor(parsed))
+}
+
 class EpisodeProperty extends BaseProperty {
   constructor(
     private propertyName: string,
@@ -88,8 +96,8 @@ export class EpisodeResource extends BaseResource {
 
   async find(_filters: unknown, options: unknown): Promise<BaseRecord[]> {
     const optionsObj = options as { limit?: number; offset?: number; sort?: { sortBy?: string; direction?: 'asc' | 'desc' } } | undefined
-    const limit = optionsObj?.limit ?? 10
-    const offset = optionsObj?.offset ?? 0
+    const limit = toPositiveInt(optionsObj?.limit, 10)
+    const offset = toPositiveInt(optionsObj?.offset, 0)
     const sortBy = optionsObj?.sort?.sortBy ?? 'accessedAt'
     const direction = optionsObj?.sort?.direction ?? 'desc'
 

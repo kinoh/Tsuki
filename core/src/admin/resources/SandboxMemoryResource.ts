@@ -55,13 +55,25 @@ class SandboxMemoryRecord extends BaseRecord {
   }
 
   id(): string {
-    return this.entry.path
+    return encodeRecordId(this.entry.path)
   }
 }
 
 function toRelativePath(root: string, filePath: string): string {
   const relative = path.relative(root, filePath)
   return relative.split(path.sep).join('/')
+}
+
+function encodeRecordId(relativePath: string): string {
+  return encodeURIComponent(relativePath)
+}
+
+function decodeRecordId(id: string): string | null {
+  try {
+    return decodeURIComponent(id)
+  } catch {
+    return null
+  }
 }
 
 function resolveSandboxPath(root: string, relativePath: string): string | null {
@@ -197,7 +209,11 @@ export class SandboxMemoryResource extends BaseResource {
   }
 
   async findOne(id: string): Promise<BaseRecord | null> {
-    const resolved = resolveSandboxPath(this.root, id)
+    const decodedId = decodeRecordId(id)
+    if (!decodedId) {
+      return null
+    }
+    const resolved = resolveSandboxPath(this.root, decodedId)
     if (!resolved) {
       return null
     }
@@ -207,9 +223,9 @@ export class SandboxMemoryResource extends BaseResource {
       if (!stats.isFile()) {
         return null
       }
-      const content = await this.readContent(id)
+      const content = await this.readContent(decodedId)
       const entry: SandboxFileRecord = {
-        path: id,
+        path: decodedId,
         size: stats.size,
         modifiedAt: stats.mtime,
         content,
