@@ -19,3 +19,12 @@ tasks:
       - rm -rf ./data
       - task -t ../Taskfile.yaml local/clean-data
       - pnpm tsx ./tests/runner.ts ./tests/client/run.ts ./tests/client/scenarios/{{.SCENARIO}}.yaml
+  tts/demo:
+    desc: demonstrate TTS
+    cmds:
+      - |
+        curl -sS -X POST "http://localhost:{{.PORT}}/tts" \
+          -H "Authorization: {{.USER}}:{{.WEB_AUTH_TOKEN}}" \
+          -H "Content-Type: application/json" \
+          -d '{"message":"こんにちは♪聞こえますか～？"}' \
+          --output out.wav
