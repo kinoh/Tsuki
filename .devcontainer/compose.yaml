@@ -1,6 +1,7 @@
 services:
   core:
-    build: !reset null
+    build:
+      dockerfile: .devcontainer/Dockerfile
     image: node:22-bookworm
     command: ["sleep", "infinity"]
     working_dir: /workspaces/tsuki/core

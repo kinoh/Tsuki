@@ -5,7 +5,6 @@
   "service": "core",
   "shutdownAction": "stopCompose",
   "remoteUser": "node",
-  "postCreateCommand": "npm -g i pnpm",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {}
   },

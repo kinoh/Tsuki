@@ -3,7 +3,8 @@ FROM node:22 AS runtime
 RUN curl -sSLf -o /tmp/pnpm https://github.com/pnpm/pnpm/releases/download/v10.6.3/pnpm-linux-x64 \
     && chmod +x /tmp/pnpm \
     && ENV="/home/vscode/.bashrc" SHELL="/usr/bin/bash" /tmp/pnpm setup \
-    && rm /tmp/pnpm
+    && rm /tmp/pnpm \
+    && corepack enable
 
 RUN apt-get update \
     && apt-get -y install distro-info \
