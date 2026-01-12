@@ -149,7 +149,7 @@ export class SandboxMemoryResource extends BaseResource {
 
   private async readContent(relativePath: string): Promise<string> {
     const resolved = resolveSandboxPath(this.root, relativePath)
-    if (!resolved) {
+    if (resolved === null) {
       return ''
     }
 
@@ -215,11 +215,11 @@ export class SandboxMemoryResource extends BaseResource {
 
   async findOne(id: string): Promise<BaseRecord | null> {
     const decodedId = decodeRecordId(id)
-    if (!decodedId) {
+    if (decodedId === null || decodedId === '') {
       return null
     }
     const resolved = resolveSandboxPath(this.root, decodedId)
-    if (!resolved) {
+    if (resolved === null) {
       return null
     }
 

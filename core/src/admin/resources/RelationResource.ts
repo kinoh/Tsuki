@@ -1,5 +1,5 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
-import neo4j from 'neo4j-driver'
+import * as neo4j from 'neo4j-driver'
 import { ConceptGraphClient } from './ConceptGraphClient'
 
 interface RelationEntry {
@@ -97,6 +97,16 @@ function toPositiveInt(value: unknown, fallback: number): number {
   return Math.max(0, Math.floor(parsed))
 }
 
+function toText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value)
+  }
+  return ''
+}
+
 export class RelationResource extends BaseResource {
   constructor(private readonly client: ConceptGraphClient) {
     super()
@@ -162,9 +172,9 @@ export class RelationResource extends BaseResource {
     )
 
     const relations: RelationEntry[] = rows.map(row => {
-      const rawType = String(row.type ?? '')
-      const from = String(row.from ?? '')
-      const to = String(row.to ?? '')
+      const rawType = toText(row.type)
+      const from = toText(row.from)
+      const to = toText(row.to)
       return {
         id: encodeRelationId({ from, to, type: rawType }),
         from,
@@ -198,9 +208,9 @@ export class RelationResource extends BaseResource {
     }
 
     const row = rows[0]
-    const rawType = String(row.type ?? '')
-    const from = String(row.from ?? '')
-    const to = String(row.to ?? '')
+    const rawType = toText(row.type)
+    const from = toText(row.from)
+    const to = toText(row.to)
     const relation: RelationEntry = {
       id,
       from,

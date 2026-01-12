@@ -1,4 +1,4 @@
-import neo4j from 'neo4j-driver'
+import * as neo4j from 'neo4j-driver'
 import { ConfigService } from '../../configService'
 import { logger } from '../../logger'
 
@@ -10,7 +10,8 @@ export class ConceptGraphClient {
   constructor(config: ConfigService) {
     const user = process.env.MEMGRAPH_USER
     const password = process.env.MEMGRAPH_PASSWORD ?? ''
-    const auth = user && user.trim() !== '' ? neo4j.auth.basic(user, password) : undefined
+    const hasUser = typeof user === 'string' && user.trim() !== ''
+    const auth = hasUser ? neo4j.auth.basic(user, password) : undefined
     this.driver = neo4j.driver(config.memgraphUri, auth)
   }
 

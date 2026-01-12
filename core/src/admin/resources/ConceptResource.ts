@@ -1,5 +1,5 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
-import neo4j from 'neo4j-driver'
+import * as neo4j from 'neo4j-driver'
 import { ConceptGraphClient } from './ConceptGraphClient'
 
 interface ConceptEntry {
@@ -15,6 +15,16 @@ function toPositiveInt(value: unknown, fallback: number): number {
     return fallback
   }
   return Math.max(0, Math.floor(parsed))
+}
+
+function toText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value)
+  }
+  return ''
 }
 
 class ConceptProperty extends BaseProperty {
@@ -124,7 +134,7 @@ export class ConceptResource extends BaseResource {
     )
 
     const concepts: ConceptEntry[] = rows.map(row => ({
-      name: String(row.name ?? ''),
+      name: toText(row.name),
       valence: ConceptGraphClient.asNumber(row.valence),
       arousalLevel: ConceptGraphClient.asNumber(row.arousal_level),
       accessedAt: new Date(ConceptGraphClient.asNumber(row.accessed_at)),
@@ -150,7 +160,7 @@ export class ConceptResource extends BaseResource {
 
     const row = rows[0]
     const concept: ConceptEntry = {
-      name: String(row.name ?? ''),
+      name: toText(row.name),
       valence: ConceptGraphClient.asNumber(row.valence),
       arousalLevel: ConceptGraphClient.asNumber(row.arousal_level),
       accessedAt: new Date(ConceptGraphClient.asNumber(row.accessed_at)),

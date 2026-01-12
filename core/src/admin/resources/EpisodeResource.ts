@@ -1,5 +1,5 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
-import neo4j from 'neo4j-driver'
+import * as neo4j from 'neo4j-driver'
 import { ConceptGraphClient } from './ConceptGraphClient'
 
 interface EpisodeEntry {
@@ -16,6 +16,16 @@ function toPositiveInt(value: unknown, fallback: number): number {
     return fallback
   }
   return Math.max(0, Math.floor(parsed))
+}
+
+function toText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value)
+  }
+  return ''
 }
 
 class EpisodeProperty extends BaseProperty {
@@ -127,8 +137,8 @@ export class EpisodeResource extends BaseResource {
     )
 
     const episodes: EpisodeEntry[] = rows.map(row => ({
-      name: String(row.name ?? ''),
-      summary: String(row.summary ?? ''),
+      name: toText(row.name),
+      summary: toText(row.summary),
       valence: ConceptGraphClient.asNumber(row.valence),
       arousalLevel: ConceptGraphClient.asNumber(row.arousal_level),
       accessedAt: new Date(ConceptGraphClient.asNumber(row.accessed_at)),
@@ -155,8 +165,8 @@ export class EpisodeResource extends BaseResource {
 
     const row = rows[0]
     const episode: EpisodeEntry = {
-      name: String(row.name ?? ''),
-      summary: String(row.summary ?? ''),
+      name: toText(row.name),
+      summary: toText(row.summary),
       valence: ConceptGraphClient.asNumber(row.valence),
       arousalLevel: ConceptGraphClient.asNumber(row.arousal_level),
       accessedAt: new Date(ConceptGraphClient.asNumber(row.accessed_at)),
