@@ -84,7 +84,6 @@ export class AgentService {
       router,
       requestContext,
       this.agent.name,
-      this.mcp,
       null,
     )
     this.activeUsers.set(userId, newUser)

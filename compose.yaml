@@ -28,6 +28,7 @@ services:
       ADMIN_JS_TMP_DIR: /tmp/.adminjs
     volumes:
       - core-data:/data
+      - sandbox-data:/memory:ro
     ports:
       - "2953:2953"
     depends_on:

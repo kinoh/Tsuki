@@ -1,3 +1,4 @@
+import { promises as fs } from 'fs'
 import { getUserSpecificMCP, MCPAuthHandler, MCPClient } from '../mastra/mcp'
 import { ResponseMessage, createResponseMessage } from './message'
 import { ConversationManager } from './conversation'
@@ -11,7 +12,6 @@ import { logger } from '../logger'
 
 const PROMPT_MEMORY_PATH = '/memory/prompts/personality.md'
 const PROMPT_MEMORY_MAX_LENGTH = 4 * 1024
-const PROMPT_MEMORY_TIMEOUT_MS = 5_000
 
 export type AgentRuntimeContext = {
   /** The personality of the agent */
@@ -45,51 +45,28 @@ export interface MCPNotificationHandler {
   handleSchedulerNotification(userId: string, notification: MCPNotificationResourceUpdated): Promise<void>
 }
 
-type ShellExecResult = {
-  stdout: string
-  stderr: string
-  exit_code: number | null
-  timed_out: boolean
-  stdout_truncated: boolean
-  stderr_truncated: boolean
-  elapsed_ms: number
-}
-
-async function runShellCommand(mcp: MCPClient, command: string): Promise<ShellExecResult | null> {
-  const response = await mcp.callTool('shell_exec', 'execute', {
-    command,
-    timeout_ms: PROMPT_MEMORY_TIMEOUT_MS,
-  })
-  if (response === null || typeof response !== 'object') {
-    return null
-  }
-
-  const result = response as ShellExecResult
-  if (typeof result.stdout !== 'string' || typeof result.stderr !== 'string') {
-    return null
-  }
-
-  return result
-}
-
-async function loadPromptMemory(mcp: MCPClient): Promise<string> {
-  const command = `cat ${PROMPT_MEMORY_PATH}`
-  const result = await runShellCommand(mcp, command)
-  if (!result || result.exit_code !== 0) {
-    logger.warn({ stderr: result?.stderr, path: PROMPT_MEMORY_PATH }, 'Failed to read prompt memory file')
+async function loadPromptMemory(): Promise<string> {
+  let buffer: Buffer
+  try {
+    buffer = await fs.readFile(PROMPT_MEMORY_PATH)
+  } catch (err) {
+    logger.warn({ err, path: PROMPT_MEMORY_PATH }, 'Failed to read prompt memory file')
     return ''
   }
 
-  const stdout = result.stdout.replace(/\r\n/g, '\n')
+  const stdout = buffer.toString('utf-8').replace(/\r\n/g, '\n')
   const newlineIndex = stdout.indexOf('\n')
+  const size = buffer.length
 
-  const size = result.stdout.length
-
-  const content = stdout.slice(newlineIndex + 1).trimEnd()
+  let content = stdout.slice(newlineIndex + 1).trimEnd()
   const truncated = size > PROMPT_MEMORY_MAX_LENGTH
   const warning = truncated
     ? `WARNING: truncated to ${PROMPT_MEMORY_MAX_LENGTH} bytes\n`
     : ''
+
+  if (truncated) {
+    content = content.slice(0, PROMPT_MEMORY_MAX_LENGTH)
+  }
 
   return `${warning}${content}`
 }
@@ -106,7 +83,6 @@ export class ActiveUser implements UserContext {
     private router: MessageRouter,
     private requestContext: RequestContext<AgentRuntimeContext>,
     private readonly assistantName: string,
-    private readonly universalMcp: MCPClient,
     onAuth: MCPAuthHandler | null,
   ) {
     this.mcp = getUserSpecificMCP(config, userId)
@@ -130,7 +106,7 @@ export class ActiveUser implements UserContext {
 
   async loadPersonality(): Promise<string> {
     try {
-      return await loadPromptMemory(this.universalMcp)
+      return await loadPromptMemory()
     } catch (err) {
       logger.warn({ err, userId: this.userId }, 'Failed to load memory')
       return ''
