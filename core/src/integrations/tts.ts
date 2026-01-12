@@ -5,8 +5,6 @@ import { logger } from '../logger'
 type Accent = Record<string, unknown>
 type AudioQuery = Record<string, unknown>
 
-const JA_ACCENT_ENDPOINT = 'http://ja-accent:2954'
-const VOICEVOX_ENDPOINT = 'http://voicevox-engine:50021'
 const DEFAULT_VOICEVOX_SPEAKER = 10
 const DEFAULT_VOICEVOX_TIMEOUT_MS = 10000
 
@@ -67,7 +65,7 @@ export async function synthesizeTts(message: string, config: ConfigService): Pro
   const speaker = getVoicevoxSpeaker()
   const timeoutMs = getVoicevoxTimeoutMs()
 
-  const accentUrl = new URL('/accent', JA_ACCENT_ENDPOINT)
+  const accentUrl = new URL('/accent', config.jaAccentUrl)
   const accentResponse = await fetchWithTimeout(
     accentUrl.toString(),
     {
@@ -81,7 +79,7 @@ export async function synthesizeTts(message: string, config: ConfigService): Pro
 
   logger.info({ message, accent: accent.accent }, 'Generated accent from ja-accent')
 
-  const phrasesUrl = new URL('/accent_phrases', VOICEVOX_ENDPOINT)
+  const phrasesUrl = new URL('/accent_phrases', config.voicevoxUrl)
   phrasesUrl.searchParams.set('speaker', speaker.toString())
   phrasesUrl.searchParams.set('text', accent.accent as string)
   phrasesUrl.searchParams.set('is_kana', 'true')
@@ -107,7 +105,7 @@ export async function synthesizeTts(message: string, config: ConfigService): Pro
   query.outputSamplingRate = 24000
   query.outputStereo = false
 
-  const synthUrl = new URL('/synthesis', VOICEVOX_ENDPOINT)
+  const synthUrl = new URL('/synthesis', config.voicevoxUrl)
   synthUrl.searchParams.set('speaker', speaker.toString())
 
   const synthResponse = await fetchWithTimeout(
