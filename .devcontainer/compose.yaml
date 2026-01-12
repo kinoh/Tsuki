@@ -4,11 +4,7 @@ services:
     image: node:22-bookworm
     command: ["sleep", "infinity"]
     working_dir: /workspaces/tsuki/core
-    environment:
-      NODE_ENV: development
-      ENV: development
-      MEMGRAPH_URI: bolt://memgraph:7687
-      SANDBOX_MCP_URL: http://sandbox:8000/mcp
+    environment: !reset []
     volumes:
       - .:/workspaces/tsuki:cached
       - core-data:/data
