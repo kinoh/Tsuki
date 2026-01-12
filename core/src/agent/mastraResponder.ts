@@ -76,7 +76,7 @@ export class MastraResponder implements Responder {
       },
     )
 
-    await this.usage.recordUsage(response, threadId, ctx.userId, this.agent.name)
+    await this.usage.recordUsage(response, threadId, input.userId, this.agent.name)
 
     const uiMessages = (response as { response?: { uiMessages?: unknown } }).response?.uiMessages
     const uiChat = buildChatFromUiMessages(uiMessages, this.config.traceTools)
