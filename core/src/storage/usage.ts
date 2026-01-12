@@ -13,11 +13,10 @@ export interface UsageData {
   totalTokens: number | null
   reasoningTokens: number | null
   cachedInputTokens: number | null
-  raw: string | null
   createdAt: string
 }
 
-const USAGE_STATS_COLUMN_COUNT = 11
+const USAGE_STATS_COLUMN_COUNT = 10
 
 export interface MetricsSummary {
   totalUsage: number
@@ -69,7 +68,6 @@ export class UsageStorage {
         total_tokens INTEGER,
         reasoning_tokens INTEGER,
         cached_input_tokens INTEGER,
-        raw TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `)
@@ -91,7 +89,6 @@ export class UsageStorage {
           total_tokens,
           reasoning_tokens,
           cached_input_tokens,
-          raw,
           created_at
         )
         SELECT
@@ -102,7 +99,6 @@ export class UsageStorage {
           prompt_tokens,
           completion_tokens,
           total_tokens,
-          NULL,
           NULL,
           NULL,
           created_at
@@ -142,7 +138,6 @@ export class UsageStorage {
 
     const id = response.response.id
     const usage = response.usage
-    const raw = typeof usage.raw === 'undefined' ? null : JSON.stringify(usage.raw)
 
     try {
       await this.client.execute({
@@ -157,8 +152,7 @@ export class UsageStorage {
             total_tokens,
             reasoning_tokens,
             cached_input_tokens,
-            raw
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         args: [
           id,
@@ -170,7 +164,6 @@ export class UsageStorage {
           usage.totalTokens ?? null,
           usage.reasoningTokens ?? null,
           usage.cachedInputTokens ?? null,
-          raw,
         ],
       })
     } catch (err) {
