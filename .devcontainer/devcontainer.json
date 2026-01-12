@@ -8,6 +8,6 @@
   "postCreateCommand": "npm -g i pnpm",
   "containerEnv": {
     "NPM_CONFIG_PREFIX": "/home/node/.npm-global",
-    "PATH": "${containerEnv:PATH}:/home/node/.npm-global/bin"
+    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/node/.npm-global/bin"
   }
 }

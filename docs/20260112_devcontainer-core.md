@@ -25,7 +25,7 @@ Switch the core devcontainer to a lightweight compose override that mounts the f
   - repo mount `.:/workspaces/tsuki` (compose paths resolve from repo root, so `..` was incorrect).
   - `core-data` and `sandbox-data` mounts preserved.
   - environment overrides for `NODE_ENV`, `MEMGRAPH_URI`, and `SANDBOX_MCP_URL`.
-- `.devcontainer/devcontainer.json` installs `pnpm` on container creation via `postCreateCommand`, sets `NPM_CONFIG_PREFIX=/home/node/.npm-global`, and extends `PATH` with `/home/node/.npm-global/bin`.
+- `.devcontainer/devcontainer.json` installs `pnpm` on container creation via `postCreateCommand`, sets `NPM_CONFIG_PREFIX=/home/node/.npm-global`, and defines an explicit `PATH` that keeps `/usr/local/bin` while adding `/home/node/.npm-global/bin` to avoid losing the default entrypoint.
 - `ConfigService` now exposes `memgraphUri` and `sandboxMcpUrl`, used by the MCP client configuration.
 
 ## Future Considerations
