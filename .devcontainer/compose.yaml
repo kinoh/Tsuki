@@ -1,18 +1,16 @@
 services:
   core:
-    image: tsuki-dev
-    build:
-      context: .devcontainer/
-      dockerfile: Dockerfile
-      args:
-        GIT_HASH: local
-    command: []
+    image: node:22-bullseye
+    command: ["sleep", "infinity"]
+    working_dir: /workspaces/tsuki/core
+    environment:
+      NODE_ENV: development
+      ENV: development
+      MEMGRAPH_URI: bolt://memgraph:7687
+      SANDBOX_MCP_URL: http://sandbox:8000/mcp
     volumes:
-      - .:/workspace:cached
-      - devcontainer-data:/home/vscode:cached
-    network_mode: host
+      - ..:/workspaces/tsuki:cached
+      - core-data:/data
+      - sandbox-data:/memory:ro
     stdin_open: true
     tty: true
-
-volumes:
-  devcontainer-data:
