@@ -151,7 +151,7 @@ export class UsageStorage {
             output_tokens,
             total_tokens,
             reasoning_tokens,
-            cached_input_tokens,
+            cached_input_tokens
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         args: [
