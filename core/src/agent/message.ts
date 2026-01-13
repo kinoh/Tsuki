@@ -4,7 +4,7 @@ import type { TextUIPart, ReasoningUIPart, ToolInvocationUIPart, SourceUIPart, F
 // User message serialized as text part
 export interface UserTextMessage {
   user: string
-  text: string
+  content: string
   timestamp: string
 }
 

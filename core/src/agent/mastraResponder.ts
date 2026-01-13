@@ -42,7 +42,7 @@ export class MastraResponder implements Responder {
       const textData: UserTextMessage = {
         timestamp,
         user: input.userId,
-        text: input.text,
+        content: input.text,
       }
       contentParts.push({ type: 'text', text: JSON.stringify(textData) })
     }
