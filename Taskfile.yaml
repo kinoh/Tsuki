@@ -117,6 +117,7 @@ tasks:
     desc: Backup all data
     cmds:
       - task core/backup
+      - task sandbox/backup
       - task memgraph/backup
   core/backup:
     desc: Backup core data
