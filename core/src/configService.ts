@@ -20,7 +20,7 @@ export class ConfigService {
     this.memgraphUri = process.env.MEMGRAPH_URI ?? 'bolt://memgraph:7687'
     this.sandboxMcpUrl = process.env.SANDBOX_MCP_URL ?? 'http://sandbox:8000/mcp'
     this.jaAccentUrl = process.env.JA_ACCENT_URL ?? 'http://ja-accent:2954'
-    this.voicevoxUrl = process.env.VOICEVOX_URL ?? 'http://voicevox:50021'
+    this.voicevoxUrl = process.env.VOICEVOX_URL ?? 'http://voicevox-engine:50021'
     this.dataDir = process.env.DATA_DIR ?? './data'
     this.serverPort = Number(process.env.PORT ?? 2953)
     this.traceTools = ConfigService.parseBooleanFlag(process.env.TRACE_TOOLS)
