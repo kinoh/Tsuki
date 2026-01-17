@@ -19,43 +19,64 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Install Task
-      uses: arduino/setup-task@v2
-      with:
-        version: 3.x
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-    - name: Install SSH key
-      env:
-        PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      run: |
-        mkdir -p ~/.ssh
-        printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
-        chmod 700 ~/.ssh/id_rsa
-        eval $(ssh-agent -s)
-        ssh-add ~/.ssh/id_rsa
-        ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
-    - name: Build and deploy
-      env:
-        DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
-        PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
-        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-        FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
-        WEATHER_LOCATION_PATH: ${{ secrets.WEATHER_LOCATION_PATH }}
-        PROMETHEUS_BASE_URL: ${{ secrets.PROMETHEUS_BASE_URL }}
-        PROMETHEUS_BASIC_AUTH_USERNAME: ${{ secrets.PROMETHEUS_BASIC_AUTH_USERNAME }}
-        PROMETHEUS_BASIC_AUTH_PASSWORD: ${{ secrets.PROMETHEUS_BASIC_AUTH_PASSWORD }}
-      run: task deploy
-    - name: Wait for health
-      env:
-        DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
-        WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
-        PROMPT_PRIVATE_KEY: dummy
-        OPENAI_API_KEY: dummy
-        DIFY_SANDBOX_API_KEY: dummy
-        GCP_SERVICE_ACCOUNT_KEY: dummy
-        FCM_PROJECT_ID: dummy
-      run: task wait
-      timeout-minutes: 5
+      - name: Annotate deployment start
+        run: |
+            curl -X POST "${{ secrets.GRAFANA_HOST }}/api/annotations" \
+            -H "Authorization: Bearer ${{ secrets.GRAFANA_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "dashboardID": 2,
+              "time": '$(date +%s%3N)',
+              "tags": ["tsuki:deploy"],
+              "text": "deploy ${{ github.sha }} from ${{ github.ref }}"
+            }' > /tmp/response.json
+            echo "ANNOTATION_ID=$(jq -r '.id' /tmp/response.json)" >> $GITHUB_ENV
+      - uses: actions/checkout@v4
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install SSH key
+        env:
+          PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf %s "$PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 700 ~/.ssh/id_rsa
+          eval $(ssh-agent -s)
+          ssh-add ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2> /dev/null
+      - name: Build and deploy
+        env:
+          DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
+          PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          FCM_PROJECT_ID: ${{ secrets.FCM_PROJECT_ID }}
+          WEATHER_LOCATION_PATH: ${{ secrets.WEATHER_LOCATION_PATH }}
+          PROMETHEUS_BASE_URL: ${{ secrets.PROMETHEUS_BASE_URL }}
+          PROMETHEUS_BASIC_AUTH_USERNAME: ${{ secrets.PROMETHEUS_BASIC_AUTH_USERNAME }}
+          PROMETHEUS_BASIC_AUTH_PASSWORD: ${{ secrets.PROMETHEUS_BASIC_AUTH_PASSWORD }}
+        run: task deploy
+      - name: Wait for health
+        env:
+          DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
+          WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
+          PROMPT_PRIVATE_KEY: dummy
+          OPENAI_API_KEY: dummy
+          DIFY_SANDBOX_API_KEY: dummy
+          GCP_SERVICE_ACCOUNT_KEY: dummy
+          FCM_PROJECT_ID: dummy
+        run: task wait
+        timeout-minutes: 5
+      - name: Annotate deployment success
+        run: |
+            curl -X PATCH "${{ secrets.GRAFANA_HOST }}/api/annotations/${{ env.ANNOTATION_ID }}" \
+            -H "Authorization: Bearer ${{ secrets.GRAFANA_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "timeEnd": '$(date +%s%3N)',
+              "tags": ["tsuki:deploy", "tsuki:deploy:success"]
+            }'
