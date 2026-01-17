@@ -21,8 +21,7 @@ jobs:
           grafanaDashboardID: 2
           grafanaPanelID: 2
           grafanaTags: |
-            type:performance
-            service:sre-smart-scaling-api
+            type:deploy
       - name: Action that takes some time
         run: sleep 30
       - name: Update Grafana annotation
@@ -33,3 +32,5 @@ jobs:
           grafanaAnnotationID: ${{ steps.grafana.outputs.annotation-id }} # Output from previous usage of action
           grafanaDashboardID: 2
           grafanaPanelID: 2
+          grafanaTags: |
+            success
