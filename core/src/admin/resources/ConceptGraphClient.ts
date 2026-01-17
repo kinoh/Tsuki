@@ -1,6 +1,6 @@
 import * as neo4j from 'neo4j-driver'
-import { ConfigService } from '../../configService'
-import { logger } from '../../logger'
+import { ConfigService } from '../../internal/configService'
+import { logger } from '../../internal/logger'
 
 export type ConceptGraphRow = Record<string, unknown>
 

@@ -1,5 +1,5 @@
 import express from 'express'
-import { logger } from '../../logger'
+import { logger } from '../../internal/logger'
 
 async function getGitHash(): Promise<string | null> {
   // In Docker environment, get from environment variable

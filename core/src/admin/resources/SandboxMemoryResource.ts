@@ -1,7 +1,7 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { logger } from '../../logger'
+import { logger } from '../../internal/logger'
 
 interface SandboxFileEntry {
   path: string

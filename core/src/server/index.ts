@@ -7,9 +7,9 @@ import { WebSocketManager } from './websocket'
 import { createAdminRouter } from '../admin/index'
 import { setupRoutes } from './routes/index'
 import { AgentService } from '../agent/agentService'
-import { ConfigService } from '../configService'
-import { RuntimeConfigStore } from '../runtimeConfig'
-import { logger } from '../logger'
+import { ConfigService } from '../internal/configService'
+import { RuntimeConfigStore } from '../internal/runtimeConfig'
+import { logger } from '../internal/logger'
 
 export async function serve(
   config: ConfigService,

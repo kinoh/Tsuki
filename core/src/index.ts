@@ -6,9 +6,9 @@ import { FCMManager } from './server/fcm'
 import { FCMTokenStorage } from './storage/fcm'
 import { SensoryService } from './agent/sensoryService'
 import { McpSensory } from './agent/sensories/mcpSensory'
-import { ConfigService } from './configService'
-import { RuntimeConfigStore } from './runtimeConfig'
-import { logger } from './logger'
+import { ConfigService } from './internal/configService'
+import { RuntimeConfigStore } from './internal/runtimeConfig'
+import { logger } from './internal/logger'
 
 // Main function to start server with runtime context
 async function main(): Promise<void> {

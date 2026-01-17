@@ -2,7 +2,7 @@ import express from 'express'
 import type { MastraDBMessage } from '@mastra/core/agent/message-list'
 import { ResponseMessage, createResponseMessage } from '../../agent/message'
 import { Thread, GetMessagesQuery } from '../types'
-import { logger } from '../../logger'
+import { logger } from '../../internal/logger'
 
 export async function threadsHandler(req: express.Request, res: express.Response): Promise<void> {
   const agentMemory = req.app.locals.agentMemory

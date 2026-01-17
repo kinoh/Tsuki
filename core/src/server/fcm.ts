@@ -3,8 +3,8 @@ import { getMessaging, Messaging, MulticastMessage } from 'firebase-admin/messag
 import { FCMTokenStorage } from '../storage/fcm'
 import { MessageSender } from '../agent/activeuser'
 import { ResponseMessage } from '../agent/message'
-import { logger } from '../logger'
-import { RuntimeConfigStore } from '../runtimeConfig'
+import { logger } from '../internal/logger'
+import { RuntimeConfigStore } from '../internal/runtimeConfig'
 
 export interface Notification {
   title: string

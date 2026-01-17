@@ -1,8 +1,8 @@
 import { Request, Response } from 'express'
 import { FCMTokenStorage } from '../../storage/fcm'
 import { FCMManager } from '../fcm'
-import { logger } from '../../logger'
-import { RuntimeConfigStore } from '../../runtimeConfig'
+import { logger } from '../../internal/logger'
+import { RuntimeConfigStore } from '../../internal/runtimeConfig'
 
 interface MutateNotificationTokenPayload {
   token?: string

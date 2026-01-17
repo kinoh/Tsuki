@@ -4,7 +4,7 @@ import { AgentService } from '../agent/agentService'
 import type { ResponseMessage } from '../agent/message'
 import { MessageSender } from '../agent/activeuser'
 import { clientMessageSchema } from '../shared/wsSchema'
-import { logger } from '../logger'
+import { logger } from '../internal/logger'
 
 class ClientConnection {
   constructor(

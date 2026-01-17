@@ -1,6 +1,6 @@
 import { Request, Response } from 'express'
-import { logger } from '../../logger'
-import { RuntimeConfigStore, RuntimeConfig } from '../../runtimeConfig'
+import { logger } from '../../internal/logger'
+import { RuntimeConfigStore, RuntimeConfig } from '../../internal/runtimeConfig'
 
 function getStore(req: Request): RuntimeConfigStore {
   return req.app.locals.runtimeConfigStore as RuntimeConfigStore

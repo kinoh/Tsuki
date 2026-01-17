@@ -3,7 +3,7 @@ import { MessageInput, MCPNotificationResourceUpdated } from './activeuser'
 import { ResponseMessage, UserTextMessage, extractTextParts, type MessageContentPart } from './message'
 import { UsageStorage } from '../storage/usage'
 import { UserContext } from './userContext'
-import { ConfigService } from '../configService'
+import { ConfigService } from '../internal/configService'
 
 export interface Responder {
   respond(input: MessageInput, ctx: UserContext): Promise<ResponseMessage>

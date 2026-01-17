@@ -7,8 +7,8 @@ import { UserContext } from './userContext'
 import { Responder } from './mastraResponder'
 import { MessageRouter } from './router'
 import { MastraDBMessage } from '@mastra/core/agent/message-list'
-import { ConfigService } from '../configService'
-import { logger } from '../logger'
+import { ConfigService } from '../internal/configService'
+import { logger } from '../internal/logger'
 
 const PROMPT_MEMORY_PATH = '/memory/prompts/personality.md'
 const PROMPT_MEMORY_MAX_LENGTH = 4 * 1024

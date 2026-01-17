@@ -1,7 +1,7 @@
 import { Request, Response } from 'express'
-import { ConfigService } from '../../configService'
+import { ConfigService } from '../../internal/configService'
 import { synthesizeTts, VoiceVoxError } from '../../integrations/tts'
-import { logger } from '../../logger'
+import { logger } from '../../internal/logger'
 
 type TTSRequest = {
   message: string,

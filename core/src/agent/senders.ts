@@ -1,6 +1,6 @@
 import { MessageSender } from './activeuser'
 import { ResponseMessage } from './message'
-import { logger } from '../logger'
+import { logger } from '../internal/logger'
 
 export class InternalMessageSender implements MessageSender, AsyncIterable<ResponseMessage> {
   private queue: Array<(value: IteratorResult<ResponseMessage>) => void> = []

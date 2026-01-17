@@ -6,8 +6,8 @@ import { summon } from './agents/tsuki'
 import { getUniversalMCP, MCPClient } from './mcp'
 import type { ToolAction } from '@mastra/core/tools'
 import { PinoLogger } from '@mastra/loggers'
-import { ConfigService } from '../configService'
-import { parseLogLevel } from '../logger'
+import { ConfigService } from '../internal/configService'
+import { parseLogLevel } from '../internal/logger'
 
 export class MastraInstance {
   constructor(

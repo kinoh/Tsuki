@@ -1,6 +1,6 @@
 import express from 'express'
 import { UsageStorage } from '../../storage/usage'
-import { logger } from '../../logger'
+import { logger } from '../../internal/logger'
 
 export async function metricsHandler(req: express.Request, res: express.Response): Promise<void> {
   try {

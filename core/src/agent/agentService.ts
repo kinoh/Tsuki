@@ -9,8 +9,8 @@ import { MCPAuthHandler, MCPClient } from '../mastra/mcp'
 import { FCMManager } from '../server/fcm'
 import { MastraResponder, Responder } from './mastraResponder'
 import { AIRouter } from './aiRouter'
-import { ConfigService } from '../configService'
-import { logger } from '../logger'
+import { ConfigService } from '../internal/configService'
+import { logger } from '../internal/logger'
 
 export async function createAgentService(
   config: ConfigService,

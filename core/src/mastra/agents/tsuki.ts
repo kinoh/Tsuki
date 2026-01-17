@@ -2,7 +2,7 @@ import { openai } from '@ai-sdk/openai'
 import { Agent, ToolsInput } from '@mastra/core/agent'
 import { Memory } from '@mastra/memory'
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql'
-import { logger } from '../../logger'
+import { logger } from '../../internal/logger'
 
 export function summon(dataDir: string, openAiModel: string, tools: ToolsInput): Agent {
   logger.info({ dataDir, openAiModel }, 'hello, world')

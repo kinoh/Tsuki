@@ -1,6 +1,6 @@
 import { MastraStorage } from '@mastra/core/storage'
 import { getClient, LibSQLClient } from './libsql'
-import { logger } from '../logger'
+import { logger } from '../internal/logger'
 
 export class FCMTokenStorage {
   private readonly client: LibSQLClient

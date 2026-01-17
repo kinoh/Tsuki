@@ -1,6 +1,6 @@
 import fetch, { type RequestInit, type Response as FetchResponse } from 'node-fetch'
-import { ConfigService } from '../configService'
-import { logger } from '../logger'
+import { ConfigService } from '../internal/configService'
+import { logger } from '../internal/logger'
 
 type Accent = Record<string, unknown>
 type AudioQuery = Record<string, unknown>

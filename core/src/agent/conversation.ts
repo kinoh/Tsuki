@@ -1,6 +1,6 @@
 import type { MastraMemory } from '@mastra/core/memory'
 import type { MastraDBMessage } from '@mastra/core/agent/message-list'
-import { logger } from '../logger'
+import { logger } from '../internal/logger'
 
 export class ConversationManager {
   private readonly RECENT_UPDATE_THRESHOLD_HOURS = 1

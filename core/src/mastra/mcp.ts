@@ -1,8 +1,8 @@
 import type { Tool } from '@mastra/core/tools'
 import { RequestContext } from '@mastra/core/request-context'
 import { MCPClient as MastraMCPClient, MCPClientOptions } from '@mastra/mcp'
-import { ConfigService } from '../configService'
-import { logger } from '../logger'
+import { ConfigService } from '../internal/configService'
+import { logger } from '../internal/logger'
 
 export class MCPClient {
   public readonly client: MastraMCPClient

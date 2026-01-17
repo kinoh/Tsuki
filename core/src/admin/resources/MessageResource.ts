@@ -1,8 +1,8 @@
 import { BaseResource, BaseProperty, BaseRecord, Filter } from 'adminjs'
 import type { MastraMemory } from '@mastra/core/memory'
 import fetch from 'node-fetch'
-import { logger } from '../../logger'
-import { ConfigService } from '../../configService'
+import { logger } from '../../internal/logger'
+import { ConfigService } from '../../internal/configService'
 
 // Utility to get the auth token from environment variables
 function getAuthToken(): string {

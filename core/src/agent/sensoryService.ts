@@ -1,5 +1,5 @@
 import { AgentService } from './agentService'
-import { logger } from '../logger'
+import { logger } from '../internal/logger'
 
 type SensoryPollerConfig = {
   userIds: string[]

@@ -1,7 +1,7 @@
 import type { LanguageModelUsage } from '@mastra/core/stream'
 import { MastraStorage } from '@mastra/core/storage'
 import { getClient, LibSQLClient } from './libsql'
-import { logger } from '../logger'
+import { logger } from '../internal/logger'
 
 export interface UsageData {
   id: string

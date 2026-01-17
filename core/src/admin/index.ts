@@ -9,8 +9,8 @@ import { ConceptResource } from './resources/ConceptResource'
 import { EpisodeResource } from './resources/EpisodeResource'
 import { RelationResource } from './resources/RelationResource'
 import { SandboxMemoryResource } from './resources/SandboxMemoryResource'
-import { ConfigService } from '../configService'
-import { logger } from '../logger'
+import { ConfigService } from '../internal/configService'
+import { logger } from '../internal/logger'
 
 export function createAdminJS(config: ConfigService, agentMemory: MastraMemory): AdminJS {
   const conceptGraphClient = new ConceptGraphClient(config)

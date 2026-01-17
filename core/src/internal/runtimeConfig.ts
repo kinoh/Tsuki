@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { logger } from './logger'
-import type { components } from './shared/openapi'
+import type { components } from '../shared/openapi'
 
 export type RuntimeConfig = components['schemas']['Config']
 

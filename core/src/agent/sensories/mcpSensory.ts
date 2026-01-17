@@ -1,6 +1,6 @@
 import { MCPClient } from '../../mastra/mcp'
 import { SensoryFetcher, SensorySample } from '../sensoryService'
-import { logger } from '../../logger'
+import { logger } from '../../internal/logger'
 
 export class McpSensory implements SensoryFetcher {
   constructor(

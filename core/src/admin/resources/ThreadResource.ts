@@ -1,7 +1,7 @@
 import { BaseResource, BaseProperty, BaseRecord } from 'adminjs'
 import type { MastraMemory } from '@mastra/core/memory'
 import { TABLE_THREADS } from '@mastra/core/storage'
-import { logger } from '../../logger'
+import { logger } from '../../internal/logger'
 
 interface Thread {
   id: string
