@@ -7,9 +7,12 @@
 - **Multi-channel Message Delivery**: WebSocket, FCM push notifications, and internal routing
 - **Smart Thread Management**: Automatic conversation continuation with timezone-aware daily thread IDs
 - **Cross-thread Semantic Recall**: Persistent memory across conversation sessions
-- **Per-user Structured Memory**: MCP-based markdown note-taking for personalized context
+- **Self-editable Prompt Memory**: File-based prompt memory at `/memory/prompts/personality.md`
 - **Encrypted Prompts**: Secure agent instruction storage using Age encryption
-- **Two-tier MCP Integration**: Universal (RSS) and user-specific (scheduler, structured-memory) tool architecture
+- **Unified MCP Integration (planned)**: Core MCP servers (concept-graph, rss, scheduler, shell-exec)
+- **Pre-conscious Router + Sensory Pipeline**: Router decides responses to sensory inputs; supports periodic polling and sensory messages
+- **Sandboxed Execution**: gVisor sandbox with shell-exec MCP for safe file/process access
+- **TTS**: VoiceVox synthesis with ja-accent support via `/tts` endpoint
 - **GUI Client**: Cross-platform desktop and Android app built with [Tauri](https://tauri.app/) + Svelte
 
 ### Quick Start
