@@ -10,27 +10,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Add Grafana annotation
-        id: grafana
-        uses: hexionas/grafana-annotation-action@v0
-        with:
-          grafanaHost: ${{ secrets.GRAFANA_HOST }}
-          grafanaToken: ${{ secrets.GRAFANA_TOKEN }}
-          grafanaText: |
-            This is an example of the text that
-            will be present on the annotation
-          grafanaDashboardID: 2
-          grafanaPanelID: 2
-          grafanaTags: |
-            type:deploy
+        run: |
+            curl -X POST "${{ secrets.GRAFANA_HOST }}/api/annotations" \
+            -H "Authorization: Bearer ${{ secrets.GRAFANA_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "dashboardID": 2,
+              "time": '$(date +%s%3N)',
+              "tags": ["tsuki:deploy"],
+              "text": "deploy commit ${{ github.sha }}"
+            }' > /tmp/response.json
+            echo "ANNOTATION_ID=$(jq -r '.id' /tmp/response.json)" >> $GITHUB_ENV
       - name: Action that takes some time
         run: sleep 30
       - name: Update Grafana annotation
-        uses: hexionas/grafana-annotation-action@v0
-        with:
-          grafanaHost: ${{ secrets.GRAFANA_HOST }}
-          grafanaToken: ${{ secrets.GRAFANA_TOKEN }}
-          grafanaAnnotationID: ${{ steps.grafana.outputs.annotation-id }} # Output from previous usage of action
-          grafanaDashboardID: 2
-          grafanaPanelID: 2
-          grafanaTags: |
-            success
+        run: |
+            curl -X PATCH "${{ secrets.GRAFANA_HOST }}/api/annotations/${{ env.ANNOTATION_ID }}" \
+            -H "Authorization: Bearer ${{ secrets.GRAFANA_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "timeEnd": '$(date +%s%3N)',
+              "tags": ["tsuki:deploy:success"]
+            }'
