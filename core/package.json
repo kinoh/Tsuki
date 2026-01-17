@@ -15,7 +15,7 @@
     "mastra-dev": "mastra dev",
     "mastra-build": "mastra build",
     "mastra-start": "mastra start",
-    "depcruise": "npx depcruise src --include-only \"^src\" --output-type dot | dot -T svg > ../docs/core-dependency-graph.svg"
+    "depcruise": "npx depcruise src --include-only \"^src\" --collapse 2 --output-type dot | dot -T svg > ../docs/core-dependency-graph.svg"
   },
   "keywords": [],
   "author": "",
