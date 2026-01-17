@@ -22,6 +22,8 @@ pnpm start
 
 # Start the GUI client (optional, separate terminal)
 cd gui/
+npm run dev        # Vite web UI
+# For desktop app:
 npm run tauri dev
 
 # Or deploy with Docker
@@ -32,7 +34,7 @@ task deploy  # or docker compose up --build --detach
 
 - **Core Backend** (`core/`): TypeScript/Node.js server with Mastra agents and MCP integration
 - **GUI Client** (`gui/`): Tauri + Svelte cross-platform application
-- **Docker Deployment**: Single containerized service with built-in MCP servers
+- **Docker Deployment**: Docker Compose stack for core, memgraph, sandbox, and voice services
 
 ### Documentation
 
