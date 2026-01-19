@@ -62,6 +62,6 @@ Markdown document with a headline describing the location and measurement timest
 
 ## Implementation Notes
 
-- The Rust MCP server should follow the structure used in `mcp/structured-memory` and `mcp/scheduler` (Tokio runtime, tool registry, MCP protocol endpoints)
+- The Rust MCP server should follow the structure used in `mcp/scheduler` (Tokio runtime, tool registry, MCP protocol endpoints)
 - Prefer `reqwest` for HTTP fetching and `scraper`/`select` for HTML parsing, keeping the Markdown output identical to the current proof of concept
 - The Rust implementation should not expose dynamic location switching; it should read the configured `LOCATION_PATH` during startup and serve that location exclusively

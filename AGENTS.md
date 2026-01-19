@@ -38,7 +38,6 @@ Guidance for coding agents working on Tsuki.
   - `rss-mcp-lite` (npm) for shared RSS; data: `${DATA_DIR}/rss_feeds.db`, `${DATA_DIR}/rss_feeds.opml`.
 - User-specific MCP (Rust binaries)
   - `scheduler`: time-based notifications, data under `${DATA_DIR}/${userId}__scheduler/`.
-  - `structured-memory`: markdown notes, data under `${DATA_DIR}/${userId}__structured_memory/`.
 - MCP clients support resource subscriptions; isolation is per user; roots are under `DATA_DIR`.
 
 ## Runtime & Commands

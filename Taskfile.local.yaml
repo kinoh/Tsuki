@@ -11,6 +11,10 @@ vars:
   DOCKER_COMPOSE: docker compose -f compose.yaml -f compose.dev.yaml
 
 tasks:
+  ps:
+    desc: Do ps in local environment
+    cmds:
+      - '{{.DOCKER_COMPOSE}} ps'
   local-reset:
     desc: Reset local data
     cmds:
@@ -54,3 +58,20 @@ tasks:
       - tar xzf {{.BACKUP_FILE_PATH}} -C /tmp/tsuki-backup-sandbox
       - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-sandbox/. sandbox:/memory'
       - rm -rf /tmp/tsuki-backup-sandbox
+  core/restore/latest:
+    desc: Restore latest core data
+    vars:
+      BACKUP_FILE_PATH:
+        sh: 'find ./backup -name "tsuki-backup-*.tar.gz" | sort | tail -1'
+    cmds:
+      - task: core/restore/{{.BACKUP_FILE_PATH}}
+  core/restore/*:
+    desc: Restore core data
+    vars:
+      BACKUP_FILE_PATH: '{{index .MATCH 0}}'
+    cmds:
+      - '{{.DOCKER_COMPOSE}} exec core rm -rf /data/*'
+      - mkdir -p /tmp/tsuki-backup-core
+      - tar xzf {{.BACKUP_FILE_PATH}} -C /tmp/tsuki-backup-core
+      - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-core/. core:/data'
+      - rm -rf /tmp/tsuki-backup-core

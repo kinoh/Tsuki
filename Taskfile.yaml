@@ -89,7 +89,6 @@ tasks:
     desc: Build all MCP servers
     deps:
       - mcp/build-concept-graph
-      - mcp/build-structured-memory
       - mcp/build-scheduler
       - mcp/build-weather
       - mcp/build-metrics
@@ -149,3 +148,19 @@ tasks:
       - '{{.DOCKER_COMPOSE}} cp sandbox:/memory /tmp/tsuki-backup-sandbox'
       - tar czf ./backup/tsuki-sandbox-backup-{{.TIMESTAMP}}.tar.gz -C /tmp/tsuki-backup-sandbox .
       - rm -rf /tmp/tsuki-backup-sandbox
+  memgraph/restore/latest:
+    desc: Restore latest memgraph database
+    vars:
+      BACKUP_FILE_NAME:
+        sh: 'ls -t ${BACKUP_DIR:-./backup}/memgraph | head -1'
+    cmds:
+      - task: memgraph/restore/{{.BACKUP_FILE_NAME}}
+  memgraph/restore/*:
+    desc: Restore memgraph database
+    vars:
+      BACKUP_DIR: ${BACKUP_DIR:-./backup}/memgraph
+      BACKUP_FILE_NAME: '{{index .MATCH 0}}'
+    cmds:
+      - '{{.DOCKER_COMPOSE}} cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}'
+      - '{{.DOCKER_COMPOSE}} exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}'
+      - 'echo "RECOVER SNAPSHOT ''/data/snapshots/{{.BACKUP_FILE_NAME}}'' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole'

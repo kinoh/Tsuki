@@ -9,7 +9,6 @@ RUN apk add --no-cache musl-dev \
 
 # Copy Rust source code
 COPY mcp/concept-graph ./mcp/concept-graph
-COPY mcp/structured-memory ./mcp/structured-memory
 COPY mcp/scheduler ./mcp/scheduler
 COPY mcp/weather ./mcp/weather
 COPY mcp/metrics ./mcp/metrics
@@ -21,13 +20,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cd mcp/concept-graph && \
     cargo build --release --target x86_64-unknown-linux-musl && \
     cp target/x86_64-unknown-linux-musl/release/concept-graph /build/concept-graph
-
-# Build structured-memory with caching
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/mcp/structured-memory/target \
-    cd mcp/structured-memory && \
-    cargo build --release --target x86_64-unknown-linux-musl && \
-    cp target/x86_64-unknown-linux-musl/release/structured-memory /build/structured-memory
 
 # Build scheduler with caching
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -101,7 +93,6 @@ RUN pnpm config set script-shell /bin/sh
 
 # Copy mcp binaries from build stage
 COPY --from=rust-builder --chown=tsuki:nodejs /build/concept-graph ./bin/concept-graph
-COPY --from=rust-builder --chown=tsuki:nodejs /build/structured-memory ./bin/structured-memory
 COPY --from=rust-builder --chown=tsuki:nodejs /build/scheduler ./bin/scheduler
 COPY --from=rust-builder --chown=tsuki:nodejs /build/weather ./bin/weather
 COPY --from=rust-builder --chown=tsuki:nodejs /build/metrics ./bin/metrics
