@@ -54,11 +54,9 @@ async function loadPromptMemory(): Promise<string> {
     return ''
   }
 
-  const stdout = buffer.toString('utf-8').replace(/\r\n/g, '\n')
-  const newlineIndex = stdout.indexOf('\n')
-  const size = buffer.length
+  let content = buffer.toString('utf-8').replace(/\r\n/g, '\n').trim()
+  const size = content.length
 
-  let content = stdout.slice(newlineIndex + 1).trimEnd()
   const truncated = size > PROMPT_MEMORY_MAX_LENGTH
   const warning = truncated
     ? `WARNING: truncated to ${PROMPT_MEMORY_MAX_LENGTH} bytes\n`
