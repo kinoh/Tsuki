@@ -1,0 +1,13 @@
+[package]
+name = "tsuki-core-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws"] }
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+time = { version = "0.3", features = ["formatting"] }
+tokio = { version = "1.37", features = ["full"] }
+uuid = { version = "1.8", features = ["v4"] }
