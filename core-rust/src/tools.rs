@@ -118,9 +118,9 @@ fn state_set_schema() -> Value {
       "key": { "type": "string" },
       "content": { "type": "string" },
       "related_keys": { "type": "array", "items": { "type": "string" } },
-      "metadata": { "type": "object", "additionalProperties": false }
+      "metadata": { "type": "object", "properties": {}, "additionalProperties": false }
     },
-    "required": ["key", "content"],
+    "required": ["key", "content", "related_keys", "metadata"],
     "additionalProperties": false
   })
 }
@@ -143,7 +143,7 @@ fn state_search_schema() -> Value {
       "query": { "type": "string" },
       "limit": { "type": "integer", "minimum": 1 }
     },
-    "required": ["query"],
+    "required": ["query", "limit"],
     "additionalProperties": false
   })
 }

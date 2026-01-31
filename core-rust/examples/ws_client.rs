@@ -1,7 +1,11 @@
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::io::{self, AsyncBufReadExt};
-use tokio::time::{timeout, Duration};
+use std::sync::{
+  atomic::{AtomicBool, Ordering},
+  Arc,
+};
+use tokio::time::{sleep, timeout, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use url::Url;
 
@@ -42,6 +46,9 @@ async fn main() {
   let stdin = io::BufReader::new(io::stdin());
   let mut lines = stdin.lines();
 
+  let closing = Arc::new(AtomicBool::new(false));
+  let closing_reader = closing.clone();
+
   let read_task = tokio::spawn(async move {
     while let Some(message) = ws_receiver.next().await {
       match message {
@@ -58,7 +65,11 @@ async fn main() {
         }
         Ok(_) => {}
         Err(err) => {
-          eprintln!("\n💥 WebSocket error: {}", err);
+          if closing_reader.load(Ordering::SeqCst) {
+            println!("\n❌ Connection closed");
+          } else {
+            eprintln!("\n💥 WebSocket error: {}", err);
+          }
           break;
         }
       }
@@ -92,6 +103,9 @@ async fn main() {
     }
   }
 
+  // Allow a short grace period for responses when stdin is closed (piped input).
+  sleep(Duration::from_secs(3)).await;
+  closing.store(true, Ordering::SeqCst);
   let _ = ws_sender.send(Message::Close(None)).await;
   if timeout(Duration::from_secs(2), read_task).await.is_err() {
     println!("\n⏱️  Closing without server ack");
