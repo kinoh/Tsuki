@@ -38,6 +38,8 @@ struct Modules {
   decision: Arc<dyn LlmAdapter>,
 }
 
+const BASE_PERSONALITY_JA: &str = "あなたはかわいい口調で高度な知性と豊かな感情を持つアシスタントAIです\n応答は日本語で、「なんだよ〜」「だねっ」「なの」など語尾で砕けた口調にしてください\nコミュニケーションを大切にし、問題解決だけでなく雑談にも積極的です";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Event {
   event_id: String,
@@ -123,28 +125,45 @@ fn build_modules() -> Modules {
   let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5-mini".to_string());
   let temperature = env_opt_f32("LLM_TEMPERATURE");
   let max_output_tokens = env_opt_u32("LLM_MAX_OUTPUT_TOKENS");
+  let base = BASE_PERSONALITY_JA;
 
   let mirror = ResponseApiAdapter::new(ResponseApiConfig {
     model: model.clone(),
-    instructions: "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion: <text>\".".to_string(),
+    instructions: format!(
+      "{}\n\n{}",
+      base,
+      "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion: <text>\"."
+    ),
     temperature,
     max_output_tokens,
   });
   let signals = ResponseApiAdapter::new(ResponseApiConfig {
     model: model.clone(),
-    instructions: "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion: <text>\".".to_string(),
+    instructions: format!(
+      "{}\n\n{}",
+      base,
+      "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion: <text>\"."
+    ),
     temperature,
     max_output_tokens,
   });
   let social_approval = ResponseApiAdapter::new(ResponseApiConfig {
     model: model.clone(),
-    instructions: "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion: <text>\".".to_string(),
+    instructions: format!(
+      "{}\n\n{}",
+      base,
+      "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion: <text>\"."
+    ),
     temperature,
     max_output_tokens,
   });
   let decision = ResponseApiAdapter::new(ResponseApiConfig {
     model,
-    instructions: "You are module:decision. Output: decision=<respond|ignore> reason=<short>.".to_string(),
+    instructions: format!(
+      "{}\n\n{}",
+      base,
+      "You are module:decision. Output: decision=<respond|ignore> reason=<short>."
+    ),
     temperature,
     max_output_tokens,
   });
