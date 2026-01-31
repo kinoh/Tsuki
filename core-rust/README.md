@@ -37,4 +37,5 @@ You will receive event messages:
 ## Notes
 - Three fixed prompt-like submodules (curiosity, self_preservation, social_approval) and one decision module call the OpenAI Response API.
 - A shared base personality prompt (Japanese) is prepended to all module instructions.
+- Internal state is exposed to the model as three function tools: `state_set`, `state_get`, `state_search`.
 - All outputs (input, submodules, decision, action) are emitted as events.

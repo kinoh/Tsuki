@@ -1,4 +1,6 @@
 mod llm;
+mod state;
+mod tools;
 
 use axum::{
     extract::{
@@ -21,13 +23,16 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
+use crate::state::{InMemoryStateStore, StateStore};
+use crate::tools::{state_tools, StateToolHandler};
 
 #[derive(Clone)]
 struct AppState {
-    events: Arc<Mutex<Vec<Event>>>,
-    tx: broadcast::Sender<Event>,
-    auth_token: String,
-    modules: Modules,
+  events: Arc<Mutex<Vec<Event>>>,
+  tx: broadcast::Sender<Event>,
+  auth_token: String,
+  modules: Modules,
+  _state_store: Arc<dyn StateStore>,
 }
 
 #[derive(Clone)]
@@ -77,17 +82,19 @@ struct ModuleOutput {
 
 #[tokio::main]
 async fn main() {
-    let port = env_u16("PORT", 2953);
-    let auth_token = std::env::var("WEB_AUTH_TOKEN").unwrap_or_else(|_| "test-token".to_string());
-    let (tx, _) = broadcast::channel(256);
-    let modules = build_modules();
+  let port = env_u16("PORT", 2953);
+  let auth_token = std::env::var("WEB_AUTH_TOKEN").unwrap_or_else(|_| "test-token".to_string());
+  let (tx, _) = broadcast::channel(256);
+  let state_store: Arc<dyn StateStore> = Arc::new(InMemoryStateStore::new());
+  let modules = build_modules(state_store.clone());
 
-    let state = AppState {
-        events: Arc::new(Mutex::new(Vec::new())),
-        tx,
-        auth_token,
-        modules,
-    };
+  let state = AppState {
+    events: Arc::new(Mutex::new(Vec::new())),
+    tx,
+    auth_token,
+    modules,
+    _state_store: state_store,
+  };
 
     let app = Router::new().route("/", get(ws_handler)).with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -119,13 +126,16 @@ fn env_opt_u32(key: &str) -> Option<u32> {
         .and_then(|raw| raw.parse::<u32>().ok())
 }
 
-fn build_modules() -> Modules {
-    let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5-mini".to_string());
-    let temperature = env_opt_f32("LLM_TEMPERATURE");
-    let max_output_tokens = env_opt_u32("LLM_MAX_OUTPUT_TOKENS");
-    let base = BASE_PERSONALITY_JA;
+fn build_modules(state_store: Arc<dyn StateStore>) -> Modules {
+  let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5-mini".to_string());
+  let temperature = env_opt_f32("LLM_TEMPERATURE");
+  let max_output_tokens = env_opt_u32("LLM_MAX_OUTPUT_TOKENS");
+  let base = BASE_PERSONALITY_JA;
+  let tools = state_tools();
+  let tool_handler = Arc::new(StateToolHandler::new(state_store));
+  let max_tool_rounds = 3;
 
-    let mirror = ResponseApiAdapter::new(ResponseApiConfig {
+  let mirror = ResponseApiAdapter::new(ResponseApiConfig {
     model: model.clone(),
     instructions: format!(
       "{}\n\n{}",
@@ -134,8 +144,11 @@ fn build_modules() -> Modules {
     ),
     temperature,
     max_output_tokens,
+    tools: tools.clone(),
+    tool_handler: Some(tool_handler.clone()),
+    max_tool_rounds,
   });
-    let signals = ResponseApiAdapter::new(ResponseApiConfig {
+  let signals = ResponseApiAdapter::new(ResponseApiConfig {
     model: model.clone(),
     instructions: format!(
       "{}\n\n{}",
@@ -144,8 +157,11 @@ fn build_modules() -> Modules {
     ),
     temperature,
     max_output_tokens,
+    tools: tools.clone(),
+    tool_handler: Some(tool_handler.clone()),
+    max_tool_rounds,
   });
-    let social_approval = ResponseApiAdapter::new(ResponseApiConfig {
+  let social_approval = ResponseApiAdapter::new(ResponseApiConfig {
     model: model.clone(),
     instructions: format!(
       "{}\n\n{}",
@@ -154,16 +170,22 @@ fn build_modules() -> Modules {
     ),
     temperature,
     max_output_tokens,
+    tools: tools.clone(),
+    tool_handler: Some(tool_handler.clone()),
+    max_tool_rounds,
   });
-    let decision = ResponseApiAdapter::new(ResponseApiConfig {
-        model,
+  let decision = ResponseApiAdapter::new(ResponseApiConfig {
+    model,
         instructions: format!(
             "{}\n\n{}",
             base, "You are module:decision. Output: decision=<respond|ignore> reason=<short>."
-        ),
-        temperature,
-        max_output_tokens,
-    });
+    ),
+    temperature,
+    max_output_tokens,
+    tools,
+    tool_handler: Some(tool_handler),
+    max_tool_rounds,
+  });
 
     Modules {
         curiosity: Arc::new(mirror),
