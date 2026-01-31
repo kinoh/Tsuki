@@ -351,7 +351,8 @@ fn record_event(state: &AppState, event: Event) {
     if let Ok(mut events) = state.events.lock() {
         events.push(event.clone());
     }
-    let _ = state.tx.send(event);
+    let _ = state.tx.send(event.clone());
+    log_event(&event);
 }
 
 fn build_event(
@@ -438,17 +439,12 @@ async fn run_module(
     adapter: Arc<dyn LlmAdapter>,
     input: String,
 ) -> ModuleOutput {
-    let request_event = build_event(
-        "internal",
-        "text",
-        json!({ "text": input }),
-        vec![
-            role_tag.to_string(),
-            format!("module:{}", name),
-            "llm.request".to_string(),
-        ],
+    println!(
+        "MODULE_INPUT name={} role={} bytes={}",
+        name,
+        role_tag,
+        input.len()
     );
-    record_event(state, request_event);
 
     match adapter.respond(LlmRequest { input }).await {
         Ok(response) => {
@@ -458,7 +454,7 @@ async fn run_module(
                 json!({ "text": response.text, "raw": response.raw }),
                 vec![
                     role_tag.to_string(),
-            format!("module:{}", name),
+                    format!("module:{}", name),
                     "llm.response".to_string(),
                 ],
             );
@@ -554,6 +550,24 @@ fn truncate(value: &str, max: usize) -> String {
         return value.to_string();
     }
     value.chars().take(max).collect::<String>() + "…"
+}
+
+fn log_event(event: &Event) {
+    let tags = if event.meta.tags.is_empty() {
+        "none".to_string()
+    } else {
+        event.meta.tags.join(",")
+    };
+    let payload_text = event
+        .payload
+        .get("text")
+        .and_then(|value| value.as_str())
+        .map(|value| truncate(value, 120))
+        .unwrap_or_else(|| truncate(&event.payload.to_string(), 120));
+    println!(
+        "EVENT ts={} source={} modality={} tags={} payload={}",
+        event.ts, event.source, event.modality, tags, payload_text
+    );
 }
 
 fn extract_question(text: &str) -> Option<String> {
