@@ -16,6 +16,8 @@ Environment variables:
 - `OPENAI_MODEL` (default: gpt-5-mini)
 - `LLM_TEMPERATURE` (optional)
 - `LLM_MAX_OUTPUT_TOKENS` (optional)
+- `SUBMODULE_HISTORY_LIMIT` (default: 10)
+- `DECISION_HISTORY_LIMIT` (default: 30)
 
 ## CLI (reuse existing ws_client.js)
 ```
@@ -38,4 +40,6 @@ You will receive event messages:
 - Three fixed prompt-like submodules (curiosity, self_preservation, social_approval) and one decision module call the OpenAI Response API.
 - A shared base personality prompt (Japanese) is prepended to all module instructions.
 - Internal state is exposed to the model as three function tools: `state_set`, `state_get`, `state_search`.
+- Submodules are registered in a ModuleRegistry (in-memory) and can be extended later.
+- Decision uses recent event history from the event store; question events are emitted when requested.
 - All outputs (input, submodules, decision, action) are emitted as events.

@@ -1,4 +1,5 @@
 mod llm;
+mod module_registry;
 mod state;
 mod tools;
 
@@ -23,6 +24,7 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
+use crate::module_registry::{ModuleDefinition, ModuleRegistry};
 use crate::state::{InMemoryStateStore, StateStore};
 use crate::tools::{state_tools, StateToolHandler};
 
@@ -37,13 +39,23 @@ struct AppState {
 
 #[derive(Clone)]
 struct Modules {
-    curiosity: Arc<dyn LlmAdapter>,
-    self_preservation: Arc<dyn LlmAdapter>,
-    social_approval: Arc<dyn LlmAdapter>,
-    decision: Arc<dyn LlmAdapter>,
+  registry: ModuleRegistry,
+  runtime: ModuleRuntime,
+  decision: Arc<dyn LlmAdapter>,
 }
 
 const BASE_PERSONALITY_JA: &str = "あなたはかわいい口調で高度な知性と豊かな感情を持つアシスタントAIです\n応答は日本語で、「なんだよ〜」「だねっ」「なの」など語尾で砕けた口調にしてください\nコミュニケーションを大切にし、問題解決だけでなく雑談にも積極的です";
+
+#[derive(Clone)]
+struct ModuleRuntime {
+  base_instructions: String,
+  model: String,
+  temperature: Option<f32>,
+  max_output_tokens: Option<u32>,
+  tools: Vec<async_openai::types::responses::Tool>,
+  tool_handler: Arc<dyn crate::llm::ToolHandler>,
+  max_tool_rounds: usize,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Event {
@@ -76,8 +88,8 @@ struct OutboundEvent {
 
 #[derive(Debug, Clone)]
 struct ModuleOutput {
-    name: &'static str,
-    text: String,
+  name: String,
+  text: String,
 }
 
 #[tokio::main]
@@ -126,73 +138,80 @@ fn env_opt_u32(key: &str) -> Option<u32> {
         .and_then(|raw| raw.parse::<u32>().ok())
 }
 
+fn env_usize(key: &str, fallback: usize) -> usize {
+  std::env::var(key)
+    .ok()
+    .and_then(|raw| raw.parse::<usize>().ok())
+    .unwrap_or(fallback)
+}
+
 fn build_modules(state_store: Arc<dyn StateStore>) -> Modules {
   let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5-mini".to_string());
   let temperature = env_opt_f32("LLM_TEMPERATURE");
   let max_output_tokens = env_opt_u32("LLM_MAX_OUTPUT_TOKENS");
-  let base = BASE_PERSONALITY_JA;
   let tools = state_tools();
   let tool_handler = Arc::new(StateToolHandler::new(state_store));
-  let max_tool_rounds = 3;
 
-  let mirror = ResponseApiAdapter::new(ResponseApiConfig {
+  let runtime = ModuleRuntime {
+    base_instructions: BASE_PERSONALITY_JA.to_string(),
     model: model.clone(),
-    instructions: format!(
-      "{}\n\n{}",
-      base,
-      "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion=<text> confidence=<short>\"."
-    ),
-    temperature,
-    max_output_tokens,
-    tools: tools.clone(),
-    tool_handler: Some(tool_handler.clone()),
-    max_tool_rounds,
-  });
-  let signals = ResponseApiAdapter::new(ResponseApiConfig {
-    model: model.clone(),
-    instructions: format!(
-      "{}\n\n{}",
-      base,
-      "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion=<text> confidence=<short>\"."
-    ),
-    temperature,
-    max_output_tokens,
-    tools: tools.clone(),
-    tool_handler: Some(tool_handler.clone()),
-    max_tool_rounds,
-  });
-  let social_approval = ResponseApiAdapter::new(ResponseApiConfig {
-    model: model.clone(),
-    instructions: format!(
-      "{}\n\n{}",
-      base,
-      "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion=<text> confidence=<short>\"."
-    ),
-    temperature,
-    max_output_tokens,
-    tools: tools.clone(),
-    tool_handler: Some(tool_handler.clone()),
-    max_tool_rounds,
-  });
-  let decision = ResponseApiAdapter::new(ResponseApiConfig {
-    model,
-        instructions: format!(
-            "{}\n\n{}",
-            base, "You are module:decision. Output: decision=<respond|ignore> reason=<short>."
-    ),
     temperature,
     max_output_tokens,
     tools,
-    tool_handler: Some(tool_handler),
-    max_tool_rounds,
-  });
+    tool_handler,
+    max_tool_rounds: 3,
+  };
 
-    Modules {
-        curiosity: Arc::new(mirror),
-        self_preservation: Arc::new(signals),
-        social_approval: Arc::new(social_approval),
-        decision: Arc::new(decision),
-    }
+  let registry = ModuleRegistry::new(vec![
+    ModuleDefinition::new(
+      "curiosity",
+      "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
+    ),
+    ModuleDefinition::new(
+      "self_preservation",
+      "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
+    ),
+    ModuleDefinition::new(
+      "social_approval",
+      "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
+    ),
+  ]);
+
+  let decision_instructions = "You are module:decision. Read the event history and module outputs. Output a single line: decision=<respond|ignore|question> reason=<short> question=<text|none>.";
+  let decision = ResponseApiAdapter::new(build_config(
+    compose_instructions(&runtime.base_instructions, decision_instructions),
+    &runtime,
+  ));
+
+  Modules {
+    registry,
+    runtime,
+    decision: Arc::new(decision),
+  }
+}
+
+fn compose_instructions(base: &str, module_specific: &str) -> String {
+  format!("{}\n\n{}", base, module_specific)
+}
+
+fn build_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiConfig {
+  ResponseApiConfig {
+    model: runtime.model.clone(),
+    instructions,
+    temperature: runtime.temperature,
+    max_output_tokens: runtime.max_output_tokens,
+    tools: runtime.tools.clone(),
+    tool_handler: Some(runtime.tool_handler.clone()),
+    max_tool_rounds: runtime.max_tool_rounds,
+  }
+}
+
+fn decision_history_limit() -> usize {
+  env_usize("DECISION_HISTORY_LIMIT", 30)
+}
+
+fn submodule_history_limit() -> usize {
+  env_usize("SUBMODULE_HISTORY_LIMIT", 10)
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -311,9 +330,18 @@ async fn handle_input(raw: String, state: &AppState) {
         .trim()
         .to_string();
 
-    let submodule_outputs = run_submodules(&input_text, &state.modules, state).await;
-    let decision_output =
-        run_decision(&input_text, &submodule_outputs, &state.modules, state).await;
+    let _submodule_outputs = run_submodules(&input_text, &state.modules, state).await;
+    let decision_output = run_decision(&input_text, &state.modules, state).await;
+
+    if let Some(question) = extract_question(&decision_output.text) {
+        let question_event = build_event(
+            "internal",
+            "text",
+            json!({ "text": question, "target": "user" }),
+            vec!["question".to_string(), "needs_input".to_string()],
+        );
+        record_event(state, question_event);
+    }
 
     let action_event = run_action(&input_text, &decision_output.text);
     record_event(state, action_event);
@@ -353,62 +381,59 @@ async fn run_submodules(
     modules: &Modules,
     state: &AppState,
 ) -> Vec<ModuleOutput> {
-    let mirror_input = format!("User input: {}", input_text);
-    let signals_input = format!("User input: {}", input_text);
-    let social_input = format!("User input: {}", input_text);
-
-    let tasks = vec![
-        run_module(
-            state,
-            "curiosity",
-            "submodule",
-            modules.curiosity.clone(),
-            mirror_input,
-        ),
-        run_module(
-            state,
-            "self_preservation",
-            "submodule",
-            modules.self_preservation.clone(),
-            signals_input,
-        ),
-        run_module(
-            state,
-            "social_approval",
-            "submodule",
-            modules.social_approval.clone(),
-            social_input,
-        ),
-    ];
+    let history = format_event_history(state, submodule_history_limit());
+    let module_defs = modules.registry.list_active();
+    let tasks = module_defs
+        .into_iter()
+        .map(|definition| {
+            let input = format!(
+                "User input: {}\nRecent events:\n{}",
+                input_text,
+                history
+            );
+            let instructions = compose_instructions(
+                &modules.runtime.base_instructions,
+                &definition.instructions,
+            );
+            let adapter = ResponseApiAdapter::new(build_config(instructions, &modules.runtime));
+            run_module(
+                state,
+                definition.name.clone(),
+                "submodule",
+                Arc::new(adapter),
+                input,
+            )
+        })
+        .collect::<Vec<_>>();
 
     join_all(tasks).await
 }
 
 async fn run_decision(
     input_text: &str,
-    submodules: &[ModuleOutput],
     modules: &Modules,
     state: &AppState,
 ) -> ModuleOutput {
-    let mut context_lines = vec![format!("User input: {}", input_text)];
-    for output in submodules {
-        context_lines.push(format!("{}: {}", output.name, output.text));
-    }
-    context_lines.push("Return: decision=<respond|ignore> reason=<short>.".to_string());
+    let history = format_event_history(state, decision_history_limit());
+    let context = format!(
+        "Latest user input: {}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
+        input_text,
+        history
+    );
 
     run_module(
         state,
-        "decision",
+        "decision".to_string(),
         "decision",
         modules.decision.clone(),
-        context_lines.join("\n"),
+        context,
     )
     .await
 }
 
 async fn run_module(
     state: &AppState,
-    name: &'static str,
+    name: String,
     role_tag: &'static str,
     adapter: Arc<dyn LlmAdapter>,
     input: String,
@@ -433,13 +458,13 @@ async fn run_module(
                 json!({ "text": response.text, "raw": response.raw }),
                 vec![
                     role_tag.to_string(),
-                    format!("module:{}", name),
+            format!("module:{}", name),
                     "llm.response".to_string(),
                 ],
             );
             record_event(state, response_event);
             ModuleOutput {
-                name,
+                name: name.clone(),
                 text: response.text,
             }
         }
@@ -457,7 +482,7 @@ async fn run_module(
             );
             record_event(state, error_event);
             ModuleOutput {
-                name,
+                name: name.clone(),
                 text: format!("error: {}", err),
             }
         }
@@ -477,4 +502,109 @@ fn run_action(input_text: &str, decision_text: &str) -> Event {
         json!({ "text": action_text }),
         vec!["action".to_string(), "response".to_string()],
     )
+}
+
+fn format_event_history(state: &AppState, limit: usize) -> String {
+    let events = latest_events(state, limit);
+    if events.is_empty() {
+        return "none".to_string();
+    }
+    events
+        .iter()
+        .map(format_event_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn latest_events(state: &AppState, limit: usize) -> Vec<Event> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    state
+        .events
+        .lock()
+        .map(|events| {
+            let len = events.len();
+            let start = len.saturating_sub(limit);
+            events.iter().skip(start).cloned().collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn format_event_line(event: &Event) -> String {
+    let tags = if event.meta.tags.is_empty() {
+        "none".to_string()
+    } else {
+        event.meta.tags.join(",")
+    };
+    let payload_text = event
+        .payload
+        .get("text")
+        .and_then(|value| value.as_str())
+        .map(|value| truncate(value, 160))
+        .unwrap_or_else(|| truncate(&event.payload.to_string(), 160));
+    format!(
+        "{} | {} | {} | {} | {}",
+        event.ts, event.source, event.modality, tags, payload_text
+    )
+}
+
+fn truncate(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    value.chars().take(max).collect::<String>() + "…"
+}
+
+fn extract_question(text: &str) -> Option<String> {
+    let parsed = parse_decision(text);
+    if parsed.decision == "question" {
+        return parsed.question;
+    }
+    parsed.question
+}
+
+fn parse_decision(text: &str) -> DecisionParsed {
+    let decision = extract_field(text, "decision=", &["reason=", "question="])
+        .and_then(|value| value.split_whitespace().next().map(|s| s.to_lowercase()))
+        .unwrap_or_else(|| "respond".to_string());
+    let reason = extract_field(text, "reason=", &["decision=", "question="]);
+    let question = extract_field(text, "question=", &["decision=", "reason="])
+        .and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+
+    DecisionParsed {
+        decision,
+        reason,
+        question,
+    }
+}
+
+fn extract_field(text: &str, key: &str, end_keys: &[&str]) -> Option<String> {
+    let start = text.find(key)?;
+    let after = &text[start + key.len()..];
+    let mut end = after.len();
+    for end_key in end_keys {
+        if let Some(idx) = after.find(end_key) {
+            end = end.min(idx);
+        }
+    }
+    let value = after[..end].trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+struct DecisionParsed {
+    decision: String,
+    reason: Option<String>,
+    question: Option<String>,
 }
