@@ -1,3 +1,5 @@
+mod llm;
+
 use axum::{
   extract::{
     ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
@@ -7,7 +9,7 @@ use axum::{
   routing::get,
   Router,
 };
-use futures::{SinkExt, StreamExt};
+use futures::{future::join_all, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
@@ -18,11 +20,21 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
+
 #[derive(Clone)]
 struct AppState {
   events: Arc<Mutex<Vec<Event>>>,
   tx: broadcast::Sender<Event>,
   auth_token: String,
+  modules: Modules,
+}
+
+#[derive(Clone)]
+struct Modules {
+  mirror: Arc<dyn LlmAdapter>,
+  signals: Arc<dyn LlmAdapter>,
+  decision: Arc<dyn LlmAdapter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,16 +66,24 @@ struct OutboundEvent {
   event: Event,
 }
 
+#[derive(Debug, Clone)]
+struct ModuleOutput {
+  name: &'static str,
+  text: String,
+}
+
 #[tokio::main]
 async fn main() {
   let port = env_u16("PORT", 2953);
   let auth_token = std::env::var("WEB_AUTH_TOKEN").unwrap_or_else(|_| "test-token".to_string());
   let (tx, _) = broadcast::channel(256);
+  let modules = build_modules();
 
   let state = AppState {
     events: Arc::new(Mutex::new(Vec::new())),
     tx,
     auth_token,
+    modules,
   };
 
   let app = Router::new().route("/", get(ws_handler)).with_state(state);
@@ -84,6 +104,49 @@ fn env_u16(key: &str, fallback: u16) -> u16 {
     .ok()
     .and_then(|raw| raw.parse::<u16>().ok())
     .unwrap_or(fallback)
+}
+
+fn env_opt_f32(key: &str) -> Option<f32> {
+  std::env::var(key)
+    .ok()
+    .and_then(|raw| raw.parse::<f32>().ok())
+}
+
+fn env_opt_u32(key: &str) -> Option<u32> {
+  std::env::var(key)
+    .ok()
+    .and_then(|raw| raw.parse::<u32>().ok())
+}
+
+fn build_modules() -> Modules {
+  let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5-mini".to_string());
+  let temperature = env_opt_f32("LLM_TEMPERATURE");
+  let max_output_tokens = env_opt_u32("LLM_MAX_OUTPUT_TOKENS");
+
+  let mirror = ResponseApiAdapter::new(ResponseApiConfig {
+    model: model.clone(),
+    instructions: "You are module:mirror. Reflect the user's intent in one short sentence.".to_string(),
+    temperature,
+    max_output_tokens,
+  });
+  let signals = ResponseApiAdapter::new(ResponseApiConfig {
+    model: model.clone(),
+    instructions: "You are module:signals. Extract quick signals as short bullet points.".to_string(),
+    temperature,
+    max_output_tokens,
+  });
+  let decision = ResponseApiAdapter::new(ResponseApiConfig {
+    model,
+    instructions: "You are module:decision. Output: decision=<respond|ignore> reason=<short>.".to_string(),
+    temperature,
+    max_output_tokens,
+  });
+
+  Modules {
+    mirror: Arc::new(mirror),
+    signals: Arc::new(signals),
+    decision: Arc::new(decision),
+  }
 }
 
 async fn ws_handler(
@@ -194,15 +257,18 @@ async fn handle_input(raw: String, state: &AppState) {
   );
   record_event(state, input_event.clone());
 
-  let submodule_events = run_submodules(&input_event);
-  for event in submodule_events.iter().cloned() {
-    record_event(state, event);
-  }
+  let input_text = input_event
+    .payload
+    .get("text")
+    .and_then(|value| value.as_str())
+    .unwrap_or("")
+    .trim()
+    .to_string();
 
-  let decision_event = run_decision(&input_event, &submodule_events);
-  record_event(state, decision_event.clone());
+  let submodule_outputs = run_submodules(&input_text, &state.modules, state).await;
+  let decision_output = run_decision(&input_text, &submodule_outputs, &state.modules, state).await;
 
-  let action_event = run_action(&input_event, &decision_event);
+  let action_event = run_action(&input_text, &decision_output.text);
   record_event(state, action_event);
 }
 
@@ -235,80 +301,119 @@ fn now_iso8601() -> String {
     .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-fn run_submodules(input: &Event) -> Vec<Event> {
-  let text = input
-    .payload
-    .get("text")
-    .and_then(|value| value.as_str())
-    .unwrap_or("")
-    .trim()
-    .to_string();
+async fn run_submodules(
+  input_text: &str,
+  modules: &Modules,
+  state: &AppState,
+) -> Vec<ModuleOutput> {
+  let mirror_input = format!("User input: {}", input_text);
+  let signals_input = format!("User input: {}", input_text);
 
-  let mirror_output = format!(
-    "module:mirror | prompt=reflect user intent | output=\"{}\"",
-    text
-  );
-  let signal_output = format!(
-    "module:signals | prompt=extract quick signals | output=chars:{} words:{}",
-    text.chars().count(),
-    text.split_whitespace().count()
-  );
+  let tasks = vec![
+    run_module(
+      state,
+      "mirror",
+      "submodule",
+      modules.mirror.clone(),
+      mirror_input,
+    ),
+    run_module(
+      state,
+      "signals",
+      "submodule",
+      modules.signals.clone(),
+      signals_input,
+    ),
+  ];
 
-  vec![
-    build_event(
-      "internal",
-      "text",
-      json!({ "text": mirror_output }),
-      vec!["submodule".to_string(), "module:mirror".to_string()],
-    ),
-    build_event(
-      "internal",
-      "text",
-      json!({ "text": signal_output }),
-      vec!["submodule".to_string(), "module:signals".to_string()],
-    ),
-  ]
+  join_all(tasks).await
 }
 
-fn run_decision(input: &Event, submodules: &[Event]) -> Event {
-  let text = input
-    .payload
-    .get("text")
-    .and_then(|value| value.as_str())
-    .unwrap_or("")
-    .trim();
+async fn run_decision(
+  input_text: &str,
+  submodules: &[ModuleOutput],
+  modules: &Modules,
+  state: &AppState,
+) -> ModuleOutput {
+  let mut context_lines = vec![format!("User input: {}", input_text)];
+  for output in submodules {
+    context_lines.push(format!("{}: {}", output.name, output.text));
+  }
+  context_lines.push("Return: decision=<respond|ignore> reason=<short>.".to_string());
 
-  let decision = if text.is_empty() { "ignore" } else { "respond" };
-  let reason = format!(
-    "decision={} reason=non-empty input submodules={} ",
-    decision,
-    submodules.len()
-  );
+  run_module(
+    state,
+    "decision",
+    "decision",
+    modules.decision.clone(),
+    context_lines.join("\n"),
+  )
+  .await
+}
 
-  build_event(
+async fn run_module(
+  state: &AppState,
+  name: &'static str,
+  role_tag: &'static str,
+  adapter: Arc<dyn LlmAdapter>,
+  input: String,
+) -> ModuleOutput {
+  let request_event = build_event(
     "internal",
     "text",
-    json!({ "text": reason }),
-    vec!["decision".to_string()],
-  )
+    json!({ "text": input }),
+    vec![
+      role_tag.to_string(),
+      format!("module:{}", name),
+      "llm.request".to_string(),
+    ],
+  );
+  record_event(state, request_event);
+
+  match adapter.respond(LlmRequest { input }).await {
+    Ok(response) => {
+      let response_event = build_event(
+        "internal",
+        "text",
+        json!({ "text": response.text, "raw": response.raw }),
+        vec![
+          role_tag.to_string(),
+          format!("module:{}", name),
+          "llm.response".to_string(),
+        ],
+      );
+      record_event(state, response_event);
+      ModuleOutput {
+        name,
+        text: response.text,
+      }
+    }
+    Err(err) => {
+      let error_text = format!("error: {}", err);
+      let error_event = build_event(
+        "internal",
+        "text",
+        json!({ "text": error_text }),
+        vec![
+          role_tag.to_string(),
+          format!("module:{}", name),
+          "error".to_string(),
+        ],
+      );
+      record_event(state, error_event);
+      ModuleOutput {
+        name,
+        text: format!("error: {}", err),
+      }
+    }
+  }
 }
 
-fn run_action(input: &Event, decision: &Event) -> Event {
-  let decision_text = decision
-    .payload
-    .get("text")
-    .and_then(|value| value.as_str())
-    .unwrap_or("decision=respond");
-  let user_text = input
-    .payload
-    .get("text")
-    .and_then(|value| value.as_str())
-    .unwrap_or("");
-
+fn run_action(input_text: &str, decision_text: &str) -> Event {
   let action_text = format!(
     "action=emit_response decision=({}) reply=\"{}\"",
-    decision_text,
-    user_text
+    decision_text.trim(),
+    input_text
   );
 
   build_event(

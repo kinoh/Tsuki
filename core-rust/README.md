@@ -12,6 +12,10 @@ cargo run
 Environment variables:
 - `PORT` (default: 2953)
 - `WEB_AUTH_TOKEN` (default: test-token)
+- `OPENAI_API_KEY` (required)
+- `OPENAI_MODEL` (default: gpt-5-mini)
+- `LLM_TEMPERATURE` (optional)
+- `LLM_MAX_OUTPUT_TOKENS` (optional)
 
 ## CLI (reuse existing ws_client.js)
 ```
@@ -31,5 +35,5 @@ You will receive event messages:
 ```
 
 ## Notes
-- Two fixed prompt-like submodules and one decision module are simulated.
+- Two fixed prompt-like submodules and one decision module call the OpenAI Response API.
 - All outputs (input, submodules, decision, action) are emitted as events.
