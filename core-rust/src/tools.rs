@@ -118,7 +118,7 @@ fn state_set_schema() -> Value {
       "key": { "type": "string" },
       "content": { "type": "string" },
       "related_keys": { "type": "array", "items": { "type": "string" } },
-      "metadata": { "type": "object" }
+      "metadata": { "type": "object", "additionalProperties": false }
     },
     "required": ["key", "content"],
     "additionalProperties": false
