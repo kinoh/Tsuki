@@ -32,8 +32,9 @@ struct AppState {
 
 #[derive(Clone)]
 struct Modules {
-  mirror: Arc<dyn LlmAdapter>,
-  signals: Arc<dyn LlmAdapter>,
+  curiosity: Arc<dyn LlmAdapter>,
+  self_preservation: Arc<dyn LlmAdapter>,
+  social_approval: Arc<dyn LlmAdapter>,
   decision: Arc<dyn LlmAdapter>,
 }
 
@@ -125,13 +126,19 @@ fn build_modules() -> Modules {
 
   let mirror = ResponseApiAdapter::new(ResponseApiConfig {
     model: model.clone(),
-    instructions: "You are module:mirror. Reflect the user's intent in one short sentence.".to_string(),
+    instructions: "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion: <text>\".".to_string(),
     temperature,
     max_output_tokens,
   });
   let signals = ResponseApiAdapter::new(ResponseApiConfig {
     model: model.clone(),
-    instructions: "You are module:signals. Extract quick signals as short bullet points.".to_string(),
+    instructions: "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion: <text>\".".to_string(),
+    temperature,
+    max_output_tokens,
+  });
+  let social_approval = ResponseApiAdapter::new(ResponseApiConfig {
+    model: model.clone(),
+    instructions: "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion: <text>\".".to_string(),
     temperature,
     max_output_tokens,
   });
@@ -143,8 +150,9 @@ fn build_modules() -> Modules {
   });
 
   Modules {
-    mirror: Arc::new(mirror),
-    signals: Arc::new(signals),
+    curiosity: Arc::new(mirror),
+    self_preservation: Arc::new(signals),
+    social_approval: Arc::new(social_approval),
     decision: Arc::new(decision),
   }
 }
@@ -308,21 +316,29 @@ async fn run_submodules(
 ) -> Vec<ModuleOutput> {
   let mirror_input = format!("User input: {}", input_text);
   let signals_input = format!("User input: {}", input_text);
+  let social_input = format!("User input: {}", input_text);
 
   let tasks = vec![
     run_module(
       state,
-      "mirror",
+      "curiosity",
       "submodule",
-      modules.mirror.clone(),
+      modules.curiosity.clone(),
       mirror_input,
     ),
     run_module(
       state,
-      "signals",
+      "self_preservation",
       "submodule",
-      modules.signals.clone(),
+      modules.self_preservation.clone(),
       signals_input,
+    ),
+    run_module(
+      state,
+      "social_approval",
+      "submodule",
+      modules.social_approval.clone(),
+      social_input,
     ),
   ];
 

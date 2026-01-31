@@ -35,5 +35,5 @@ You will receive event messages:
 ```
 
 ## Notes
-- Two fixed prompt-like submodules and one decision module call the OpenAI Response API.
+- Three fixed prompt-like submodules (curiosity, self_preservation, social_approval) and one decision module call the OpenAI Response API.
 - All outputs (input, submodules, decision, action) are emitted as events.
