@@ -25,6 +25,12 @@ cd core
 WEB_AUTH_TOKEN=test-token WS_URL=ws://localhost:2953/ node scripts/ws_client.js
 ```
 
+## CLI (Rust example)
+```
+cd core-rust
+WEB_AUTH_TOKEN=test-token WS_URL=ws://localhost:2953/ cargo run --example ws_client
+```
+
 First message is auth: `USER_NAME:WEB_AUTH_TOKEN`.
 After auth, send JSON like:
 ```
