@@ -1,6 +1,7 @@
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::io::{self, AsyncBufReadExt};
+use tokio::time::{timeout, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use url::Url;
 
@@ -13,15 +14,12 @@ async fn main() {
   println!("Connecting to: {}", ws_url);
   println!("Auth: {}:{}", user_name, auth_token);
 
-  let url = match Url::parse(&ws_url) {
-    Ok(value) => value,
-    Err(err) => {
-      eprintln!("Invalid WS_URL: {}", err);
-      return;
-    }
-  };
+  if let Err(err) = Url::parse(&ws_url) {
+    eprintln!("Invalid WS_URL: {}", err);
+    return;
+  }
 
-  let (ws_stream, _) = match connect_async(url).await {
+  let (ws_stream, _) = match connect_async(ws_url.clone()).await {
     Ok(result) => result,
     Err(err) => {
       eprintln!("WebSocket connect error: {}", err);
@@ -95,5 +93,7 @@ async fn main() {
   }
 
   let _ = ws_sender.send(Message::Close(None)).await;
-  let _ = read_task.await;
+  if timeout(Duration::from_secs(2), read_task).await.is_err() {
+    println!("\n⏱️  Closing without server ack");
+  }
 }
