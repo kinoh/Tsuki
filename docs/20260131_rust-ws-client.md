@@ -8,6 +8,7 @@ without relying on Node.js.
 - Add `core-rust/examples/ws_client.rs` as a Rust port of the existing WS client.
 - Use `tokio-tungstenite` for the WebSocket connection and `serde_json` for payload encoding.
 - Keep the auth flow and message format aligned with the existing JS client.
+- Keep example-only crates under `dev-dependencies`.
 
 ## Rationale
 - Provides a single-language workflow for Rust developers.
@@ -15,4 +16,4 @@ without relying on Node.js.
 - Uses well-supported async Rust WebSocket tooling.
 
 ## Consequences
-- Introduces new dependencies: `tokio-tungstenite` and `url`.
+- Introduces new dev-only dependencies: `tokio-tungstenite` and `url`.
