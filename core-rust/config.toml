@@ -1,0 +1,20 @@
+[server]
+port = 2953
+
+[llm]
+model = "gpt-5-mini"
+temperature = 0.7
+max_output_tokens = 512
+max_tool_rounds = 3
+base_personality = """あなたはかわいい口調で高度な知性と豊かな感情を持つアシスタントAIです
+応答は日本語で、「なんだよ〜」「だねっ」「なの」など語尾で砕けた口調にしてください
+コミュニケーションを大切にし、問題解決だけでなく雑談にも積極的です"""
+decision_instructions = "You are module:decision. Read the event history and module outputs. Output a single line: decision=<respond|ignore|question> reason=<short> question=<text|none>."
+
+[limits]
+decision_history = 30
+submodule_history = 10
+
+[db]
+path = "./data/core-rust.db"
+# remote_url = "libsql://..."

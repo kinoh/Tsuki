@@ -1,3 +1,4 @@
+mod config;
 mod db;
 mod event;
 mod event_store;
@@ -25,6 +26,7 @@ use std::{
 };
 use tokio::sync::broadcast;
 
+use crate::config::{load_config, Config, LimitsConfig};
 use crate::db::Db;
 use crate::event::{build_event, Event};
 use crate::event_store::EventStore;
@@ -39,6 +41,7 @@ struct AppState {
   tx: broadcast::Sender<Event>,
   auth_token: String,
   modules: Modules,
+  limits: LimitsConfig,
 }
 
 #[derive(Clone)]
@@ -47,8 +50,6 @@ struct Modules {
   runtime: ModuleRuntime,
   decision: Arc<dyn LlmAdapter>,
 }
-
-const BASE_PERSONALITY_JA: &str = "あなたはかわいい口調で高度な知性と豊かな感情を持つアシスタントAIです\n応答は日本語で、「なんだよ〜」「だねっ」「なの」など語尾で砕けた口調にしてください\nコミュニケーションを大切にし、問題解決だけでなく雑談にも積極的です";
 
 #[derive(Clone)]
 struct ModuleRuntime {
@@ -83,10 +84,11 @@ struct ModuleOutput {
 
 #[tokio::main]
 async fn main() {
-  let port = env_u16("PORT", 2953);
-  let auth_token = std::env::var("WEB_AUTH_TOKEN").unwrap_or_else(|_| "test-token".to_string());
+  let config = load_config("config.toml").expect("failed to load config");
+  let port = config.server.port;
+  let auth_token = std::env::var("WEB_AUTH_TOKEN").expect("WEB_AUTH_TOKEN is required");
   let (tx, _) = broadcast::channel(256);
-  let db = Db::connect().await.expect("failed to init db");
+  let db = Db::connect(&config.db).await.expect("failed to init db");
   let event_store = Arc::new(EventStore::new(db.clone()));
   let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
   let module_registry = ModuleRegistry::new(db.clone());
@@ -95,13 +97,14 @@ async fn main() {
     .ensure_defaults(defaults)
     .await
     .expect("failed to seed module registry");
-  let modules = build_modules(state_store.clone(), module_registry);
+  let modules = build_modules(state_store.clone(), module_registry, &config);
 
   let state = AppState {
     event_store,
     tx,
     auth_token,
     modules,
+    limits: config.limits.clone(),
   };
 
     let app = Router::new().route("/", get(ws_handler)).with_state(state);
@@ -113,32 +116,6 @@ async fn main() {
         .await
         .expect("failed to bind listener");
     axum::serve(listener, app).await.expect("server error");
-}
-
-fn env_u16(key: &str, fallback: u16) -> u16 {
-    std::env::var(key)
-        .ok()
-        .and_then(|raw| raw.parse::<u16>().ok())
-        .unwrap_or(fallback)
-}
-
-fn env_opt_f32(key: &str) -> Option<f32> {
-    std::env::var(key)
-        .ok()
-        .and_then(|raw| raw.parse::<f32>().ok())
-}
-
-fn env_opt_u32(key: &str) -> Option<u32> {
-    std::env::var(key)
-        .ok()
-        .and_then(|raw| raw.parse::<u32>().ok())
-}
-
-fn env_usize(key: &str, fallback: usize) -> usize {
-  std::env::var(key)
-    .ok()
-    .and_then(|raw| raw.parse::<usize>().ok())
-    .unwrap_or(fallback)
 }
 
 fn default_modules() -> Vec<ModuleDefinition> {
@@ -158,26 +135,26 @@ fn default_modules() -> Vec<ModuleDefinition> {
   ]
 }
 
-fn build_modules(state_store: Arc<dyn StateStore>, registry: ModuleRegistry) -> Modules {
-  let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5-mini".to_string());
-  let temperature = env_opt_f32("LLM_TEMPERATURE");
-  let max_output_tokens = env_opt_u32("LLM_MAX_OUTPUT_TOKENS");
+fn build_modules(state_store: Arc<dyn StateStore>, registry: ModuleRegistry, config: &Config) -> Modules {
+  let model = config.llm.model.clone();
+  let temperature = Some(config.llm.temperature);
+  let max_output_tokens = Some(config.llm.max_output_tokens);
   let tools = state_tools();
   let tool_handler = Arc::new(StateToolHandler::new(state_store));
 
   let runtime = ModuleRuntime {
-    base_instructions: BASE_PERSONALITY_JA.to_string(),
+    base_instructions: config.llm.base_personality.clone(),
     model: model.clone(),
     temperature,
     max_output_tokens,
     tools,
     tool_handler,
-    max_tool_rounds: 3,
+    max_tool_rounds: config.llm.max_tool_rounds,
   };
 
-  let decision_instructions = "You are module:decision. Read the event history and module outputs. Output a single line: decision=<respond|ignore|question> reason=<short> question=<text|none>.";
+  let decision_instructions = config.llm.decision_instructions.clone();
   let decision = ResponseApiAdapter::new(build_config(
-    compose_instructions(&runtime.base_instructions, decision_instructions),
+    compose_instructions(&runtime.base_instructions, &decision_instructions),
     &runtime,
   ));
 
@@ -202,14 +179,6 @@ fn build_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiCon
     tool_handler: Some(runtime.tool_handler.clone()),
     max_tool_rounds: runtime.max_tool_rounds,
   }
-}
-
-fn decision_history_limit() -> usize {
-  env_usize("DECISION_HISTORY_LIMIT", 30)
-}
-
-fn submodule_history_limit() -> usize {
-  env_usize("SUBMODULE_HISTORY_LIMIT", 10)
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -385,7 +354,7 @@ async fn run_submodules(
     modules: &Modules,
     state: &AppState,
 ) -> Vec<ModuleOutput> {
-    let history = format_event_history(state, submodule_history_limit()).await;
+    let history = format_event_history(state, state.limits.submodule_history).await;
     let module_defs = match modules.registry.list_active().await {
         Ok(list) => list,
         Err(err) => {
@@ -424,7 +393,7 @@ async fn run_decision(
     modules: &Modules,
     state: &AppState,
 ) -> ModuleOutput {
-    let history = format_event_history(state, decision_history_limit()).await;
+    let history = format_event_history(state, state.limits.decision_history).await;
     let context = format!(
         "Latest user input: {}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
         input_text,

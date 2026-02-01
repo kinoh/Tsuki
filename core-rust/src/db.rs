@@ -1,5 +1,6 @@
-use crate::event::Event;
 use crate::clock::now_iso8601;
+use crate::config::DbConfig;
+use crate::event::Event;
 use libsql::{params, Connection};
 use serde_json::Value;
 use std::error::Error;
@@ -14,17 +15,22 @@ pub struct Db {
 }
 
 impl Db {
-  pub async fn connect() -> DbResult<Arc<Self>> {
-    let db_path = std::env::var("DB_PATH").unwrap_or_else(|_| "./data/core-rust.db".to_string());
+  pub async fn connect(config: &DbConfig) -> DbResult<Arc<Self>> {
+    let db_path = config.path.clone();
     if let Some(parent) = Path::new(&db_path).parent() {
       if !parent.as_os_str().is_empty() {
         std::fs::create_dir_all(parent)?;
       }
     }
 
-    let db = if let Ok(url) = std::env::var("TURSO_DATABASE_URL") {
+    let db = if let Some(url) = config.remote_url.clone() {
       let token = std::env::var("TURSO_AUTH_TOKEN")
-        .map_err(|_| "TURSO_AUTH_TOKEN is required for remote databases")?;
+        .map_err(|_| {
+          std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "TURSO_AUTH_TOKEN is required for remote databases",
+          )
+        })?;
       libsql::Builder::new_remote_replica(&db_path, url, token)
         .build()
         .await?

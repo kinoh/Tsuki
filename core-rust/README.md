@@ -9,18 +9,13 @@ cd core-rust
 cargo run
 ```
 
-Environment variables:
-- `PORT` (default: 2953)
-- `WEB_AUTH_TOKEN` (default: test-token)
+Config file:
+- `config.toml` (required, no defaults)
+
+Environment variables (secrets only):
+- `WEB_AUTH_TOKEN` (required)
 - `OPENAI_API_KEY` (required)
-- `OPENAI_MODEL` (default: gpt-5-mini)
-- `LLM_TEMPERATURE` (optional)
-- `LLM_MAX_OUTPUT_TOKENS` (optional)
-- `SUBMODULE_HISTORY_LIMIT` (default: 10)
-- `DECISION_HISTORY_LIMIT` (default: 30)
-- `DB_PATH` (default: ./data/core-rust.db)
-- `TURSO_DATABASE_URL` (optional)
-- `TURSO_AUTH_TOKEN` (required when TURSO_DATABASE_URL is set)
+- `TURSO_AUTH_TOKEN` (required when `db.remote_url` is set)
 
 ## CLI (reuse existing ws_client.js)
 ```
@@ -52,4 +47,4 @@ You will receive event messages:
 - Submodules are registered in a ModuleRegistry (persisted in libSQL).
 - Decision uses recent event history from the event store; question events are emitted when requested.
 - All outputs (input, submodules, decision, action) are emitted as events.
-- Events, state, and modules are persisted in libSQL (local by default).
+- Events, state, and modules are persisted in libSQL (local when `db.remote_url` is unset).
