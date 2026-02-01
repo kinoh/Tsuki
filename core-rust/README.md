@@ -11,6 +11,7 @@ cargo run
 
 Config file:
 - `config.toml` (required, no defaults)
+- `[[modules]]` defines initial module registry entries
 
 Environment variables (secrets only):
 - `WEB_AUTH_TOKEN` (required)

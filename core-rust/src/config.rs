@@ -6,6 +6,7 @@ pub struct Config {
   pub llm: LlmConfig,
   pub limits: LimitsConfig,
   pub db: DbConfig,
+  pub modules: Vec<ModuleConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -33,6 +34,13 @@ pub struct LimitsConfig {
 pub struct DbConfig {
   pub path: String,
   pub remote_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModuleConfig {
+  pub name: String,
+  pub instructions: String,
+  pub enabled: bool,
 }
 
 pub fn load_config(path: &str) -> Result<Config, String> {

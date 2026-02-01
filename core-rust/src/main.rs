@@ -92,7 +92,7 @@ async fn main() {
   let event_store = Arc::new(EventStore::new(db.clone()));
   let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
   let module_registry = ModuleRegistry::new(db.clone());
-  let defaults = default_modules();
+  let defaults = module_defaults_from_config(&config);
   module_registry
     .ensure_defaults(defaults)
     .await
@@ -118,21 +118,16 @@ async fn main() {
     axum::serve(listener, app).await.expect("server error");
 }
 
-fn default_modules() -> Vec<ModuleDefinition> {
-  vec![
-    ModuleDefinition::new(
-      "curiosity",
-      "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
-    ),
-    ModuleDefinition::new(
-      "self_preservation",
-      "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
-    ),
-    ModuleDefinition::new(
-      "social_approval",
-      "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
-    ),
-  ]
+fn module_defaults_from_config(config: &Config) -> Vec<ModuleDefinition> {
+  config
+    .modules
+    .iter()
+    .map(|module| {
+      let mut def = ModuleDefinition::new(&module.name, &module.instructions);
+      def.enabled = module.enabled;
+      def
+    })
+    .collect()
 }
 
 fn build_modules(state_store: Arc<dyn StateStore>, registry: ModuleRegistry, config: &Config) -> Modules {
