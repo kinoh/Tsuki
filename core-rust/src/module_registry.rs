@@ -1,5 +1,6 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use crate::db::{Db, DbResult};
+use async_trait::async_trait;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ModuleDefinition {
@@ -20,51 +21,42 @@ impl ModuleDefinition {
 
 #[derive(Clone)]
 pub struct ModuleRegistry {
-  modules: Arc<RwLock<HashMap<String, ModuleDefinition>>>,
+  db: Arc<Db>,
 }
 
 impl ModuleRegistry {
-  pub fn new(defaults: Vec<ModuleDefinition>) -> Self {
-    let mut modules = HashMap::new();
+  pub fn new(db: Arc<Db>) -> Self {
+    Self { db }
+  }
+
+  pub async fn ensure_defaults(&self, defaults: Vec<ModuleDefinition>) -> DbResult<()> {
     for module in defaults {
-      modules.insert(module.name.clone(), module);
+      self.db
+        .upsert_module(&module.name, &module.instructions, module.enabled)
+        .await?;
     }
-    Self {
-      modules: Arc::new(RwLock::new(modules)),
-    }
+    Ok(())
   }
+}
 
-  pub fn add(&self, definition: ModuleDefinition) -> bool {
-    if let Ok(mut modules) = self.modules.write() {
-      let replaced = modules.insert(definition.name.clone(), definition);
-      return replaced.is_some();
-    }
-    false
-  }
+#[async_trait]
+pub trait ModuleRegistryReader: Send + Sync {
+  async fn list_active(&self) -> DbResult<Vec<ModuleDefinition>>;
+}
 
-  pub fn disable(&self, name: &str) -> bool {
-    if let Ok(mut modules) = self.modules.write() {
-      if let Some(module) = modules.get_mut(name) {
-        module.enabled = false;
-        return true;
-      }
-    }
-    false
-  }
-
-  pub fn list_active(&self) -> Vec<ModuleDefinition> {
-    self
-      .modules
-      .read()
-      .map(|modules| {
-        let mut list = modules
-          .values()
-          .filter(|module| module.enabled)
-          .cloned()
-          .collect::<Vec<_>>();
-        list.sort_by(|a, b| a.name.cmp(&b.name));
-        list
-      })
-      .unwrap_or_default()
+#[async_trait]
+impl ModuleRegistryReader for ModuleRegistry {
+  async fn list_active(&self) -> DbResult<Vec<ModuleDefinition>> {
+    let rows = self.db.list_active_modules().await?;
+    Ok(
+      rows
+        .into_iter()
+        .map(|(name, instructions, enabled)| ModuleDefinition {
+          name,
+          instructions,
+          enabled,
+        })
+        .collect(),
+    )
   }
 }

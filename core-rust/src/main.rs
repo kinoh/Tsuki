@@ -1,40 +1,44 @@
+mod db;
+mod event;
+mod event_store;
 mod llm;
 mod module_registry;
 mod state;
+mod time_utils;
 mod tools;
 
 use axum::{
-    extract::{
-        ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
-        State,
-    },
-    response::IntoResponse,
-    routing::get,
-    Router,
+  extract::{
+    ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
+    State,
+  },
+  response::IntoResponse,
+  routing::get,
+  Router,
 };
 use futures::{future::join_all, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    net::SocketAddr,
-    sync::{Arc, Mutex},
+  net::SocketAddr,
+  sync::Arc,
 };
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::sync::broadcast;
-use uuid::Uuid;
 
+use crate::db::Db;
+use crate::event::{build_event, Event};
+use crate::event_store::EventStore;
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
-use crate::module_registry::{ModuleDefinition, ModuleRegistry};
-use crate::state::{InMemoryStateStore, StateStore};
+use crate::module_registry::{ModuleDefinition, ModuleRegistry, ModuleRegistryReader};
+use crate::state::{DbStateStore, StateStore};
 use crate::tools::{state_tools, StateToolHandler};
 
 #[derive(Clone)]
 struct AppState {
-  events: Arc<Mutex<Vec<Event>>>,
+  event_store: Arc<EventStore>,
   tx: broadcast::Sender<Event>,
   auth_token: String,
   modules: Modules,
-  _state_store: Arc<dyn StateStore>,
 }
 
 #[derive(Clone)]
@@ -55,21 +59,6 @@ struct ModuleRuntime {
   tools: Vec<async_openai::types::responses::Tool>,
   tool_handler: Arc<dyn crate::llm::ToolHandler>,
   max_tool_rounds: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Event {
-    event_id: String,
-    ts: String,
-    source: String,
-    modality: String,
-    payload: serde_json::Value,
-    meta: EventMeta,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct EventMeta {
-    tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,15 +86,22 @@ async fn main() {
   let port = env_u16("PORT", 2953);
   let auth_token = std::env::var("WEB_AUTH_TOKEN").unwrap_or_else(|_| "test-token".to_string());
   let (tx, _) = broadcast::channel(256);
-  let state_store: Arc<dyn StateStore> = Arc::new(InMemoryStateStore::new());
-  let modules = build_modules(state_store.clone());
+  let db = Db::connect().await.expect("failed to init db");
+  let event_store = Arc::new(EventStore::new(db.clone()));
+  let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
+  let module_registry = ModuleRegistry::new(db.clone());
+  let defaults = default_modules();
+  module_registry
+    .ensure_defaults(defaults)
+    .await
+    .expect("failed to seed module registry");
+  let modules = build_modules(state_store.clone(), module_registry);
 
   let state = AppState {
-    events: Arc::new(Mutex::new(Vec::new())),
+    event_store,
     tx,
     auth_token,
     modules,
-    _state_store: state_store,
   };
 
     let app = Router::new().route("/", get(ws_handler)).with_state(state);
@@ -145,7 +141,24 @@ fn env_usize(key: &str, fallback: usize) -> usize {
     .unwrap_or(fallback)
 }
 
-fn build_modules(state_store: Arc<dyn StateStore>) -> Modules {
+fn default_modules() -> Vec<ModuleDefinition> {
+  vec![
+    ModuleDefinition::new(
+      "curiosity",
+      "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
+    ),
+    ModuleDefinition::new(
+      "self_preservation",
+      "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
+    ),
+    ModuleDefinition::new(
+      "social_approval",
+      "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
+    ),
+  ]
+}
+
+fn build_modules(state_store: Arc<dyn StateStore>, registry: ModuleRegistry) -> Modules {
   let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5-mini".to_string());
   let temperature = env_opt_f32("LLM_TEMPERATURE");
   let max_output_tokens = env_opt_u32("LLM_MAX_OUTPUT_TOKENS");
@@ -161,21 +174,6 @@ fn build_modules(state_store: Arc<dyn StateStore>) -> Modules {
     tool_handler,
     max_tool_rounds: 3,
   };
-
-  let registry = ModuleRegistry::new(vec![
-    ModuleDefinition::new(
-      "curiosity",
-      "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
-    ),
-    ModuleDefinition::new(
-      "self_preservation",
-      "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
-    ),
-    ModuleDefinition::new(
-      "social_approval",
-      "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion=<text> confidence=<short>\".",
-    ),
-  ]);
 
   let decision_instructions = "You are module:decision. Read the event history and module outputs. Output a single line: decision=<respond|ignore|question> reason=<short> question=<text|none>.";
   let decision = ResponseApiAdapter::new(build_config(
@@ -319,7 +317,7 @@ async fn handle_input(raw: String, state: &AppState) {
                 json!({ "text": "invalid input payload" }),
                 vec!["error".to_string()],
             );
-            record_event(state, event);
+            record_event(state, event).await;
             return;
         }
     };
@@ -337,7 +335,7 @@ async fn handle_input(raw: String, state: &AppState) {
             json!({ "text": "invalid input type" }),
             vec!["error".to_string()],
         );
-        record_event(state, event);
+        record_event(state, event).await;
         return;
     }
 
@@ -347,7 +345,7 @@ async fn handle_input(raw: String, state: &AppState) {
         json!({ "text": input.text }),
         vec!["input".to_string(), format!("type:{}", kind)],
     );
-    record_event(state, input_event.clone());
+    record_event(state, input_event.clone()).await;
 
     let input_text = input_event
         .payload
@@ -367,41 +365,19 @@ async fn handle_input(raw: String, state: &AppState) {
             json!({ "text": question, "target": "user" }),
             vec!["question".to_string(), "needs_input".to_string()],
         );
-        record_event(state, question_event);
+        record_event(state, question_event).await;
     }
 
     let action_event = run_action(&input_text, &decision_output.text);
-    record_event(state, action_event);
+    record_event(state, action_event).await;
 }
 
-fn record_event(state: &AppState, event: Event) {
-    if let Ok(mut events) = state.events.lock() {
-        events.push(event.clone());
+async fn record_event(state: &AppState, event: Event) {
+    if let Err(err) = state.event_store.append(&event).await {
+        println!("EVENT_STORE_ERROR error={}", err);
     }
     let _ = state.tx.send(event.clone());
     log_event(&event);
-}
-
-fn build_event(
-    source: &str,
-    modality: &str,
-    payload: serde_json::Value,
-    tags: Vec<String>,
-) -> Event {
-    Event {
-        event_id: Uuid::new_v4().to_string(),
-        ts: now_iso8601(),
-        source: source.to_string(),
-        modality: modality.to_string(),
-        payload,
-        meta: EventMeta { tags },
-    }
-}
-
-fn now_iso8601() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
 async fn run_submodules(
@@ -409,8 +385,14 @@ async fn run_submodules(
     modules: &Modules,
     state: &AppState,
 ) -> Vec<ModuleOutput> {
-    let history = format_event_history(state, submodule_history_limit());
-    let module_defs = modules.registry.list_active();
+    let history = format_event_history(state, submodule_history_limit()).await;
+    let module_defs = match modules.registry.list_active().await {
+        Ok(list) => list,
+        Err(err) => {
+            println!("MODULE_REGISTRY_ERROR error={}", err);
+            Vec::new()
+        }
+    };
     let tasks = module_defs
         .into_iter()
         .map(|definition| {
@@ -442,7 +424,7 @@ async fn run_decision(
     modules: &Modules,
     state: &AppState,
 ) -> ModuleOutput {
-    let history = format_event_history(state, decision_history_limit());
+    let history = format_event_history(state, decision_history_limit()).await;
     let context = format!(
         "Latest user input: {}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
         input_text,
@@ -485,7 +467,7 @@ async fn run_module(
                     "llm.response".to_string(),
                 ],
             );
-            record_event(state, response_event);
+            record_event(state, response_event).await;
             ModuleOutput {
                 name: name.clone(),
                 text: response.text,
@@ -503,7 +485,7 @@ async fn run_module(
                     "error".to_string(),
                 ],
             );
-            record_event(state, error_event);
+            record_event(state, error_event).await;
             ModuleOutput {
                 name: name.clone(),
                 text: format!("error: {}", err),
@@ -527,8 +509,8 @@ fn run_action(input_text: &str, decision_text: &str) -> Event {
     )
 }
 
-fn format_event_history(state: &AppState, limit: usize) -> String {
-    let events = latest_events(state, limit);
+async fn format_event_history(state: &AppState, limit: usize) -> String {
+    let events = latest_events(state, limit).await;
     if events.is_empty() {
         return "none".to_string();
     }
@@ -539,19 +521,17 @@ fn format_event_history(state: &AppState, limit: usize) -> String {
         .join("\n")
 }
 
-fn latest_events(state: &AppState, limit: usize) -> Vec<Event> {
+async fn latest_events(state: &AppState, limit: usize) -> Vec<Event> {
     if limit == 0 {
         return Vec::new();
     }
-    state
-        .events
-        .lock()
-        .map(|events| {
-            let len = events.len();
-            let start = len.saturating_sub(limit);
-            events.iter().skip(start).cloned().collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
+    match state.event_store.latest(limit).await {
+        Ok(events) => events,
+        Err(err) => {
+            println!("EVENT_STORE_ERROR error={}", err);
+            Vec::new()
+        }
+    }
 }
 
 fn format_event_line(event: &Event) -> String {
