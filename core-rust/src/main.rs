@@ -150,7 +150,11 @@ fn build_modules(
   emit_event: Arc<dyn Fn(Event) + Send + Sync>,
 ) -> Modules {
   let model = config.llm.model.clone();
-  let temperature = Some(config.llm.temperature);
+  let temperature = if config.llm.temperature_enabled {
+    Some(config.llm.temperature)
+  } else {
+    None
+  };
   let max_output_tokens = Some(config.llm.max_output_tokens);
   let tools = state_tools();
   let tool_handler = Arc::new(StateToolHandler::new(state_store, emit_event));

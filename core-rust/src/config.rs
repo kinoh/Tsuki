@@ -18,6 +18,7 @@ pub struct ServerConfig {
 pub struct LlmConfig {
   pub model: String,
   pub temperature: f32,
+  pub temperature_enabled: bool,
   pub max_output_tokens: u32,
   pub max_tool_rounds: usize,
   pub base_personality: String,

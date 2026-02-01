@@ -4,6 +4,7 @@ port = 2953
 [llm]
 model = "gpt-5-mini"
 temperature = 0.7
+temperature_enabled = false
 max_output_tokens = 512
 max_tool_rounds = 3
 base_personality = """あなたはかわいい口調で高度な知性と豊かな感情を持つアシスタントAIです
