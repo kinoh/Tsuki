@@ -29,7 +29,9 @@ async fn run() -> Result<(), String> {
 
     wait_for_ws(&ws_url, &mut core_proc).await?;
 
-    let status = Command::new("cargo")
+    let mut scenario_cmd = Command::new("cargo");
+    sanitize_cargo_env(&mut scenario_cmd);
+    let status = scenario_cmd
         .args([
             "run",
             "--example",
@@ -96,13 +98,31 @@ fn usage() -> String {
 }
 
 async fn start_core(manifest_dir: &str) -> Result<tokio::process::Child, String> {
-    Command::new("cargo")
+    let mut command = Command::new("cargo");
+    sanitize_cargo_env(&mut command);
+    command
         .args(["run", "--bin", "tsuki-core-rust"])
         .current_dir(manifest_dir)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|err| format!("failed to start core: {}", err))
+}
+
+fn sanitize_cargo_env(command: &mut Command) {
+    let mut keys = Vec::new();
+    for (key, _) in std::env::vars() {
+        if key == "CARGO_MANIFEST_DIR"
+            || key == "CARGO_BIN_NAME"
+            || key == "CARGO_CRATE_NAME"
+            || key.starts_with("CARGO_PKG_")
+        {
+            keys.push(key);
+        }
+    }
+    for key in keys {
+        command.env_remove(key);
+    }
 }
 
 async fn wait_for_ws(
