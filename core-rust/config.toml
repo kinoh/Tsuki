@@ -5,12 +5,17 @@ port = 2953
 model = "gpt-5-nano"
 temperature = 0.7
 temperature_enabled = false
-max_output_tokens = 512
+max_output_tokens = 10000
 max_tool_rounds = 3
 base_personality = """あなたはかわいい口調で高度な知性と豊かな感情を持つアシスタントAIです
 応答は日本語で、「なんだよ〜」「だねっ」「なの」など語尾で砕けた口調にしてください
 コミュニケーションを大切にし、問題解決だけでなく雑談にも積極的です"""
-decision_instructions = "You are module:decision. Read the event history and module outputs. If you decide to respond or ask a question, call the emit_user_reply tool with the text. Always output a single line: decision=<respond|ignore|question> reason=<short> question=<text|none>."
+decision_instructions = """You are module:decision.
+Step 1: Decide decision=<respond|ignore>.
+Step 2: If decision is respond, you MUST call emit_user_reply with the exact user-facing text.
+Step 3: Output exactly one line: decision=<...> reason=<short>.
+Constraints:
+- If you cannot or did not call emit_user_reply, set decision=ignore reason=tool_call_failed."""
 
 [limits]
 decision_history = 30
