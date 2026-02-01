@@ -30,6 +30,19 @@ cd core-rust
 WEB_AUTH_TOKEN=test-token WS_URL=ws://localhost:2953/ cargo run --example ws_client
 ```
 
+## Scenario tests
+Manual E2E runner and scenario client live under `tests/` and `examples/`.
+```
+cd core-rust
+cargo run --example test_runner -- tests/client/scenarios/example.yaml
+```
+
+Connect to an existing server:
+```
+cd core-rust
+cargo run --example test_runner -- --connect tests/client/scenarios/example.yaml
+```
+
 First message is auth: `USER_NAME:WEB_AUTH_TOKEN`.
 After auth, send JSON like:
 ```
