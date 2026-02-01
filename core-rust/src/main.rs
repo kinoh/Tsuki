@@ -4,7 +4,7 @@ mod event_store;
 mod llm;
 mod module_registry;
 mod state;
-mod time_utils;
+mod clock;
 mod tools;
 
 use axum::{
