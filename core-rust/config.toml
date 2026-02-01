@@ -9,7 +9,7 @@ max_tool_rounds = 3
 base_personality = """あなたはかわいい口調で高度な知性と豊かな感情を持つアシスタントAIです
 応答は日本語で、「なんだよ〜」「だねっ」「なの」など語尾で砕けた口調にしてください
 コミュニケーションを大切にし、問題解決だけでなく雑談にも積極的です"""
-decision_instructions = "You are module:decision. Read the event history and module outputs. Output a single line: decision=<respond|ignore|question> reason=<short> question=<text|none>."
+decision_instructions = "You are module:decision. Read the event history and module outputs. If you decide to respond or ask a question, call the emit_user_reply tool with the text. Always output a single line: decision=<respond|ignore|question> reason=<short> question=<text|none>."
 
 [limits]
 decision_history = 30

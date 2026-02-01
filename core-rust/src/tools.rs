@@ -1,4 +1,5 @@
 use crate::llm::{ToolError, ToolHandler};
+use crate::event::build_event;
 use crate::state::{StateRecord, StateStore};
 use async_openai::types::responses::{FunctionTool, Tool};
 use serde::Deserialize;
@@ -8,6 +9,7 @@ use std::sync::Arc;
 pub const STATE_SET_TOOL: &str = "state_set";
 pub const STATE_GET_TOOL: &str = "state_get";
 pub const STATE_SEARCH_TOOL: &str = "state_search";
+pub const EMIT_USER_REPLY_TOOL: &str = "emit_user_reply";
 
 pub fn state_tools() -> Vec<Tool> {
   vec![
@@ -29,16 +31,26 @@ pub fn state_tools() -> Vec<Tool> {
       parameters: Some(state_search_schema()),
       strict: Some(true),
     }),
+    Tool::Function(FunctionTool {
+      name: EMIT_USER_REPLY_TOOL.to_string(),
+      description: Some("Emit a reply message to the user.".to_string()),
+      parameters: Some(emit_user_reply_schema()),
+      strict: Some(true),
+    }),
   ]
 }
 
 pub struct StateToolHandler {
   store: Arc<dyn StateStore>,
+  emit_event: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
 }
 
 impl StateToolHandler {
-  pub fn new(store: Arc<dyn StateStore>) -> Self {
-    Self { store }
+  pub fn new(
+    store: Arc<dyn StateStore>,
+    emit_event: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
+  ) -> Self {
+    Self { store, emit_event }
   }
 }
 
@@ -69,6 +81,18 @@ impl ToolHandler for StateToolHandler {
         let results = self.store.search(&args.query, limit);
         Ok(to_json_string(&state_search_result(results)))
       }
+      EMIT_USER_REPLY_TOOL => {
+        let args: EmitUserReplyArgs = serde_json::from_str(arguments)
+          .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+        let event = build_event(
+          "internal",
+          "text",
+          json!({ "text": args.text, "target": "user" }),
+          vec!["action".to_string(), "response".to_string()],
+        );
+        (self.emit_event)(event);
+        Ok("{\"ok\":true}".to_string())
+      }
       _ => Err(ToolError::new(format!("unknown tool: {}", tool_name))),
     }
   }
@@ -91,6 +115,11 @@ struct StateGetArgs {
 struct StateSearchArgs {
   query: String,
   limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EmitUserReplyArgs {
+  text: String,
 }
 
 fn state_get_result(record: Option<StateRecord>) -> Value {
@@ -144,6 +173,17 @@ fn state_search_schema() -> Value {
       "limit": { "type": "integer", "minimum": 1 }
     },
     "required": ["query", "limit"],
+    "additionalProperties": false
+  })
+}
+
+fn emit_user_reply_schema() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "text": { "type": "string" }
+    },
+    "required": ["text"],
     "additionalProperties": false
   })
 }

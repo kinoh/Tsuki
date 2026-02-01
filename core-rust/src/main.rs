@@ -90,6 +90,19 @@ async fn main() {
   let (tx, _) = broadcast::channel(256);
   let db = Db::connect(&config.db).await.expect("failed to init db");
   let event_store = Arc::new(EventStore::new(db.clone()));
+  let emit_event_store = event_store.clone();
+  let emit_tx = tx.clone();
+  let emit_event = Arc::new(move |event: Event| {
+    let event_store = emit_event_store.clone();
+    let tx = emit_tx.clone();
+    tokio::spawn(async move {
+      if let Err(err) = event_store.append(&event).await {
+        println!("EVENT_STORE_ERROR error={}", err);
+      }
+      let _ = tx.send(event.clone());
+      log_event(&event);
+    });
+  });
   let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
   let module_registry = ModuleRegistry::new(db.clone());
   let defaults = module_defaults_from_config(&config);
@@ -97,7 +110,7 @@ async fn main() {
     .ensure_defaults(defaults)
     .await
     .expect("failed to seed module registry");
-  let modules = build_modules(state_store.clone(), module_registry, &config);
+  let modules = build_modules(state_store.clone(), module_registry, &config, emit_event);
 
   let state = AppState {
     event_store,
@@ -130,12 +143,17 @@ fn module_defaults_from_config(config: &Config) -> Vec<ModuleDefinition> {
     .collect()
 }
 
-fn build_modules(state_store: Arc<dyn StateStore>, registry: ModuleRegistry, config: &Config) -> Modules {
+fn build_modules(
+  state_store: Arc<dyn StateStore>,
+  registry: ModuleRegistry,
+  config: &Config,
+  emit_event: Arc<dyn Fn(Event) + Send + Sync>,
+) -> Modules {
   let model = config.llm.model.clone();
   let temperature = Some(config.llm.temperature);
   let max_output_tokens = Some(config.llm.max_output_tokens);
   let tools = state_tools();
-  let tool_handler = Arc::new(StateToolHandler::new(state_store));
+  let tool_handler = Arc::new(StateToolHandler::new(state_store, emit_event));
 
   let runtime = ModuleRuntime {
     base_instructions: config.llm.base_personality.clone(),
@@ -320,20 +338,7 @@ async fn handle_input(raw: String, state: &AppState) {
         .to_string();
 
     let _submodule_outputs = run_submodules(&input_text, &state.modules, state).await;
-    let decision_output = run_decision(&input_text, &state.modules, state).await;
-
-    if let Some(question) = extract_question(&decision_output.text) {
-        let question_event = build_event(
-            "internal",
-            "text",
-            json!({ "text": question, "target": "user" }),
-            vec!["question".to_string(), "needs_input".to_string()],
-        );
-        record_event(state, question_event).await;
-    }
-
-    let action_event = run_action(&input_text, &decision_output.text);
-    record_event(state, action_event).await;
+    let _decision_output = run_decision(&input_text, &state.modules, state).await;
 }
 
 async fn record_event(state: &AppState, event: Event) {
@@ -394,15 +399,47 @@ async fn run_decision(
         input_text,
         history
     );
+    println!(
+        "MODULE_INPUT name=decision role=decision bytes={}",
+        context.len()
+    );
 
-    run_module(
-        state,
-        "decision".to_string(),
-        "decision",
-        modules.decision.clone(),
-        context,
-    )
-    .await
+    let response = match modules
+        .decision
+        .respond(LlmRequest { input: context })
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let error_text = format!("error: {}", err);
+            let error_event = build_event(
+                "internal",
+                "text",
+                json!({ "text": error_text }),
+                vec!["decision".to_string(), "error".to_string()],
+            );
+            record_event(state, error_event).await;
+            return ModuleOutput {
+                name: "decision".to_string(),
+                text: format!("error: {}", err),
+            };
+        }
+    };
+
+    let parsed = parse_decision(&response.text);
+    let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
+    let decision_event = build_event(
+        "internal",
+        "text",
+        json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
+        vec!["decision".to_string()],
+    );
+    record_event(state, decision_event).await;
+
+    ModuleOutput {
+        name: "decision".to_string(),
+        text: response.text,
+    }
 }
 
 async fn run_module(
@@ -456,21 +493,6 @@ async fn run_module(
             }
         }
     }
-}
-
-fn run_action(input_text: &str, decision_text: &str) -> Event {
-    let action_text = format!(
-        "action=emit_response decision=({}) reply=\"{}\"",
-        decision_text.trim(),
-        input_text
-    );
-
-    build_event(
-        "internal",
-        "text",
-        json!({ "text": action_text }),
-        vec!["action".to_string(), "response".to_string()],
-    )
 }
 
 async fn format_event_history(state: &AppState, limit: usize) -> String {
@@ -539,14 +561,6 @@ fn log_event(event: &Event) {
         "EVENT ts={} source={} modality={} tags={} payload={}",
         event.ts, event.source, event.modality, tags, payload_text
     );
-}
-
-fn extract_question(text: &str) -> Option<String> {
-    let parsed = parse_decision(text);
-    if parsed.decision == "question" {
-        return parsed.question;
-    }
-    parsed.question
 }
 
 fn parse_decision(text: &str) -> DecisionParsed {
