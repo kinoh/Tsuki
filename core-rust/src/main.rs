@@ -232,7 +232,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         Ok(text) => text,
                         Err(_) => continue,
                     };
-                    if ws_sender.send(Message::Text(text)).await.is_err() {
+                    if ws_sender.send(Message::Text(text.into())).await.is_err() {
                         println!("WS_SEND_FAIL reason=closed");
                         break;
                     }
@@ -249,7 +249,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     while let Some(Ok(message)) = ws_receiver.next().await {
         match message {
             Message::Text(text) => {
-                handle_input(text, &state).await;
+                handle_input(text.to_string(), &state).await;
             }
             Message::Close(frame) => {
                 println!("WS_CLIENT_CLOSE stage=post_auth frame={:?}", frame);
