@@ -219,7 +219,7 @@ impl Db {
     conn
       .execute(
         "INSERT INTO modules (name, instructions, enabled, updated_at) VALUES (?, ?, ?, ?)\
-         ON CONFLICT(name) DO UPDATE SET\
+         ON CONFLICT(name) DO UPDATE SET \
            instructions=excluded.instructions,\
            enabled=excluded.enabled,\
            updated_at=excluded.updated_at",
