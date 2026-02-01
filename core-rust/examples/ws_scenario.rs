@@ -114,11 +114,11 @@ async fn run() -> Result<(), String> {
     )
     .await;
 
-    let received_count = Arc::new(AtomicUsize::new(0));
+    let reply_count = Arc::new(AtomicUsize::new(0));
     let notify = Arc::new(Notify::new());
 
     let reader_logger = logger.clone();
-    let reader_count = received_count.clone();
+    let reader_count = reply_count.clone();
     let reader_notify = notify.clone();
 
     let reader_task = tokio::spawn(async move {
@@ -137,8 +137,10 @@ async fn run() -> Result<(), String> {
                         }),
                     )
                     .await;
-                    reader_count.fetch_add(1, Ordering::SeqCst);
-                    reader_notify.notify_waiters();
+                    if is_reply_event(&parsed) {
+                        reader_count.fetch_add(1, Ordering::SeqCst);
+                        reader_notify.notify_waiters();
+                    }
                 }
                 Ok(Message::Close(frame)) => {
                     log_event(
@@ -175,7 +177,7 @@ async fn run() -> Result<(), String> {
             "type": kind,
             "text": input.text,
         });
-        let before = received_count.load(Ordering::SeqCst);
+        let before = reply_count.load(Ordering::SeqCst);
         ws_sender
             .send(Message::Text(payload.to_string().into()))
             .await
@@ -192,7 +194,7 @@ async fn run() -> Result<(), String> {
         .await;
 
         let timeout_ms = input.timeout_ms.unwrap_or(config.response_timeout_ms);
-        wait_for_message(&received_count, &notify, before, timeout_ms).await?;
+        wait_for_message(&reply_count, &notify, before, timeout_ms).await?;
     }
 
     let _ = ws_sender.send(Message::Close(None)).await;
@@ -301,6 +303,43 @@ fn normalize_kind(kind: Option<&str>) -> Result<&'static str, String> {
         Some("sensory") => Ok("sensory"),
         Some(other) => Err(format!("invalid input type: {}", other)),
     }
+}
+
+fn is_reply_event(message: &Value) -> bool {
+    let obj = match message.as_object() {
+        Some(value) => value,
+        None => return false,
+    };
+    let kind = obj.get("type").and_then(|value| value.as_str());
+    if kind != Some("event") {
+        return false;
+    }
+    let event = match obj.get("event").and_then(|value| value.as_object()) {
+        Some(value) => value,
+        None => return false,
+    };
+    let tags = match event
+        .get("meta")
+        .and_then(|value| value.get("tags"))
+        .and_then(|value| value.as_array())
+    {
+        Some(value) => value,
+        None => return false,
+    };
+    let mut has_action = false;
+    let mut has_response = false;
+    for tag in tags.iter().filter_map(|value| value.as_str()) {
+        if tag == "action" {
+            has_action = true;
+        }
+        if tag == "response" {
+            has_response = true;
+        }
+        if has_action && has_response {
+            return true;
+        }
+    }
+    false
 }
 
 fn init_log_path(log_dir: &Path) -> Result<PathBuf, String> {

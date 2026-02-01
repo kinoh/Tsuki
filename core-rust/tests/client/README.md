@@ -21,6 +21,6 @@ inputs:
 
 ## Expected behavior
 - Sends inputs in order
-- Waits for at least one server message per input
+- Waits for a reply event tagged with `action` + `response`
 - Records all received messages to a JSONL file
 - Does not assert correctness; evaluation is manual
