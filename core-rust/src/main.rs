@@ -219,12 +219,32 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    println!("WS_CONNECT status=accepted");
     let auth_text = match socket.recv().await {
         Some(Ok(Message::Text(text))) => text,
+        Some(Ok(Message::Close(frame))) => {
+            println!("WS_CLIENT_CLOSE stage=pre_auth frame={:?}", frame);
+            return;
+        }
+        Some(Ok(_)) => {
+            println!("WS_AUTH_FAIL reason=non_text_first_message");
+            let _ = socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: 1002,
+                    reason: "auth failed".into(),
+                })))
+                .await;
+            return;
+        }
+        Some(Err(err)) => {
+            println!("WS_ERROR stage=pre_auth error={}", err);
+            return;
+        }
         _ => return,
     };
 
     if !verify_auth(&auth_text, &state.auth_token) {
+        println!("WS_AUTH_FAIL reason=invalid_token");
         let _ = socket
             .send(Message::Close(Some(CloseFrame {
                 code: 1008,
@@ -233,6 +253,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             .await;
         return;
     }
+    println!("WS_AUTH_OK");
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut rx = state.tx.subscribe();
@@ -250,10 +271,12 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                         Err(_) => continue,
                     };
                     if ws_sender.send(Message::Text(text)).await.is_err() {
+                        println!("WS_SEND_FAIL reason=closed");
                         break;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => {
+                    println!("WS_LAGGED");
                     continue;
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
@@ -266,12 +289,16 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             Message::Text(text) => {
                 handle_input(text, &state).await;
             }
-            Message::Close(_) => break,
+            Message::Close(frame) => {
+                println!("WS_CLIENT_CLOSE stage=post_auth frame={:?}", frame);
+                break;
+            }
             _ => {}
         }
     }
 
     send_task.abort();
+    println!("WS_DISCONNECT");
 }
 
 fn verify_auth(message: &str, expected_token: &str) -> bool {
