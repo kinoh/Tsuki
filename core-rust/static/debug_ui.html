@@ -371,6 +371,11 @@
           </div>
         </div>
 
+        <div class="detail-card" style="margin-top: 12px;">
+          <h3>Raw Response</h3>
+          <pre id="rawText">(none)</pre>
+        </div>
+
       </section>
 
       <aside class="panel">
@@ -431,6 +436,7 @@
       const worklogEl = document.getElementById("worklog");
       const inputTextEl = document.getElementById("inputText");
       const outputTextEl = document.getElementById("outputText");
+      const rawTextEl = document.getElementById("rawText");
       const moduleInput = document.getElementById("moduleInput");
       const submoduleListEl = document.getElementById("submoduleList");
       const moduleTitleEl = document.getElementById("moduleTitle");
@@ -680,7 +686,7 @@
       }
 
       async function fetchWorklogs() {
-        const res = await fetch("/debug/events?tag=debug,worklog&limit=50");
+        const res = await fetch("/debug/events?tag=debug,worklog&limit=200");
         if (!res.ok) {
           worklogEl.innerHTML = '<div class="muted">Failed to load work log.</div>';
           return;
@@ -688,6 +694,10 @@
         const data = await res.json();
         state.worklogs = data.events || [];
         renderWorklogs();
+      }
+
+      function getEventTags(event) {
+        return (event.meta && event.meta.tags) || [];
       }
 
       function renderWorklogs() {
@@ -698,23 +708,29 @@
         }
         state.worklogs.forEach((event) => {
           const payload = event.payload || {};
+          const tags = getEventTags(event);
+          const moduleName = payload.module || "module";
+          const mode = payload.mode || "full";
           const item = document.createElement("div");
           item.className = "worklog-item";
           item.innerHTML = `
-            <div><strong>${payload.module || "module"}</strong></div>
-            <div class="worklog-meta">${payload.mode || "full"} · ${formatTime(event.ts)}</div>
+            <div><strong>${moduleName}</strong></div>
+            <div class="worklog-meta">worklog · ${mode} · ${formatTime(event.ts)}</div>
           `;
           item.addEventListener("click", () => {
             document.querySelectorAll(".worklog-item").forEach((el) => el.classList.remove("active"));
             item.classList.add("active");
-            inputTextEl.textContent = payload.input || "";
-            outputTextEl.textContent = payload.output || "";
-            state.lastInput = payload.input || "";
-            state.lastOutput = payload.output || "";
+            const output = payload.output || payload.text || "";
+            const input = payload.input || "";
+            inputTextEl.textContent = input;
+            outputTextEl.textContent = output;
+            rawTextEl.textContent = "(none)";
+            state.lastInput = input;
+            state.lastOutput = output;
             moduleInput.value = state.lastInput;
-            if (payload.module) {
-              const kind = payload.module === "decision" ? "decision" : "submodule";
-              selectModule(payload.module, kind);
+            if (moduleName) {
+              const kind = moduleName === "decision" ? "decision" : "submodule";
+              selectModule(moduleName, kind);
             }
           });
           worklogEl.appendChild(item);
@@ -750,6 +766,7 @@
         const data = await res.json();
         inputTextEl.textContent = input;
         outputTextEl.textContent = data.output || "";
+        rawTextEl.textContent = "(none)";
         state.lastInput = input;
         state.lastOutput = data.output || "";
         setFlowHighlight({ kind: state.selectedKind, name: moduleName });
@@ -773,12 +790,17 @@
           const tags = (event.meta && event.meta.tags) || [];
           return tags.includes(`module:${moduleName}`);
         });
+        events.sort((a, b) => {
+          const at = Date.parse(a.ts || "") || 0;
+          const bt = Date.parse(b.ts || "") || 0;
+          return bt - at;
+        });
         const latest = events[0];
         if (!latest) {
           runStatus.textContent = "No raw payload found.";
           return;
         }
-        outputTextEl.textContent = JSON.stringify(latest.payload.raw, null, 2);
+        rawTextEl.textContent = JSON.stringify(latest.payload.raw, null, 2);
       }
 
       async function savePrompts() {
