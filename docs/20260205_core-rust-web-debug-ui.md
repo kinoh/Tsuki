@@ -79,6 +79,7 @@ rather than automated evaluation.
   - `POST /debug/prompts` to persist and apply prompt edits
   - `POST /debug/modules/{name}/run` to run a single module
   - `GET /debug/runs` (or `GET /debug/events?group=run`) as a derived work log view
+- Prompt edits should also enable/disable submodules to match the submitted list.
 - Prompt persistence:
   - Store all prompts in `core-rust/data/prompts.md`
   - Load at startup; apply edits immediately for subsequent runs

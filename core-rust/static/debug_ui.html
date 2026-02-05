@@ -242,6 +242,34 @@
         width: auto;
       }
 
+      .submodule-manage-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 8px 0 12px;
+      }
+
+      .submodule-manage-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 17, 21, 0.7);
+        font-size: 12px;
+      }
+
+      .submodule-manage-item button {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: var(--text);
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 11px;
+      }
+
       select,
       textarea,
       input {
@@ -372,6 +400,19 @@
           <div class="muted">Format: name: output (one per line)</div>
         </div>
 
+        <div class="control-section" id="submoduleManageSection" hidden>
+          <h2>Submodules</h2>
+          <div class="submodule-manage-list" id="submoduleManageList"></div>
+          <label for="newSubmoduleName">New Submodule</label>
+          <input id="newSubmoduleName" placeholder="module_name" />
+          <label for="newSubmodulePrompt">Instructions</label>
+          <textarea id="newSubmodulePrompt"></textarea>
+          <div class="button-row">
+            <button id="addSubmodule">Add</button>
+          </div>
+          <div class="muted" id="submoduleManageStatus"></div>
+        </div>
+
         <div class="control-section" id="modulePromptSection" hidden>
           <label for="moduleBasePrompt">Base Prompt</label>
           <textarea id="moduleBasePrompt"></textarea>
@@ -400,6 +441,12 @@
       const includeHistoryInput = document.getElementById("includeHistory");
       const submoduleOutputsSection = document.getElementById("submoduleOutputsSection");
       const submoduleOutputsInput = document.getElementById("submoduleOutputsInput");
+      const submoduleManageSection = document.getElementById("submoduleManageSection");
+      const submoduleManageList = document.getElementById("submoduleManageList");
+      const newSubmoduleName = document.getElementById("newSubmoduleName");
+      const newSubmodulePrompt = document.getElementById("newSubmodulePrompt");
+      const addSubmoduleButton = document.getElementById("addSubmodule");
+      const submoduleManageStatus = document.getElementById("submoduleManageStatus");
       const modulePromptSection = document.getElementById("modulePromptSection");
       const runStatus = document.getElementById("runStatus");
       const modulePrompt = document.getElementById("modulePrompt");
@@ -498,6 +545,7 @@
           state.submoduleOutputsRaw = template;
         }
         renderSubmoduleList();
+        renderSubmoduleManageList();
         setStatus("Ready");
       }
 
@@ -520,6 +568,38 @@
           });
           submoduleListEl.appendChild(chip);
         });
+      }
+
+      function renderSubmoduleManageList() {
+        submoduleManageList.innerHTML = "";
+        const names = Array.from(state.submodules.keys());
+        if (names.length === 0) {
+          submoduleManageList.innerHTML = '<div class="muted">No submodules.</div>';
+          return;
+        }
+        names.forEach((name) => {
+          const item = document.createElement("div");
+          item.className = "submodule-manage-item";
+          item.innerHTML = `<span>${name}</span>`;
+          const remove = document.createElement("button");
+          remove.textContent = "Remove";
+          remove.addEventListener("click", () => removeSubmodule(name));
+          item.appendChild(remove);
+          submoduleManageList.appendChild(item);
+        });
+      }
+
+      function removeSubmodule(name) {
+        state.submodules.delete(name);
+        renderSubmoduleList();
+        renderSubmoduleManageList();
+        const template = buildSubmoduleOutputTemplate();
+        if (!state.submoduleOutputsRaw || state.submoduleOutputsRaw.trim() === "") {
+          state.submoduleOutputsRaw = template;
+        }
+        if (state.selectedModule === name) {
+          applySelection({ kind: "submodules", name: null });
+        }
       }
 
       function selectNode(nodeName) {
@@ -550,6 +630,7 @@
         runButtons.hidden = true;
         includeHistoryRow.hidden = true;
         submoduleOutputsSection.hidden = true;
+        submoduleManageSection.hidden = true;
         modulePromptSection.hidden = true;
         if (selection.kind === "submodule") {
           inputSection.hidden = false;
@@ -585,8 +666,8 @@
           moduleEmptyEl.textContent = "Reply has no prompt.";
           moduleEmptyEl.hidden = false;
         } else if (selection.kind === "submodules") {
-          moduleEmptyEl.textContent = "Select a submodule to inspect.";
-          moduleEmptyEl.hidden = false;
+          submoduleManageSection.hidden = false;
+          moduleEmptyEl.hidden = true;
         } else {
           moduleEmptyEl.textContent = "Select a submodule to inspect.";
           moduleEmptyEl.hidden = false;
@@ -702,6 +783,7 @@
 
       async function savePrompts() {
         promptStatus.textContent = "Saving...";
+        submoduleManageStatus.textContent = "";
         const submodules = Array.from(state.submodules.entries()).map(([name, instructions]) => ({
           name,
           instructions,
@@ -745,6 +827,26 @@
         }
       });
 
+      addSubmoduleButton.addEventListener("click", () => {
+        const name = newSubmoduleName.value.trim();
+        const instructions = newSubmodulePrompt.value.trim();
+        if (!name) {
+          submoduleManageStatus.textContent = "Name is required.";
+          return;
+        }
+        if (state.submodules.has(name)) {
+          submoduleManageStatus.textContent = "Module already exists.";
+          return;
+        }
+        state.submodules.set(name, instructions);
+        newSubmoduleName.value = "";
+        newSubmodulePrompt.value = "";
+        submoduleManageStatus.textContent = "Added.";
+        state.submoduleOutputsRaw = buildSubmoduleOutputTemplate();
+        renderSubmoduleList();
+        renderSubmoduleManageList();
+      });
+
       document.getElementById("runModule").addEventListener("click", runModule);
       document.getElementById("loadRaw").addEventListener("click", loadRaw);
       document.getElementById("savePrompts").addEventListener("click", savePrompts);
@@ -760,6 +862,7 @@
       inputSection.hidden = true;
       includeHistoryRow.hidden = true;
       submoduleOutputsSection.hidden = true;
+      submoduleManageSection.hidden = true;
       modulePromptSection.hidden = true;
     </script>
   </body>

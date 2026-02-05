@@ -352,6 +352,35 @@ async fn debug_update_prompts(
     for module in &payload.submodules {
         submodules.insert(module.name.clone(), module.instructions.clone());
     }
+    let desired_modules = payload
+        .submodules
+        .iter()
+        .map(|module| module.name.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let active_modules = state
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    for module in active_modules {
+        if !desired_modules.contains(module.name.as_str()) {
+            state
+                .modules
+                .registry
+                .upsert(&module.name, &module.instructions, false)
+                .await
+                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        }
+    }
+    for module in &payload.submodules {
+        state
+            .modules
+            .registry
+            .upsert(&module.name, &module.instructions, true)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    }
     let overrides = PromptOverrides {
         base: Some(payload.base.clone()),
         decision: Some(payload.decision.clone()),

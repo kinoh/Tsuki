@@ -37,6 +37,15 @@ impl ModuleRegistry {
     }
     Ok(())
   }
+
+  pub async fn upsert(
+    &self,
+    name: &str,
+    instructions: &str,
+    enabled: bool,
+  ) -> DbResult<()> {
+    self.db.upsert_module(name, instructions, enabled).await
+  }
 }
 
 #[async_trait]
