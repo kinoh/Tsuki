@@ -465,11 +465,10 @@ async fn run_module(
             let response_event = build_event(
                 "internal",
                 "text",
-                json!({ "text": response.text, "raw": response.raw }),
+                json!({ "text": response.text }),
                 vec![
                     role_tag.to_string(),
                     format!("module:{}", name),
-                    "llm.response".to_string(),
                 ],
             );
             record_event(state, response_event).await;
