@@ -77,7 +77,7 @@ rather than automated evaluation.
 - Add debug-only endpoints:
   - `GET /debug/prompts` for current prompt values
   - `POST /debug/prompts` to persist and apply prompt edits
-  - `POST /debug/modules/:name/run` to run a single module
+  - `POST /debug/modules/{name}/run` to run a single module
   - `GET /debug/runs` (or `GET /debug/events?group=run`) as a derived work log view
 - Prompt persistence:
   - Store all prompts in `core-rust/data/prompts.md`
@@ -89,6 +89,9 @@ rather than automated evaluation.
 - Debug raw payloads:
   - Emit full LLM response only for debug runs (tagged `debug`, e.g. `llm.raw`)
   - Debug events must be excluded from module history inputs
+- Decision debug input:
+  - Accept optional user-provided submodule outputs via `submodule_outputs`
+  - Format: one line per module as `name: output` (empty values ignored)
 
 ## Non-Functional Requirements
 - None beyond local developer usability.

@@ -339,6 +339,15 @@
           <div class="muted" id="runStatus"></div>
         </div>
 
+        <div class="control-section" id="submoduleOutputsSection" hidden>
+          <label for="submoduleOutputsInput">Submodule Outputs (optional)</label>
+          <textarea
+            id="submoduleOutputsInput"
+            placeholder="curiosity: ...&#10;self_preservation: ...&#10;social_approval: ..."
+          ></textarea>
+          <div class="muted">Format: name: output (one per line)</div>
+        </div>
+
         <div class="control-section" id="modulePromptSection" hidden>
           <label for="moduleBasePrompt">Base Prompt</label>
           <textarea id="moduleBasePrompt"></textarea>
@@ -363,6 +372,8 @@
       const moduleEmptyEl = document.getElementById("moduleEmpty");
       const inputSection = document.getElementById("inputSection");
       const runButtons = document.getElementById("runButtons");
+      const submoduleOutputsSection = document.getElementById("submoduleOutputsSection");
+      const submoduleOutputsInput = document.getElementById("submoduleOutputsInput");
       const modulePromptSection = document.getElementById("modulePromptSection");
       const runStatus = document.getElementById("runStatus");
       const modulePrompt = document.getElementById("modulePrompt");
@@ -376,6 +387,7 @@
         submodules: new Map(),
         basePrompt: "",
         decisionPrompt: "",
+        submoduleOutputsRaw: "",
         selectedModule: null,
         selectedKind: null,
         lastInput: "",
@@ -454,8 +466,18 @@
         state.submodules = new Map(data.submodules.map((item) => [item.name, item.instructions]));
         state.basePrompt = data.base || "";
         state.decisionPrompt = data.decision || "";
+        const template = buildSubmoduleOutputTemplate();
+        if (!state.submoduleOutputsRaw || state.submoduleOutputsRaw.trim() === "") {
+          state.submoduleOutputsRaw = template;
+        }
         renderSubmoduleList();
         setStatus("Ready");
+      }
+
+      function buildSubmoduleOutputTemplate() {
+        return Array.from(state.submodules.keys())
+          .map((name) => `${name}: `)
+          .join("\n");
       }
 
       function renderSubmoduleList() {
@@ -499,6 +521,7 @@
           : `Module: ${selection.kind}`;
         inputSection.hidden = true;
         runButtons.hidden = true;
+        submoduleOutputsSection.hidden = true;
         modulePromptSection.hidden = true;
         if (selection.kind === "submodule") {
           inputSection.hidden = false;
@@ -510,10 +533,16 @@
         } else if (selection.kind === "decision") {
           inputSection.hidden = false;
           runButtons.hidden = false;
+          submoduleOutputsSection.hidden = false;
           modulePromptSection.hidden = false;
           modulePromptLabel.textContent = "Decision Prompt";
           moduleBasePrompt.value = state.basePrompt;
           modulePrompt.value = state.decisionPrompt;
+          const template = buildSubmoduleOutputTemplate();
+          if (!state.submoduleOutputsRaw || state.submoduleOutputsRaw.trim() === "") {
+            state.submoduleOutputsRaw = template;
+          }
+          submoduleOutputsInput.value = state.submoduleOutputsRaw;
         } else if (selection.kind === "input") {
           inputSection.hidden = false;
           modulePromptSection.hidden = true;
@@ -591,10 +620,14 @@
           return;
         }
         runStatus.textContent = "Running...";
+        const payload = { input };
+        if (state.selectedKind === "decision") {
+          payload.submodule_outputs = state.submoduleOutputsRaw || "";
+        }
         const res = await fetch(`/debug/modules/${encodeURIComponent(moduleName)}/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) {
           runStatus.textContent = "Run failed.";
@@ -661,6 +694,10 @@
         state.basePrompt = moduleBasePrompt.value;
       });
 
+      submoduleOutputsInput.addEventListener("input", () => {
+        state.submoduleOutputsRaw = submoduleOutputsInput.value;
+      });
+
       modulePrompt.addEventListener("input", () => {
         const name = state.selectedModule;
         if (!name) return;
@@ -684,6 +721,7 @@
       setFlowHighlight(null);
       moduleEmptyEl.hidden = false;
       inputSection.hidden = true;
+      submoduleOutputsSection.hidden = true;
       modulePromptSection.hidden = true;
     </script>
   </body>

@@ -88,6 +88,8 @@ struct OutboundEvent {
 #[derive(Debug, Deserialize)]
 struct DebugRunRequest {
     input: String,
+    #[serde(default)]
+    submodule_outputs: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -368,7 +370,12 @@ async fn debug_run_module(
         return Err((StatusCode::BAD_REQUEST, "input is required".to_string()));
     }
     let output = if name == "decision" {
-        run_decision_debug(&payload.input, &state).await?
+        run_decision_debug(
+            &payload.input,
+            payload.submodule_outputs.as_deref(),
+            &state,
+        )
+        .await?
     } else {
         run_submodule_debug(&name, &payload.input, &state).await?
     };
@@ -626,6 +633,7 @@ async fn run_decision(
 
 async fn run_decision_debug(
     input_text: &str,
+    submodule_outputs_raw: Option<&str>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
     let history = format_event_history(state, state.limits.decision_history).await;
@@ -642,10 +650,20 @@ async fn run_decision_debug(
         compose_instructions(&base_instructions, &decision_instructions),
         &state.modules.runtime,
     ));
+    let submodule_outputs = parse_submodule_outputs(submodule_outputs_raw);
+    let submodule_section = if submodule_outputs.is_empty() {
+        "Submodule outputs (user provided): none".to_string()
+    } else {
+        let lines = submodule_outputs
+            .into_iter()
+            .map(|(name, text)| format!("- {}: {}", name, text))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("Submodule outputs (user provided):\n{}", lines)
+    };
     let context = format!(
-        "Latest user input: {}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
-        input_text,
-        history
+        "Latest user input: {}\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
+        input_text, submodule_section, history
     );
     let response = adapter
         .respond(LlmRequest { input: context })
@@ -696,6 +714,28 @@ async fn run_submodule_debug(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     emit_debug_module_events(state, name, "module_only", input_text, &response).await;
     Ok(response.text)
+}
+
+fn parse_submodule_outputs(raw: Option<&str>) -> Vec<(String, String)> {
+    let raw = match raw {
+        Some(value) => value,
+        None => return Vec::new(),
+    };
+    raw.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let (name, value) = line.split_once(':')?;
+            let name = name.trim();
+            let value = value.trim();
+            if name.is_empty() || value.is_empty() {
+                return None;
+            }
+            Some((name.to_string(), value.to_string()))
+        })
+        .collect()
 }
 
 async fn emit_debug_module_events(
