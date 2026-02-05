@@ -23,6 +23,7 @@ rather than automated evaluation.
 - Event details available on demand (backing data, not the primary view)
 - Submodule outputs and decision outputs
 - Tool calls and tool outputs (when present)
+  - Debug-only raw LLM payloads should not appear in normal event views
 
 ## Prompt Editing
 - All prompt types must be editable:
@@ -84,6 +85,9 @@ rather than automated evaluation.
   - Emit debug-only events for work logs (no downstream execution)
   - Tag with `debug` and `worklog`, include input/module/output/mode in payload
   - Link to underlying events by ID when needed
+- Debug raw payloads:
+  - Emit full LLM response only for debug runs (tagged `debug`, e.g. `llm.raw`)
+  - Debug events must be excluded from module history inputs
 
 ## Non-Functional Requirements
 - None beyond local developer usability.
