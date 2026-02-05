@@ -173,7 +173,7 @@ async fn main() {
         .route("/", get(ws_handler))
         .route("/debug/ui", get(debug_ui))
         .route("/debug/prompts", get(debug_get_prompts).post(debug_update_prompts))
-        .route("/debug/modules/:name/run", post(debug_run_module))
+        .route("/debug/modules/{name}/run", post(debug_run_module))
         .route("/debug/events", get(debug_events))
         .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
