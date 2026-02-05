@@ -4,6 +4,7 @@ mod event;
 mod event_store;
 mod llm;
 mod module_registry;
+mod prompts;
 mod state;
 mod clock;
 mod tools;
@@ -11,10 +12,13 @@ mod tools;
 use axum::{
   extract::{
     ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
+    Path,
     State,
   },
+  http::StatusCode,
   response::IntoResponse,
-  routing::get,
+  routing::{get, post},
+  Json,
   Router,
 };
 use futures::{future::join_all, SinkExt, StreamExt};
@@ -22,9 +26,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
   net::SocketAddr,
+  path::PathBuf,
   sync::Arc,
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
 
 use crate::config::{load_config, Config, LimitsConfig};
 use crate::db::Db;
@@ -32,6 +37,7 @@ use crate::event::{build_event, Event};
 use crate::event_store::EventStore;
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
 use crate::module_registry::{ModuleDefinition, ModuleRegistry, ModuleRegistryReader};
+use crate::prompts::{load_prompts, write_prompts, PromptOverrides, DEFAULT_PROMPTS_PATH};
 use crate::state::{DbStateStore, StateStore};
 use crate::tools::{state_tools, StateToolHandler};
 
@@ -42,13 +48,15 @@ struct AppState {
   auth_token: String,
   modules: Modules,
   limits: LimitsConfig,
+  prompts: Arc<RwLock<PromptOverrides>>,
+  prompts_path: PathBuf,
+  decision_instructions: String,
 }
 
 #[derive(Clone)]
 struct Modules {
   registry: ModuleRegistry,
   runtime: ModuleRuntime,
-  decision: Arc<dyn LlmAdapter>,
 }
 
 #[derive(Clone)]
@@ -76,6 +84,29 @@ struct OutboundEvent {
     event: Event,
 }
 
+#[derive(Debug, Deserialize)]
+struct DebugRunRequest {
+    input: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugRunResponse {
+    output: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PromptModulePayload {
+    name: String,
+    instructions: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PromptsPayload {
+    base: String,
+    decision: String,
+    submodules: Vec<PromptModulePayload>,
+}
+
 #[derive(Debug, Clone)]
 struct ModuleOutput {
   name: String,
@@ -90,6 +121,9 @@ async fn main() {
   let (tx, _) = broadcast::channel(256);
   let db = Db::connect(&config.db).await.expect("failed to init db");
   let event_store = Arc::new(EventStore::new(db.clone()));
+  let prompts_path = PathBuf::from(DEFAULT_PROMPTS_PATH);
+  let prompt_overrides = load_prompts(&prompts_path).unwrap_or_default();
+  let prompts = Arc::new(RwLock::new(prompt_overrides));
   let emit_event_store = event_store.clone();
   let emit_tx = tx.clone();
   let emit_event = Arc::new(move |event: Event| {
@@ -118,9 +152,16 @@ async fn main() {
     auth_token,
     modules,
     limits: config.limits.clone(),
+    prompts,
+    prompts_path,
+    decision_instructions: config.llm.decision_instructions.clone(),
   };
 
-    let app = Router::new().route("/", get(ws_handler)).with_state(state);
+    let app = Router::new()
+        .route("/", get(ws_handler))
+        .route("/debug/prompts", get(debug_get_prompts).post(debug_update_prompts))
+        .route("/debug/modules/:name/run", post(debug_run_module))
+        .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
     println!("rust core ws listening on ws://{}", addr);
@@ -169,16 +210,9 @@ fn build_modules(
     max_tool_rounds: config.llm.max_tool_rounds,
   };
 
-  let decision_instructions = config.llm.decision_instructions.clone();
-  let decision = ResponseApiAdapter::new(build_config(
-    compose_instructions(&runtime.base_instructions, &decision_instructions),
-    &runtime,
-  ));
-
   Modules {
     registry,
     runtime,
-    decision: Arc::new(decision),
   }
 }
 
@@ -285,6 +319,48 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     println!("WS_DISCONNECT");
 }
 
+async fn debug_get_prompts(
+    State(state): State<AppState>,
+) -> Result<Json<PromptsPayload>, (StatusCode, String)> {
+    let prompts = build_effective_prompts(&state).await?;
+    Ok(Json(prompts))
+}
+
+async fn debug_update_prompts(
+    State(state): State<AppState>,
+    Json(payload): Json<PromptsPayload>,
+) -> Result<Json<PromptsPayload>, (StatusCode, String)> {
+    let mut submodules = std::collections::HashMap::new();
+    for module in &payload.submodules {
+        submodules.insert(module.name.clone(), module.instructions.clone());
+    }
+    let overrides = PromptOverrides {
+        base: Some(payload.base.clone()),
+        decision: Some(payload.decision.clone()),
+        submodules,
+    };
+    write_prompts(&state.prompts_path, &overrides)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    *state.prompts.write().await = overrides;
+    Ok(Json(payload))
+}
+
+async fn debug_run_module(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+    Json(payload): Json<DebugRunRequest>,
+) -> Result<Json<DebugRunResponse>, (StatusCode, String)> {
+    if payload.input.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "input is required".to_string()));
+    }
+    let output = if name == "decision" {
+        run_decision_debug(&payload.input, &state).await?
+    } else {
+        run_submodule_debug(&name, &payload.input, &state).await?
+    };
+    Ok(Json(DebugRunResponse { output }))
+}
+
 fn verify_auth(message: &str, expected_token: &str) -> bool {
     let mut parts = message.splitn(2, ':');
     let user = parts.next().unwrap_or("");
@@ -345,6 +421,43 @@ async fn handle_input(raw: String, state: &AppState) {
     let _decision_output = run_decision(&input_text, &state.modules, state).await;
 }
 
+async fn build_effective_prompts(
+    state: &AppState,
+) -> Result<PromptsPayload, (StatusCode, String)> {
+    let overrides = current_prompt_overrides(state).await;
+    let base = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+    let decision = overrides
+        .decision
+        .clone()
+        .unwrap_or_else(|| state.decision_instructions.clone());
+    let module_defs = state
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let mut submodules = Vec::new();
+    for definition in module_defs {
+        let instructions = overrides
+            .submodules
+            .get(&definition.name)
+            .cloned()
+            .unwrap_or(definition.instructions);
+        submodules.push(PromptModulePayload {
+            name: definition.name,
+            instructions,
+        });
+    }
+    Ok(PromptsPayload {
+        base,
+        decision,
+        submodules,
+    })
+}
+
 async fn record_event(state: &AppState, event: Event) {
     if let Err(err) = state.event_store.append(&event).await {
         println!("EVENT_STORE_ERROR error={}", err);
@@ -359,6 +472,11 @@ async fn run_submodules(
     state: &AppState,
 ) -> Vec<ModuleOutput> {
     let history = format_event_history(state, state.limits.submodule_history).await;
+    let overrides = current_prompt_overrides(state).await;
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
     let module_defs = match modules.registry.list_active().await {
         Ok(list) => list,
         Err(err) => {
@@ -374,9 +492,14 @@ async fn run_submodules(
                 input_text,
                 history
             );
+            let instructions = overrides
+                .submodules
+                .get(&definition.name)
+                .cloned()
+                .unwrap_or_else(|| definition.instructions.clone());
             let instructions = compose_instructions(
-                &modules.runtime.base_instructions,
-                &definition.instructions,
+                &base_instructions,
+                &instructions,
             );
             let adapter = ResponseApiAdapter::new(build_config(instructions, &modules.runtime));
             run_module(
@@ -398,6 +521,19 @@ async fn run_decision(
     state: &AppState,
 ) -> ModuleOutput {
     let history = format_event_history(state, state.limits.decision_history).await;
+    let overrides = current_prompt_overrides(state).await;
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
+    let decision_instructions = overrides
+        .decision
+        .clone()
+        .unwrap_or_else(|| state.decision_instructions.clone());
+    let adapter = ResponseApiAdapter::new(build_config(
+        compose_instructions(&base_instructions, &decision_instructions),
+        &modules.runtime,
+    ));
     let context = format!(
         "Latest user input: {}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
         input_text,
@@ -408,11 +544,7 @@ async fn run_decision(
         context.len()
     );
 
-    let response = match modules
-        .decision
-        .respond(LlmRequest { input: context })
-        .await
-    {
+    let response = match adapter.respond(LlmRequest { input: context }).await {
         Ok(response) => response,
         Err(err) => {
             let error_text = format!("error: {}", err);
@@ -444,6 +576,123 @@ async fn run_decision(
         name: "decision".to_string(),
         text: response.text,
     }
+}
+
+async fn run_decision_debug(
+    input_text: &str,
+    state: &AppState,
+) -> Result<String, (StatusCode, String)> {
+    let history = format_event_history(state, state.limits.decision_history).await;
+    let overrides = current_prompt_overrides(state).await;
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+    let decision_instructions = overrides
+        .decision
+        .clone()
+        .unwrap_or_else(|| state.decision_instructions.clone());
+    let adapter = ResponseApiAdapter::new(build_config(
+        compose_instructions(&base_instructions, &decision_instructions),
+        &state.modules.runtime,
+    ));
+    let context = format!(
+        "Latest user input: {}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
+        input_text,
+        history
+    );
+    let response = adapter
+        .respond(LlmRequest { input: context })
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    emit_debug_module_events(state, "decision", "module_only", input_text, &response).await;
+    Ok(response.text)
+}
+
+async fn run_submodule_debug(
+    name: &str,
+    input_text: &str,
+    state: &AppState,
+) -> Result<String, (StatusCode, String)> {
+    let history = format_event_history(state, state.limits.submodule_history).await;
+    let overrides = current_prompt_overrides(state).await;
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+    let module_defs = state
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let definition = module_defs
+        .into_iter()
+        .find(|definition| definition.name == name)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "module not found".to_string()))?;
+    let instructions = overrides
+        .submodules
+        .get(&definition.name)
+        .cloned()
+        .unwrap_or(definition.instructions);
+    let adapter = ResponseApiAdapter::new(build_config(
+        compose_instructions(&base_instructions, &instructions),
+        &state.modules.runtime,
+    ));
+    let context = format!(
+        "User input: {}\nRecent events:\n{}",
+        input_text,
+        history
+    );
+    let response = adapter
+        .respond(LlmRequest { input: context })
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    emit_debug_module_events(state, name, "module_only", input_text, &response).await;
+    Ok(response.text)
+}
+
+async fn emit_debug_module_events(
+    state: &AppState,
+    module: &str,
+    mode: &str,
+    input_text: &str,
+    response: &crate::llm::LlmResponse,
+) {
+    let worklog_event = build_event(
+        "debug",
+        "text",
+        json!({
+            "input": input_text,
+            "output": response.text.clone(),
+            "module": module,
+            "mode": mode,
+        }),
+        vec![
+            "debug".to_string(),
+            "worklog".to_string(),
+            format!("module:{}", module),
+            format!("mode:{}", mode),
+        ],
+    );
+    record_event(state, worklog_event).await;
+
+    let raw_event = build_event(
+        "debug",
+        "text",
+        json!({
+            "raw": response.raw.clone(),
+            "module": module,
+            "mode": mode,
+        }),
+        vec![
+            "debug".to_string(),
+            "llm.raw".to_string(),
+            format!("module:{}", module),
+            format!("mode:{}", mode),
+        ],
+    );
+    record_event(state, raw_event).await;
 }
 
 async fn run_module(
@@ -498,6 +747,10 @@ async fn run_module(
     }
 }
 
+async fn current_prompt_overrides(state: &AppState) -> PromptOverrides {
+    state.prompts.read().await.clone()
+}
+
 async fn format_event_history(state: &AppState, limit: usize) -> String {
     let events = latest_events(state, limit).await;
     if events.is_empty() {
@@ -515,7 +768,10 @@ async fn latest_events(state: &AppState, limit: usize) -> Vec<Event> {
         return Vec::new();
     }
     match state.event_store.latest(limit).await {
-        Ok(events) => events,
+        Ok(events) => events
+            .into_iter()
+            .filter(|event| !is_debug_event(event))
+            .collect(),
         Err(err) => {
             println!("EVENT_STORE_ERROR error={}", err);
             Vec::new()
@@ -564,6 +820,10 @@ fn log_event(event: &Event) {
         "EVENT ts={} source={} modality={} tags={} payload={}",
         event.ts, event.source, event.modality, tags, payload_text
     );
+}
+
+fn is_debug_event(event: &Event) -> bool {
+    event.meta.tags.iter().any(|tag| tag == "debug")
 }
 
 fn parse_decision(text: &str) -> DecisionParsed {
