@@ -13,10 +13,11 @@ use axum::{
   extract::{
     ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
     Path,
+    Query,
     State,
   },
   http::StatusCode,
-  response::IntoResponse,
+  response::{Html, IntoResponse},
   routing::{get, post},
   Json,
   Router,
@@ -107,6 +108,17 @@ struct PromptsPayload {
     submodules: Vec<PromptModulePayload>,
 }
 
+#[derive(Debug, Deserialize)]
+struct DebugEventsQuery {
+    tag: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugEventsResponse {
+    events: Vec<Event>,
+}
+
 #[derive(Debug, Clone)]
 struct ModuleOutput {
   name: String,
@@ -159,8 +171,10 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(ws_handler))
+        .route("/debug/ui", get(debug_ui))
         .route("/debug/prompts", get(debug_get_prompts).post(debug_update_prompts))
         .route("/debug/modules/:name/run", post(debug_run_module))
+        .route("/debug/events", get(debug_events))
         .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
@@ -359,6 +373,38 @@ async fn debug_run_module(
         run_submodule_debug(&name, &payload.input, &state).await?
     };
     Ok(Json(DebugRunResponse { output }))
+}
+
+async fn debug_events(
+    State(state): State<AppState>,
+    Query(query): Query<DebugEventsQuery>,
+) -> Result<Json<DebugEventsResponse>, (StatusCode, String)> {
+    let limit = query.limit.unwrap_or(200).min(1000);
+    let mut events = state
+        .event_store
+        .latest(limit)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
+    if let Some(raw_tags) = query.tag {
+        let tags = raw_tags
+            .split(',')
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        if !tags.is_empty() {
+            events = events
+                .into_iter()
+                .filter(|event| tags.iter().all(|tag| event.meta.tags.iter().any(|t| t == tag)))
+                .collect();
+        }
+    }
+
+    Ok(Json(DebugEventsResponse { events }))
+}
+
+async fn debug_ui() -> Html<&'static str> {
+    Html(include_str!("../static/debug_ui.html"))
 }
 
 fn verify_auth(message: &str, expected_token: &str) -> bool {

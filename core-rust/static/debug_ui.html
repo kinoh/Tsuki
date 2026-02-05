@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Core Rust Debug UI</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #171a21;
+        --panel-2: #1c2029;
+        --text: #e8ecf2;
+        --muted: #9aa4b2;
+        --accent: #e3b341;
+        --accent-2: #55b6d2;
+        --danger: #d46b6b;
+        --line: rgba(255, 255, 255, 0.08);
+        --shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+        --radius: 16px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+        color: var(--text);
+        background: radial-gradient(circle at top left, #1c2029 0%, #0f1115 60%);
+        min-height: 100vh;
+      }
+
+      header {
+        padding: 20px 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+      }
+
+      header h1 {
+        font-size: 20px;
+        margin: 0;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      header .status {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 280px 1fr 360px;
+        gap: 16px;
+        padding: 20px 24px 32px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border-radius: var(--radius);
+        padding: 16px;
+        box-shadow: var(--shadow);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .panel h2 {
+        margin: 0 0 12px;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+      }
+
+      .worklog-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-height: 70vh;
+        overflow: auto;
+      }
+
+      .worklog-item {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        background: var(--panel-2);
+        cursor: pointer;
+        transition: border 0.2s ease, transform 0.2s ease;
+      }
+
+      .worklog-item:hover {
+        border-color: rgba(227, 179, 65, 0.5);
+        transform: translateY(-1px);
+      }
+
+      .worklog-item.active {
+        border-color: var(--accent);
+      }
+
+      .worklog-meta {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .flow {
+        background: linear-gradient(145deg, rgba(23, 26, 33, 0.6), rgba(15, 17, 21, 0.6));
+        border-radius: var(--radius);
+        padding: 20px;
+        min-height: 60vh;
+        border: 1px solid var(--line);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .flow-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+        align-items: center;
+      }
+
+      .node {
+        border-radius: 14px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        text-align: center;
+        transition: transform 0.2s ease, border 0.2s ease, opacity 0.2s ease;
+      }
+
+      .node strong {
+        display: block;
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .node small {
+        color: var(--muted);
+      }
+
+      .node.active {
+        border-color: var(--accent);
+        transform: translateY(-2px) scale(1.01);
+        background: rgba(227, 179, 65, 0.08);
+      }
+
+      .node.dim {
+        opacity: 0.35;
+      }
+
+      .flow-details {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .detail-card {
+        background: var(--panel);
+        border-radius: 14px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        min-height: 120px;
+      }
+
+      .detail-card h3 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        color: var(--muted);
+        letter-spacing: 0.08em;
+      }
+
+      .detail-card pre {
+        white-space: pre-wrap;
+        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        color: var(--text);
+      }
+
+      .control-section {
+        margin-bottom: 16px;
+      }
+
+      label {
+        font-size: 12px;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      select,
+      textarea,
+      input {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 17, 21, 0.9);
+        color: var(--text);
+        padding: 10px;
+        font-size: 13px;
+      }
+
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+
+      button {
+        background: var(--accent);
+        color: #1a1a1a;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--text);
+      }
+
+      .button-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 1200px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .flow-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Core Rust Debug</h1>
+      <div class="status" id="status">Idle</div>
+    </header>
+
+    <div class="layout">
+      <aside class="panel">
+        <h2>Work Log</h2>
+        <div class="worklog-list" id="worklog"></div>
+        <div class="button-row">
+          <button class="secondary" id="refreshLog">Refresh</button>
+        </div>
+      </aside>
+
+      <section class="flow">
+        <div class="flow-grid" id="flowGrid">
+          <div class="node" data-node="input">
+            <strong>Input</strong>
+            <small>User</small>
+          </div>
+          <div class="node" data-node="submodules">
+            <strong>Submodules</strong>
+            <small>Parallel</small>
+          </div>
+          <div class="node" data-node="decision">
+            <strong>Decision</strong>
+            <small>Main</small>
+          </div>
+          <div class="node" data-node="reply">
+            <strong>Reply</strong>
+            <small>emit_user_reply</small>
+          </div>
+        </div>
+
+        <div class="flow-details">
+          <div class="detail-card">
+            <h3>Input</h3>
+            <pre id="inputText">No run selected.</pre>
+          </div>
+          <div class="detail-card">
+            <h3>Output</h3>
+            <pre id="outputText">Run a module to see output.</pre>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="control-section">
+          <h2>Module Run</h2>
+          <label for="moduleSelect">Module</label>
+          <select id="moduleSelect"></select>
+          <label for="moduleInput">Input</label>
+          <textarea id="moduleInput" placeholder="Type input for the selected module..."></textarea>
+          <div class="button-row">
+            <button id="runModule">Run</button>
+            <button class="secondary" id="loadRaw">Load Raw</button>
+          </div>
+          <div class="muted" id="runStatus"></div>
+        </div>
+
+        <div class="control-section">
+          <h2>Prompts</h2>
+          <label for="basePrompt">Base</label>
+          <textarea id="basePrompt"></textarea>
+          <label for="decisionPrompt">Decision</label>
+          <textarea id="decisionPrompt"></textarea>
+          <label for="submoduleSelect">Submodule</label>
+          <select id="submoduleSelect"></select>
+          <label for="submodulePrompt">Instructions</label>
+          <textarea id="submodulePrompt"></textarea>
+          <div class="button-row">
+            <button id="savePrompts">Save</button>
+          </div>
+          <div class="muted" id="promptStatus"></div>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const worklogEl = document.getElementById("worklog");
+      const inputTextEl = document.getElementById("inputText");
+      const outputTextEl = document.getElementById("outputText");
+      const moduleSelect = document.getElementById("moduleSelect");
+      const moduleInput = document.getElementById("moduleInput");
+      const runStatus = document.getElementById("runStatus");
+      const basePrompt = document.getElementById("basePrompt");
+      const decisionPrompt = document.getElementById("decisionPrompt");
+      const submoduleSelect = document.getElementById("submoduleSelect");
+      const submodulePrompt = document.getElementById("submodulePrompt");
+      const promptStatus = document.getElementById("promptStatus");
+      const flowNodes = Array.from(document.querySelectorAll(".node"));
+
+      const state = {
+        prompts: null,
+        submodules: new Map(),
+        selectedModule: null,
+        selectedMode: "full",
+        worklogs: [],
+      };
+
+      function setStatus(text) {
+        statusEl.textContent = text;
+      }
+
+      function setFlowHighlight(moduleName, mode) {
+        state.selectedModule = moduleName;
+        state.selectedMode = mode || "full";
+        flowNodes.forEach((node) => {
+          node.classList.remove("active");
+          node.classList.remove("dim");
+        });
+        if (state.selectedMode === "module_only" && moduleName) {
+          flowNodes.forEach((node) => {
+            if (node.dataset.node === "submodules") {
+              node.classList.add("active");
+            } else if (node.dataset.node === "decision" && moduleName === "decision") {
+              node.classList.add("active");
+            } else if (node.dataset.node === "reply") {
+              node.classList.add("dim");
+            } else if (node.dataset.node === "input") {
+              node.classList.add("active");
+            } else {
+              node.classList.add("dim");
+            }
+          });
+        }
+      }
+
+      function formatTime(iso) {
+        if (!iso) return "";
+        const date = new Date(iso);
+        return date.toLocaleTimeString();
+      }
+
+      async function fetchPrompts() {
+        setStatus("Loading prompts...");
+        const res = await fetch("/debug/prompts");
+        if (!res.ok) {
+          setStatus("Failed to load prompts");
+          return;
+        }
+        const data = await res.json();
+        state.prompts = data;
+        state.submodules = new Map(data.submodules.map((item) => [item.name, item.instructions]));
+        basePrompt.value = data.base;
+        decisionPrompt.value = data.decision;
+        submoduleSelect.innerHTML = "";
+        moduleSelect.innerHTML = "";
+        const moduleNames = data.submodules.map((item) => item.name);
+        moduleNames.forEach((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          submoduleSelect.appendChild(option);
+          const moduleOption = document.createElement("option");
+          moduleOption.value = name;
+          moduleOption.textContent = name;
+          moduleSelect.appendChild(moduleOption);
+        });
+        const decisionOption = document.createElement("option");
+        decisionOption.value = "decision";
+        decisionOption.textContent = "decision";
+        moduleSelect.appendChild(decisionOption);
+        submoduleSelect.dispatchEvent(new Event("change"));
+        setStatus("Ready");
+      }
+
+      async function fetchWorklogs() {
+        const res = await fetch("/debug/events?tag=debug,worklog&limit=50");
+        if (!res.ok) {
+          worklogEl.innerHTML = '<div class="muted">Failed to load work log.</div>';
+          return;
+        }
+        const data = await res.json();
+        state.worklogs = data.events || [];
+        renderWorklogs();
+      }
+
+      function renderWorklogs() {
+        worklogEl.innerHTML = "";
+        if (state.worklogs.length === 0) {
+          worklogEl.innerHTML = '<div class="muted">No work log entries yet.</div>';
+          return;
+        }
+        state.worklogs.forEach((event) => {
+          const payload = event.payload || {};
+          const item = document.createElement("div");
+          item.className = "worklog-item";
+          item.innerHTML = `
+            <div><strong>${payload.module || "module"}</strong></div>
+            <div class="worklog-meta">${payload.mode || "full"} · ${formatTime(event.ts)}</div>
+          `;
+          item.addEventListener("click", () => {
+            document.querySelectorAll(".worklog-item").forEach((el) => el.classList.remove("active"));
+            item.classList.add("active");
+            inputTextEl.textContent = payload.input || "";
+            outputTextEl.textContent = payload.output || "";
+            setFlowHighlight(payload.module, payload.mode);
+          });
+          worklogEl.appendChild(item);
+        });
+      }
+
+      async function runModule() {
+        const moduleName = moduleSelect.value;
+        const input = moduleInput.value.trim();
+        if (!input) {
+          runStatus.textContent = "Input is required.";
+          return;
+        }
+        runStatus.textContent = "Running...";
+        const res = await fetch(`/debug/modules/${encodeURIComponent(moduleName)}/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input }),
+        });
+        if (!res.ok) {
+          runStatus.textContent = "Run failed.";
+          return;
+        }
+        const data = await res.json();
+        inputTextEl.textContent = input;
+        outputTextEl.textContent = data.output || "";
+        setFlowHighlight(moduleName, "module_only");
+        runStatus.textContent = "Done.";
+        await fetchWorklogs();
+      }
+
+      async function loadRaw() {
+        const moduleName = moduleSelect.value;
+        const res = await fetch(`/debug/events?tag=debug,llm.raw&limit=20`);
+        if (!res.ok) {
+          runStatus.textContent = "Failed to load raw.";
+          return;
+        }
+        const data = await res.json();
+        const events = (data.events || []).filter((event) => {
+          const tags = (event.meta && event.meta.tags) || [];
+          return tags.includes(`module:${moduleName}`);
+        });
+        const latest = events[0];
+        if (!latest) {
+          runStatus.textContent = "No raw payload found.";
+          return;
+        }
+        outputTextEl.textContent = JSON.stringify(latest.payload.raw, null, 2);
+      }
+
+      async function savePrompts() {
+        promptStatus.textContent = "Saving...";
+        const submodules = Array.from(state.submodules.entries()).map(([name, instructions]) => ({
+          name,
+          instructions,
+        }));
+        const payload = {
+          base: basePrompt.value,
+          decision: decisionPrompt.value,
+          submodules,
+        };
+        const res = await fetch("/debug/prompts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          promptStatus.textContent = "Save failed.";
+          return;
+        }
+        promptStatus.textContent = "Saved.";
+      }
+
+      submoduleSelect.addEventListener("change", () => {
+        const name = submoduleSelect.value;
+        const instructions = state.submodules.get(name) || "";
+        submodulePrompt.value = instructions;
+      });
+
+      submodulePrompt.addEventListener("input", () => {
+        const name = submoduleSelect.value;
+        state.submodules.set(name, submodulePrompt.value);
+      });
+
+      document.getElementById("runModule").addEventListener("click", runModule);
+      document.getElementById("loadRaw").addEventListener("click", loadRaw);
+      document.getElementById("savePrompts").addEventListener("click", savePrompts);
+      document.getElementById("refreshLog").addEventListener("click", fetchWorklogs);
+
+      fetchPrompts();
+      fetchWorklogs();
+      setFlowHighlight(null, "full");
+    </script>
+  </body>
+</html>
