@@ -700,6 +700,49 @@
         return (event.meta && event.meta.tags) || [];
       }
 
+      function extractTagValue(tags, prefix) {
+        const match = tags.find((tag) => tag.startsWith(prefix));
+        return match ? match.slice(prefix.length) : "";
+      }
+
+      function eventTimestamp(event) {
+        if (!event.ts) return 0;
+        const value = Date.parse(event.ts);
+        return Number.isNaN(value) ? 0 : value;
+      }
+
+      async function updateRawFromWorklog(event, moduleName, mode) {
+        rawTextEl.textContent = "(loading...)";
+        const res = await fetch("/debug/events?tag=debug,llm.raw&limit=200");
+        if (!res.ok) {
+          rawTextEl.textContent = "(none)";
+          return;
+        }
+        const data = await res.json();
+        const candidates = (data.events || []).filter((rawEvent) => {
+          const tags = getEventTags(rawEvent);
+          if (!tags.includes(`module:${moduleName}`)) return false;
+          const rawMode = extractTagValue(tags, "mode:");
+          if (mode && rawMode && rawMode !== mode) return false;
+          return true;
+        });
+        if (candidates.length === 0) {
+          rawTextEl.textContent = "(none)";
+          return;
+        }
+        const targetTs = eventTimestamp(event);
+        let best = candidates[0];
+        let bestDelta = Math.abs(eventTimestamp(best) - targetTs);
+        candidates.forEach((candidate) => {
+          const delta = Math.abs(eventTimestamp(candidate) - targetTs);
+          if (delta < bestDelta) {
+            best = candidate;
+            bestDelta = delta;
+          }
+        });
+        rawTextEl.textContent = JSON.stringify(best.payload.raw, null, 2);
+      }
+
       function renderWorklogs() {
         worklogEl.innerHTML = "";
         if (state.worklogs.length === 0) {
@@ -724,7 +767,6 @@
             const input = payload.input || "";
             inputTextEl.textContent = input;
             outputTextEl.textContent = output;
-            rawTextEl.textContent = "(none)";
             state.lastInput = input;
             state.lastOutput = output;
             moduleInput.value = state.lastInput;
@@ -732,6 +774,7 @@
               const kind = moduleName === "decision" ? "decision" : "submodule";
               selectModule(moduleName, kind);
             }
+            updateRawFromWorklog(event, moduleName, mode);
           });
           worklogEl.appendChild(item);
         });
