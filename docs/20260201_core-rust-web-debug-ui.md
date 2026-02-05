@@ -68,7 +68,8 @@ rather than automated evaluation.
   - Center: execution flow visualization
   - Right: prompt editor + module run controls
 - Normal mode flow: `User Input → Submodules → Decision → emit_user_reply`
-- Module-only mode flow: `User Input → [Selected Module]` (others hidden/disabled)
+- Module-only mode flow: keep the full flow visible, highlight the selected
+  module and gray out the others
 - Work log entries summarize input, selected module(s), and outputs; events are
   available as expandable details.
 
