@@ -90,6 +90,8 @@ struct DebugRunRequest {
     input: String,
     #[serde(default)]
     submodule_outputs: Option<String>,
+    #[serde(default)]
+    include_history: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -369,15 +371,17 @@ async fn debug_run_module(
     if payload.input.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "input is required".to_string()));
     }
+    let include_history = payload.include_history.unwrap_or(false);
     let output = if name == "decision" {
         run_decision_debug(
             &payload.input,
             payload.submodule_outputs.as_deref(),
+            include_history,
             &state,
         )
         .await?
     } else {
-        run_submodule_debug(&name, &payload.input, &state).await?
+        run_submodule_debug(&name, &payload.input, include_history, &state).await?
     };
     Ok(Json(DebugRunResponse { output }))
 }
@@ -634,9 +638,14 @@ async fn run_decision(
 async fn run_decision_debug(
     input_text: &str,
     submodule_outputs_raw: Option<&str>,
+    include_history: bool,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
-    let history = format_event_history(state, state.limits.decision_history).await;
+    let history = if include_history {
+        format_event_history(state, state.limits.decision_history).await
+    } else {
+        "none".to_string()
+    };
     let overrides = current_prompt_overrides(state).await;
     let base_instructions = overrides
         .base
@@ -676,9 +685,14 @@ async fn run_decision_debug(
 async fn run_submodule_debug(
     name: &str,
     input_text: &str,
+    include_history: bool,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
-    let history = format_event_history(state, state.limits.submodule_history).await;
+    let history = if include_history {
+        format_event_history(state, state.limits.submodule_history).await
+    } else {
+        "none".to_string()
+    };
     let overrides = current_prompt_overrides(state).await;
     let base_instructions = overrides
         .base

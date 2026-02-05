@@ -92,6 +92,7 @@ rather than automated evaluation.
 - Decision debug input:
   - Accept optional user-provided submodule outputs via `submodule_outputs`
   - Format: one line per module as `name: output` (empty values ignored)
+  - Allow `include_history` to toggle whether recent events are injected
 
 ## Non-Functional Requirements
 - None beyond local developer usability.

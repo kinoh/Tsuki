@@ -223,6 +223,25 @@
         margin-bottom: 6px;
       }
 
+      .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 8px 0 4px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .checkbox-row label {
+        margin: 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .checkbox-row input {
+        width: auto;
+      }
+
       select,
       textarea,
       input {
@@ -333,6 +352,10 @@
         <div class="control-section" id="inputSection" hidden>
           <label for="moduleInput">Input</label>
           <textarea id="moduleInput" placeholder="Type input for the selected module..."></textarea>
+          <div class="checkbox-row" id="includeHistoryRow">
+            <input type="checkbox" id="includeHistory" />
+            <label for="includeHistory">Include history</label>
+          </div>
           <div class="button-row" id="runButtons">
             <button id="runModule">Run</button>
             <button class="secondary" id="loadRaw">Load Raw</button>
@@ -373,6 +396,8 @@
       const moduleEmptyEl = document.getElementById("moduleEmpty");
       const inputSection = document.getElementById("inputSection");
       const runButtons = document.getElementById("runButtons");
+      const includeHistoryRow = document.getElementById("includeHistoryRow");
+      const includeHistoryInput = document.getElementById("includeHistory");
       const submoduleOutputsSection = document.getElementById("submoduleOutputsSection");
       const submoduleOutputsInput = document.getElementById("submoduleOutputsInput");
       const modulePromptSection = document.getElementById("modulePromptSection");
@@ -389,6 +414,7 @@
         basePrompt: "",
         decisionPrompt: "",
         submoduleOutputsRaw: "",
+        includeHistory: false,
         selectedModule: null,
         selectedKind: null,
         lastInput: "",
@@ -522,11 +548,14 @@
           : `Module: ${selection.kind}`;
         inputSection.hidden = true;
         runButtons.hidden = true;
+        includeHistoryRow.hidden = true;
         submoduleOutputsSection.hidden = true;
         modulePromptSection.hidden = true;
         if (selection.kind === "submodule") {
           inputSection.hidden = false;
           runButtons.hidden = false;
+          includeHistoryRow.hidden = false;
+          includeHistoryInput.checked = state.includeHistory;
           modulePromptSection.hidden = false;
           modulePromptLabel.textContent = "Submodule Prompt";
           moduleBasePrompt.value = state.basePrompt;
@@ -534,6 +563,8 @@
         } else if (selection.kind === "decision") {
           inputSection.hidden = false;
           runButtons.hidden = false;
+          includeHistoryRow.hidden = false;
+          includeHistoryInput.checked = state.includeHistory;
           submoduleOutputsSection.hidden = false;
           modulePromptSection.hidden = false;
           modulePromptLabel.textContent = "Decision Prompt";
@@ -625,6 +656,7 @@
         if (state.selectedKind === "decision") {
           payload.submodule_outputs = state.submoduleOutputsRaw || "";
         }
+        payload.include_history = state.includeHistory;
         const res = await fetch(`/debug/modules/${encodeURIComponent(moduleName)}/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -695,6 +727,10 @@
         state.basePrompt = moduleBasePrompt.value;
       });
 
+      includeHistoryInput.addEventListener("change", () => {
+        state.includeHistory = includeHistoryInput.checked;
+      });
+
       submoduleOutputsInput.addEventListener("input", () => {
         state.submoduleOutputsRaw = submoduleOutputsInput.value;
       });
@@ -722,6 +758,7 @@
       setFlowHighlight(null);
       moduleEmptyEl.hidden = false;
       inputSection.hidden = true;
+      includeHistoryRow.hidden = true;
       submoduleOutputsSection.hidden = true;
       modulePromptSection.hidden = true;
     </script>
