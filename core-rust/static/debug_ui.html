@@ -692,13 +692,17 @@
       }
 
       async function fetchWorklogs() {
-        const res = await fetch("/debug/events?tag=debug,worklog&limit=200");
-        if (!res.ok) {
+        const [worklogRes, replyRes] = await Promise.all([
+          fetch("/debug/events?tag=debug,worklog&limit=200"),
+          fetch("/debug/events?tag=action,response&limit=200"),
+        ]);
+        if (!worklogRes.ok || !replyRes.ok) {
           worklogEl.innerHTML = '<div class="muted">Failed to load work log.</div>';
           return;
         }
-        const data = await res.json();
-        state.worklogs = (data.events || []).sort((a, b) => {
+        const [worklogData, replyData] = await Promise.all([worklogRes.json(), replyRes.json()]);
+        const merged = [...(worklogData.events || []), ...(replyData.events || [])];
+        state.worklogs = merged.sort((a, b) => {
           const at = Date.parse(a.ts || "") || 0;
           const bt = Date.parse(b.ts || "") || 0;
           return bt - at;
@@ -708,6 +712,11 @@
 
       function getEventTags(event) {
         return (event.meta && event.meta.tags) || [];
+      }
+
+      function isReplyEvent(event) {
+        const tags = getEventTags(event);
+        return tags.includes("action") && tags.includes("response");
       }
 
       function extractTagValue(tags, prefix) {
@@ -761,14 +770,15 @@
         }
         state.worklogs.forEach((event) => {
           const payload = event.payload || {};
-          const tags = getEventTags(event);
-          const moduleName = payload.module || "module";
-          const mode = payload.mode || "full";
+          const reply = isReplyEvent(event);
+          const moduleName = reply ? "reply" : payload.module || "module";
+          const mode = reply ? "-" : payload.mode || "full";
+          const kind = reply ? "reply" : "worklog";
           const item = document.createElement("div");
           item.className = "worklog-item";
           item.innerHTML = `
             <div><strong>${moduleName}</strong></div>
-            <div class="worklog-meta">worklog · ${mode} · ${formatTime(event.ts)}</div>
+            <div class="worklog-meta">${kind} · ${mode} · ${formatTime(event.ts)}</div>
           `;
           item.addEventListener("click", () => {
             document.querySelectorAll(".worklog-item").forEach((el) => el.classList.remove("active"));
@@ -780,6 +790,11 @@
             state.lastInput = input;
             state.lastOutput = output;
             moduleInput.value = state.lastInput;
+            if (reply) {
+              selectNode("reply");
+              rawTextEl.textContent = "(none)";
+              return;
+            }
             if (moduleName) {
               const kind = moduleName === "decision" ? "decision" : "submodule";
               selectModule(moduleName, kind);
