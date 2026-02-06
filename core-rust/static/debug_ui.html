@@ -692,7 +692,11 @@
           return;
         }
         const data = await res.json();
-        state.worklogs = data.events || [];
+        state.worklogs = (data.events || []).sort((a, b) => {
+          const at = Date.parse(a.ts || "") || 0;
+          const bt = Date.parse(b.ts || "") || 0;
+          return bt - at;
+        });
         renderWorklogs();
       }
 
