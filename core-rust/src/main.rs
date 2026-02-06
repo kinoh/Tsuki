@@ -443,8 +443,19 @@ async fn debug_events(
     Ok(Json(DebugEventsResponse { events }))
 }
 
-async fn debug_ui() -> Html<&'static str> {
-    Html(include_str!("../static/debug_ui.html"))
+async fn debug_ui() -> Html<String> {
+    const EMBEDDED: &str = include_str!("../static/debug_ui.html");
+    const DEBUG_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/debug_ui.html");
+    match tokio::fs::read_to_string(DEBUG_UI_PATH).await {
+        Ok(html) => Html(html),
+        Err(err) => {
+            println!(
+                "DEBUG_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                DEBUG_UI_PATH, err
+            );
+            Html(EMBEDDED.to_string())
+        }
+    }
 }
 
 fn verify_auth(message: &str, expected_token: &str) -> bool {
