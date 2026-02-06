@@ -53,7 +53,7 @@
 
       .layout {
         display: grid;
-        grid-template-columns: 280px 1fr 360px;
+        grid-template-columns: minmax(220px, 18vw) minmax(0, 1fr) minmax(360px, 32vw);
         gap: 16px;
         padding: 20px 24px 32px;
       }
@@ -312,6 +312,12 @@
       .muted {
         color: var(--muted);
         font-size: 12px;
+      }
+
+      @media (max-width: 1440px) {
+        .layout {
+          grid-template-columns: minmax(200px, 24vw) minmax(0, 1fr) minmax(320px, 36vw);
+        }
       }
 
       @media (max-width: 1200px) {
