@@ -437,6 +437,11 @@
         </div>
 
         <div class="detail-card" style="margin-top: 12px;">
+          <h3>LLM Input Context</h3>
+          <pre id="contextText">(none)</pre>
+        </div>
+
+        <div class="detail-card" style="margin-top: 12px;">
           <h3>Raw Response</h3>
           <pre id="rawText">(none)</pre>
         </div>
@@ -501,6 +506,7 @@
       const worklogEl = document.getElementById("worklog");
       const inputTextEl = document.getElementById("inputText");
       const outputTextEl = document.getElementById("outputText");
+      const contextTextEl = document.getElementById("contextText");
       const rawTextEl = document.getElementById("rawText");
       const moduleInput = document.getElementById("moduleInput");
       const submoduleListEl = document.getElementById("submoduleList");
@@ -849,9 +855,11 @@
 
       async function updateRawFromWorklog(event, moduleName, mode) {
         rawTextEl.textContent = "(loading...)";
+        contextTextEl.textContent = "(loading...)";
         const res = await fetch("/debug/events?tag=debug,llm.raw&limit=200");
         if (!res.ok) {
           rawTextEl.textContent = "(none)";
+          contextTextEl.textContent = "(none)";
           return;
         }
         const data = await res.json();
@@ -864,6 +872,7 @@
         });
         if (candidates.length === 0) {
           rawTextEl.textContent = "(none)";
+          contextTextEl.textContent = "(none)";
           return;
         }
         const targetTs = eventTimestamp(event);
@@ -877,6 +886,7 @@
           }
         });
         rawTextEl.textContent = JSON.stringify(best.payload.raw, null, 2);
+        contextTextEl.textContent = best.payload.context || "(none)";
       }
 
       function renderWorklogs() {
@@ -932,6 +942,7 @@
             if (reply) {
               selectNode("reply");
               rawTextEl.textContent = "(none)";
+              contextTextEl.textContent = "(none)";
               return;
             }
             if (moduleName) {
@@ -978,6 +989,7 @@
         const data = await res.json();
         inputTextEl.textContent = input;
         outputTextEl.textContent = data.output || "";
+        contextTextEl.textContent = "(none)";
         rawTextEl.textContent = "(none)";
         state.lastInput = input;
         state.lastOutput = data.output || "";
@@ -1012,6 +1024,7 @@
           runStatus.textContent = "No raw payload found.";
           return;
         }
+        contextTextEl.textContent = latest.payload.context || "(none)";
         rawTextEl.textContent = JSON.stringify(latest.payload.raw, null, 2);
       }
 
