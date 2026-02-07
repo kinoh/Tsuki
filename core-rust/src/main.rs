@@ -31,6 +31,7 @@ use std::{
   path::PathBuf,
   sync::Arc,
 };
+use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 use tokio::sync::{broadcast, RwLock};
 
 use crate::config::{load_config, Config, LimitsConfig};
@@ -953,11 +954,10 @@ async fn format_event_history(
     if events.is_empty() {
         return "none".to_string();
     }
-    events
-        .iter()
-        .map(format_event_line)
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut lines = Vec::with_capacity(events.len() + 1);
+    lines.push("ts | role | message".to_string());
+    lines.extend(events.iter().map(format_event_line));
+    lines.join("\n")
 }
 
 async fn latest_events(
@@ -992,20 +992,58 @@ async fn latest_events(
 }
 
 fn format_event_line(event: &Event) -> String {
-    let tags = if event.meta.tags.is_empty() {
-        "none".to_string()
-    } else {
-        event.meta.tags.join(",")
-    };
+    let role = event_role(event);
+    let ts = format_local_ts_seconds(&event.ts);
     let payload_text = event
         .payload
         .get("text")
         .and_then(|value| value.as_str())
         .map(|value| truncate(value, 160))
         .unwrap_or_else(|| truncate(&event.payload.to_string(), 160));
+    format!("{} | {} | {}", ts, role, payload_text)
+}
+
+fn event_role(event: &Event) -> String {
+    let tags = &event.meta.tags;
+    if event.source == "user" {
+        return "user".to_string();
+    }
+    if tags.iter().any(|tag| tag == "action") && tags.iter().any(|tag| tag == "response") {
+        return "assistant".to_string();
+    }
+    if tags.iter().any(|tag| tag == "decision") {
+        return "decision".to_string();
+    }
+    if tags.iter().any(|tag| tag == "submodule") {
+        if let Some(module_name) = tags
+            .iter()
+            .find_map(|tag| tag.strip_prefix("module:"))
+            .filter(|value| !value.is_empty())
+        {
+            return format!("submodule:{}", module_name);
+        }
+        return "submodule".to_string();
+    }
+    event.source.clone()
+}
+
+fn format_local_ts_seconds(ts: &str) -> String {
+    let parsed = match OffsetDateTime::parse(ts, &Rfc3339) {
+        Ok(value) => value,
+        Err(_) => return ts.to_string(),
+    };
+    let local = match UtcOffset::current_local_offset() {
+        Ok(offset) => parsed.to_offset(offset),
+        Err(_) => parsed,
+    };
     format!(
-        "{} | {} | {} | {} | {}",
-        event.ts, event.source, event.modality, tags, payload_text
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        local.year(),
+        local.month() as u8,
+        local.day(),
+        local.hour(),
+        local.minute(),
+        local.second()
     )
 }
 
