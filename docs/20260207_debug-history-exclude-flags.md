@@ -18,3 +18,4 @@
 - Backend: `DebugRunRequest` accepts optional `exclude_event_ids: Vec<String>`.
 - Backend history builder filters out events whose `event_id` is in the exclusion set.
 - UI: excluded rows are visually dimmed; toggling is idempotent.
+- UI regression fix: `exclude` button is rendered as plain `x` (no border/background), and Work Log reserves scrollbar gutter + right padding to avoid overlap with items.
