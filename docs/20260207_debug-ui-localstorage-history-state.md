@@ -20,6 +20,7 @@
 - Saved fields:
   - `historyCutoffTs`
   - `excludedEventIds`
+  - `appendInputMode`
 - Load on page init, save on:
   - exclusion toggle
   - cutoff set/clear

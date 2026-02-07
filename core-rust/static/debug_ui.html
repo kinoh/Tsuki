@@ -455,6 +455,11 @@
         <div class="control-section" id="inputSection" hidden>
           <label for="moduleInput">Input</label>
           <textarea id="moduleInput" placeholder="Type input for the selected module..."></textarea>
+          <label for="appendInputMode">Input Append Mode</label>
+          <select id="appendInputMode">
+            <option value="always_new">always_new</option>
+            <option value="reuse_open">reuse_open</option>
+          </select>
           <div class="button-row" id="runButtons">
             <button id="runModule">Run</button>
             <button class="secondary" id="loadRaw">Load Raw</button>
@@ -509,6 +514,7 @@
       const contextTextEl = document.getElementById("contextText");
       const rawTextEl = document.getElementById("rawText");
       const moduleInput = document.getElementById("moduleInput");
+      const appendInputModeSelect = document.getElementById("appendInputMode");
       const submoduleListEl = document.getElementById("submoduleList");
       const moduleTitleEl = document.getElementById("moduleTitle");
       const moduleEmptyEl = document.getElementById("moduleEmpty");
@@ -539,6 +545,7 @@
         basePrompt: "",
         decisionPrompt: "",
         submoduleOutputsRaw: "",
+        appendInputMode: "always_new",
         historyCutoffTs: null,
         selectedWorklogTs: null,
         excludedEventIds: new Set(),
@@ -563,6 +570,12 @@
                 parsed.excludedEventIds.filter((value) => typeof value === "string"),
               );
             }
+            if (
+              parsed.appendInputMode === "always_new" ||
+              parsed.appendInputMode === "reuse_open"
+            ) {
+              state.appendInputMode = parsed.appendInputMode;
+            }
           }
         } catch (_err) {
           // Ignore malformed local state and continue with defaults.
@@ -574,6 +587,7 @@
           const payload = {
             historyCutoffTs: state.historyCutoffTs,
             excludedEventIds: Array.from(state.excludedEventIds),
+            appendInputMode: state.appendInputMode,
           };
           localStorage.setItem(DEBUG_UI_STATE_KEY, JSON.stringify(payload));
         } catch (_err) {
@@ -971,6 +985,7 @@
         if (state.selectedKind === "decision") {
           payload.submodule_outputs = state.submoduleOutputsRaw || "";
         }
+        payload.append_input_mode = state.appendInputMode;
         payload.exclude_event_ids = Array.from(state.excludedEventIds);
         const cutoffTs = getCurrentHistoryCutoffTs();
         payload.include_history = Boolean(cutoffTs);
@@ -1108,6 +1123,10 @@
         state.submoduleOutputsRaw = submoduleOutputsInput.value;
       });
 
+      appendInputModeSelect.addEventListener("change", () => {
+        state.appendInputMode = appendInputModeSelect.value || "always_new";
+      });
+
       modulePrompt.addEventListener("input", () => {
         const name = state.selectedModule;
         if (!name) return;
@@ -1158,6 +1177,7 @@
       });
 
       loadPersistedDebugState();
+      appendInputModeSelect.value = state.appendInputMode;
       fetchPrompts();
       fetchWorklogs();
       setFlowHighlight(null);

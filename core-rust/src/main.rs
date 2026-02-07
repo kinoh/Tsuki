@@ -98,11 +98,28 @@ struct DebugRunRequest {
     history_cutoff_ts: Option<String>,
     #[serde(default)]
     exclude_event_ids: Option<Vec<String>>,
+    #[serde(default)]
+    append_input_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct DebugRunResponse {
     output: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppendInputMode {
+    AlwaysNew,
+    ReuseOpen,
+}
+
+impl AppendInputMode {
+    fn from_request(value: Option<&str>) -> Self {
+        match value {
+            Some(raw) if raw.eq_ignore_ascii_case("reuse_open") => Self::ReuseOpen,
+            _ => Self::AlwaysNew,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -413,6 +430,16 @@ async fn debug_run_module(
         .unwrap_or_default()
         .into_iter()
         .collect::<HashSet<_>>();
+    let append_mode = AppendInputMode::from_request(payload.append_input_mode.as_deref());
+    maybe_append_debug_input_event(
+        &state,
+        payload.input.trim(),
+        include_history,
+        history_cutoff_ts,
+        &excluded_event_ids,
+        append_mode,
+    )
+    .await;
     let output = if name == "decision" {
         run_decision_debug(
             &payload.input,
@@ -478,6 +505,73 @@ async fn debug_ui() -> Html<String> {
             Html(EMBEDDED.to_string())
         }
     }
+}
+
+async fn maybe_append_debug_input_event(
+    state: &AppState,
+    input_text: &str,
+    include_history: bool,
+    cutoff_ts: Option<&str>,
+    excluded_event_ids: &HashSet<String>,
+    append_mode: AppendInputMode,
+) {
+    let normalized_input = input_text.trim();
+    if normalized_input.is_empty() {
+        return;
+    }
+    let should_append = match append_mode {
+        AppendInputMode::AlwaysNew => true,
+        AppendInputMode::ReuseOpen => {
+            if !include_history {
+                true
+            } else {
+                let events = latest_events(state, 1000, cutoff_ts, Some(excluded_event_ids)).await;
+                should_append_debug_input_for_reuse_open(normalized_input, &events)
+            }
+        }
+    };
+    if !should_append {
+        return;
+    }
+    let event = build_event(
+        "user",
+        "text",
+        json!({ "text": normalized_input }),
+        vec!["input".to_string(), "type:message".to_string()],
+    );
+    record_event(state, event).await;
+}
+
+fn should_append_debug_input_for_reuse_open(input_text: &str, events: &[Event]) -> bool {
+    let mut saw_decision_after_input = false;
+    for event in events {
+        if is_decision_event(event) {
+            saw_decision_after_input = true;
+            continue;
+        }
+        if !is_user_input_event(event) {
+            continue;
+        }
+        if saw_decision_after_input {
+            return true;
+        }
+        let previous_input = event
+            .payload
+            .get("text")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim();
+        return previous_input != input_text;
+    }
+    true
+}
+
+fn is_user_input_event(event: &Event) -> bool {
+    event.source == "user" && event.meta.tags.iter().any(|tag| tag == "input")
+}
+
+fn is_decision_event(event: &Event) -> bool {
+    event.meta.tags.iter().any(|tag| tag == "decision")
 }
 
 fn verify_auth(message: &str, expected_token: &str) -> bool {
@@ -750,6 +844,15 @@ async fn run_decision_debug(
         })
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let parsed = parse_decision(&response.text);
+    let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
+    let decision_event = build_event(
+        "internal",
+        "text",
+        json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
+        vec!["decision".to_string()],
+    );
+    record_event(state, decision_event).await;
     emit_debug_module_events(
         state,
         "decision",
@@ -816,6 +919,13 @@ async fn run_submodule_debug(
         })
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let response_event = build_event(
+        "internal",
+        "text",
+        json!({ "text": response.text.clone() }),
+        vec!["submodule".to_string(), format!("module:{}", name)],
+    );
+    record_event(state, response_event).await;
     emit_debug_module_events(state, name, "module_only", input_text, &context, &response).await;
     Ok(response.text)
 }
