@@ -408,6 +408,10 @@
             id="submoduleOutputsInput"
             placeholder="curiosity: ...&#10;self_preservation: ...&#10;social_approval: ..."
           ></textarea>
+          <div class="button-row">
+            <button class="secondary" id="autofillSubmoduleOutputs">Auto-fill from logs</button>
+          </div>
+          <div class="muted" id="autofillStatus"></div>
           <div class="muted">Format: name: output (one per line)</div>
         </div>
 
@@ -453,6 +457,8 @@
       const includeHistoryInput = document.getElementById("includeHistory");
       const submoduleOutputsSection = document.getElementById("submoduleOutputsSection");
       const submoduleOutputsInput = document.getElementById("submoduleOutputsInput");
+      const autofillSubmoduleOutputsButton = document.getElementById("autofillSubmoduleOutputs");
+      const autofillStatus = document.getElementById("autofillStatus");
       const submoduleManageSection = document.getElementById("submoduleManageSection");
       const submoduleManageList = document.getElementById("submoduleManageList");
       const newSubmoduleName = document.getElementById("newSubmoduleName");
@@ -538,6 +544,10 @@
         if (!iso) return "";
         const date = new Date(iso);
         return date.toLocaleTimeString();
+      }
+
+      function normalizeInputText(value) {
+        return (value || "").trim();
       }
 
       async function fetchPrompts() {
@@ -686,6 +696,7 @@
         }
         runStatus.textContent = "";
         promptStatus.textContent = "";
+        autofillStatus.textContent = "";
         if (!inputSection.hidden && !moduleInput.value.trim() && state.lastInput) {
           moduleInput.value = state.lastInput;
         }
@@ -871,6 +882,54 @@
         rawTextEl.textContent = JSON.stringify(latest.payload.raw, null, 2);
       }
 
+      async function autofillSubmoduleOutputsFromLogs() {
+        const input = normalizeInputText(moduleInput.value);
+        if (!input) {
+          autofillStatus.textContent = "Input is required.";
+          return;
+        }
+        autofillStatus.textContent = "Loading...";
+        const res = await fetch("/debug/events?tag=debug,worklog&limit=500");
+        if (!res.ok) {
+          autofillStatus.textContent = "Failed to load logs.";
+          return;
+        }
+        const data = await res.json();
+        const events = (data.events || []).sort((a, b) => {
+          const at = Date.parse(a.ts || "") || 0;
+          const bt = Date.parse(b.ts || "") || 0;
+          return bt - at;
+        });
+        const matched = new Map();
+        const matchedTimes = [];
+        const submoduleNames = Array.from(state.submodules.keys());
+        events.forEach((event) => {
+          const payload = event.payload || {};
+          if (payload.mode !== "module_only") return;
+          const moduleName = payload.module || "";
+          if (!state.submodules.has(moduleName)) return;
+          if (matched.has(moduleName)) return;
+          if (normalizeInputText(payload.input) !== input) return;
+          matched.set(moduleName, payload.output || "");
+          if (event.ts) {
+            matchedTimes.push(event.ts);
+          }
+        });
+        if (matched.size === 0) {
+          autofillStatus.textContent = "No matching submodule outputs found.";
+          return;
+        }
+        const lines = submoduleNames.map((name) => `${name}: ${matched.get(name) || ""}`);
+        state.submoduleOutputsRaw = lines.join("\n");
+        submoduleOutputsInput.value = state.submoduleOutputsRaw;
+        const latestTs = matchedTimes
+          .map((ts) => Date.parse(ts))
+          .filter((ts) => !Number.isNaN(ts))
+          .sort((a, b) => b - a)[0];
+        const latestLabel = latestTs ? new Date(latestTs).toLocaleTimeString() : "unknown time";
+        autofillStatus.textContent = `Filled ${matched.size}/${submoduleNames.length} modules from ${latestLabel}.`;
+      }
+
       async function savePrompts() {
         promptStatus.textContent = "Saving...";
         submoduleManageStatus.textContent = "";
@@ -941,6 +1000,7 @@
       document.getElementById("loadRaw").addEventListener("click", loadRaw);
       document.getElementById("savePrompts").addEventListener("click", savePrompts);
       document.getElementById("refreshLog").addEventListener("click", fetchWorklogs);
+      autofillSubmoduleOutputsButton.addEventListener("click", autofillSubmoduleOutputsFromLogs);
       flowNodes.forEach((node) => {
         node.addEventListener("click", () => selectNode(node.dataset.node));
       });
