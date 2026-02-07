@@ -525,6 +525,7 @@
       const moduleBasePrompt = document.getElementById("moduleBasePrompt");
       const promptStatus = document.getElementById("promptStatus");
       const flowNodes = Array.from(document.querySelectorAll(".node"));
+      const DEBUG_UI_STATE_KEY = "tsuki_core_rust_debug_ui_state_v1";
 
       const state = {
         prompts: null,
@@ -541,6 +542,38 @@
         lastOutput: "",
         worklogs: [],
       };
+
+      function loadPersistedDebugState() {
+        try {
+          const raw = localStorage.getItem(DEBUG_UI_STATE_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            if (typeof parsed.historyCutoffTs === "string" || parsed.historyCutoffTs === null) {
+              state.historyCutoffTs = parsed.historyCutoffTs;
+            }
+            if (Array.isArray(parsed.excludedEventIds)) {
+              state.excludedEventIds = new Set(
+                parsed.excludedEventIds.filter((value) => typeof value === "string"),
+              );
+            }
+          }
+        } catch (_err) {
+          // Ignore malformed local state and continue with defaults.
+        }
+      }
+
+      function savePersistedDebugState() {
+        try {
+          const payload = {
+            historyCutoffTs: state.historyCutoffTs,
+            excludedEventIds: Array.from(state.excludedEventIds),
+          };
+          localStorage.setItem(DEBUG_UI_STATE_KEY, JSON.stringify(payload));
+        } catch (_err) {
+          // Ignore persistence errors in debug-only UI.
+        }
+      }
 
       function setStatus(text) {
         statusEl.textContent = text;
@@ -790,6 +823,7 @@
             state.selectedWorklogTs = null;
           }
         }
+        savePersistedDebugState();
         renderWorklogs();
       }
 
@@ -882,6 +916,7 @@
             } else {
               state.excludedEventIds.add(event.event_id);
             }
+            savePersistedDebugState();
             renderWorklogs();
           });
           item.addEventListener("click", () => {
@@ -1096,10 +1131,12 @@
       document.getElementById("refreshLog").addEventListener("click", fetchWorklogs);
       document.getElementById("setCutoff").addEventListener("click", () => {
         state.historyCutoffTs = state.selectedWorklogTs || null;
+        savePersistedDebugState();
         renderWorklogs();
       });
       document.getElementById("clearCutoff").addEventListener("click", () => {
         state.historyCutoffTs = null;
+        savePersistedDebugState();
         renderWorklogs();
       });
       autofillSubmoduleOutputsButton.addEventListener("click", autofillSubmoduleOutputsFromLogs);
@@ -1107,6 +1144,7 @@
         node.addEventListener("click", () => selectNode(node.dataset.node));
       });
 
+      loadPersistedDebugState();
       fetchPrompts();
       fetchWorklogs();
       setFlowHighlight(null);
