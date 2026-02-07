@@ -80,6 +80,8 @@
         gap: 10px;
         max-height: 70vh;
         overflow: auto;
+        position: relative;
+        padding-top: 10px;
       }
 
       .worklog-item {
@@ -103,6 +105,28 @@
       .worklog-meta {
         font-size: 11px;
         color: var(--muted);
+      }
+
+      .worklog-item.cutoff-anchor {
+        position: relative;
+      }
+
+      .worklog-item.cutoff-anchor::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: -6px;
+        border-bottom: 2px solid rgba(113, 74, 244, 0.85);
+      }
+
+      .worklog-list.cutoff-at-top::before {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        top: 2px;
+        border-top: 2px solid rgba(113, 74, 244, 0.85);
       }
 
       .flow {
@@ -342,6 +366,8 @@
         <div class="worklog-list" id="worklog"></div>
         <div class="button-row">
           <button class="secondary" id="refreshLog">Refresh</button>
+          <button class="secondary" id="setCutoff">Set cutoff</button>
+          <button class="secondary" id="clearCutoff">Clear cutoff</button>
         </div>
       </aside>
 
@@ -391,10 +417,6 @@
         <div class="control-section" id="inputSection" hidden>
           <label for="moduleInput">Input</label>
           <textarea id="moduleInput" placeholder="Type input for the selected module..."></textarea>
-          <div class="checkbox-row" id="includeHistoryRow">
-            <input type="checkbox" id="includeHistory" />
-            <label for="includeHistory">Include history</label>
-          </div>
           <div class="button-row" id="runButtons">
             <button id="runModule">Run</button>
             <button class="secondary" id="loadRaw">Load Raw</button>
@@ -453,8 +475,6 @@
       const moduleEmptyEl = document.getElementById("moduleEmpty");
       const inputSection = document.getElementById("inputSection");
       const runButtons = document.getElementById("runButtons");
-      const includeHistoryRow = document.getElementById("includeHistoryRow");
-      const includeHistoryInput = document.getElementById("includeHistory");
       const submoduleOutputsSection = document.getElementById("submoduleOutputsSection");
       const submoduleOutputsInput = document.getElementById("submoduleOutputsInput");
       const autofillSubmoduleOutputsButton = document.getElementById("autofillSubmoduleOutputs");
@@ -479,7 +499,8 @@
         basePrompt: "",
         decisionPrompt: "",
         submoduleOutputsRaw: "",
-        includeHistory: false,
+        historyCutoffTs: null,
+        selectedWorklogTs: null,
         selectedModule: null,
         selectedKind: null,
         lastInput: "",
@@ -544,6 +565,10 @@
         if (!iso) return "";
         const date = new Date(iso);
         return date.toLocaleTimeString();
+      }
+
+      function getCurrentHistoryCutoffTs() {
+        return state.historyCutoffTs;
       }
 
       function normalizeInputText(value) {
@@ -650,15 +675,12 @@
           : `Module: ${selection.kind}`;
         inputSection.hidden = true;
         runButtons.hidden = true;
-        includeHistoryRow.hidden = true;
         submoduleOutputsSection.hidden = true;
         submoduleManageSection.hidden = true;
         modulePromptSection.hidden = true;
         if (selection.kind === "submodule") {
           inputSection.hidden = false;
           runButtons.hidden = false;
-          includeHistoryRow.hidden = false;
-          includeHistoryInput.checked = state.includeHistory;
           modulePromptSection.hidden = false;
           modulePromptLabel.textContent = "Submodule Prompt";
           moduleBasePrompt.value = state.basePrompt;
@@ -666,8 +688,6 @@
         } else if (selection.kind === "decision") {
           inputSection.hidden = false;
           runButtons.hidden = false;
-          includeHistoryRow.hidden = false;
-          includeHistoryInput.checked = state.includeHistory;
           submoduleOutputsSection.hidden = false;
           modulePromptSection.hidden = false;
           modulePromptLabel.textContent = "Decision Prompt";
@@ -718,6 +738,18 @@
           const bt = Date.parse(b.ts || "") || 0;
           return bt - at;
         });
+        if (state.historyCutoffTs) {
+          const exists = state.worklogs.some((event) => event.ts === state.historyCutoffTs);
+          if (!exists) {
+            state.historyCutoffTs = null;
+          }
+        }
+        if (state.selectedWorklogTs) {
+          const exists = state.worklogs.some((event) => event.ts === state.selectedWorklogTs);
+          if (!exists) {
+            state.selectedWorklogTs = null;
+          }
+        }
         renderWorklogs();
       }
 
@@ -775,6 +807,7 @@
 
       function renderWorklogs() {
         worklogEl.innerHTML = "";
+        worklogEl.classList.toggle("cutoff-at-top", !state.historyCutoffTs);
         if (state.worklogs.length === 0) {
           worklogEl.innerHTML = '<div class="muted">No work log entries yet.</div>';
           return;
@@ -787,13 +820,19 @@
           const kind = reply ? "reply" : "worklog";
           const item = document.createElement("div");
           item.className = "worklog-item";
+          if (event.ts && event.ts === state.selectedWorklogTs) {
+            item.classList.add("active");
+          }
+          if (event.ts && event.ts === state.historyCutoffTs) {
+            item.classList.add("cutoff-anchor");
+          }
           item.innerHTML = `
             <div><strong>${moduleName}</strong></div>
             <div class="worklog-meta">${kind} · ${mode} · ${formatTime(event.ts)}</div>
           `;
           item.addEventListener("click", () => {
-            document.querySelectorAll(".worklog-item").forEach((el) => el.classList.remove("active"));
-            item.classList.add("active");
+            state.selectedWorklogTs = event.ts || null;
+            renderWorklogs();
             const output = payload.output || payload.text || "";
             const input = payload.input || "";
             inputTextEl.textContent = input;
@@ -832,7 +871,11 @@
         if (state.selectedKind === "decision") {
           payload.submodule_outputs = state.submoduleOutputsRaw || "";
         }
-        payload.include_history = state.includeHistory;
+        const cutoffTs = getCurrentHistoryCutoffTs();
+        payload.include_history = Boolean(cutoffTs);
+        if (cutoffTs) {
+          payload.history_cutoff_ts = cutoffTs;
+        }
         const res = await fetch(`/debug/modules/${encodeURIComponent(moduleName)}/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -958,10 +1001,6 @@
         state.basePrompt = moduleBasePrompt.value;
       });
 
-      includeHistoryInput.addEventListener("change", () => {
-        state.includeHistory = includeHistoryInput.checked;
-      });
-
       submoduleOutputsInput.addEventListener("input", () => {
         state.submoduleOutputsRaw = submoduleOutputsInput.value;
       });
@@ -1000,6 +1039,14 @@
       document.getElementById("loadRaw").addEventListener("click", loadRaw);
       document.getElementById("savePrompts").addEventListener("click", savePrompts);
       document.getElementById("refreshLog").addEventListener("click", fetchWorklogs);
+      document.getElementById("setCutoff").addEventListener("click", () => {
+        state.historyCutoffTs = state.selectedWorklogTs || null;
+        renderWorklogs();
+      });
+      document.getElementById("clearCutoff").addEventListener("click", () => {
+        state.historyCutoffTs = null;
+        renderWorklogs();
+      });
       autofillSubmoduleOutputsButton.addEventListener("click", autofillSubmoduleOutputsFromLogs);
       flowNodes.forEach((node) => {
         node.addEventListener("click", () => selectNode(node.dataset.node));
@@ -1010,7 +1057,6 @@
       setFlowHighlight(null);
       moduleEmptyEl.hidden = false;
       inputSection.hidden = true;
-      includeHistoryRow.hidden = true;
       submoduleOutputsSection.hidden = true;
       submoduleManageSection.hidden = true;
       modulePromptSection.hidden = true;

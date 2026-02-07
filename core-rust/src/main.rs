@@ -92,6 +92,8 @@ struct DebugRunRequest {
     submodule_outputs: Option<String>,
     #[serde(default)]
     include_history: Option<bool>,
+    #[serde(default)]
+    history_cutoff_ts: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -400,17 +402,26 @@ async fn debug_run_module(
     if payload.input.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "input is required".to_string()));
     }
-    let include_history = payload.include_history.unwrap_or(false);
+    let include_history = payload.include_history.unwrap_or(true);
+    let history_cutoff_ts = payload.history_cutoff_ts.as_deref();
     let output = if name == "decision" {
         run_decision_debug(
             &payload.input,
             payload.submodule_outputs.as_deref(),
             include_history,
+            history_cutoff_ts,
             &state,
         )
         .await?
     } else {
-        run_submodule_debug(&name, &payload.input, include_history, &state).await?
+        run_submodule_debug(
+            &name,
+            &payload.input,
+            include_history,
+            history_cutoff_ts,
+            &state,
+        )
+        .await?
     };
     Ok(Json(DebugRunResponse { output }))
 }
@@ -568,7 +579,7 @@ async fn run_submodules(
     modules: &Modules,
     state: &AppState,
 ) -> Vec<ModuleOutput> {
-    let history = format_event_history(state, state.limits.submodule_history).await;
+    let history = format_event_history(state, state.limits.submodule_history, None).await;
     let overrides = current_prompt_overrides(state).await;
     let base_instructions = overrides
         .base
@@ -617,7 +628,7 @@ async fn run_decision(
     modules: &Modules,
     state: &AppState,
 ) -> ModuleOutput {
-    let history = format_event_history(state, state.limits.decision_history).await;
+    let history = format_event_history(state, state.limits.decision_history, None).await;
     let overrides = current_prompt_overrides(state).await;
     let base_instructions = overrides
         .base
@@ -679,10 +690,11 @@ async fn run_decision_debug(
     input_text: &str,
     submodule_outputs_raw: Option<&str>,
     include_history: bool,
+    history_cutoff_ts: Option<&str>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
     let history = if include_history {
-        format_event_history(state, state.limits.decision_history).await
+        format_event_history(state, state.limits.decision_history, history_cutoff_ts).await
     } else {
         "none".to_string()
     };
@@ -726,10 +738,11 @@ async fn run_submodule_debug(
     name: &str,
     input_text: &str,
     include_history: bool,
+    history_cutoff_ts: Option<&str>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
     let history = if include_history {
-        format_event_history(state, state.limits.submodule_history).await
+        format_event_history(state, state.limits.submodule_history, history_cutoff_ts).await
     } else {
         "none".to_string()
     };
@@ -891,8 +904,8 @@ async fn current_prompt_overrides(state: &AppState) -> PromptOverrides {
     state.prompts.read().await.clone()
 }
 
-async fn format_event_history(state: &AppState, limit: usize) -> String {
-    let events = latest_events(state, limit).await;
+async fn format_event_history(state: &AppState, limit: usize, cutoff_ts: Option<&str>) -> String {
+    let events = latest_events(state, limit, cutoff_ts).await;
     if events.is_empty() {
         return "none".to_string();
     }
@@ -903,7 +916,7 @@ async fn format_event_history(state: &AppState, limit: usize) -> String {
         .join("\n")
 }
 
-async fn latest_events(state: &AppState, limit: usize) -> Vec<Event> {
+async fn latest_events(state: &AppState, limit: usize, cutoff_ts: Option<&str>) -> Vec<Event> {
     if limit == 0 {
         return Vec::new();
     }
@@ -911,6 +924,11 @@ async fn latest_events(state: &AppState, limit: usize) -> Vec<Event> {
         Ok(events) => events
             .into_iter()
             .filter(|event| !is_debug_event(event))
+            .filter(|event| {
+                cutoff_ts
+                    .map(|cutoff| event.ts.as_str() <= cutoff)
+                    .unwrap_or(true)
+            })
             .collect(),
         Err(err) => {
             println!("EVENT_STORE_ERROR error={}", err);
