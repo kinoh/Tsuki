@@ -744,10 +744,20 @@ async fn run_decision_debug(
         input_text, submodule_section, history
     );
     let response = adapter
-        .respond(LlmRequest { input: context })
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    emit_debug_module_events(state, "decision", "module_only", input_text, &response).await;
+    emit_debug_module_events(
+        state,
+        "decision",
+        "module_only",
+        input_text,
+        &context,
+        &response,
+    )
+    .await;
     Ok(response.text)
 }
 
@@ -800,10 +810,12 @@ async fn run_submodule_debug(
         history
     );
     let response = adapter
-        .respond(LlmRequest { input: context })
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    emit_debug_module_events(state, name, "module_only", input_text, &response).await;
+    emit_debug_module_events(state, name, "module_only", input_text, &context, &response).await;
     Ok(response.text)
 }
 
@@ -834,6 +846,7 @@ async fn emit_debug_module_events(
     module: &str,
     mode: &str,
     input_text: &str,
+    context: &str,
     response: &crate::llm::LlmResponse,
 ) {
     let worklog_event = build_event(
@@ -859,6 +872,8 @@ async fn emit_debug_module_events(
         "text",
         json!({
             "raw": response.raw.clone(),
+            "context": context,
+            "output_text": response.text.clone(),
             "module": module,
             "mode": mode,
         }),
