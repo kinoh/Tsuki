@@ -20,5 +20,6 @@
 ## Implementation Notes
 - UI sends `include_history=false` when no cutoff is set (top divider).
 - UI sends `include_history=true` and `history_cutoff_ts` when cutoff is set.
-- Backend filters history events to `event.ts <= history_cutoff_ts`.
+- Backend filters history events to `event.ts >= history_cutoff_ts`.
+- In the Work Log, this means events newer than the divider are included and older ones are excluded.
 - Right-panel `Include history` toggle is removed in favor of Work Log cutoff control.

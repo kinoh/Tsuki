@@ -926,7 +926,7 @@ async fn latest_events(state: &AppState, limit: usize, cutoff_ts: Option<&str>) 
             .filter(|event| !is_debug_event(event))
             .filter(|event| {
                 cutoff_ts
-                    .map(|cutoff| event.ts.as_str() <= cutoff)
+                    .map(|cutoff| event.ts.as_str() >= cutoff)
                     .unwrap_or(true)
             })
             .collect(),
