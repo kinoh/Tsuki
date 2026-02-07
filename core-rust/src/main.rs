@@ -26,6 +26,7 @@ use futures::{future::join_all, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
+  collections::HashSet,
   net::SocketAddr,
   path::PathBuf,
   sync::Arc,
@@ -94,6 +95,8 @@ struct DebugRunRequest {
     include_history: Option<bool>,
     #[serde(default)]
     history_cutoff_ts: Option<String>,
+    #[serde(default)]
+    exclude_event_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -404,12 +407,18 @@ async fn debug_run_module(
     }
     let include_history = payload.include_history.unwrap_or(true);
     let history_cutoff_ts = payload.history_cutoff_ts.as_deref();
+    let excluded_event_ids = payload
+        .exclude_event_ids
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<HashSet<_>>();
     let output = if name == "decision" {
         run_decision_debug(
             &payload.input,
             payload.submodule_outputs.as_deref(),
             include_history,
             history_cutoff_ts,
+            &excluded_event_ids,
             &state,
         )
         .await?
@@ -419,6 +428,7 @@ async fn debug_run_module(
             &payload.input,
             include_history,
             history_cutoff_ts,
+            &excluded_event_ids,
             &state,
         )
         .await?
@@ -579,7 +589,7 @@ async fn run_submodules(
     modules: &Modules,
     state: &AppState,
 ) -> Vec<ModuleOutput> {
-    let history = format_event_history(state, state.limits.submodule_history, None).await;
+    let history = format_event_history(state, state.limits.submodule_history, None, None).await;
     let overrides = current_prompt_overrides(state).await;
     let base_instructions = overrides
         .base
@@ -628,7 +638,7 @@ async fn run_decision(
     modules: &Modules,
     state: &AppState,
 ) -> ModuleOutput {
-    let history = format_event_history(state, state.limits.decision_history, None).await;
+    let history = format_event_history(state, state.limits.decision_history, None, None).await;
     let overrides = current_prompt_overrides(state).await;
     let base_instructions = overrides
         .base
@@ -691,10 +701,17 @@ async fn run_decision_debug(
     submodule_outputs_raw: Option<&str>,
     include_history: bool,
     history_cutoff_ts: Option<&str>,
+    excluded_event_ids: &HashSet<String>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
     let history = if include_history {
-        format_event_history(state, state.limits.decision_history, history_cutoff_ts).await
+        format_event_history(
+            state,
+            state.limits.decision_history,
+            history_cutoff_ts,
+            Some(excluded_event_ids),
+        )
+        .await
     } else {
         "none".to_string()
     };
@@ -739,10 +756,17 @@ async fn run_submodule_debug(
     input_text: &str,
     include_history: bool,
     history_cutoff_ts: Option<&str>,
+    excluded_event_ids: &HashSet<String>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
     let history = if include_history {
-        format_event_history(state, state.limits.submodule_history, history_cutoff_ts).await
+        format_event_history(
+            state,
+            state.limits.submodule_history,
+            history_cutoff_ts,
+            Some(excluded_event_ids),
+        )
+        .await
     } else {
         "none".to_string()
     };
@@ -904,8 +928,13 @@ async fn current_prompt_overrides(state: &AppState) -> PromptOverrides {
     state.prompts.read().await.clone()
 }
 
-async fn format_event_history(state: &AppState, limit: usize, cutoff_ts: Option<&str>) -> String {
-    let events = latest_events(state, limit, cutoff_ts).await;
+async fn format_event_history(
+    state: &AppState,
+    limit: usize,
+    cutoff_ts: Option<&str>,
+    excluded_event_ids: Option<&HashSet<String>>,
+) -> String {
+    let events = latest_events(state, limit, cutoff_ts, excluded_event_ids).await;
     if events.is_empty() {
         return "none".to_string();
     }
@@ -916,7 +945,12 @@ async fn format_event_history(state: &AppState, limit: usize, cutoff_ts: Option<
         .join("\n")
 }
 
-async fn latest_events(state: &AppState, limit: usize, cutoff_ts: Option<&str>) -> Vec<Event> {
+async fn latest_events(
+    state: &AppState,
+    limit: usize,
+    cutoff_ts: Option<&str>,
+    excluded_event_ids: Option<&HashSet<String>>,
+) -> Vec<Event> {
     if limit == 0 {
         return Vec::new();
     }
@@ -924,6 +958,11 @@ async fn latest_events(state: &AppState, limit: usize, cutoff_ts: Option<&str>) 
         Ok(events) => events
             .into_iter()
             .filter(|event| !is_debug_event(event))
+            .filter(|event| {
+                excluded_event_ids
+                    .map(|ids| !ids.contains(event.event_id.as_str()))
+                    .unwrap_or(true)
+            })
             .filter(|event| {
                 cutoff_ts
                     .map(|cutoff| event.ts.as_str() >= cutoff)
