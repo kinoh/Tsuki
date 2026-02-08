@@ -4,6 +4,7 @@
 - The system is not a business product and does not require separate security-grade audit rails.
 - The model should continuously know what it attempted, what feedback happened, and why updates were proposed.
 - Improvement trigger signals and proposal artifacts should be first-class events in the same event stream.
+- This phase targets `core-rust` only.
 
 ## Design Principles
 - Use one event system for conversation and self-improvement state transitions.
@@ -14,11 +15,14 @@
 
 ## Scope
 - In scope:
-  - periodic self-improvement cycle
+  - manual/debug-triggered self-improvement cycle in `core-rust`
   - event-based trigger records
   - event-based proposal records
   - event-based approval/rejection records
+  - projection execution in the same runtime flow used for user input handling
 - Out of scope:
+  - `core/` (TypeScript runtime) implementation changes
+  - in-process daily scheduler implementation in `core-rust`
   - separate audit database/service
   - A/B testing
   - additional safety policy framework beyond existing runtime controls
@@ -36,21 +40,24 @@
   - `phase`: `trigger|proposal|review`
   - `target`: `base|decision|submodule:<name>`
   - `reason`: short rationale
-  - `diff`: proposed patch text
+  - `content`: full replacement prompt content for `target`
   - `status`: `pending|approved|rejected`
   - `feedback_refs`: related event ids
   - `review`: `approval|rejection` (for review phase)
 
 ## Event Semantics
 - `improve.review` with `review=approval` means the proposal is logically accepted and should be reflected in prompt state.
-- If reflection fails, emit a standard runtime `error` event with improvement context (no dedicated `projection.error` event type).
+- Projection is executed immediately in the same runtime path style as user input processing (no delayed reconciler).
+- No dedicated success event is required for projection completion in this phase.
+- If projection fails, emit a standard runtime `error` event with improvement context (no dedicated `projection.error` event type).
+- Minimum required linkage in projection error payload is the related review `event_id`.
 - Event sourcing expectation: eventual consistency from approved proposal to materialized prompt content.
 
 ## Runtime Flow
-1. Scheduler emits `improve.trigger` (daily by default).
+1. Debug/manual action emits `improve.trigger`.
 2. Reflector modules read recent events and emit `improve.proposal`.
-3. Reviewer (human or meta-module) emits `improve.review`.
-4. Prompt projection updates persisted prompt material from approved proposals.
+3. Debug reviewer (human) emits `improve.review`.
+4. On `review=approval`, prompt projection immediately updates persisted prompt material from the proposal `content`.
 5. On projection failure, runtime emits a normal `error` event and keeps proposal/review events as source of truth.
 
 ## Module Responsibilities
@@ -60,13 +67,13 @@
   - proposes updates only for decision prompt.
 - Base reflector:
   - proposes updates only for base prompt.
-- Meta reviewer:
+- Debug reviewer:
   - does not directly rewrite prompts;
-  - evaluates proposal consistency and emits review events.
+  - evaluates proposal consistency and emits review events in debug flow.
 
 ## Trigger Strategy
-- Primary trigger: periodic run (daily).
-- Optional immediate trigger: explicit high-signal user feedback.
+- Primary trigger for this phase: debug/manual trigger.
+- Optional trigger: explicit high-signal user feedback mapped to debug/manual operations.
 - Both are represented as `improve.trigger` events.
 
 ## Approval Strategy
@@ -74,10 +81,13 @@
 - No separate approval ledger is required.
 - Final source of truth is the event stream plus current prompt files.
 - `review=approval` is not optional metadata; it is the intent that the projection layer must realize.
+- Duplicate approvals are acceptable in this phase because projection uses full replacement content semantics.
 
 ## Debugging
 - Debug UI should filter and inspect `improve.*` tags.
-- Proposal debugging should show trigger context, proposal diff, and review outcome.
+- Work log should display `improve.trigger`, `improve.proposal`, and `improve.review`.
+- Proposal debugging should show trigger context, proposal replacement content, and review outcome.
+- Proposal content can be inspected via the existing Output panel.
 - Improvement trigger action should be initiated from the right panel after selecting the relevant module, to stay consistent with existing module run interactions.
 - Because all steps are events, replay and context reconstruction use the same mechanism as normal conversation debugging.
 
