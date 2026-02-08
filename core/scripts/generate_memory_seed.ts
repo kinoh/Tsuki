@@ -319,6 +319,62 @@ async function loadPrompt(options: CliOptions): Promise<string> {
   return content.trim()
 }
 
+function extractGeneratedText(result: unknown): string {
+  if (!result || typeof result !== 'object') {
+    return ''
+  }
+  const root = result as Record<string, unknown>
+  if (typeof root.text === 'string' && root.text.trim().length > 0) {
+    return root.text.trim()
+  }
+
+  const content = root.content
+  if (Array.isArray(content)) {
+    const fromContent = content
+      .flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const c = item as Record<string, unknown>
+        if (c.type !== 'text') return []
+        if (typeof c.text !== 'string') return []
+        return [c.text.trim()]
+      })
+      .filter((text) => text.length > 0)
+      .join('\n\n')
+    if (fromContent.length > 0) {
+      return fromContent
+    }
+  }
+
+  const response = root.response
+  if (response && typeof response === 'object') {
+    const body = (response as Record<string, unknown>).body
+    if (body && typeof body === 'object') {
+      const output = (body as Record<string, unknown>).output
+      if (Array.isArray(output)) {
+        const fromOutputText = output
+          .flatMap((entry) => {
+            if (!entry || typeof entry !== 'object') return []
+            const contentBlocks = (entry as Record<string, unknown>).content
+            if (!Array.isArray(contentBlocks)) return []
+            return contentBlocks.flatMap((block) => {
+              if (!block || typeof block !== 'object') return []
+              const b = block as Record<string, unknown>
+              if (b.type !== 'output_text') return []
+              if (typeof b.text !== 'string') return []
+              return [b.text.trim()]
+            })
+          })
+          .filter((text) => text.length > 0)
+          .join('\n\n')
+        if (fromOutputText.length > 0) {
+          return fromOutputText
+        }
+      }
+    }
+  }
+  return ''
+}
+
 async function generateMemorySeed(history: string, prompt: string, modelName: string): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
@@ -334,7 +390,7 @@ async function generateMemorySeed(history: string, prompt: string, modelName: st
     inputFormat: 'prompt',
     mode: { type: 'regular' },
   })
-  return result.text?.trim() || ''
+  return extractGeneratedText(result)
 }
 
 async function main(): Promise<void> {
@@ -354,6 +410,7 @@ async function main(): Promise<void> {
   console.log(`db: ${dbPath}`)
   console.log(`cache hit: ${fromCache ? 'yes' : 'no'}`)
   console.log(`history chars: ${history.length}`)
+  console.log(`model: ${options.model}`)
 
   if (options.dryRun) {
     console.log('--- history preview ---')

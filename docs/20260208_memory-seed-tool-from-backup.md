@@ -28,6 +28,10 @@
   - uses OpenAI via existing `@ai-sdk/openai`
   - system prompt is the provided prompt
   - user content is full simplified history text
+  - output extraction is resilient:
+    - first tries `result.text`
+    - falls back to `result.content[type=text]`
+    - falls back to `response.body.output[].content[type=output_text]`
 - Safety / validation:
   - `--dry-run` mode prints the full history payload that would be sent to the LLM, without model calls
   - requires `OPENAI_API_KEY` only when generation is requested
