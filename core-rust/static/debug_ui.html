@@ -273,10 +273,15 @@
         margin-bottom: 16px;
       }
 
+      .control-section h2 {
+        margin-top: 36px;
+      }
+
       label {
         font-size: 12px;
         color: var(--muted);
         display: block;
+        margin-top: 6px;
         margin-bottom: 6px;
       }
 
@@ -364,6 +369,7 @@
         display: flex;
         gap: 8px;
         margin-top: 10px;
+        margin-bottom: 10px;
       }
 
       .muted {
@@ -467,29 +473,6 @@
           <div class="muted" id="runStatus"></div>
         </div>
 
-        <div class="control-section" id="improveSection">
-          <h2>Self-Improvement</h2>
-          <label for="improveTarget">Target</label>
-          <input id="improveTarget" placeholder="base | decision | submodule:curiosity" />
-          <label for="improveSectionName">Section</label>
-          <input id="improveSectionName" value="Memory" />
-          <label for="improveReason">Reason</label>
-          <textarea id="improveReason" placeholder="Why this update should happen..."></textarea>
-          <label for="improveContent">Proposal Content</label>
-          <textarea id="improveContent" placeholder="Replacement content"></textarea>
-          <div class="button-row">
-            <button id="improveTrigger">Trigger</button>
-            <button id="improvePropose">Propose</button>
-          </div>
-          <label for="improveProposalId">Proposal Event ID</label>
-          <input id="improveProposalId" placeholder="event_id for review" />
-          <div class="button-row">
-            <button class="secondary" id="improveApprove">Approve</button>
-            <button class="secondary" id="improveReject">Reject</button>
-          </div>
-          <div class="muted" id="improveStatus"></div>
-        </div>
-
         <div class="control-section" id="submoduleOutputsSection" hidden>
           <label for="submoduleOutputsInput">Submodule Outputs (optional)</label>
           <textarea
@@ -525,6 +508,29 @@
             <button id="savePrompts">Save</button>
           </div>
           <div class="muted" id="promptStatus"></div>
+        </div>
+
+        <div class="control-section" id="improveSection">
+          <h2>Self-Improvement</h2>
+          <label for="improveTarget">Target</label>
+          <input id="improveTarget" placeholder="base | decision | submodule:curiosity" />
+          <label for="improveSectionName">Section</label>
+          <input id="improveSectionName" value="Memory" />
+          <label for="improveReason">Reason</label>
+          <textarea id="improveReason" placeholder="Why this update should happen..."></textarea>
+          <label for="improveContent">Proposal Content</label>
+          <textarea id="improveContent" placeholder="Replacement content"></textarea>
+          <div class="button-row">
+            <button id="improveTrigger">Trigger</button>
+            <button id="improvePropose">Propose</button>
+          </div>
+          <label for="improveProposalId">Proposal Event ID</label>
+          <input id="improveProposalId" placeholder="event_id for review" />
+          <div class="button-row">
+            <button class="secondary" id="improveApprove">Approve</button>
+            <button class="secondary" id="improveReject">Reject</button>
+          </div>
+          <div class="muted" id="improveStatus"></div>
         </div>
       </aside>
     </div>
