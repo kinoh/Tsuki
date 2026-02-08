@@ -26,6 +26,12 @@ type MessageRow = {
   content: string
 }
 
+type HistoryEntry = {
+  role: string
+  text: string
+  isSystem: boolean
+}
+
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
     limit: 400,
@@ -87,7 +93,7 @@ function parseArgs(argv: string[]): CliOptions {
   if (!Number.isFinite(options.limit) || options.limit <= 0) {
     throw new Error('--limit must be a positive number')
   }
-  if (!options.prompt && !options.promptFile) {
+  if (!options.dryRun && !options.prompt && !options.promptFile) {
     throw new Error('Either --prompt or --prompt-file is required')
   }
   return options
@@ -147,36 +153,41 @@ async function extractMastraDb(backupFile: string, outDir: string): Promise<stri
   return dbPath
 }
 
-function parsePartText(text: string): string | null {
+function parsePartText(text: string): { text: string | null, isSystem: boolean } {
   try {
     const parsed = JSON.parse(text) as unknown
     if (typeof parsed === 'string') {
-      return parsed.trim() || null
+      return { text: parsed.trim() || null, isSystem: false }
     }
     if (parsed && typeof parsed === 'object') {
       const record = parsed as Record<string, unknown>
+      const user = record.user
+      const isSystem = typeof user === 'string' && user.trim().toLowerCase() === 'system'
       const content = record.content
       if (typeof content === 'string' && content.trim().length > 0) {
-        return content.trim()
+        return { text: content.trim(), isSystem }
       }
-      const user = record.user
       if (typeof user === 'string' && user.trim().length > 0) {
-        return user.trim()
+        return { text: user.trim(), isSystem }
       }
     }
   } catch {
     // treat as plain text below
   }
-  return text.trim() || null
+  return { text: text.trim() || null, isSystem: false }
 }
 
-function simplifyMessage(row: MessageRow): string[] {
+function simplifyMessage(row: MessageRow): HistoryEntry[] {
   let root: unknown
   try {
     root = JSON.parse(row.content)
   } catch {
     const plain = row.content.trim()
-    return plain ? [`${row.role}: ${plain}`] : []
+    if (!plain) {
+      return []
+    }
+    const isSystem = row.role.trim().toLowerCase() === 'system'
+    return [{ role: row.role, text: plain, isSystem }]
   }
   if (!root || typeof root !== 'object') {
     return []
@@ -185,17 +196,42 @@ function simplifyMessage(row: MessageRow): string[] {
   if (!Array.isArray(parts)) {
     return []
   }
-  const lines: string[] = []
+  const entries: HistoryEntry[] = []
+  const rowRole = row.role.trim().toLowerCase()
+  const rowIsSystem = rowRole === 'system'
   for (const part of parts) {
     if (!part || typeof part !== 'object') continue
     const p = part as Record<string, unknown>
     if (p.type !== 'text') continue
     if (typeof p.text !== 'string') continue
-    const text = parsePartText(p.text)
-    if (!text) continue
-    lines.push(`${row.role}: ${text}`)
+    const parsed = parsePartText(p.text)
+    if (!parsed.text) continue
+    entries.push({
+      role: row.role,
+      text: parsed.text,
+      isSystem: rowIsSystem || parsed.isSystem,
+    })
   }
-  return lines
+  return entries
+}
+
+function filterSystemAndSystemResponses(entries: HistoryEntry[]): HistoryEntry[] {
+  const filtered: HistoryEntry[] = []
+  let skipNextAssistant = false
+  for (const entry of entries) {
+    const role = entry.role.trim().toLowerCase()
+    if (entry.isSystem || role === 'system') {
+      skipNextAssistant = true
+      continue
+    }
+    if (skipNextAssistant && role === 'assistant') {
+      skipNextAssistant = false
+      continue
+    }
+    skipNextAssistant = false
+    filtered.push(entry)
+  }
+  return filtered
 }
 
 async function loadMessageHistory(dbPath: string, options: CliOptions): Promise<string> {
@@ -219,7 +255,9 @@ async function loadMessageHistory(dbPath: string, options: CliOptions): Promise<
   const { stdout } = await execFile('sqlite3', ['-json', dbPath, sql], { maxBuffer: 64 * 1024 * 1024 })
   const rows = JSON.parse(stdout || '[]') as MessageRow[]
   rows.reverse()
-  const lines = rows.flatMap((row) => simplifyMessage(row))
+  const entries = rows.flatMap((row) => simplifyMessage(row))
+  const filteredEntries = filterSystemAndSystemResponses(entries)
+  const lines = filteredEntries.map((entry) => `${entry.role}: ${entry.text}`)
   return lines.join('\n')
 }
 

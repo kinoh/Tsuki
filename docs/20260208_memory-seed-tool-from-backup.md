@@ -21,6 +21,7 @@
   - uses `--limit` latest messages (descending query then reversed for chronological input)
 - Prompt input:
   - `--prompt "<text>"` or `--prompt-file <path>`
+  - prompt is optional when `--dry-run` is set
 - Generation:
   - uses OpenAI via existing `@ai-sdk/openai`
   - system prompt is the provided prompt
@@ -28,6 +29,9 @@
 - Safety / validation:
   - `--dry-run` mode prints history preview without model calls
   - requires `OPENAI_API_KEY` only when generation is requested
+- History cleanup policy:
+  - exclude system messages
+  - exclude the immediate assistant response to a system message
 
 ## Why
 - Reuses existing project dependencies and scripting style (`tsx`).
