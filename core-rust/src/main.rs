@@ -1,3 +1,4 @@
+mod application;
 mod clock;
 mod config;
 mod db;
@@ -21,7 +22,7 @@ use axum::{
 };
 use futures::{future::join_all, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::{collections::HashSet, net::SocketAddr, path::PathBuf, sync::Arc};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 use tokio::sync::{broadcast, RwLock};
@@ -37,32 +38,32 @@ use crate::state::{DbStateStore, StateStore};
 use crate::tools::{state_tools, StateToolHandler};
 
 #[derive(Clone)]
-struct AppState {
-    event_store: Arc<EventStore>,
-    tx: broadcast::Sender<Event>,
-    auth_token: String,
-    modules: Modules,
-    limits: LimitsConfig,
-    prompts: Arc<RwLock<PromptOverrides>>,
-    prompts_path: PathBuf,
-    decision_instructions: String,
+pub(crate) struct AppState {
+    pub(crate) event_store: Arc<EventStore>,
+    pub(crate) tx: broadcast::Sender<Event>,
+    pub(crate) auth_token: String,
+    pub(crate) modules: Modules,
+    pub(crate) limits: LimitsConfig,
+    pub(crate) prompts: Arc<RwLock<PromptOverrides>>,
+    pub(crate) prompts_path: PathBuf,
+    pub(crate) decision_instructions: String,
 }
 
 #[derive(Clone)]
-struct Modules {
-    registry: ModuleRegistry,
-    runtime: ModuleRuntime,
+pub(crate) struct Modules {
+    pub(crate) registry: ModuleRegistry,
+    pub(crate) runtime: ModuleRuntime,
 }
 
 #[derive(Clone)]
-struct ModuleRuntime {
-    base_instructions: String,
-    model: String,
-    temperature: Option<f32>,
-    max_output_tokens: Option<u32>,
-    tools: Vec<async_openai::types::responses::Tool>,
-    tool_handler: Arc<dyn crate::llm::ToolHandler>,
-    max_tool_rounds: usize,
+pub(crate) struct ModuleRuntime {
+    pub(crate) base_instructions: String,
+    pub(crate) model: String,
+    pub(crate) temperature: Option<f32>,
+    pub(crate) max_output_tokens: Option<u32>,
+    pub(crate) tools: Vec<async_openai::types::responses::Tool>,
+    pub(crate) tool_handler: Arc<dyn crate::llm::ToolHandler>,
+    pub(crate) max_tool_rounds: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,75 +140,46 @@ struct DebugEventsResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct DebugImproveTriggerRequest {
+pub(crate) struct DebugImproveTriggerRequest {
     #[serde(default)]
-    target: Option<String>,
+    pub(crate) target: Option<String>,
     #[serde(default)]
-    reason: Option<String>,
+    pub(crate) reason: Option<String>,
     #[serde(default)]
-    feedback_refs: Option<Vec<String>>,
+    pub(crate) feedback_refs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
-struct DebugImproveProposalRequest {
-    target: String,
-    section: String,
+pub(crate) struct DebugImproveProposalRequest {
+    pub(crate) target: String,
+    pub(crate) section: String,
     #[serde(default)]
-    reason: Option<String>,
-    content: String,
+    pub(crate) reason: Option<String>,
+    pub(crate) content: String,
     #[serde(default)]
-    feedback_refs: Option<Vec<String>>,
+    pub(crate) feedback_refs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
-struct DebugImproveReviewRequest {
-    proposal_event_id: String,
-    review: String,
+pub(crate) struct DebugImproveReviewRequest {
+    pub(crate) proposal_event_id: String,
+    pub(crate) review: String,
     #[serde(default)]
-    reason: Option<String>,
+    pub(crate) reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-struct DebugImproveResponse {
-    proposal_event_id: Option<String>,
-    review_event_id: Option<String>,
-    auto_approved: bool,
-    applied: bool,
+pub(crate) struct DebugImproveResponse {
+    pub(crate) proposal_event_id: Option<String>,
+    pub(crate) review_event_id: Option<String>,
+    pub(crate) auto_approved: bool,
+    pub(crate) applied: bool,
 }
 
 #[derive(Debug, Clone)]
 struct ModuleOutput {
     name: String,
     text: String,
-}
-
-#[derive(Debug, Clone)]
-enum PromptTarget {
-    Base,
-    Decision,
-    Submodule(String),
-}
-
-impl PromptTarget {
-    fn parse(raw: &str) -> Option<Self> {
-        let value = raw.trim();
-        if value.eq_ignore_ascii_case("base") {
-            return Some(Self::Base);
-        }
-        if value.eq_ignore_ascii_case("decision") {
-            return Some(Self::Decision);
-        }
-        let prefix = "submodule:";
-        if let Some(head) = value.get(..prefix.len()) {
-            if head.eq_ignore_ascii_case(prefix) {
-                let name = value.get(prefix.len()..).unwrap_or("").trim();
-                if !name.is_empty() {
-                    return Some(Self::Submodule(name.to_string()));
-                }
-            }
-        }
-        None
-    }
 }
 
 #[tokio::main]
@@ -569,439 +541,24 @@ async fn debug_improve_trigger(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveTriggerRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    let target = payload
-        .target
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("manual")
-        .to_string();
-    let reason = payload
-        .reason
-        .unwrap_or_else(|| "debug trigger".to_string());
-    let feedback_refs = payload.feedback_refs.unwrap_or_default();
-    let trigger_event = build_event(
-        "debug",
-        "text",
-        json!({
-            "phase": "trigger",
-            "target": target,
-            "reason": reason,
-            "feedback_refs": feedback_refs,
-        }),
-        vec!["improve.trigger".to_string()],
-    );
-    record_event(&state, trigger_event.clone()).await;
-    emit_debug_improve_worklog(
-        &state,
-        "trigger",
-        trigger_event.event_id.as_str(),
-        "",
-        "trigger emitted",
-        None,
-    )
-    .await;
-    Ok(Json(DebugImproveResponse {
-        proposal_event_id: None,
-        review_event_id: None,
-        auto_approved: false,
-        applied: false,
-    }))
+    let result = crate::application::improve_service::trigger_improvement(&state, payload).await?;
+    Ok(Json(result))
 }
 
 async fn debug_improve_proposal(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveProposalRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    if PromptTarget::parse(&payload.target).is_none() {
-        return Err((StatusCode::BAD_REQUEST, "invalid target".to_string()));
-    }
-    if payload.section.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "section is required".to_string()));
-    }
-    let proposal_event = build_event(
-        "debug",
-        "text",
-        json!({
-            "phase": "proposal",
-            "target": payload.target.trim(),
-            "section": payload.section.trim(),
-            "reason": payload.reason.clone().unwrap_or_else(|| "none".to_string()),
-            "content": payload.content,
-            "status": "pending",
-            "feedback_refs": payload.feedback_refs.unwrap_or_default(),
-        }),
-        vec!["improve.proposal".to_string()],
-    );
-    record_event(&state, proposal_event.clone()).await;
-    emit_debug_improve_worklog(
-        &state,
-        "proposal",
-        proposal_event.event_id.as_str(),
-        proposal_event
-            .payload
-            .get("reason")
-            .and_then(|value| value.as_str())
-            .unwrap_or(""),
-        proposal_event
-            .payload
-            .get("content")
-            .and_then(|value| value.as_str())
-            .unwrap_or(""),
-        proposal_event
-            .payload
-            .get("section")
-            .and_then(|value| value.as_str()),
-    )
-    .await;
-
-    let is_memory = proposal_event
-        .payload
-        .get("section")
-        .and_then(|value| value.as_str())
-        .map(|value| value == "Memory")
-        .unwrap_or(false);
-    if !is_memory {
-        return Ok(Json(DebugImproveResponse {
-            proposal_event_id: Some(proposal_event.event_id),
-            review_event_id: None,
-            auto_approved: false,
-            applied: false,
-        }));
-    }
-
-    let review_event = build_event(
-        "debug",
-        "text",
-        json!({
-            "phase": "review",
-            "proposal_event_id": proposal_event.event_id.clone(),
-            "review": "approval",
-            "reason": "auto_approval:Memory",
-            "status": "approved",
-        }),
-        vec!["improve.review".to_string()],
-    );
-    record_event(&state, review_event.clone()).await;
-    emit_debug_improve_worklog(
-        &state,
-        "review",
-        review_event.event_id.as_str(),
-        "auto approval",
-        "review=approval",
-        Some("Memory"),
-    )
-    .await;
-
-    let apply_result = apply_improve_projection(&state, &proposal_event).await;
-    if let Err(err) = apply_result {
-        emit_improve_projection_error(&state, review_event.event_id.as_str(), &err).await;
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, err));
-    }
-    Ok(Json(DebugImproveResponse {
-        proposal_event_id: Some(proposal_event.event_id),
-        review_event_id: Some(review_event.event_id),
-        auto_approved: true,
-        applied: true,
-    }))
+    let result = crate::application::improve_service::propose_improvement(&state, payload).await?;
+    Ok(Json(result))
 }
 
 async fn debug_improve_review(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveReviewRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    let proposal_event = state
-        .event_store
-        .get_by_id(payload.proposal_event_id.as_str())
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                "proposal event not found".to_string(),
-            )
-        })?;
-    if !proposal_event
-        .meta
-        .tags
-        .iter()
-        .any(|tag| tag == "improve.proposal")
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "event is not improve.proposal".to_string(),
-        ));
-    }
-    let review = normalize_review_value(payload.review.as_str()).ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            "review must be approval or rejection".to_string(),
-        )
-    })?;
-    let status = if review == "approval" {
-        "approved"
-    } else {
-        "rejected"
-    };
-    let review_reason = payload.reason.clone().unwrap_or_else(|| "none".to_string());
-    let worklog_input = payload
-        .reason
-        .as_deref()
-        .unwrap_or("manual review")
-        .to_string();
-    let worklog_output = format!("review={}", review);
-    let review_event = build_event(
-        "debug",
-        "text",
-        json!({
-            "phase": "review",
-            "proposal_event_id": proposal_event.event_id.clone(),
-            "review": review,
-            "reason": review_reason,
-            "status": status,
-        }),
-        vec!["improve.review".to_string()],
-    );
-    record_event(&state, review_event.clone()).await;
-    emit_debug_improve_worklog(
-        &state,
-        "review",
-        review_event.event_id.as_str(),
-        worklog_input.as_str(),
-        worklog_output.as_str(),
-        proposal_event
-            .payload
-            .get("section")
-            .and_then(|value| value.as_str()),
-    )
-    .await;
-
-    if review != "approval" {
-        return Ok(Json(DebugImproveResponse {
-            proposal_event_id: Some(proposal_event.event_id),
-            review_event_id: Some(review_event.event_id),
-            auto_approved: false,
-            applied: false,
-        }));
-    }
-
-    let apply_result = apply_improve_projection(&state, &proposal_event).await;
-    if let Err(err) = apply_result {
-        emit_improve_projection_error(&state, review_event.event_id.as_str(), &err).await;
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, err));
-    }
-    Ok(Json(DebugImproveResponse {
-        proposal_event_id: Some(proposal_event.event_id),
-        review_event_id: Some(review_event.event_id),
-        auto_approved: false,
-        applied: true,
-    }))
-}
-
-fn normalize_review_value(value: &str) -> Option<&'static str> {
-    if value.eq_ignore_ascii_case("approval") || value.eq_ignore_ascii_case("approved") {
-        return Some("approval");
-    }
-    if value.eq_ignore_ascii_case("rejection") || value.eq_ignore_ascii_case("rejected") {
-        return Some("rejection");
-    }
-    None
-}
-
-async fn emit_debug_improve_worklog(
-    state: &AppState,
-    phase: &str,
-    event_id: &str,
-    input: &str,
-    output: &str,
-    section: Option<&str>,
-) {
-    let worklog_event = build_event(
-        "debug",
-        "text",
-        json!({
-            "input": input,
-            "output": output,
-            "module": "improve",
-            "mode": phase,
-            "phase": phase,
-            "section": section.unwrap_or(""),
-            "event_id": event_id,
-        }),
-        vec![
-            "debug".to_string(),
-            "worklog".to_string(),
-            "module:improve".to_string(),
-            format!("mode:{}", phase),
-        ],
-    );
-    record_event(state, worklog_event).await;
-}
-
-async fn emit_improve_projection_error(state: &AppState, review_event_id: &str, err: &str) {
-    let error_event = build_event(
-        "internal",
-        "text",
-        json!({
-            "event_id": review_event_id,
-            "text": format!("projection failed: {}", err),
-        }),
-        vec!["error".to_string()],
-    );
-    record_event(state, error_event).await;
-}
-
-async fn apply_improve_projection(state: &AppState, proposal_event: &Event) -> Result<(), String> {
-    let target_raw = payload_str(&proposal_event.payload, "target")
-        .ok_or_else(|| "proposal target is required".to_string())?;
-    let section = payload_str(&proposal_event.payload, "section")
-        .ok_or_else(|| "proposal section is required".to_string())?;
-    let content = payload_str(&proposal_event.payload, "content")
-        .ok_or_else(|| "proposal content is required".to_string())?;
-    let target = PromptTarget::parse(target_raw.as_str())
-        .ok_or_else(|| format!("invalid proposal target: {}", target_raw))?;
-
-    let mut overrides = current_prompt_overrides(state).await;
-    let current_target_prompt = resolve_target_prompt_text(state, &overrides, &target).await?;
-    let next_target_prompt = if section == "Memory" {
-        replace_markdown_section_body(current_target_prompt.as_str(), "Memory", content.as_str())?
-    } else {
-        content.to_string()
-    };
-
-    match &target {
-        PromptTarget::Base => {
-            overrides.base = Some(next_target_prompt);
-        }
-        PromptTarget::Decision => {
-            overrides.decision = Some(next_target_prompt);
-        }
-        PromptTarget::Submodule(name) => {
-            ensure_active_submodule_exists(state, name).await?;
-            overrides
-                .submodules
-                .insert(name.clone(), next_target_prompt);
-        }
-    }
-
-    write_prompts(&state.prompts_path, &overrides)?;
-    *state.prompts.write().await = overrides;
-    Ok(())
-}
-
-async fn ensure_active_submodule_exists(state: &AppState, name: &str) -> Result<(), String> {
-    let modules = state
-        .modules
-        .registry
-        .list_active()
-        .await
-        .map_err(|err| err.to_string())?;
-    if modules.iter().any(|module| module.name == name) {
-        return Ok(());
-    }
-    Err(format!("submodule not found: {}", name))
-}
-
-async fn resolve_target_prompt_text(
-    state: &AppState,
-    overrides: &PromptOverrides,
-    target: &PromptTarget,
-) -> Result<String, String> {
-    match target {
-        PromptTarget::Base => Ok(overrides
-            .base
-            .clone()
-            .unwrap_or_else(|| state.modules.runtime.base_instructions.clone())),
-        PromptTarget::Decision => Ok(overrides
-            .decision
-            .clone()
-            .unwrap_or_else(|| state.decision_instructions.clone())),
-        PromptTarget::Submodule(name) => {
-            if let Some(text) = overrides.submodules.get(name) {
-                return Ok(text.clone());
-            }
-            let module = state
-                .modules
-                .registry
-                .list_active()
-                .await
-                .map_err(|err| err.to_string())?
-                .into_iter()
-                .find(|item| item.name == *name)
-                .ok_or_else(|| format!("submodule not found: {}", name))?;
-            Ok(module.instructions)
-        }
-    }
-}
-
-fn payload_str(payload: &Value, key: &str) -> Option<String> {
-    payload
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string())
-}
-
-fn replace_markdown_section_body(
-    source: &str,
-    section_name: &str,
-    body: &str,
-) -> Result<String, String> {
-    let (start, end) = find_markdown_section_body_range(source, section_name)
-        .ok_or_else(|| format!("section not found: {}", section_name))?;
-    let mut replacement = body.trim_end_matches('\n').to_string();
-    replacement.push('\n');
-    let mut output = String::with_capacity(source.len() + replacement.len());
-    output.push_str(&source[..start]);
-    output.push_str(&replacement);
-    output.push_str(&source[end..]);
-    Ok(output)
-}
-
-fn find_markdown_section_body_range(source: &str, section_name: &str) -> Option<(usize, usize)> {
-    #[derive(Clone, Copy)]
-    struct Heading {
-        level: usize,
-        line_start: usize,
-        body_start: usize,
-    }
-
-    let mut headings: Vec<(Heading, String)> = Vec::new();
-    let mut offset = 0usize;
-    for line in source.split_inclusive('\n') {
-        let line_start = offset;
-        offset += line.len();
-        let content = line.trim_end_matches('\n').trim_end_matches('\r');
-        let hash_count = content.chars().take_while(|ch| *ch == '#').count();
-        if hash_count == 0 {
-            continue;
-        }
-        if content.chars().nth(hash_count) != Some(' ') {
-            continue;
-        }
-        let title = content[hash_count + 1..].trim().to_string();
-        headings.push((
-            Heading {
-                level: hash_count,
-                line_start,
-                body_start: offset,
-            },
-            title,
-        ));
-    }
-    for (index, (heading, title)) in headings.iter().enumerate() {
-        if title != section_name {
-            continue;
-        }
-        let mut end = source.len();
-        for (next, _) in headings.iter().skip(index + 1) {
-            if next.level <= heading.level {
-                end = next.line_start;
-                break;
-            }
-        }
-        return Some((heading.body_start, end));
-    }
-    None
+    let result = crate::application::improve_service::review_improvement(&state, payload).await?;
+    Ok(Json(result))
 }
 
 async fn debug_ui() -> Html<String> {
@@ -1181,7 +738,7 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
     })
 }
 
-async fn record_event(state: &AppState, event: Event) {
+pub(crate) async fn record_event(state: &AppState, event: Event) {
     if let Err(err) = state.event_store.append(&event).await {
         println!("EVENT_STORE_ERROR error={}", err);
     }
