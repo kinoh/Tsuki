@@ -21,6 +21,7 @@
   - reads from `mastra_messages`
   - supports optional filters: `--thread-id`, `--resource-id`
   - uses `--limit` latest messages (descending query then reversed for chronological input)
+  - each history line includes message timestamp as `[time:<createdAt>]`
 - Prompt input:
   - `--prompt "<text>"` or `--prompt-file <path>`
   - prompt is optional when `--dry-run` is set

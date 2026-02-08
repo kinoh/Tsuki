@@ -29,6 +29,7 @@ type MessageRow = {
 
 type HistoryEntry = {
   role: string
+  createdAt: string
   text: string
   isSystem: boolean
 }
@@ -227,7 +228,7 @@ function simplifyMessage(row: MessageRow): HistoryEntry[] {
       return []
     }
     const isSystem = row.role.trim().toLowerCase() === 'system' || isSystemLikeMessage(plain)
-    return [{ role: row.role, text: plain, isSystem }]
+    return [{ role: row.role, createdAt: row.createdAt, text: plain, isSystem }]
   }
   if (!root || typeof root !== 'object') {
     return []
@@ -248,6 +249,7 @@ function simplifyMessage(row: MessageRow): HistoryEntry[] {
     if (!parsed.text) continue
     entries.push({
       role: row.role,
+      createdAt: row.createdAt,
       text: parsed.text,
       isSystem: rowIsSystem || parsed.isSystem || isSystemLikeMessage(parsed.text),
     })
@@ -297,7 +299,10 @@ async function loadMessageHistory(dbPath: string, options: CliOptions): Promise<
   rows.reverse()
   const entries = rows.flatMap((row) => simplifyMessage(row))
   const filteredEntries = filterSystemAndSystemResponses(entries)
-  const lines = filteredEntries.map((entry) => `${entry.role}: ${entry.text}`)
+  const lines = filteredEntries.map((entry) => {
+    const ts = entry.createdAt ? `[time:${entry.createdAt}] ` : ''
+    return `${ts}${entry.role}: ${entry.text}`
+  })
   return lines.join('\n')
 }
 
