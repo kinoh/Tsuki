@@ -8,6 +8,7 @@
     "lint": "tsc --noEmit && eslint src/",
     "test": "echo \"No tests configured yet\" && exit 0",
     "test:agent": "tsx --env-file .env ./scripts/test_agent.js",
+    "memory:seed": "tsx --env-file .env ./scripts/generate_memory_seed.ts",
     "start": "tsx watch --env-file .env ./src/index.ts",
     "start:prod": "tsx ./src/index.ts",
     "build": "echo 'No build needed - using tsx in production'",
