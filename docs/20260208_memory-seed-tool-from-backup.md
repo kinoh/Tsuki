@@ -27,7 +27,7 @@
   - system prompt is the provided prompt
   - user content is full simplified history text
 - Safety / validation:
-  - `--dry-run` mode prints history preview without model calls
+  - `--dry-run` mode prints the full history payload that would be sent to the LLM, without model calls
   - requires `OPENAI_API_KEY` only when generation is requested
 - History cleanup policy:
   - exclude system messages

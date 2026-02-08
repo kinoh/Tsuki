@@ -316,7 +316,7 @@ async function main(): Promise<void> {
 
     if (options.dryRun) {
       console.log('--- history preview ---')
-      console.log(history.slice(0, 4000))
+      console.log(history)
       return
     }
 
