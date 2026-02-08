@@ -4,19 +4,23 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct EventStore {
-  db: Arc<Db>,
+    db: Arc<Db>,
 }
 
 impl EventStore {
-  pub fn new(db: Arc<Db>) -> Self {
-    Self { db }
-  }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
+    }
 
-  pub async fn append(&self, event: &Event) -> DbResult<()> {
-    self.db.insert_event(event).await
-  }
+    pub async fn append(&self, event: &Event) -> DbResult<()> {
+        self.db.insert_event(event).await
+    }
 
-  pub async fn latest(&self, limit: usize) -> DbResult<Vec<Event>> {
-    self.db.load_latest_events(limit).await
-  }
+    pub async fn latest(&self, limit: usize) -> DbResult<Vec<Event>> {
+        self.db.load_latest_events(limit).await
+    }
+
+    pub async fn get_by_id(&self, event_id: &str) -> DbResult<Option<Event>> {
+        self.db.get_event_by_id(event_id).await
+    }
 }

@@ -467,6 +467,29 @@
           <div class="muted" id="runStatus"></div>
         </div>
 
+        <div class="control-section" id="improveSection">
+          <h2>Self-Improvement</h2>
+          <label for="improveTarget">Target</label>
+          <input id="improveTarget" placeholder="base | decision | submodule:curiosity" />
+          <label for="improveSectionName">Section</label>
+          <input id="improveSectionName" value="Memory" />
+          <label for="improveReason">Reason</label>
+          <textarea id="improveReason" placeholder="Why this update should happen..."></textarea>
+          <label for="improveContent">Proposal Content</label>
+          <textarea id="improveContent" placeholder="Replacement content"></textarea>
+          <div class="button-row">
+            <button id="improveTrigger">Trigger</button>
+            <button id="improvePropose">Propose</button>
+          </div>
+          <label for="improveProposalId">Proposal Event ID</label>
+          <input id="improveProposalId" placeholder="event_id for review" />
+          <div class="button-row">
+            <button class="secondary" id="improveApprove">Approve</button>
+            <button class="secondary" id="improveReject">Reject</button>
+          </div>
+          <div class="muted" id="improveStatus"></div>
+        </div>
+
         <div class="control-section" id="submoduleOutputsSection" hidden>
           <label for="submoduleOutputsInput">Submodule Outputs (optional)</label>
           <textarea
@@ -520,6 +543,12 @@
       const moduleEmptyEl = document.getElementById("moduleEmpty");
       const inputSection = document.getElementById("inputSection");
       const runButtons = document.getElementById("runButtons");
+      const improveTarget = document.getElementById("improveTarget");
+      const improveSectionName = document.getElementById("improveSectionName");
+      const improveReason = document.getElementById("improveReason");
+      const improveContent = document.getElementById("improveContent");
+      const improveProposalId = document.getElementById("improveProposalId");
+      const improveStatus = document.getElementById("improveStatus");
       const submoduleOutputsSection = document.getElementById("submoduleOutputsSection");
       const submoduleOutputsInput = document.getElementById("submoduleOutputsInput");
       const autofillSubmoduleOutputsButton = document.getElementById("autofillSubmoduleOutputs");
@@ -959,6 +988,14 @@
               contextTextEl.textContent = "(none)";
               return;
             }
+            if (moduleName === "improve") {
+              rawTextEl.textContent = "(none)";
+              contextTextEl.textContent = "(none)";
+              if (payload.event_id) {
+                improveProposalId.value = payload.event_id;
+              }
+              return;
+            }
             if (moduleName) {
               const kind = moduleName === "decision" ? "decision" : "submodule";
               selectModule(moduleName, kind);
@@ -1091,6 +1128,90 @@
         autofillStatus.textContent = `Filled ${matched.size}/${submoduleNames.length} modules from ${latestLabel}.`;
       }
 
+      async function improveTrigger() {
+        improveStatus.textContent = "Triggering...";
+        const payload = {
+          target: (improveTarget.value || "").trim() || "manual",
+          reason: (improveReason.value || "").trim(),
+        };
+        const res = await fetch("/debug/improve/trigger", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          improveStatus.textContent = "Trigger failed.";
+          return;
+        }
+        improveStatus.textContent = "Trigger emitted.";
+        await fetchWorklogs();
+      }
+
+      async function improvePropose() {
+        const target = (improveTarget.value || "").trim();
+        const section = (improveSectionName.value || "").trim();
+        if (!target) {
+          improveStatus.textContent = "Target is required.";
+          return;
+        }
+        if (!section) {
+          improveStatus.textContent = "Section is required.";
+          return;
+        }
+        improveStatus.textContent = "Submitting proposal...";
+        const payload = {
+          target,
+          section,
+          reason: (improveReason.value || "").trim(),
+          content: improveContent.value || "",
+        };
+        const res = await fetch("/debug/improve/proposal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          improveStatus.textContent = "Proposal failed.";
+          return;
+        }
+        const data = await res.json();
+        if (data.proposal_event_id) {
+          improveProposalId.value = data.proposal_event_id;
+        }
+        improveStatus.textContent = data.auto_approved
+          ? "Proposed and auto-approved."
+          : "Proposal emitted.";
+        await fetchWorklogs();
+      }
+
+      async function improveReview(review) {
+        const proposalEventId = (improveProposalId.value || "").trim();
+        if (!proposalEventId) {
+          improveStatus.textContent = "Proposal Event ID is required.";
+          return;
+        }
+        improveStatus.textContent = `Sending ${review}...`;
+        const payload = {
+          proposal_event_id: proposalEventId,
+          review,
+          reason: (improveReason.value || "").trim(),
+        };
+        const res = await fetch("/debug/improve/review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          improveStatus.textContent = `Review failed (${review}).`;
+          return;
+        }
+        const data = await res.json();
+        improveStatus.textContent = data.applied
+          ? `${review} applied.`
+          : `${review} recorded.`;
+        await fetchWorklogs();
+      }
+
       async function savePrompts() {
         promptStatus.textContent = "Saving...";
         submoduleManageStatus.textContent = "";
@@ -1160,6 +1281,14 @@
       document.getElementById("runModule").addEventListener("click", runModule);
       document.getElementById("loadRaw").addEventListener("click", loadRaw);
       document.getElementById("savePrompts").addEventListener("click", savePrompts);
+      document.getElementById("improveTrigger").addEventListener("click", improveTrigger);
+      document.getElementById("improvePropose").addEventListener("click", improvePropose);
+      document
+        .getElementById("improveApprove")
+        .addEventListener("click", () => improveReview("approval"));
+      document
+        .getElementById("improveReject")
+        .addEventListener("click", () => improveReview("rejection"));
       document.getElementById("refreshLog").addEventListener("click", fetchWorklogs);
       document.getElementById("setCutoff").addEventListener("click", () => {
         state.historyCutoffTs = state.selectedWorklogTs || null;
