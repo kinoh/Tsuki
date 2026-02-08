@@ -511,6 +511,15 @@ async fn debug_run_module(
             &state,
         )
         .await?
+    } else if name == "submodules" {
+        run_all_submodules_debug(
+            &payload.input,
+            include_history,
+            history_cutoff_ts,
+            &excluded_event_ids,
+            &state,
+        )
+        .await?
     } else {
         run_submodule_debug(
             &name,
@@ -1353,6 +1362,45 @@ async fn run_decision_debug(
     )
     .await;
     Ok(response.text)
+}
+
+async fn run_all_submodules_debug(
+    input_text: &str,
+    include_history: bool,
+    history_cutoff_ts: Option<&str>,
+    excluded_event_ids: &HashSet<String>,
+    state: &AppState,
+) -> Result<String, (StatusCode, String)> {
+    let module_names = state
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<Vec<_>>();
+    if module_names.is_empty() {
+        return Ok("no active submodules".to_string());
+    }
+    let runs = module_names.iter().map(|name| async move {
+        let output = run_submodule_debug(
+            name.as_str(),
+            input_text,
+            include_history,
+            history_cutoff_ts,
+            excluded_event_ids,
+            state,
+        )
+        .await?;
+        Ok::<(String, String), (StatusCode, String)>((name.clone(), output))
+    });
+    let mut outputs = Vec::with_capacity(module_names.len());
+    for result in join_all(runs).await {
+        let (name, output) = result?;
+        outputs.push(format!("{}: {}", name, output));
+    }
+    Ok(outputs.join("\n"))
 }
 
 async fn run_submodule_debug(

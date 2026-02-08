@@ -783,7 +783,8 @@
 
       function applySelection(selection) {
         state.selectedKind = selection.kind;
-        state.selectedModule = selection.name || null;
+        state.selectedModule =
+          selection.name || (selection.kind === "submodules" ? "submodules" : null);
         setFlowHighlight(selection);
         moduleEmptyEl.hidden = true;
         moduleTitleEl.textContent = selection.name
@@ -824,6 +825,8 @@
           moduleEmptyEl.textContent = "Reply has no prompt.";
           moduleEmptyEl.hidden = false;
         } else if (selection.kind === "submodules") {
+          inputSection.hidden = false;
+          runButtons.hidden = false;
           submoduleManageSection.hidden = false;
           moduleEmptyEl.hidden = true;
         } else {
@@ -1007,8 +1010,9 @@
       }
 
       async function runModule() {
-        const moduleName = state.selectedModule;
-        if (!moduleName || !["submodule", "decision"].includes(state.selectedKind)) {
+        const moduleName =
+          state.selectedKind === "submodules" ? "submodules" : state.selectedModule;
+        if (!moduleName || !["submodule", "decision", "submodules"].includes(state.selectedKind)) {
           runStatus.textContent = "Select a runnable module.";
           return;
         }
