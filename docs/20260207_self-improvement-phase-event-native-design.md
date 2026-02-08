@@ -10,6 +10,7 @@
 - Do not introduce a separate audit subsystem.
 - Keep reflection and update proposals observable by the same runtime context model.
 - Keep safety/A-B mechanisms out of scope for now.
+- Treat approval as the semantic commit point: once approved, the system is expected to converge to an applied state.
 
 ## Scope
 - In scope:
@@ -17,11 +18,12 @@
   - event-based trigger records
   - event-based proposal records
   - event-based approval/rejection records
-  - event-based apply/rollback records
 - Out of scope:
   - separate audit database/service
   - A/B testing
   - additional safety policy framework beyond existing runtime controls
+  - dedicated apply/rollback event families
+  - delayed projection reconciliation workflows
 
 ## Event Model
 - Every self-improvement action is emitted as an event with standard fields:
@@ -30,22 +32,26 @@
   - `improve.trigger`
   - `improve.proposal`
   - `improve.review`
-  - `improve.apply`
-  - `improve.rollback`
 - Suggested payload fields:
-  - `phase`: `trigger|proposal|review|apply|rollback`
+  - `phase`: `trigger|proposal|review`
   - `target`: `base|decision|submodule:<name>`
   - `reason`: short rationale
-  - `diff`: proposed patch text (for proposal/apply)
-  - `status`: `accepted|rejected|applied|rolled_back`
+  - `diff`: proposed patch text
+  - `status`: `pending|approved|rejected`
   - `feedback_refs`: related event ids
+  - `review`: `approval|rejection` (for review phase)
+
+## Event Semantics
+- `improve.review` with `review=approval` means the proposal is logically accepted and should be reflected in prompt state.
+- If reflection fails, emit a standard runtime `error` event with improvement context (no dedicated `projection.error` event type).
+- Event sourcing expectation: eventual consistency from approved proposal to materialized prompt content.
 
 ## Runtime Flow
 1. Scheduler emits `improve.trigger` (daily by default).
 2. Reflector modules read recent events and emit `improve.proposal`.
 3. Reviewer (human or meta-module) emits `improve.review`.
-4. Apply step emits `improve.apply` and updates prompt source.
-5. If needed, emit `improve.rollback` and restore prior prompt content.
+4. Prompt projection updates persisted prompt material from approved proposals.
+5. On projection failure, runtime emits a normal `error` event and keeps proposal/review events as source of truth.
 
 ## Module Responsibilities
 - Submodule reflector:
@@ -67,14 +73,12 @@
 - Approval is represented in-stream via `improve.review` events.
 - No separate approval ledger is required.
 - Final source of truth is the event stream plus current prompt files.
+- `review=approval` is not optional metadata; it is the intent that the projection layer must realize.
 
 ## Debugging
 - Debug UI should filter and inspect `improve.*` tags.
-- Proposal debugging should show:
-  - trigger context
-  - proposal diff
-  - review outcome
-  - apply/rollback transitions
+- Proposal debugging should show trigger context, proposal diff, and review outcome.
+- Improvement trigger action should be initiated from the right panel after selecting the relevant module, to stay consistent with existing module run interactions.
 - Because all steps are events, replay and context reconstruction use the same mechanism as normal conversation debugging.
 
 ## Why This Works Here
