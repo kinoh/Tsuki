@@ -276,6 +276,25 @@ function filterSystemAndSystemResponses(entries: HistoryEntry[]): HistoryEntry[]
   return filtered
 }
 
+function formatTokyoDate(iso: string): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const pick = (type: string): string => parts.find((part) => part.type === type)?.value || '00'
+  const yyyy = pick('year')
+  const mm = pick('month')
+  const dd = pick('day')
+  return `${yyyy}/${mm}/${dd}`
+}
+
 async function loadMessageHistory(dbPath: string, options: CliOptions): Promise<string> {
   const conditions: string[] = []
 
@@ -299,10 +318,16 @@ async function loadMessageHistory(dbPath: string, options: CliOptions): Promise<
   rows.reverse()
   const entries = rows.flatMap((row) => simplifyMessage(row))
   const filteredEntries = filterSystemAndSystemResponses(entries)
-  const lines = filteredEntries.map((entry) => {
-    const ts = entry.createdAt ? `[time:${entry.createdAt}] ` : ''
-    return `${ts}${entry.role}: ${entry.text}`
-  })
+  const lines: string[] = []
+  let currentDay = ''
+  for (const entry of filteredEntries) {
+    const day = formatTokyoDate(entry.createdAt)
+    if (day && day !== currentDay) {
+      lines.push(`[${day}]`)
+      currentDay = day
+    }
+    lines.push(`${entry.role}: ${entry.text}`)
+  }
   return lines.join('\n')
 }
 
