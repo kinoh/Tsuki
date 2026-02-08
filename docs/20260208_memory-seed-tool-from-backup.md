@@ -14,7 +14,9 @@
 - Backup handling:
   - default uses latest `../backup/tsuki-backup-*.tar.gz`
   - supports explicit `--backup <path>`
-  - extracts only `mastra.db` into a temporary directory
+  - supports `--cache-dir <path>` (default: `/tmp/tsuki-mastra-cache`)
+  - extracts only `mastra.db` into the cache directory
+  - reuses extracted db on cache hit (same backup filename + mtime + size)
 - Message loading:
   - reads from `mastra_messages`
   - supports optional filters: `--thread-id`, `--resource-id`
@@ -32,6 +34,9 @@
 - History cleanup policy:
   - exclude system messages
   - exclude the immediate assistant response to a system message
+  - additionally treat infrastructure notifications as system-equivalent messages
+    - lines starting with `[source:MCP:`
+    - lines starting with `Received scheduler notification:`
 
 ## Why
 - Reuses existing project dependencies and scripting style (`tsx`).
@@ -43,3 +48,5 @@
   - `cd core && pnpm run memory:seed -- --prompt-file ./scripts/memory_seed_prompt.txt --dry-run`
 - Generate from specific backup and thread:
   - `cd core && pnpm run memory:seed -- --backup ../backup/tsuki-backup-20260208231014.tar.gz --thread-id kino-20260205 --prompt-file ./scripts/memory_seed_prompt.txt --output ./data/memory_seed.md`
+- Use custom cache directory:
+  - `cd core && pnpm run memory:seed -- --cache-dir /tmp/tsuki-cache --prompt-file ./scripts/memory_seed_prompt.txt --dry-run`

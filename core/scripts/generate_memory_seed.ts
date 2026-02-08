@@ -10,6 +10,7 @@ const execFile = promisify(execFileCb)
 
 type CliOptions = {
   backup?: string
+  cacheDir: string
   prompt?: string
   promptFile?: string
   threadId?: string
@@ -34,6 +35,7 @@ type HistoryEntry = {
 
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
+    cacheDir: '/tmp/tsuki-mastra-cache',
     limit: 400,
     model: process.env.OPENAI_MODEL || 'gpt-4.1',
     dryRun: false,
@@ -51,6 +53,10 @@ function parseArgs(argv: string[]): CliOptions {
         break
       case '--prompt':
         options.prompt = value
+        i += 1
+        break
+      case '--cache-dir':
+        options.cacheDir = value
         i += 1
         break
       case '--prompt-file':
@@ -106,6 +112,7 @@ Usage:
 
 Options:
   --backup <path>        Backup tar.gz path (default: latest in ../backup)
+  --cache-dir <path>     Cache directory for extracted mastra.db (default: /tmp/tsuki-mastra-cache)
   --prompt <text>        Prompt text for memory seed generation
   --prompt-file <path>   Prompt file path (utf-8)
   --thread-id <id>       Optional thread_id filter
@@ -137,7 +144,15 @@ async function listTarEntries(backupFile: string): Promise<string[]> {
     .filter((line) => line.length > 0)
 }
 
-async function extractMastraDb(backupFile: string, outDir: string): Promise<string> {
+function backupCacheKey(backupFile: string, stat: { mtimeMs: number, size: number }): string {
+  const base = path.basename(backupFile).replace(/[^a-zA-Z0-9._-]/g, '_')
+  return `${base}_${Math.floor(stat.mtimeMs)}_${stat.size}`
+}
+
+async function extractMastraDb(
+  backupFile: string,
+  cacheRoot: string,
+): Promise<{ dbPath: string, fromCache: boolean }> {
   const entries = await listTarEntries(backupFile)
   const dbInArchive = entries
     .filter((entry) => entry.endsWith('mastra.db'))
@@ -146,11 +161,22 @@ async function extractMastraDb(backupFile: string, outDir: string): Promise<stri
   if (!dbInArchive) {
     throw new Error(`mastra.db not found in archive: ${backupFile}`)
   }
-  await fs.mkdir(outDir, { recursive: true })
-  await execFile('tar', ['-xzf', backupFile, '-C', outDir, dbInArchive])
-  const dbPath = path.join(outDir, dbInArchive)
+  const stat = await fs.stat(backupFile)
+  const key = backupCacheKey(backupFile, { mtimeMs: stat.mtimeMs, size: stat.size })
+  const cacheDir = path.join(cacheRoot, key)
+  const dbPath = path.join(cacheDir, dbInArchive)
+
+  try {
+    await fs.access(dbPath)
+    return { dbPath, fromCache: true }
+  } catch {
+    // cache miss
+  }
+
+  await fs.mkdir(cacheDir, { recursive: true })
+  await execFile('tar', ['-xzf', backupFile, '-C', cacheDir, dbInArchive])
   await fs.access(dbPath)
-  return dbPath
+  return { dbPath, fromCache: false }
 }
 
 function parsePartText(text: string): { text: string | null, isSystem: boolean } {
@@ -177,6 +203,20 @@ function parsePartText(text: string): { text: string | null, isSystem: boolean }
   return { text: text.trim() || null, isSystem: false }
 }
 
+function isSystemLikeMessage(text: string): boolean {
+  const normalized = text.trim()
+  if (!normalized) {
+    return false
+  }
+  if (normalized.startsWith('[source:MCP:')) {
+    return true
+  }
+  if (normalized.startsWith('Received scheduler notification:')) {
+    return true
+  }
+  return false
+}
+
 function simplifyMessage(row: MessageRow): HistoryEntry[] {
   let root: unknown
   try {
@@ -186,7 +226,7 @@ function simplifyMessage(row: MessageRow): HistoryEntry[] {
     if (!plain) {
       return []
     }
-    const isSystem = row.role.trim().toLowerCase() === 'system'
+    const isSystem = row.role.trim().toLowerCase() === 'system' || isSystemLikeMessage(plain)
     return [{ role: row.role, text: plain, isSystem }]
   }
   if (!root || typeof root !== 'object') {
@@ -209,7 +249,7 @@ function simplifyMessage(row: MessageRow): HistoryEntry[] {
     entries.push({
       role: row.role,
       text: parsed.text,
-      isSystem: rowIsSystem || parsed.isSystem,
+      isSystem: rowIsSystem || parsed.isSystem || isSystemLikeMessage(parsed.text),
     })
   }
   return entries
@@ -302,40 +342,38 @@ async function main(): Promise<void> {
   const backupPath =
     options.backup || (await getLatestBackupFile(path.resolve(process.cwd(), '../backup')))
 
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tsuki-mastra-'))
-  try {
-    const dbPath = await extractMastraDb(backupPath, tempRoot)
-    const history = await loadMessageHistory(dbPath, options)
-    if (!history.trim()) {
-      throw new Error('No messages found for the given filters')
-    }
+  const cacheRoot = path.resolve(options.cacheDir || path.join(os.tmpdir(), 'tsuki-mastra-cache'))
+  const { dbPath, fromCache } = await extractMastraDb(backupPath, cacheRoot)
+  const history = await loadMessageHistory(dbPath, options)
+  if (!history.trim()) {
+    throw new Error('No messages found for the given filters')
+  }
 
-    console.log(`backup: ${backupPath}`)
-    console.log(`db: ${dbPath}`)
-    console.log(`history chars: ${history.length}`)
+  console.log(`backup: ${backupPath}`)
+  console.log(`cache dir: ${cacheRoot}`)
+  console.log(`db: ${dbPath}`)
+  console.log(`cache hit: ${fromCache ? 'yes' : 'no'}`)
+  console.log(`history chars: ${history.length}`)
 
-    if (options.dryRun) {
-      console.log('--- history preview ---')
-      console.log(history)
-      return
-    }
+  if (options.dryRun) {
+    console.log('--- history preview ---')
+    console.log(history)
+    return
+  }
 
-    const prompt = await loadPrompt(options)
-    const generated = await generateMemorySeed(history, prompt, options.model)
-    if (!generated) {
-      throw new Error('Model returned empty output')
-    }
+  const prompt = await loadPrompt(options)
+  const generated = await generateMemorySeed(history, prompt, options.model)
+  if (!generated) {
+    throw new Error('Model returned empty output')
+  }
 
-    console.log('--- generated memory seed ---')
-    console.log(generated)
+  console.log('--- generated memory seed ---')
+  console.log(generated)
 
-    if (options.output) {
-      await fs.mkdir(path.dirname(options.output), { recursive: true })
-      await fs.writeFile(options.output, `${generated}\n`, 'utf-8')
-      console.log(`written: ${options.output}`)
-    }
-  } finally {
-    await fs.rm(tempRoot, { recursive: true, force: true })
+  if (options.output) {
+    await fs.mkdir(path.dirname(options.output), { recursive: true })
+    await fs.writeFile(options.output, `${generated}\n`, 'utf-8')
+    console.log(`written: ${options.output}`)
   }
 }
 
