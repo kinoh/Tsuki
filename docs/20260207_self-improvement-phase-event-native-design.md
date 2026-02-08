@@ -83,6 +83,16 @@
 - `review=approval` is not optional metadata; it is the intent that the projection layer must realize.
 - Duplicate approvals are acceptable in this phase because projection uses full replacement content semantics.
 
+## Automatic Approval for Memory Sections
+- A proposal is eligible for automatic approval when and only when the updated section name is exactly `Memory`.
+- Section hierarchy does not matter; the auto-approval rule is name-based.
+- Auto-approval is limited to the `Memory` section body only.
+- If a proposal touches any non-`Memory` section, it must follow the manual debug review flow.
+- Even for automatic approval, runtime must emit `improve.review` with `review=approval` before projection to keep event semantics consistent.
+- Projection still follows existing phase rules:
+  - no dedicated success event is required;
+  - on failure, emit a normal `error` event linked by related review `event_id`.
+
 ## Debugging
 - Debug UI should filter and inspect `improve.*` tags.
 - Work log should display `improve.trigger`, `improve.proposal`, and `improve.review`.
