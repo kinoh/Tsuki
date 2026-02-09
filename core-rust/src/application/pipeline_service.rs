@@ -188,8 +188,7 @@ async fn maybe_append_debug_input_event(
         json!({ "text": normalized_input }),
         vec!["input".to_string(), "type:message".to_string()],
     );
-    record_event(state, event.clone()).await;
-    emit_debug_input_worklog(state, normalized_input, &event).await;
+    record_event(state, event).await;
 }
 
 fn should_append_debug_input_for_reuse_open(input_text: &str, events: &[Event]) -> bool {
@@ -565,28 +564,6 @@ async fn emit_debug_module_events(
         ],
     );
     record_event(state, raw_event).await;
-}
-
-async fn emit_debug_input_worklog(state: &AppState, input_text: &str, input_event: &Event) {
-    let worklog_event = build_event(
-        "debug",
-        "text",
-        json!({
-            "input": input_text,
-            "output": "",
-            "module": "input",
-            "mode": "input",
-            "history_event_id": input_event.event_id,
-            "history_event_ts": input_event.ts,
-        }),
-        vec![
-            "debug".to_string(),
-            "worklog".to_string(),
-            "module:input".to_string(),
-            "mode:input".to_string(),
-        ],
-    );
-    record_event(state, worklog_event).await;
 }
 
 async fn append_user_provided_submodule_output_events(

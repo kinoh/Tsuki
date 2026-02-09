@@ -401,9 +401,14 @@
 
     <div class="layout">
       <aside class="panel">
-        <h2>Work Log</h2>
+        <h2>Event Log</h2>
         <div class="worklog-list" id="worklog"></div>
         <div class="button-row">
+          <select id="eventFilter">
+            <option value="all">all</option>
+            <option value="non-debug">non-debug</option>
+            <option value="debug-only">debug-only</option>
+          </select>
           <button class="secondary" id="refreshLog">Refresh</button>
           <button class="secondary" id="setCutoff">Set cutoff</button>
           <button class="secondary" id="clearCutoff">Clear cutoff</button>
@@ -572,6 +577,7 @@
       const moduleBasePrompt = document.getElementById("moduleBasePrompt");
       const promptStatus = document.getElementById("promptStatus");
       const flowNodes = Array.from(document.querySelectorAll(".node"));
+      const eventFilterSelect = document.getElementById("eventFilter");
       const DEBUG_UI_STATE_KEY = "tsuki_core_rust_debug_ui_state_v1";
 
       const state = {
@@ -585,6 +591,7 @@
         selectedWorklogTs: null,
         selectedHistoryTs: null,
         excludedEventIds: new Set(),
+        eventFilter: "all",
         selectedModule: null,
         selectedKind: null,
         lastInput: "",
@@ -612,6 +619,13 @@
             ) {
               state.appendInputMode = parsed.appendInputMode;
             }
+            if (
+              parsed.eventFilter === "all" ||
+              parsed.eventFilter === "non-debug" ||
+              parsed.eventFilter === "debug-only"
+            ) {
+              state.eventFilter = parsed.eventFilter;
+            }
           }
         } catch (_err) {
           // Ignore malformed local state and continue with defaults.
@@ -624,6 +638,7 @@
             historyCutoffTs: state.historyCutoffTs,
             excludedEventIds: Array.from(state.excludedEventIds),
             appendInputMode: state.appendInputMode,
+            eventFilter: state.eventFilter,
           };
           localStorage.setItem(DEBUG_UI_STATE_KEY, JSON.stringify(payload));
         } catch (_err) {
@@ -849,29 +864,31 @@
       }
 
       async function fetchWorklogs() {
-        const [worklogRes, replyRes] = await Promise.all([
-          fetch("/debug/events?tag=debug,worklog&limit=200"),
-          fetch("/debug/events?tag=action,response&limit=200"),
-        ]);
-        if (!worklogRes.ok || !replyRes.ok) {
-          worklogEl.innerHTML = '<div class="muted">Failed to load work log.</div>';
+        const res = await fetch("/debug/events?limit=500");
+        if (!res.ok) {
+          worklogEl.innerHTML = '<div class="muted">Failed to load event log.</div>';
           return;
         }
-        const [worklogData, replyData] = await Promise.all([worklogRes.json(), replyRes.json()]);
-        const merged = [...(worklogData.events || []), ...(replyData.events || [])];
-        state.worklogs = merged.sort((a, b) => {
+        const data = await res.json();
+        state.worklogs = (data.events || []).sort((a, b) => {
           const at = Date.parse(a.ts || "") || 0;
           const bt = Date.parse(b.ts || "") || 0;
           return bt - at;
         });
-        const liveIds = new Set(state.worklogs.map((event) => getHistoryEventId(event)));
+        const liveIds = new Set(
+          state.worklogs
+            .filter((event) => !isDebugEvent(event))
+            .map((event) => event.event_id),
+        );
         state.excludedEventIds.forEach((id) => {
           if (!liveIds.has(id)) {
             state.excludedEventIds.delete(id);
           }
         });
         if (state.historyCutoffTs) {
-          const exists = state.worklogs.some((event) => getHistoryEventTs(event) === state.historyCutoffTs);
+          const exists = state.worklogs.some(
+            (event) => !isDebugEvent(event) && event.ts === state.historyCutoffTs,
+          );
           if (!exists) {
             state.historyCutoffTs = null;
           }
@@ -895,6 +912,74 @@
         return tags.includes("action") && tags.includes("response");
       }
 
+      function isDebugEvent(event) {
+        return getEventTags(event).includes("debug");
+      }
+
+      function isRawDebugEvent(event) {
+        const tags = getEventTags(event);
+        return tags.includes("debug") && tags.includes("llm.raw");
+      }
+
+      function getModuleNameFromTags(event) {
+        const tags = getEventTags(event);
+        const moduleTag = tags.find((tag) => tag.startsWith("module:"));
+        if (moduleTag) {
+          return moduleTag.slice("module:".length);
+        }
+        if (tags.includes("decision")) {
+          return "decision";
+        }
+        if (isReplyEvent(event)) {
+          return "reply";
+        }
+        if (event.source === "user" && tags.includes("input")) {
+          return "input";
+        }
+        return "";
+      }
+
+      function getModeFromTags(event) {
+        return extractTagValue(getEventTags(event), "mode:");
+      }
+
+      function eventSummary(event) {
+        const payload = event.payload || {};
+        if (typeof payload.text === "string" && payload.text.trim()) {
+          return payload.text.trim();
+        }
+        if (typeof payload.output === "string" && payload.output.trim()) {
+          return payload.output.trim();
+        }
+        if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+          return payload.output_text.trim();
+        }
+        return JSON.stringify(payload);
+      }
+
+      function truncate(text, maxLen) {
+        if (!text) return "";
+        if (text.length <= maxLen) return text;
+        return `${text.slice(0, maxLen)}...`;
+      }
+
+      function getEventKind(event) {
+        const tags = getEventTags(event);
+        if (isReplyEvent(event)) return "reply";
+        if (event.source === "user" && tags.includes("input")) return "input";
+        if (tags.includes("decision")) return "decision";
+        if (tags.includes("submodule")) return "submodule";
+        if (tags.includes("debug") && tags.includes("worklog")) return "debug.worklog";
+        if (tags.includes("debug") && tags.includes("llm.raw")) return "debug.raw";
+        return event.source || "event";
+      }
+
+      function isVisibleByFilter(event) {
+        if (state.eventFilter === "non-debug") return !isDebugEvent(event);
+        if (state.eventFilter === "debug-only") return isDebugEvent(event);
+        return true;
+      }
+
       function extractTagValue(tags, prefix) {
         const match = tags.find((tag) => tag.startsWith(prefix));
         return match ? match.slice(prefix.length) : "";
@@ -904,16 +989,6 @@
         if (!event.ts) return 0;
         const value = Date.parse(event.ts);
         return Number.isNaN(value) ? 0 : value;
-      }
-
-      function getHistoryEventId(event) {
-        const payload = (event && event.payload) || {};
-        return payload.history_event_id || event.event_id;
-      }
-
-      function getHistoryEventTs(event) {
-        const payload = (event && event.payload) || {};
-        return payload.history_event_ts || event.ts || null;
       }
 
       async function updateRawFromWorklog(event, moduleName, mode) {
@@ -955,19 +1030,18 @@
       function renderWorklogs() {
         worklogEl.innerHTML = "";
         worklogEl.classList.toggle("cutoff-at-top", !state.historyCutoffTs);
-        if (state.worklogs.length === 0) {
-          worklogEl.innerHTML = '<div class="muted">No work log entries yet.</div>';
+        const visibleEvents = state.worklogs.filter(isVisibleByFilter);
+        if (visibleEvents.length === 0) {
+          worklogEl.innerHTML = '<div class="muted">No event log entries yet.</div>';
           return;
         }
-        state.worklogs.forEach((event) => {
+        visibleEvents.forEach((event) => {
           const payload = event.payload || {};
-          const reply = isReplyEvent(event);
-          const moduleName = reply ? "reply" : payload.module || "module";
-          const mode = reply ? "-" : payload.mode || "full";
-          const kind = reply ? "reply" : "worklog";
-          const historyEventId = getHistoryEventId(event);
-          const historyEventTs = getHistoryEventTs(event);
-          const excluded = state.excludedEventIds.has(historyEventId);
+          const kind = getEventKind(event);
+          const moduleName = payload.module || getModuleNameFromTags(event) || "event";
+          const mode = payload.mode || getModeFromTags(event) || "-";
+          const isHistoryTarget = !isDebugEvent(event);
+          const excluded = isHistoryTarget && state.excludedEventIds.has(event.event_id);
           const item = document.createElement("div");
           item.className = "worklog-item";
           if (excluded) {
@@ -976,45 +1050,55 @@
           if (event.ts && event.ts === state.selectedWorklogTs) {
             item.classList.add("active");
           }
-          if (historyEventTs && historyEventTs === state.historyCutoffTs) {
+          if (isHistoryTarget && event.ts && event.ts === state.historyCutoffTs) {
             item.classList.add("cutoff-anchor");
           }
+          const summary = truncate(eventSummary(event), 120);
           item.innerHTML = `
             <div><strong>${moduleName}</strong></div>
             <div class="worklog-meta">${kind} · ${mode} · ${formatTime(event.ts)}</div>
-            <button class="exclude-btn" type="button" title="Exclude from history">&times;</button>
+            <div class="muted">${summary}</div>
+            <button class="exclude-btn" type="button" title="Exclude from history" ${isHistoryTarget ? "" : "disabled"}>&times;</button>
           `;
           item.querySelector(".exclude-btn").addEventListener("click", (clickEvent) => {
             clickEvent.stopPropagation();
-            if (state.excludedEventIds.has(historyEventId)) {
-              state.excludedEventIds.delete(historyEventId);
+            if (!isHistoryTarget) {
+              return;
+            }
+            if (state.excludedEventIds.has(event.event_id)) {
+              state.excludedEventIds.delete(event.event_id);
             } else {
-              state.excludedEventIds.add(historyEventId);
+              state.excludedEventIds.add(event.event_id);
             }
             savePersistedDebugState();
             renderWorklogs();
           });
           item.addEventListener("click", () => {
             state.selectedWorklogTs = event.ts || null;
-            state.selectedHistoryTs = historyEventTs;
+            state.selectedHistoryTs = isHistoryTarget ? event.ts || null : null;
             renderWorklogs();
-            const output = payload.output || payload.text || "";
-            const input = payload.input || "";
+            const output = payload.output || payload.output_text || payload.text || "";
+            const input = payload.input || (kind === "input" ? payload.text || "" : "");
             inputTextEl.textContent = input;
             outputTextEl.textContent = output;
             state.lastInput = input;
             state.lastOutput = output;
             moduleInput.value = state.lastInput;
-            if (reply) {
+            if (kind === "reply") {
               selectNode("reply");
               rawTextEl.textContent = "(none)";
               contextTextEl.textContent = "(none)";
               return;
             }
-            if (moduleName === "input") {
+            if (kind === "input") {
               selectNode("input");
               rawTextEl.textContent = "(none)";
               contextTextEl.textContent = "(none)";
+              return;
+            }
+            if (isRawDebugEvent(event)) {
+              rawTextEl.textContent = JSON.stringify(payload.raw || null, null, 2);
+              contextTextEl.textContent = payload.context || "(none)";
               return;
             }
             if (moduleName === "improve") {
@@ -1029,7 +1113,12 @@
               const kind = moduleName === "decision" ? "decision" : "submodule";
               selectModule(moduleName, kind);
             }
-            updateRawFromWorklog(event, moduleName, mode);
+            if (kind === "submodule" || kind === "decision" || kind === "debug.worklog") {
+              updateRawFromWorklog(event, moduleName, mode);
+            } else {
+              rawTextEl.textContent = "(none)";
+              contextTextEl.textContent = "(none)";
+            }
           });
           worklogEl.appendChild(item);
         });
@@ -1278,6 +1367,12 @@
         state.appendInputMode = appendInputModeSelect.value || "always_new";
       });
 
+      eventFilterSelect.addEventListener("change", () => {
+        state.eventFilter = eventFilterSelect.value || "all";
+        savePersistedDebugState();
+        renderWorklogs();
+      });
+
       modulePrompt.addEventListener("input", () => {
         const name = state.selectedModule;
         if (!name) return;
@@ -1337,6 +1432,7 @@
 
       loadPersistedDebugState();
       appendInputModeSelect.value = state.appendInputMode;
+      eventFilterSelect.value = state.eventFilter;
       fetchPrompts();
       fetchWorklogs();
       setFlowHighlight(null);

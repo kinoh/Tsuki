@@ -51,6 +51,15 @@
 3. Existing `debug,worklog` rendering can remain during transition, but as secondary metadata.
 4. Final state removes any requirement that adding a new primary event kind must also add `debug,worklog` emission.
 
+## Implementation Notes (2026-02-09)
+- `core-rust/static/debug_ui.html` now fetches Event Log from `/debug/events?limit=500` (all events in one stream).
+- Event Log list now supports a local UI filter: `all` / `non-debug` / `debug-only`.
+- Exclude/cutoff controls now target only non-debug primary events:
+  - `exclude_event_ids` stores selected primary `event_id`s
+  - cutoff anchor stores selected primary `ts`
+- Selecting `debug,llm.raw` entries shows stored `context` and `raw` directly.
+- Debug input no longer emits synthetic `debug,worklog` rows; input visibility comes from primary user input events.
+
 ## Explicit Notes from User Feedback
 - Event Log should be principle-first: all events are visible.
 - Separation between production-consumable outputs and debug inspection must be maintained.
@@ -59,4 +68,3 @@
 ## Non-Goals
 - No immediate deletion of existing debug tags/data.
 - No change to event storage schema in this decision document.
-
