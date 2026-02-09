@@ -25,6 +25,8 @@
   - module output event is emitted in the normal role/tag shape
   - decision run emits normal `decision` event
   - reply remains normal `action,response`
+- Work log should include a visible row for debug-appended `user(input)` so cutoff/exclude can be controlled from UI.
+- Work log exclude/cutoff controls should map to primary history event ids/timestamps (not only debug worklog event ids).
 - Debug observability remains additive:
   - `debug,llm.raw` includes raw response and composed LLM context
   - these debug events stay excluded from context history
@@ -41,6 +43,7 @@
   - `history_cutoff_ts`: defines lower bound for included history (`event.ts >= cutoff`)
   - `exclude_event_ids`: explicitly omitted events
 - Alignment change does not alter these controls; it changes what primary events are emitted during debug runs.
+- Debug UI controls should carry `history_event_id` and `history_event_ts` from worklog payload when available.
 
 ## Non-Goals
 - No destructive event deletion.
@@ -53,6 +56,8 @@
   - `ts | role | message`
   - roles include `user`, `submodule:<name>`, `decision`, `assistant`
 - `debug,llm.raw` remains available and excluded from history input selection.
+- Decision debug context should not duplicate "latest input" outside history.
+- User-provided submodule outputs for decision debug should be represented as events and therefore appear via `Recent event history`.
 
 ## Why This Direction
 - Restores semantic consistency between normal and debug execution.

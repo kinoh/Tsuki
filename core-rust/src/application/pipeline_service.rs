@@ -188,7 +188,8 @@ async fn maybe_append_debug_input_event(
         json!({ "text": normalized_input }),
         vec!["input".to_string(), "type:message".to_string()],
     );
-    record_event(state, event).await;
+    record_event(state, event.clone()).await;
+    emit_debug_input_worklog(state, normalized_input, &event).await;
 }
 
 fn should_append_debug_input_for_reuse_open(input_text: &str, events: &[Event]) -> bool {
@@ -311,7 +312,7 @@ async fn run_decision(input_text: &str, modules: &Modules, state: &AppState) -> 
         json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
         vec!["decision".to_string()],
     );
-    record_event(state, decision_event).await;
+    record_event(state, decision_event.clone()).await;
 
     ModuleOutput {
         name: "decision".to_string(),
@@ -327,6 +328,7 @@ async fn run_decision_debug(
     excluded_event_ids: &HashSet<String>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
+    append_user_provided_submodule_output_events(state, submodule_outputs_raw).await?;
     let history = if include_history {
         format_event_history(
             state,
@@ -351,20 +353,9 @@ async fn run_decision_debug(
         compose_instructions(&base_instructions, &decision_instructions),
         &state.modules.runtime,
     ));
-    let submodule_outputs = parse_submodule_outputs(submodule_outputs_raw);
-    let submodule_section = if submodule_outputs.is_empty() {
-        "Submodule outputs (user provided): none".to_string()
-    } else {
-        let lines = submodule_outputs
-            .into_iter()
-            .map(|(name, text)| format!("- {}: {}", name, text))
-            .collect::<Vec<_>>()
-            .join("\n");
-        format!("Submodule outputs (user provided):\n{}", lines)
-    };
     let context = format!(
-        "Latest user input: {}\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
-        input_text, submodule_section, history
+        "Recent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
+        history
     );
     let response = adapter
         .respond(LlmRequest {
@@ -380,7 +371,7 @@ async fn run_decision_debug(
         json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
         vec!["decision".to_string()],
     );
-    record_event(state, decision_event).await;
+    record_event(state, decision_event.clone()).await;
     emit_debug_module_events(
         state,
         "decision",
@@ -388,6 +379,7 @@ async fn run_decision_debug(
         input_text,
         &context,
         &response,
+        Some(&decision_event),
     )
     .await;
     Ok(response.text)
@@ -488,8 +480,17 @@ async fn run_submodule_debug(
         json!({ "text": response.text.clone() }),
         vec!["submodule".to_string(), format!("module:{}", name)],
     );
-    record_event(state, response_event).await;
-    emit_debug_module_events(state, name, "module_only", input_text, &context, &response).await;
+    record_event(state, response_event.clone()).await;
+    emit_debug_module_events(
+        state,
+        name,
+        "module_only",
+        input_text,
+        &context,
+        &response,
+        Some(&response_event),
+    )
+    .await;
     Ok(response.text)
 }
 
@@ -522,7 +523,10 @@ async fn emit_debug_module_events(
     input_text: &str,
     context: &str,
     response: &crate::llm::LlmResponse,
+    history_event: Option<&Event>,
 ) {
+    let history_event_id = history_event.map(|event| event.event_id.as_str()).unwrap_or("");
+    let history_event_ts = history_event.map(|event| event.ts.as_str()).unwrap_or("");
     let worklog_event = build_event(
         "debug",
         "text",
@@ -531,6 +535,8 @@ async fn emit_debug_module_events(
             "output": response.text.clone(),
             "module": module,
             "mode": mode,
+            "history_event_id": history_event_id,
+            "history_event_ts": history_event_ts,
         }),
         vec![
             "debug".to_string(),
@@ -559,6 +565,45 @@ async fn emit_debug_module_events(
         ],
     );
     record_event(state, raw_event).await;
+}
+
+async fn emit_debug_input_worklog(state: &AppState, input_text: &str, input_event: &Event) {
+    let worklog_event = build_event(
+        "debug",
+        "text",
+        json!({
+            "input": input_text,
+            "output": "",
+            "module": "input",
+            "mode": "input",
+            "history_event_id": input_event.event_id,
+            "history_event_ts": input_event.ts,
+        }),
+        vec![
+            "debug".to_string(),
+            "worklog".to_string(),
+            "module:input".to_string(),
+            "mode:input".to_string(),
+        ],
+    );
+    record_event(state, worklog_event).await;
+}
+
+async fn append_user_provided_submodule_output_events(
+    state: &AppState,
+    raw: Option<&str>,
+) -> Result<(), (StatusCode, String)> {
+    let outputs = parse_submodule_outputs(raw);
+    for (name, text) in outputs {
+        let event = build_event(
+            "internal",
+            "text",
+            json!({ "text": text }),
+            vec!["submodule".to_string(), format!("module:{}", name)],
+        );
+        record_event(state, event).await;
+    }
+    Ok(())
 }
 
 async fn run_module(

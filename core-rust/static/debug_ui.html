@@ -583,6 +583,7 @@
         appendInputMode: "always_new",
         historyCutoffTs: null,
         selectedWorklogTs: null,
+        selectedHistoryTs: null,
         excludedEventIds: new Set(),
         selectedModule: null,
         selectedKind: null,
@@ -863,14 +864,14 @@
           const bt = Date.parse(b.ts || "") || 0;
           return bt - at;
         });
-        const liveIds = new Set(state.worklogs.map((event) => event.event_id));
+        const liveIds = new Set(state.worklogs.map((event) => getHistoryEventId(event)));
         state.excludedEventIds.forEach((id) => {
           if (!liveIds.has(id)) {
             state.excludedEventIds.delete(id);
           }
         });
         if (state.historyCutoffTs) {
-          const exists = state.worklogs.some((event) => event.ts === state.historyCutoffTs);
+          const exists = state.worklogs.some((event) => getHistoryEventTs(event) === state.historyCutoffTs);
           if (!exists) {
             state.historyCutoffTs = null;
           }
@@ -903,6 +904,16 @@
         if (!event.ts) return 0;
         const value = Date.parse(event.ts);
         return Number.isNaN(value) ? 0 : value;
+      }
+
+      function getHistoryEventId(event) {
+        const payload = (event && event.payload) || {};
+        return payload.history_event_id || event.event_id;
+      }
+
+      function getHistoryEventTs(event) {
+        const payload = (event && event.payload) || {};
+        return payload.history_event_ts || event.ts || null;
       }
 
       async function updateRawFromWorklog(event, moduleName, mode) {
@@ -954,7 +965,9 @@
           const moduleName = reply ? "reply" : payload.module || "module";
           const mode = reply ? "-" : payload.mode || "full";
           const kind = reply ? "reply" : "worklog";
-          const excluded = state.excludedEventIds.has(event.event_id);
+          const historyEventId = getHistoryEventId(event);
+          const historyEventTs = getHistoryEventTs(event);
+          const excluded = state.excludedEventIds.has(historyEventId);
           const item = document.createElement("div");
           item.className = "worklog-item";
           if (excluded) {
@@ -963,7 +976,7 @@
           if (event.ts && event.ts === state.selectedWorklogTs) {
             item.classList.add("active");
           }
-          if (event.ts && event.ts === state.historyCutoffTs) {
+          if (historyEventTs && historyEventTs === state.historyCutoffTs) {
             item.classList.add("cutoff-anchor");
           }
           item.innerHTML = `
@@ -973,16 +986,17 @@
           `;
           item.querySelector(".exclude-btn").addEventListener("click", (clickEvent) => {
             clickEvent.stopPropagation();
-            if (state.excludedEventIds.has(event.event_id)) {
-              state.excludedEventIds.delete(event.event_id);
+            if (state.excludedEventIds.has(historyEventId)) {
+              state.excludedEventIds.delete(historyEventId);
             } else {
-              state.excludedEventIds.add(event.event_id);
+              state.excludedEventIds.add(historyEventId);
             }
             savePersistedDebugState();
             renderWorklogs();
           });
           item.addEventListener("click", () => {
             state.selectedWorklogTs = event.ts || null;
+            state.selectedHistoryTs = historyEventTs;
             renderWorklogs();
             const output = payload.output || payload.text || "";
             const input = payload.input || "";
@@ -993,6 +1007,12 @@
             moduleInput.value = state.lastInput;
             if (reply) {
               selectNode("reply");
+              rawTextEl.textContent = "(none)";
+              contextTextEl.textContent = "(none)";
+              return;
+            }
+            if (moduleName === "input") {
+              selectNode("input");
               rawTextEl.textContent = "(none)";
               contextTextEl.textContent = "(none)";
               return;
@@ -1035,7 +1055,7 @@
         payload.append_input_mode = state.appendInputMode;
         payload.exclude_event_ids = Array.from(state.excludedEventIds);
         const cutoffTs = getCurrentHistoryCutoffTs();
-        payload.include_history = Boolean(cutoffTs);
+        payload.include_history = true;
         if (cutoffTs) {
           payload.history_cutoff_ts = cutoffTs;
         }
@@ -1301,7 +1321,7 @@
         .addEventListener("click", () => improveReview("rejection"));
       document.getElementById("refreshLog").addEventListener("click", fetchWorklogs);
       document.getElementById("setCutoff").addEventListener("click", () => {
-        state.historyCutoffTs = state.selectedWorklogTs || null;
+        state.historyCutoffTs = state.selectedHistoryTs || null;
         savePersistedDebugState();
         renderWorklogs();
       });
