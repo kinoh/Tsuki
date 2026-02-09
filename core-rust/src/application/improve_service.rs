@@ -65,15 +65,6 @@ pub(crate) async fn trigger_improvement(
         vec!["improve.trigger".to_string()],
     );
     crate::record_event(state, trigger_event.clone()).await;
-    emit_debug_improve_worklog(
-        state,
-        "trigger",
-        trigger_event.event_id.as_str(),
-        "",
-        "trigger emitted",
-        None,
-    )
-    .await;
     Ok(DebugImproveResponse {
         proposal_event_id: None,
         review_event_id: None,
@@ -107,26 +98,6 @@ pub(crate) async fn propose_improvement(
         vec!["improve.proposal".to_string()],
     );
     crate::record_event(state, proposal_event.clone()).await;
-    emit_debug_improve_worklog(
-        state,
-        "proposal",
-        proposal_event.event_id.as_str(),
-        proposal_event
-            .payload
-            .get("reason")
-            .and_then(|value| value.as_str())
-            .unwrap_or(""),
-        proposal_event
-            .payload
-            .get("content")
-            .and_then(|value| value.as_str())
-            .unwrap_or(""),
-        proposal_event
-            .payload
-            .get("section")
-            .and_then(|value| value.as_str()),
-    )
-    .await;
 
     let is_memory = proposal_event
         .payload
@@ -156,15 +127,6 @@ pub(crate) async fn propose_improvement(
         vec!["improve.review".to_string()],
     );
     crate::record_event(state, review_event.clone()).await;
-    emit_debug_improve_worklog(
-        state,
-        "review",
-        review_event.event_id.as_str(),
-        "auto approval",
-        "review=approval",
-        Some("Memory"),
-    )
-    .await;
 
     let apply_result = apply_projection(state, &proposal_event).await;
     if let Err(err) = apply_result {
@@ -217,12 +179,6 @@ pub(crate) async fn review_improvement(
         "rejected"
     };
     let review_reason = payload.reason.clone().unwrap_or_else(|| "none".to_string());
-    let worklog_input = payload
-        .reason
-        .as_deref()
-        .unwrap_or("manual review")
-        .to_string();
-    let worklog_output = format!("review={}", review);
     let review_event = build_event(
         "debug",
         "text",
@@ -236,18 +192,6 @@ pub(crate) async fn review_improvement(
         vec!["improve.review".to_string()],
     );
     crate::record_event(state, review_event.clone()).await;
-    emit_debug_improve_worklog(
-        state,
-        "review",
-        review_event.event_id.as_str(),
-        worklog_input.as_str(),
-        worklog_output.as_str(),
-        proposal_event
-            .payload
-            .get("section")
-            .and_then(|value| value.as_str()),
-    )
-    .await;
 
     if review != "approval" {
         return Ok(DebugImproveResponse {
@@ -279,36 +223,6 @@ fn normalize_review_value(value: &str) -> Option<&'static str> {
         return Some("rejection");
     }
     None
-}
-
-async fn emit_debug_improve_worklog(
-    state: &AppState,
-    phase: &str,
-    event_id: &str,
-    input: &str,
-    output: &str,
-    section: Option<&str>,
-) {
-    let worklog_event = build_event(
-        "debug",
-        "text",
-        json!({
-            "input": input,
-            "output": output,
-            "module": "improve",
-            "mode": phase,
-            "phase": phase,
-            "section": section.unwrap_or(""),
-            "event_id": event_id,
-        }),
-        vec![
-            "debug".to_string(),
-            "worklog".to_string(),
-            "module:improve".to_string(),
-            format!("mode:{}", phase),
-        ],
-    );
-    crate::record_event(state, worklog_event).await;
 }
 
 async fn emit_projection_error(state: &AppState, review_event_id: &str, err: &str) {

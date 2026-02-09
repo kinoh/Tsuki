@@ -936,6 +936,9 @@
         if (event.source === "user" && tags.includes("input")) {
           return "input";
         }
+        if (tags.some((tag) => tag.startsWith("improve."))) {
+          return "improve";
+        }
         return "";
       }
 
@@ -969,7 +972,6 @@
         if (event.source === "user" && tags.includes("input")) return "input";
         if (tags.includes("decision")) return "decision";
         if (tags.includes("submodule")) return "submodule";
-        if (tags.includes("debug") && tags.includes("worklog")) return "debug.worklog";
         if (tags.includes("debug") && tags.includes("llm.raw")) return "debug.raw";
         return event.source || "event";
       }
@@ -991,7 +993,7 @@
         return Number.isNaN(value) ? 0 : value;
       }
 
-      async function updateRawFromWorklog(event, moduleName, mode) {
+      async function updateRawFromEvent(event, moduleName) {
         rawTextEl.textContent = "(loading...)";
         contextTextEl.textContent = "(loading...)";
         const res = await fetch("/debug/events?tag=debug,llm.raw&limit=200");
@@ -1004,8 +1006,6 @@
         const candidates = (data.events || []).filter((rawEvent) => {
           const tags = getEventTags(rawEvent);
           if (!tags.includes(`module:${moduleName}`)) return false;
-          const rawMode = extractTagValue(tags, "mode:");
-          if (mode && rawMode && rawMode !== mode) return false;
           return true;
         });
         if (candidates.length === 0) {
@@ -1113,8 +1113,8 @@
               const kind = moduleName === "decision" ? "decision" : "submodule";
               selectModule(moduleName, kind);
             }
-            if (kind === "submodule" || kind === "decision" || kind === "debug.worklog") {
-              updateRawFromWorklog(event, moduleName, mode);
+            if (kind === "submodule" || kind === "decision") {
+              updateRawFromEvent(event, moduleName);
             } else {
               rawTextEl.textContent = "(none)";
               contextTextEl.textContent = "(none)";
@@ -1206,7 +1206,7 @@
           return;
         }
         autofillStatus.textContent = "Loading...";
-        const res = await fetch("/debug/events?tag=debug,worklog&limit=500");
+        const res = await fetch("/debug/events?tag=debug,llm.raw&limit=500");
         if (!res.ok) {
           autofillStatus.textContent = "Failed to load logs.";
           return;
@@ -1222,12 +1222,17 @@
         const submoduleNames = Array.from(state.submodules.keys());
         events.forEach((event) => {
           const payload = event.payload || {};
-          if (payload.mode !== "module_only") return;
-          const moduleName = payload.module || "";
+          const tags = getEventTags(event);
+          if (!tags.includes("llm.raw")) return;
+          const mode = extractTagValue(tags, "mode:");
+          if (mode !== "module_only") return;
+          const moduleName = extractTagValue(tags, "module:");
           if (!state.submodules.has(moduleName)) return;
           if (matched.has(moduleName)) return;
-          if (normalizeInputText(payload.input) !== input) return;
-          matched.set(moduleName, payload.output || "");
+          const context = payload.context || "";
+          const contextInput = extractInputFromSubmoduleContext(context);
+          if (normalizeInputText(contextInput) !== input) return;
+          matched.set(moduleName, payload.output_text || "");
           if (event.ts) {
             matchedTimes.push(event.ts);
           }
@@ -1245,6 +1250,18 @@
           .sort((a, b) => b - a)[0];
         const latestLabel = latestTs ? new Date(latestTs).toLocaleTimeString() : "unknown time";
         autofillStatus.textContent = `Filled ${matched.size}/${submoduleNames.length} modules from ${latestLabel}.`;
+      }
+
+      function extractInputFromSubmoduleContext(context) {
+        if (typeof context !== "string") return "";
+        const prefix = "User input:";
+        if (!context.startsWith(prefix)) return "";
+        const marker = "\nRecent events:";
+        const markerIndex = context.indexOf(marker);
+        if (markerIndex === -1) {
+          return context.slice(prefix.length).trim();
+        }
+        return context.slice(prefix.length, markerIndex).trim();
       }
 
       async function improveTrigger() {

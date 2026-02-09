@@ -320,7 +320,7 @@ async fn run_decision(input_text: &str, modules: &Modules, state: &AppState) -> 
 }
 
 async fn run_decision_debug(
-    input_text: &str,
+    _input_text: &str,
     submodule_outputs_raw: Option<&str>,
     include_history: bool,
     history_cutoff_ts: Option<&str>,
@@ -375,10 +375,8 @@ async fn run_decision_debug(
         state,
         "decision",
         "module_only",
-        input_text,
         &context,
         &response,
-        Some(&decision_event),
     )
     .await;
     Ok(response.text)
@@ -484,10 +482,8 @@ async fn run_submodule_debug(
         state,
         name,
         "module_only",
-        input_text,
         &context,
         &response,
-        Some(&response_event),
     )
     .await;
     Ok(response.text)
@@ -519,33 +515,9 @@ async fn emit_debug_module_events(
     state: &AppState,
     module: &str,
     mode: &str,
-    input_text: &str,
     context: &str,
     response: &crate::llm::LlmResponse,
-    history_event: Option<&Event>,
 ) {
-    let history_event_id = history_event.map(|event| event.event_id.as_str()).unwrap_or("");
-    let history_event_ts = history_event.map(|event| event.ts.as_str()).unwrap_or("");
-    let worklog_event = build_event(
-        "debug",
-        "text",
-        json!({
-            "input": input_text,
-            "output": response.text.clone(),
-            "module": module,
-            "mode": mode,
-            "history_event_id": history_event_id,
-            "history_event_ts": history_event_ts,
-        }),
-        vec![
-            "debug".to_string(),
-            "worklog".to_string(),
-            format!("module:{}", module),
-            format!("mode:{}", mode),
-        ],
-    );
-    record_event(state, worklog_event).await;
-
     let raw_event = build_event(
         "debug",
         "text",

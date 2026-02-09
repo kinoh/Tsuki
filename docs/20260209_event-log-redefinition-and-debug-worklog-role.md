@@ -59,6 +59,8 @@
   - cutoff anchor stores selected primary `ts`
 - Selecting `debug,llm.raw` entries shows stored `context` and `raw` directly.
 - Debug input no longer emits synthetic `debug,worklog` rows; input visibility comes from primary user input events.
+- `debug,worklog` emission was removed from both pipeline debug path and improve debug path.
+- Submodule output autofill now reads `debug,llm.raw` (`mode:module_only`) and extracts `User input` from recorded context.
 
 ## Explicit Notes from User Feedback
 - Event Log should be principle-first: all events are visible.
