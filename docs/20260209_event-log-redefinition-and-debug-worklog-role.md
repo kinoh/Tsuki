@@ -63,6 +63,11 @@
 - Submodule output autofill now reads `debug,llm.raw` (`mode:module_only`) and extracts `User input` from recorded context.
 - `include_history` is now enabled only when cutoff is set in UI; clearing cutoff disables history injection for debug run requests.
 - `clear cutoff` also resets the selected cutoff anchor state (`selectedHistoryTs`) to avoid stale selection behavior.
+- Decision debug no longer persists user-provided `submodule_outputs` as events.
+- Decision debug now applies `submodule_outputs` as in-memory overrides when composing `Recent event history`:
+  - only existing `submodule:<name>` history rows are overwritten
+  - no additional synthetic submodule rows are appended
+  - persisted event stream remains unchanged
 
 ## Explicit Notes from User Feedback
 - Event Log should be principle-first: all events are visible.

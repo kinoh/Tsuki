@@ -2,7 +2,10 @@ use axum::http::StatusCode;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::json;
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
 use crate::event::{build_event, Event};
@@ -327,13 +330,13 @@ async fn run_decision_debug(
     excluded_event_ids: &HashSet<String>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
-    append_user_provided_submodule_output_events(state, submodule_outputs_raw).await?;
     let history = if include_history {
-        format_event_history(
+        format_decision_debug_history(
             state,
             state.limits.decision_history,
             history_cutoff_ts,
             Some(excluded_event_ids),
+            submodule_outputs_raw,
         )
         .await
     } else {
@@ -511,6 +514,48 @@ fn parse_submodule_outputs(raw: Option<&str>) -> Vec<(String, String)> {
         .collect()
 }
 
+async fn format_decision_debug_history(
+    state: &AppState,
+    limit: usize,
+    cutoff_ts: Option<&str>,
+    excluded_event_ids: Option<&HashSet<String>>,
+    submodule_outputs_raw: Option<&str>,
+) -> String {
+    let mut events = latest_events(state, limit, cutoff_ts, excluded_event_ids).await;
+    if events.is_empty() {
+        return "none".to_string();
+    }
+    let submodule_overrides = parse_submodule_outputs(submodule_outputs_raw)
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+    if !submodule_overrides.is_empty() {
+        for event in &mut events {
+            let Some(module_name) = event_submodule_name(event) else {
+                continue;
+            };
+            let Some(override_text) = submodule_overrides.get(module_name) else {
+                continue;
+            };
+            event.payload = json!({ "text": override_text });
+        }
+    }
+    let mut lines = Vec::with_capacity(events.len() + 1);
+    lines.push("ts | role | message".to_string());
+    lines.extend(events.iter().map(format_event_line));
+    lines.join("\n")
+}
+
+fn event_submodule_name(event: &Event) -> Option<&str> {
+    if !event.meta.tags.iter().any(|tag| tag == "submodule") {
+        return None;
+    }
+    event.meta
+        .tags
+        .iter()
+        .find_map(|tag| tag.strip_prefix("module:"))
+        .filter(|value| !value.is_empty())
+}
+
 async fn emit_debug_module_events(
     state: &AppState,
     module: &str,
@@ -536,23 +581,6 @@ async fn emit_debug_module_events(
         ],
     );
     record_event(state, raw_event).await;
-}
-
-async fn append_user_provided_submodule_output_events(
-    state: &AppState,
-    raw: Option<&str>,
-) -> Result<(), (StatusCode, String)> {
-    let outputs = parse_submodule_outputs(raw);
-    for (name, text) in outputs {
-        let event = build_event(
-            "internal",
-            "text",
-            json!({ "text": text }),
-            vec!["submodule".to_string(), format!("module:{}", name)],
-        );
-        record_event(state, event).await;
-    }
-    Ok(())
 }
 
 async fn run_module(
