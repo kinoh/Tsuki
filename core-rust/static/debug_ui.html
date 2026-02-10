@@ -1144,7 +1144,7 @@
         payload.append_input_mode = state.appendInputMode;
         payload.exclude_event_ids = Array.from(state.excludedEventIds);
         const cutoffTs = getCurrentHistoryCutoffTs();
-        payload.include_history = true;
+        payload.include_history = Boolean(cutoffTs);
         if (cutoffTs) {
           payload.history_cutoff_ts = cutoffTs;
         }
@@ -1439,6 +1439,7 @@
       });
       document.getElementById("clearCutoff").addEventListener("click", () => {
         state.historyCutoffTs = null;
+        state.selectedHistoryTs = null;
         savePersistedDebugState();
         renderWorklogs();
       });

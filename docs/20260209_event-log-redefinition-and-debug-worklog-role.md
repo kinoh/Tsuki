@@ -61,6 +61,8 @@
 - Debug input no longer emits synthetic `debug,worklog` rows; input visibility comes from primary user input events.
 - `debug,worklog` emission was removed from both pipeline debug path and improve debug path.
 - Submodule output autofill now reads `debug,llm.raw` (`mode:module_only`) and extracts `User input` from recorded context.
+- `include_history` is now enabled only when cutoff is set in UI; clearing cutoff disables history injection for debug run requests.
+- `clear cutoff` also resets the selected cutoff anchor state (`selectedHistoryTs`) to avoid stale selection behavior.
 
 ## Explicit Notes from User Feedback
 - Event Log should be principle-first: all events are visible.
