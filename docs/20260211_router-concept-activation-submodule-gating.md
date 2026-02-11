@@ -61,8 +61,30 @@ Notes:
     - activation state including soft recommendations.
 - Decision may choose:
   - immediate reply,
-  - follow-up question,
-  - optional additional submodule call (if recommended and uncertainty is high).
+  - ignore/no-op,
+  - internal reflection (`reflect`) and optional additional submodule calls when uncertainty is high.
+
+## Terminology and Control Semantics
+- `question` should not be used as a decision control term in this architecture.
+  - Rationale: it is easily confused with a user-facing question, which already belongs to normal reply behavior.
+- Use `reflect` (or `introspect`) for internal self-questioning and deeper reasoning steps.
+- User-facing questions remain plain assistant replies (`reply`) and are not treated as control-plane actions.
+
+## Recommended as Internal Tooling Signal
+- `soft_recommendations` are treated as internal orchestration hints, not direct user-facing output.
+- Application layer may consume recommendations through an internal tool-like path:
+  - detect recommendation,
+  - select additional submodule executions,
+  - append resulting events,
+  - re-run decision.
+- Reflection and recommendation handling should stay control-plane only.
+  - no direct exposure of internal reflection text to users.
+
+## Reflection Loop Policy
+- On decision output `reflect`, application re-enters the decision pipeline after executing selected internal actions.
+- Each reflection cycle should append normal events so that re-run decision remains event-driven.
+- Add a hard cap (for example `max_reflection_steps`) to prevent infinite loops.
+- If the cap is reached, fall back to a safe reply/ignore strategy and emit a diagnostic event.
 
 ## Threshold Strategy
 - Two thresholds per submodule concept hook:
@@ -102,6 +124,7 @@ Mitigations:
 - Human-like behavior should not assume constant deep deliberation.
 - Decision input should remain production-like; avoid adding noisy ad hoc sections.
 - User-provided submodule outputs should override matching history semantics in-memory, not be persisted as duplicate events.
+- User-facing questioning is not the intent of decision control terms; internal reflection terminology should be explicit.
 
 ## Non-Goals
 - Full concept normalization/synonym resolution in this phase.
