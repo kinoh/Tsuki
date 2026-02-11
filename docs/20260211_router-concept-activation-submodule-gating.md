@@ -102,6 +102,15 @@ Notes:
 - Keep `debug,llm.raw` for raw prompt/response inspection.
 - Event Log remains the source of truth for replay and cutoff/exclude controls.
 
+## Concept-Graph Integration Boundary
+- For this architecture, concept-graph access should be application-led by default.
+  - Router/activation/decision-prep are high-frequency control-plane paths and should use in-process library access for lower latency and tighter orchestration.
+- MCP exposure is optional and should be used for secondary surfaces:
+  - operator/admin workflows,
+  - external integrations,
+  - ad hoc/manual tooling.
+- If exposed as tools, keep them as non-critical auxiliary paths; core activation should not depend on MCP round-trips.
+
 ## Migration Plan
 1. Introduce activation snapshot event schema.
 2. Add router threshold evaluation and hard/soft output.
