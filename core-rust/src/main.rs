@@ -74,6 +74,8 @@ struct OutboundEvent {
 struct DebugRunRequest {
     pub(crate) input: String,
     #[serde(default)]
+    pub(crate) context_override: Option<String>,
+    #[serde(default)]
     pub(crate) submodule_outputs: Option<String>,
     #[serde(default)]
     pub(crate) include_history: Option<bool>,

@@ -53,8 +53,19 @@ pub(crate) async fn run_debug_module(
     name: String,
     payload: DebugRunRequest,
 ) -> Result<DebugRunResponse, (StatusCode, String)> {
-    if payload.input.trim().is_empty() {
+    let context_override = payload
+        .context_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if payload.input.trim().is_empty() && context_override.is_none() {
         return Err((StatusCode::BAD_REQUEST, "input is required".to_string()));
+    }
+    if context_override.is_some() && name == "submodules" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "context_override is not supported for submodules".to_string(),
+        ));
     }
     let include_history = payload.include_history.unwrap_or(true);
     let history_cutoff_ts = payload.history_cutoff_ts.as_deref();
@@ -64,18 +75,21 @@ pub(crate) async fn run_debug_module(
         .into_iter()
         .collect::<HashSet<_>>();
     let append_mode = AppendInputMode::from_request(payload.append_input_mode.as_deref());
-    maybe_append_debug_input_event(
-        state,
-        payload.input.trim(),
-        include_history,
-        history_cutoff_ts,
-        &excluded_event_ids,
-        append_mode,
-    )
-    .await;
+    if context_override.is_none() {
+        maybe_append_debug_input_event(
+            state,
+            payload.input.trim(),
+            include_history,
+            history_cutoff_ts,
+            &excluded_event_ids,
+            append_mode,
+        )
+        .await;
+    }
     let output = if name == "decision" {
         run_decision_debug(
             &payload.input,
+            context_override,
             payload.submodule_outputs.as_deref(),
             include_history,
             history_cutoff_ts,
@@ -96,6 +110,7 @@ pub(crate) async fn run_debug_module(
         run_submodule_debug(
             &name,
             &payload.input,
+            context_override,
             include_history,
             history_cutoff_ts,
             &excluded_event_ids,
@@ -324,13 +339,16 @@ async fn run_decision(input_text: &str, modules: &Modules, state: &AppState) -> 
 
 async fn run_decision_debug(
     _input_text: &str,
+    context_override: Option<&str>,
     submodule_outputs_raw: Option<&str>,
     include_history: bool,
     history_cutoff_ts: Option<&str>,
     excluded_event_ids: &HashSet<String>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
-    let history = if include_history {
+    let history = if context_override.is_some() {
+        String::new()
+    } else if include_history {
         format_decision_debug_history(
             state,
             state.limits.decision_history,
@@ -355,10 +373,12 @@ async fn run_decision_debug(
         compose_instructions(&base_instructions, &decision_instructions),
         &state.modules.runtime,
     ));
-    let context = format!(
-        "Recent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
-        history
-    );
+    let context = context_override.map(str::to_string).unwrap_or_else(|| {
+        format!(
+            "Recent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
+            history
+        )
+    });
     let response = adapter
         .respond(LlmRequest {
             input: context.clone(),
@@ -408,6 +428,7 @@ async fn run_all_submodules_debug(
         let output = run_submodule_debug(
             name.as_str(),
             input_text,
+            None,
             include_history,
             history_cutoff_ts,
             excluded_event_ids,
@@ -427,12 +448,15 @@ async fn run_all_submodules_debug(
 async fn run_submodule_debug(
     name: &str,
     input_text: &str,
+    context_override: Option<&str>,
     include_history: bool,
     history_cutoff_ts: Option<&str>,
     excluded_event_ids: &HashSet<String>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
-    let history = if include_history {
+    let history = if context_override.is_some() {
+        String::new()
+    } else if include_history {
         format_event_history(
             state,
             state.limits.submodule_history,
@@ -467,7 +491,9 @@ async fn run_submodule_debug(
         compose_instructions(&base_instructions, &instructions),
         &state.modules.runtime,
     ));
-    let context = format!("User input: {}\nRecent events:\n{}", input_text, history);
+    let context = context_override
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("User input: {}\nRecent events:\n{}", input_text, history));
     let response = adapter
         .respond(LlmRequest {
             input: context.clone(),

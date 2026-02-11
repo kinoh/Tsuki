@@ -449,7 +449,14 @@
 
         <div class="detail-card" style="margin-top: 12px;">
           <h3>LLM Input Context</h3>
+          <div class="button-row">
+            <button class="secondary" id="contextEditStart" type="button" disabled>Edit</button>
+            <button class="secondary" id="contextResend" type="button" hidden disabled>Re-send</button>
+            <button class="secondary" id="contextEditCancel" type="button" hidden>Cancel</button>
+          </div>
           <pre id="contextText">(none)</pre>
+          <textarea id="contextEditor" hidden></textarea>
+          <div class="muted" id="contextEditStatus"></div>
         </div>
 
         <div class="detail-card" style="margin-top: 12px;">
@@ -546,6 +553,11 @@
       const inputTextEl = document.getElementById("inputText");
       const outputTextEl = document.getElementById("outputText");
       const contextTextEl = document.getElementById("contextText");
+      const contextEditorEl = document.getElementById("contextEditor");
+      const contextEditStartButton = document.getElementById("contextEditStart");
+      const contextResendButton = document.getElementById("contextResend");
+      const contextEditCancelButton = document.getElementById("contextEditCancel");
+      const contextEditStatusEl = document.getElementById("contextEditStatus");
       const rawTextEl = document.getElementById("rawText");
       const moduleInput = document.getElementById("moduleInput");
       const appendInputModeSelect = document.getElementById("appendInputMode");
@@ -594,6 +606,8 @@
         eventFilter: "all",
         selectedModule: null,
         selectedKind: null,
+        selectedResendModule: null,
+        contextEditActive: false,
         lastInput: "",
         lastOutput: "",
         worklogs: [],
@@ -705,6 +719,45 @@
         return date.toLocaleTimeString();
       }
 
+      function setContextViewText(text) {
+        const value = typeof text === "string" && text.length > 0 ? text : "(none)";
+        contextTextEl.textContent = value;
+        if (!state.contextEditActive) {
+          contextEditorEl.value = value === "(none)" ? "" : value;
+        }
+      }
+
+      function updateContextEditorButtons() {
+        const canEdit = Boolean(state.selectedResendModule);
+        contextEditStartButton.disabled = !canEdit;
+        contextResendButton.disabled = !canEdit;
+      }
+
+      function setContextEditMode(active) {
+        state.contextEditActive = active;
+        contextTextEl.hidden = active;
+        contextEditorEl.hidden = !active;
+        contextResendButton.hidden = !active;
+        contextEditCancelButton.hidden = !active;
+        contextEditStartButton.hidden = active;
+        if (active) {
+          contextEditorEl.value =
+            contextTextEl.textContent && contextTextEl.textContent !== "(none)"
+              ? contextTextEl.textContent
+              : "";
+          contextEditorEl.focus();
+        }
+        updateContextEditorButtons();
+      }
+
+      function setSelectedResendModule(moduleName) {
+        state.selectedResendModule = moduleName || null;
+        if (!state.selectedResendModule && state.contextEditActive) {
+          setContextEditMode(false);
+        }
+        updateContextEditorButtons();
+      }
+
       function getCurrentHistoryCutoffTs() {
         return state.historyCutoffTs;
       }
@@ -787,11 +840,15 @@
         }
       }
 
-      function selectNode(nodeName) {
+      function selectNode(nodeName, preserveResend = false) {
+        if (!preserveResend) {
+          setSelectedResendModule(null);
+          contextEditStatusEl.textContent = "";
+        }
         if (nodeName === "input") {
           applySelection({ kind: "input", name: null });
         } else if (nodeName === "decision") {
-          selectModule("decision", "decision");
+          selectModule("decision", "decision", preserveResend);
         } else if (nodeName === "reply") {
           applySelection({ kind: "reply", name: null });
         } else if (nodeName === "submodules") {
@@ -799,7 +856,11 @@
         }
       }
 
-      function selectModule(name, kind) {
+      function selectModule(name, kind, preserveResend = false) {
+        if (!preserveResend) {
+          setSelectedResendModule(null);
+          contextEditStatusEl.textContent = "";
+        }
         applySelection({ kind, name });
       }
 
@@ -897,6 +958,7 @@
           const exists = state.worklogs.some((event) => event.ts === state.selectedWorklogTs);
           if (!exists) {
             state.selectedWorklogTs = null;
+            setSelectedResendModule(null);
           }
         }
         savePersistedDebugState();
@@ -976,6 +1038,19 @@
         return event.source || "event";
       }
 
+      function resolveResendModule(kind, moduleName) {
+        if (kind === "decision") {
+          return "decision";
+        }
+        if (kind === "submodule" && moduleName && moduleName !== "submodules") {
+          return moduleName;
+        }
+        if (kind === "debug.raw" && moduleName && moduleName !== "submodules") {
+          return moduleName;
+        }
+        return null;
+      }
+
       function isVisibleByFilter(event) {
         if (state.eventFilter === "non-debug") return !isDebugEvent(event);
         if (state.eventFilter === "debug-only") return isDebugEvent(event);
@@ -995,11 +1070,11 @@
 
       async function updateRawFromEvent(event, moduleName) {
         rawTextEl.textContent = "(loading...)";
-        contextTextEl.textContent = "(loading...)";
+        setContextViewText("(loading...)");
         const res = await fetch("/debug/events?tag=debug,llm.raw&limit=200");
         if (!res.ok) {
           rawTextEl.textContent = "(none)";
-          contextTextEl.textContent = "(none)";
+          setContextViewText("(none)");
           return;
         }
         const data = await res.json();
@@ -1010,7 +1085,7 @@
         });
         if (candidates.length === 0) {
           rawTextEl.textContent = "(none)";
-          contextTextEl.textContent = "(none)";
+          setContextViewText("(none)");
           return;
         }
         const targetTs = eventTimestamp(event);
@@ -1024,7 +1099,7 @@
           }
         });
         rawTextEl.textContent = JSON.stringify(best.payload.raw, null, 2);
-        contextTextEl.textContent = best.payload.context || "(none)";
+        setContextViewText(best.payload.context || "(none)");
       }
 
       function renderWorklogs() {
@@ -1077,8 +1152,11 @@
             state.selectedWorklogTs = event.ts || null;
             state.selectedHistoryTs = isHistoryTarget ? event.ts || null : null;
             renderWorklogs();
+            contextEditStatusEl.textContent = "";
             const output = payload.output || payload.output_text || payload.text || "";
             const input = payload.input || (kind === "input" ? payload.text || "" : "");
+            const resendModule = resolveResendModule(kind, moduleName);
+            setSelectedResendModule(resendModule);
             inputTextEl.textContent = input;
             outputTextEl.textContent = output;
             state.lastInput = input;
@@ -1087,37 +1165,37 @@
             if (kind === "reply") {
               selectNode("reply");
               rawTextEl.textContent = "(none)";
-              contextTextEl.textContent = "(none)";
+              setContextViewText("(none)");
               return;
             }
             if (kind === "input") {
               selectNode("input");
               rawTextEl.textContent = "(none)";
-              contextTextEl.textContent = "(none)";
+              setContextViewText("(none)");
               return;
             }
             if (isRawDebugEvent(event)) {
               rawTextEl.textContent = JSON.stringify(payload.raw || null, null, 2);
-              contextTextEl.textContent = payload.context || "(none)";
+              setContextViewText(payload.context || "(none)");
               return;
             }
             if (moduleName === "improve") {
               rawTextEl.textContent = "(none)";
-              contextTextEl.textContent = "(none)";
+              setContextViewText("(none)");
               if (payload.event_id) {
                 improveProposalId.value = payload.event_id;
               }
               return;
             }
             if (moduleName) {
-              const kind = moduleName === "decision" ? "decision" : "submodule";
-              selectModule(moduleName, kind);
+              const nodeKind = moduleName === "decision" ? "decision" : "submodule";
+              selectModule(moduleName, nodeKind, true);
             }
             if (kind === "submodule" || kind === "decision") {
               updateRawFromEvent(event, moduleName);
             } else {
               rawTextEl.textContent = "(none)";
-              contextTextEl.textContent = "(none)";
+              setContextViewText("(none)");
             }
           });
           worklogEl.appendChild(item);
@@ -1160,12 +1238,51 @@
         const data = await res.json();
         inputTextEl.textContent = input;
         outputTextEl.textContent = data.output || "";
-        contextTextEl.textContent = "(none)";
+        setContextViewText("(none)");
         rawTextEl.textContent = "(none)";
         state.lastInput = input;
         state.lastOutput = data.output || "";
         setFlowHighlight({ kind: state.selectedKind, name: moduleName });
         runStatus.textContent = "Done.";
+        await fetchWorklogs();
+      }
+
+      async function resendWithEditedContext() {
+        const moduleName = state.selectedResendModule;
+        if (!moduleName) {
+          contextEditStatusEl.textContent = "Select an event with a runnable module.";
+          return;
+        }
+        const contextOverride = (contextEditorEl.value || "").trim();
+        if (!contextOverride) {
+          contextEditStatusEl.textContent = "Context is empty.";
+          return;
+        }
+        const input = (inputTextEl.textContent || state.lastInput || "debug resend").trim();
+        contextEditStatusEl.textContent = `Re-sending to ${moduleName}...`;
+        contextResendButton.disabled = true;
+        const payload = {
+          input,
+          context_override: contextOverride,
+          append_input_mode: state.appendInputMode,
+        };
+        const res = await fetch(`/debug/modules/${encodeURIComponent(moduleName)}/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        contextResendButton.disabled = false;
+        if (!res.ok) {
+          contextEditStatusEl.textContent = "Re-send failed.";
+          return;
+        }
+        const data = await res.json();
+        inputTextEl.textContent = input;
+        outputTextEl.textContent = data.output || "";
+        rawTextEl.textContent = "(none)";
+        runStatus.textContent = "Done.";
+        contextEditStatusEl.textContent = `Re-sent to ${moduleName}.`;
+        setContextEditMode(false);
         await fetchWorklogs();
       }
 
@@ -1195,7 +1312,7 @@
           runStatus.textContent = "No raw payload found.";
           return;
         }
-        contextTextEl.textContent = latest.payload.context || "(none)";
+        setContextViewText(latest.payload.context || "(none)");
         rawTextEl.textContent = JSON.stringify(latest.payload.raw, null, 2);
       }
 
@@ -1390,6 +1507,22 @@
         renderWorklogs();
       });
 
+      contextEditStartButton.addEventListener("click", () => {
+        if (!state.selectedResendModule) {
+          contextEditStatusEl.textContent = "Select an event first.";
+          return;
+        }
+        contextEditStatusEl.textContent = "";
+        setContextEditMode(true);
+      });
+
+      contextEditCancelButton.addEventListener("click", () => {
+        contextEditStatusEl.textContent = "";
+        setContextEditMode(false);
+      });
+
+      contextResendButton.addEventListener("click", resendWithEditedContext);
+
       modulePrompt.addEventListener("input", () => {
         const name = state.selectedModule;
         if (!name) return;
@@ -1451,6 +1584,8 @@
       loadPersistedDebugState();
       appendInputModeSelect.value = state.appendInputMode;
       eventFilterSelect.value = state.eventFilter;
+      setContextViewText("(none)");
+      setContextEditMode(false);
       fetchPrompts();
       fetchWorklogs();
       setFlowHighlight(null);

@@ -68,6 +68,11 @@
   - only existing `submodule:<name>` history rows are overwritten
   - no additional synthetic submodule rows are appended
   - persisted event stream remains unchanged
+- Debug UI now supports context editing and resend from the center panel:
+  - `Edit` is enabled only when a log event is selected and its emitter resolves to a runnable module (`decision` or a single submodule)
+  - `Re-send` posts `context_override` to the selected emitter module
+  - resend target is bound to the selected event's emitter to preserve "re-send" semantics
+  - no new mode toggle was added to the right panel to keep panel complexity stable
 
 ## Explicit Notes from User Feedback
 - Event Log should be principle-first: all events are visible.
