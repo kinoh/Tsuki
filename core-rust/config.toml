@@ -23,6 +23,7 @@ submodule_history = 10
 
 [router]
 concept_top_n = 5
+hard_trigger_threshold = 0.85
 recommendation_threshold = 0.6
 
 [db]

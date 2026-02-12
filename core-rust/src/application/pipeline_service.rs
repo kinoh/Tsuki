@@ -46,6 +46,12 @@ struct ModuleOutput {
     text: String,
 }
 
+#[derive(Debug, Clone)]
+struct HardTriggerResult {
+    module: String,
+    text: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct ConceptActivation {
     concept: String,
@@ -55,6 +61,7 @@ struct ConceptActivation {
 #[derive(Debug, Clone, Serialize)]
 struct RouterOutput {
     concept_activation: Vec<ConceptActivation>,
+    hard_triggers: Vec<String>,
     soft_recommendations: Vec<String>,
 }
 
@@ -280,14 +287,13 @@ async fn run_router(input_text: &str, modules: &Modules, state: &AppState) -> Ro
             Vec::new()
         }
     };
-    let soft_recommendations = compute_soft_recommendations(
-        input_text,
-        &concept_activation,
-        &active_module_names,
-        state.router.recommendation_threshold,
-    );
+    let scores = compute_module_scores(input_text, &concept_activation, &active_module_names);
+    let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
+    let soft_recommendations =
+        select_modules_by_threshold(&scores, state.router.recommendation_threshold);
     let router_output = RouterOutput {
         concept_activation,
+        hard_triggers,
         soft_recommendations,
     };
     let router_event = build_event(
@@ -356,12 +362,11 @@ fn compute_concept_activation(input_text: &str, state: &AppState) -> Vec<Concept
     scored
 }
 
-fn compute_soft_recommendations(
+fn compute_module_scores(
     input_text: &str,
     concept_activation: &[ConceptActivation],
     active_module_names: &[String],
-    threshold: f32,
-) -> Vec<String> {
+) -> Vec<(String, f32)> {
     let lower = input_text.to_lowercase();
     let token_set = tokenize(&lower).into_iter().collect::<HashSet<_>>();
     let concept_text = concept_activation
@@ -369,7 +374,6 @@ fn compute_soft_recommendations(
         .map(|value| value.concept.to_lowercase())
         .collect::<Vec<_>>()
         .join(" ");
-    let threshold = threshold.clamp(0.0, 1.0);
     let mut scored = Vec::<(String, f32)>::new();
     for name in active_module_names {
         let mut score = 0.0f32;
@@ -385,16 +389,23 @@ fn compute_soft_recommendations(
                 score += delta;
             }
         }
-        if score >= threshold {
-            scored.push((name.clone(), score.min(1.0)));
-        }
+        scored.push((name.clone(), score.min(1.0)));
     }
     scored.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.0.cmp(&b.0))
     });
-    scored.into_iter().map(|(name, _)| name).collect()
+    scored
+}
+
+fn select_modules_by_threshold(scores: &[(String, f32)], threshold: f32) -> Vec<String> {
+    let threshold = threshold.clamp(0.0, 1.0);
+    scores
+        .iter()
+        .filter(|(_, score)| *score >= threshold)
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 fn module_keywords(name: &str) -> Vec<(&'static str, f32)> {
@@ -476,6 +487,8 @@ async fn run_decision(
             .unwrap_or(definition.instructions);
         module_instructions.insert(module_name, instructions);
     }
+    let hard_trigger_results =
+        run_hard_triggers(input_text, router_output, &module_instructions, state).await;
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
@@ -490,10 +503,12 @@ async fn run_decision(
         Arc::new(handler),
     ));
     let context = format!(
-        "Latest user input: {}\nConcept activation(top {}):\n{}\nSubmodule recommendations:\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
+        "Latest user input: {}\nConcept activation(top {}):\n{}\nHard triggers:\n{}\nHard trigger execution results:\n{}\nSubmodule recommendations:\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
         input_text,
         state.router.concept_top_n.max(1),
         format_concept_activation(&router_output.concept_activation),
+        format_hard_triggers(&router_output.hard_triggers),
+        format_hard_trigger_results(&hard_trigger_results),
         format_soft_recommendations(&router_output.soft_recommendations),
         history
     );
@@ -583,6 +598,8 @@ async fn run_decision_debug(
             .unwrap_or(definition.instructions);
         module_instructions.insert(module_name, instructions);
     }
+    let hard_trigger_results =
+        run_hard_triggers(input_text, &router_output, &module_instructions, state).await;
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
@@ -601,10 +618,12 @@ async fn run_decision_debug(
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         format!(
-            "Latest user input: {}\nConcept activation(top {}):\n{}\nSubmodule recommendations:\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
+            "Latest user input: {}\nConcept activation(top {}):\n{}\nHard triggers:\n{}\nHard trigger execution results:\n{}\nSubmodule recommendations:\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
             input_text,
             state.router.concept_top_n.max(1),
             format_concept_activation(&router_output.concept_activation),
+            format_hard_triggers(&router_output.hard_triggers),
+            format_hard_trigger_results(&hard_trigger_results),
             format_soft_recommendations(&router_output.soft_recommendations),
             history
         )
@@ -922,6 +941,49 @@ async fn run_submodule_tool(
     Ok(output.text)
 }
 
+async fn run_hard_triggers(
+    input_text: &str,
+    router_output: &RouterOutput,
+    module_instructions: &HashMap<String, String>,
+    state: &AppState,
+) -> Vec<HardTriggerResult> {
+    if router_output.hard_triggers.is_empty() {
+        return Vec::new();
+    }
+    let runs = router_output
+        .hard_triggers
+        .iter()
+        .filter_map(|module_name| {
+            module_instructions
+                .get(module_name)
+                .map(|instructions| (module_name.clone(), instructions.clone()))
+        })
+        .map(|(module_name, instructions)| async move {
+            let result = run_submodule_tool(
+                state,
+                input_text,
+                router_output,
+                &module_name,
+                &instructions,
+                Some("hard_trigger"),
+            )
+            .await;
+            (module_name, result)
+        })
+        .collect::<Vec<_>>();
+    join_all(runs)
+        .await
+        .into_iter()
+        .map(|(module, result)| match result {
+            Ok(text) => HardTriggerResult { module, text },
+            Err(err) => HardTriggerResult {
+                module,
+                text: format!("error: {}", err),
+            },
+        })
+        .collect()
+}
+
 async fn run_module(
     state: &AppState,
     name: String,
@@ -1168,6 +1230,28 @@ fn format_concept_activation(concepts: &[ConceptActivation]) -> String {
         .join("\n")
 }
 
+fn format_hard_triggers(hard_triggers: &[String]) -> String {
+    if hard_triggers.is_empty() {
+        return "none".to_string();
+    }
+    hard_triggers
+        .iter()
+        .map(|name| format!("- {}", name))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {
+    if outputs.is_empty() {
+        return "none".to_string();
+    }
+    outputs
+        .iter()
+        .map(|output| format!("- {}: {}", output.module, truncate(&output.text, 160)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn format_soft_recommendations(recommendations: &[String]) -> String {
     if recommendations.is_empty() {
         return "none".to_string();
@@ -1271,6 +1355,22 @@ mod tests {
                 .and_then(|value| value.as_str())
                 .unwrap_or(""),
             "new social"
+        );
+    }
+
+    #[test]
+    fn select_modules_by_threshold_filters_by_score() {
+        let scores = vec![
+            ("curiosity".to_string(), 0.92),
+            ("self_preservation".to_string(), 0.72),
+            ("social_approval".to_string(), 0.58),
+        ];
+        let hard = select_modules_by_threshold(&scores, 0.85);
+        let soft = select_modules_by_threshold(&scores, 0.60);
+        assert_eq!(hard, vec!["curiosity".to_string()]);
+        assert_eq!(
+            soft,
+            vec!["curiosity".to_string(), "self_preservation".to_string()]
         );
     }
 }

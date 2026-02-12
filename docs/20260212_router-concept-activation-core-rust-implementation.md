@@ -25,5 +25,6 @@ The runtime in `core-rust` previously executed all active submodules on every in
 ## Notes
 - Concept activation access remains in-process via application state store (no MCP round trip in the activation path).
 - Added a unit test for the override-and-insert rule to protect the new context composition behavior.
-- `hard_triggers` are part of the architecture-level design in `docs/20260211_router-concept-activation-submodule-gating.md`, but forced pre-decision execution is not implemented in this change set.
-- This document describes the currently implemented `core-rust` behavior; hard-trigger execution remains a follow-up implementation step.
+- Follow-up update after user correction:
+  - The initial implementation omitted router `hard_triggers`.
+  - We aligned implementation with the updated spec by adding hard-trigger thresholds in config, router hard-trigger output, application-stage hard-trigger execution before decision, and hard-trigger execution results in decision input.

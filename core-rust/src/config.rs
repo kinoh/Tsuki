@@ -37,6 +37,8 @@ pub struct LimitsConfig {
 pub struct RouterConfig {
     #[serde(default = "default_concept_top_n")]
     pub concept_top_n: usize,
+    #[serde(default = "default_hard_trigger_threshold")]
+    pub hard_trigger_threshold: f32,
     #[serde(default = "default_recommendation_threshold")]
     pub recommendation_threshold: f32,
 }
@@ -45,6 +47,7 @@ impl Default for RouterConfig {
     fn default() -> Self {
         Self {
             concept_top_n: default_concept_top_n(),
+            hard_trigger_threshold: default_hard_trigger_threshold(),
             recommendation_threshold: default_recommendation_threshold(),
         }
     }
@@ -52,6 +55,10 @@ impl Default for RouterConfig {
 
 fn default_concept_top_n() -> usize {
     5
+}
+
+fn default_hard_trigger_threshold() -> f32 {
+    0.85
 }
 
 fn default_recommendation_threshold() -> f32 {
