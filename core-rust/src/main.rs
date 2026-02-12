@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 
-use crate::config::{load_config, Config, LimitsConfig};
+use crate::config::{load_config, Config, LimitsConfig, RouterConfig};
 use crate::db::Db;
 use crate::event::Event;
 use crate::event_store::EventStore;
@@ -39,8 +39,10 @@ pub(crate) struct AppState {
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) tx: broadcast::Sender<Event>,
     pub(crate) auth_token: String,
+    pub(crate) state_store: Arc<dyn StateStore>,
     pub(crate) modules: Modules,
     pub(crate) limits: LimitsConfig,
+    pub(crate) router: RouterConfig,
     pub(crate) prompts: Arc<RwLock<PromptOverrides>>,
     pub(crate) prompts_path: PathBuf,
     pub(crate) decision_instructions: String,
@@ -153,7 +155,6 @@ pub(crate) struct DebugImproveResponse {
     pub(crate) applied: bool,
 }
 
-
 #[tokio::main]
 async fn main() {
     let config = load_config("config.toml").expect("failed to load config");
@@ -191,8 +192,10 @@ async fn main() {
         event_store,
         tx,
         auth_token,
+        state_store,
         modules,
         limits: config.limits.clone(),
+        router: config.router.clone(),
         prompts,
         prompts_path,
         decision_instructions: config.llm.decision_instructions.clone(),
@@ -409,7 +412,8 @@ async fn debug_run_module(
     State(state): State<AppState>,
     Json(payload): Json<DebugRunRequest>,
 ) -> Result<Json<DebugRunResponse>, (StatusCode, String)> {
-    let result = crate::application::pipeline_service::run_debug_module(&state, name, payload).await?;
+    let result =
+        crate::application::pipeline_service::run_debug_module(&state, name, payload).await?;
     Ok(Json(result))
 }
 
