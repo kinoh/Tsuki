@@ -1,58 +1,88 @@
 # Router-First Concept Activation and Submodule Gating
 
-## Context
-- Current runtime executes all active submodules for each user input in the normal flow.
-- This is resource-heavy and does not match the intended architecture.
-- The target is router-first orchestration with concept-graph-driven activation.
+## Background
+Current runtime behavior executes all active submodules for each user input in the normal flow. This increases cost and latency, and it does not match the intended interaction style where deeper processing should happen conditionally.
 
-## Final Decisions
+Decision currently consumes history-oriented text, while internal activation intent is not represented as a dedicated state. This makes orchestration harder to control and reason about.
 
-### 1) Router Output Schema
-- Keep output schema minimal and sufficient.
-- Required fields:
-  - `concept_activation` (current activated concepts and scores)
-  - `soft_recommendations` (recommended submodules)
+## Goal
+Move orchestration to a router-first model where concept-graph activation is the primary internal state, and submodule execution is gated by router output instead of always-on fan-out.
 
-### 2) Threshold Source
-- Threshold values are managed in configuration files.
+## Scope
+This document defines runtime orchestration for:
+- router output and activation-driven submodule recommendation,
+- decision input composition,
+- `submodule_outputs` override behavior in composed input history,
+- integration boundary between application runtime and concept-graph access.
 
-### 3) Decision Control Semantics
-- `reflect` is not used.
-- Submodules are always provided to Decision as tools.
-- Soft trigger is recommendation only; it is not a forced execution signal.
+Out of scope:
+- dedicated KPI framework for this phase,
+- dedicated rollout plan for this phase,
+- special-case failure handling beyond existing behavior.
 
-### 4) Re-run Stop Condition
-- No dedicated stop-condition policy is introduced in this design.
+## System Model
+### Components
+- Router:
+  - reads new user input,
+  - reads concept graph state,
+  - emits minimal activation output.
+- Application orchestrator:
+  - receives router output,
+  - decides submodule calls,
+  - composes decision input,
+  - invokes decision.
+- Decision:
+  - receives context and tool availability,
+  - returns normal decision output.
+- Submodules:
+  - exposed to Decision as tools at all times.
 
-### 5) Decision Input
-- Decision input contains:
-  - concept state and activation
-  - submodule recommendations
-- Top-N count follows MCP-side conventions.
+### Router Output (minimal schema)
+- `concept_activation`:
+  - active concepts and current activation scores.
+- `soft_recommendations`:
+  - recommended submodule names.
 
-### 6) `submodule_outputs` Override Rule
-- If a matching submodule event exists in history, override that value.
-- If no matching event exists, insert at the latest position in the input event sequence.
+## Runtime Flow
+1. User input arrives.
+2. Router computes activation and returns minimal output.
+3. Application composes decision input from:
+   - concept state and activation,
+   - submodule recommendations,
+   - existing event history context.
+4. Decision runs with submodules available as tools.
+5. If Decision chooses to use a submodule tool, normal event flow records that execution and output.
 
-### 7) Event Design
-- No activation snapshot event is introduced.
+## Decision Semantics
+- Soft trigger output from router is recommendation only.
+- Submodule execution is not forced by soft recommendation; Decision can choose whether to call tools.
 
-### 8) Failure Policy
-- No special failure policy is introduced.
+## Threshold Policy
+Threshold values are managed in configuration files.
 
-### 9) Observability / KPI
-- No dedicated KPI requirement is introduced for this phase.
+## Decision Input Contract
+Decision input contains:
+- concept state and activation,
+- submodule recommendations,
+- production-style event-history context.
 
-### 10) Rollout Strategy
-- No dedicated rollout strategy is introduced for this phase.
+Top-N count for concept activation follows the original core conventions.
 
-## Concept-Graph Integration Boundary
-- Concept-graph access is application-led by default.
-- Router / activation / decision-prep paths use in-process library access.
-- MCP exposure is optional for secondary use cases only.
+## `submodule_outputs` Override Rule
+When composing history for decision input:
+- if a matching submodule event exists, override its value,
+- if no matching event exists, insert the provided output at the latest position in the input event sequence.
 
-## Explicit Notes from User Feedback
-- Executing all submodules on every input is overuse of resources.
-- Human-like behavior should not assume constant deep deliberation.
-- Decision-side recommendation should remain recommendation, not forced control.
-- `reflect` was removed due to semantic confusion in this context.
+This rule applies to composed input context; it does not require additional synthetic persistence events.
+
+## Integration Boundary
+Concept-graph access is application-led by default:
+- router / activation / decision-prep paths use in-process library access.
+- No MCP exposure.
+
+Core activation paths should not depend on MCP round-trip latency.
+
+## Notes from Discussion
+- Running all submodules for every input is considered resource overuse.
+- Human-like response behavior should not assume constant deep deliberation.
+- Recommendation must remain recommendation; avoid hidden forced control semantics.
