@@ -11,6 +11,7 @@ Move orchestration to a router-first model where concept-graph activation is the
 ## Scope
 This document defines runtime orchestration for:
 - router output and activation-driven submodule recommendation,
+- router-driven hard trigger execution at application orchestration stage,
 - decision input composition,
 - `submodule_outputs` override behavior in composed input history,
 - integration boundary between application runtime and concept-graph access.
@@ -40,20 +41,25 @@ Out of scope:
 ### Router Output (minimal schema)
 - `concept_activation`:
   - active concepts and current activation scores.
+- `hard_triggers`:
+  - submodule names that must be executed by the application before decision.
 - `soft_recommendations`:
   - recommended submodule names.
 
 ## Runtime Flow
 1. User input arrives.
 2. Router computes activation and returns minimal output.
-3. Application composes decision input from:
+3. Application executes `hard_triggers`.
+4. Application composes decision input from:
    - concept state and activation,
+   - hard-trigger execution results,
    - submodule recommendations,
    - existing event history context.
-4. Decision runs with submodules available as tools.
-5. If Decision chooses to use a submodule tool, normal event flow records that execution and output.
+5. Decision runs with submodules available as tools.
+6. If Decision chooses to use a submodule tool, normal event flow records that execution and output.
 
 ## Decision Semantics
+- Hard trigger is force execution at application orchestration stage.
 - Soft trigger output from router is recommendation only.
 - Submodule execution is not forced by soft recommendation; Decision can choose whether to call tools.
 
@@ -63,6 +69,7 @@ Threshold values are managed in configuration files.
 ## Decision Input Contract
 Decision input contains:
 - concept state and activation,
+- hard trigger execution results,
 - submodule recommendations,
 - production-style event-history context.
 
@@ -86,3 +93,4 @@ Core activation paths should not depend on MCP round-trip latency.
 - Running all submodules for every input is considered resource overuse.
 - Human-like response behavior should not assume constant deep deliberation.
 - Recommendation must remain recommendation; avoid hidden forced control semantics.
+- Hard trigger execution is handled by the application after router output, not by Decision recommendation semantics.
