@@ -86,6 +86,8 @@ This rule applies to composed input context; it does not require additional synt
 Concept-graph access is application-led by default:
 - router / activation / decision-prep paths use in-process library access.
 - No MCP exposure.
+- Even with in-process access, the concept-graph module must provide an interface equivalent to
+  `mcp/concept-graph` so behavior and integration contracts stay aligned.
 
 Core activation paths should not depend on MCP round-trip latency.
 
