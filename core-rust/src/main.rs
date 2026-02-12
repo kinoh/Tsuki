@@ -1,3 +1,4 @@
+mod activation_concept_graph;
 mod application;
 mod clock;
 mod config;
@@ -25,6 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 
+use crate::activation_concept_graph::ActivationConceptGraphStore;
 use crate::config::{load_config, Config, LimitsConfig, RouterConfig};
 use crate::db::Db;
 use crate::event::Event;
@@ -40,6 +42,7 @@ pub(crate) struct AppState {
     pub(crate) tx: broadcast::Sender<Event>,
     pub(crate) auth_token: String,
     pub(crate) state_store: Arc<dyn StateStore>,
+    pub(crate) activation_concept_graph: Arc<ActivationConceptGraphStore>,
     pub(crate) modules: Modules,
     pub(crate) limits: LimitsConfig,
     pub(crate) router: RouterConfig,
@@ -180,6 +183,20 @@ async fn main() {
         });
     });
     let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
+    let arousal_tau_ms = std::env::var("AROUSAL_TAU_MS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(86_400_000.0);
+    let activation_concept_graph = Arc::new(
+        ActivationConceptGraphStore::connect(
+            std::env::var("MEMGRAPH_URI").unwrap_or_else(|_| "bolt://localhost:7687".to_string()),
+            std::env::var("MEMGRAPH_USER").unwrap_or_default(),
+            std::env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
+            arousal_tau_ms,
+        )
+        .await
+        .expect("failed to connect activation concept graph store"),
+    );
     let module_registry = ModuleRegistry::new(db.clone());
     let defaults = module_defaults_from_config(&config);
     module_registry
@@ -193,6 +210,7 @@ async fn main() {
         tx,
         auth_token,
         state_store,
+        activation_concept_graph,
         modules,
         limits: config.limits.clone(),
         router: config.router.clone(),

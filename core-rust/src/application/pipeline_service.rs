@@ -279,7 +279,7 @@ fn is_decision_event(event: &Event) -> bool {
 }
 
 async fn run_router(input_text: &str, modules: &Modules, state: &AppState) -> RouterOutput {
-    let concept_activation = compute_concept_activation(input_text, state);
+    let concept_activation = compute_concept_activation(input_text, state).await;
     let active_module_names = match modules.registry.list_active().await {
         Ok(defs) => defs.into_iter().map(|d| d.name).collect::<Vec<_>>(),
         Err(err) => {
@@ -307,7 +307,7 @@ async fn run_router(input_text: &str, modules: &Modules, state: &AppState) -> Ro
     router_output
 }
 
-fn compute_concept_activation(input_text: &str, state: &AppState) -> Vec<ConceptActivation> {
+async fn compute_concept_activation(input_text: &str, state: &AppState) -> Vec<ConceptActivation> {
     let normalized = input_text.trim().to_lowercase();
     if normalized.is_empty() {
         return Vec::new();
@@ -318,35 +318,36 @@ fn compute_concept_activation(input_text: &str, state: &AppState) -> Vec<Concept
     let mut queries = tokens.clone();
     queries.push(normalized.clone());
     queries.dedup();
-    for query in queries {
-        for record in state.state_store.search(&query, search_limit) {
-            let key = record.key.trim().to_string();
-            if key.is_empty() {
-                continue;
-            }
-            let key_lc = key.to_lowercase();
-            let content_lc = record.content.to_lowercase();
-            let mut score = 0.0f32;
-            if key_lc.contains(&normalized) {
-                score += 0.65;
-            }
-            if content_lc.contains(&normalized) {
+    let concepts = match state
+        .activation_concept_graph
+        .concept_search(&queries, search_limit)
+        .await
+    {
+        Ok(values) => values,
+        Err(err) => {
+            println!(
+                "ACTIVATION_CONCEPT_GRAPH_ERROR op=concept_search error={}",
+                err
+            );
+            Vec::new()
+        }
+    };
+    for key in concepts {
+        let key_lc = key.to_lowercase();
+        let mut score = 0.0f32;
+        if key_lc.contains(&normalized) {
+            score += 0.7;
+        }
+        for token in &tokens {
+            if key_lc.contains(token) {
                 score += 0.25;
             }
-            for token in &tokens {
-                if key_lc.contains(token) {
-                    score += 0.2;
-                }
-                if content_lc.contains(token) {
-                    score += 0.1;
-                }
-            }
-            if score <= 0.0 {
-                score = 0.05;
-            }
-            let entry = score_map.entry(key).or_insert(0.0);
-            *entry = (*entry).max(score.min(1.0));
         }
+        if score <= 0.0 {
+            score = 0.05;
+        }
+        let entry = score_map.entry(key).or_insert(0.0);
+        *entry = (*entry).max(score.min(1.0));
     }
     let mut scored = score_map
         .into_iter()
