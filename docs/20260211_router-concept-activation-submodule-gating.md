@@ -96,3 +96,10 @@ Core activation paths should not depend on MCP round-trip latency.
 - Human-like response behavior should not assume constant deep deliberation.
 - Recommendation must remain recommendation; avoid hidden forced control semantics.
 - Hard trigger execution is handled by the application after router output, not by Decision recommendation semantics.
+
+## Follow-up Clarification (2026-02-13)
+- Router is clarified as a language-ambiguity absorber that outputs query terms; it should not execute tools in activation path.
+- Application activation path reads concept-graph state in-process and does not depend on MCP transport round-trip.
+- Submodule-purpose-driven graph mutation is handled by submodules, not by application-level embedded keyword heuristics.
+- Consolidated responsibility and interface details are documented in:
+  - `docs/20260213_router-concept-graph-interface-and-responsibility-clarification.md`

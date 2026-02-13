@@ -28,3 +28,6 @@ The runtime in `core-rust` previously executed all active submodules on every in
 - Follow-up update after user correction:
   - The initial implementation omitted router `hard_triggers`.
   - We aligned implementation with the updated spec by adding hard-trigger thresholds in config, router hard-trigger output, application-stage hard-trigger execution before decision, and hard-trigger execution results in decision input.
+- Follow-up clarification is captured in:
+  - `docs/20260213_router-concept-graph-interface-and-responsibility-clarification.md`
+  - This clarifies that router should output query terms and avoid tool execution in activation path, and that submodule-purpose graph mutations should not be hardcoded in application keyword logic.
