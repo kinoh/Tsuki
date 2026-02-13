@@ -10,7 +10,8 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let path = std::env::args().nth(1).ok_or_else(usage)?;
-    let content = fs::read_to_string(&path).map_err(|err| format!("failed to read log: {}", err))?;
+    let content =
+        fs::read_to_string(&path).map_err(|err| format!("failed to read log: {}", err))?;
 
     let mut last_send_time: Option<i64> = None;
 

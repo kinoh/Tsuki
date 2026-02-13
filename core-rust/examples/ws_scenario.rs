@@ -67,7 +67,9 @@ async fn run() -> Result<(), String> {
     let scenario = load_scenario(&scenario_path)?;
     let config = ClientConfig::from_env();
     let log_path = init_log_path(&config.log_dir)?;
-    let logger = Arc::new(Mutex::new(Logger::new(&log_path).map_err(|err| err.to_string())?));
+    let logger = Arc::new(Mutex::new(
+        Logger::new(&log_path).map_err(|err| err.to_string())?,
+    ));
 
     log_event(
         &logger,
@@ -126,8 +128,8 @@ async fn run() -> Result<(), String> {
             match message {
                 Ok(Message::Text(text)) => {
                     let raw = text.to_string();
-                    let parsed = serde_json::from_str::<Value>(&raw)
-                        .unwrap_or_else(|_| Value::String(raw));
+                    let parsed =
+                        serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| Value::String(raw));
                     log_event(
                         &reader_logger,
                         json!({
@@ -225,7 +227,8 @@ impl ClientConfig {
         let ws_url = std::env::var("WS_URL").unwrap_or_else(|_| DEFAULT_WS_URL.to_string());
         let auth_token =
             std::env::var("WEB_AUTH_TOKEN").unwrap_or_else(|_| DEFAULT_AUTH_TOKEN.to_string());
-        let user_name = std::env::var("USER_NAME").unwrap_or_else(|_| DEFAULT_USER_NAME.to_string());
+        let user_name =
+            std::env::var("USER_NAME").unwrap_or_else(|_| DEFAULT_USER_NAME.to_string());
         let log_dir = std::env::var("LOG_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(DEFAULT_LOG_DIR));
@@ -262,7 +265,8 @@ fn usage() -> String {
 }
 
 fn load_scenario(path: &Path) -> Result<Scenario, String> {
-    let raw = fs::read_to_string(path).map_err(|err| format!("failed to read scenario: {}", err))?;
+    let raw =
+        fs::read_to_string(path).map_err(|err| format!("failed to read scenario: {}", err))?;
     let scenario: Scenario =
         serde_yaml::from_str(&raw).map_err(|err| format!("failed to parse YAML: {}", err))?;
 
@@ -297,7 +301,10 @@ fn load_scenario(path: &Path) -> Result<Scenario, String> {
 }
 
 fn normalize_kind(kind: Option<&str>) -> Result<&'static str, String> {
-    match kind.map(|value| value.trim()).filter(|value| !value.is_empty()) {
+    match kind
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
         None => Ok("message"),
         Some("message") => Ok("message"),
         Some("sensory") => Ok("sensory"),
@@ -347,7 +354,10 @@ fn init_log_path(log_dir: &Path) -> Result<PathBuf, String> {
     let now = OffsetDateTime::now_utc();
     let format = format_description::parse("[year][month][day]-[hour][minute][second]")
         .map_err(|err| format!("failed to format timestamp: {}", err))?;
-    let file_name = format!("{}.jsonl", now.format(&format).unwrap_or_else(|_| "log".to_string()));
+    let file_name = format!(
+        "{}.jsonl",
+        now.format(&format).unwrap_or_else(|_| "log".to_string())
+    );
     Ok(log_dir.join(file_name))
 }
 

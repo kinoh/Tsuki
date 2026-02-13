@@ -3,7 +3,7 @@ use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
@@ -53,14 +53,13 @@ struct HardTriggerResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct ConceptActivation {
-    concept: String,
-    score: f32,
+struct RouterOutput {
+    activation_query_terms: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct RouterOutput {
-    concept_activation: Vec<ConceptActivation>,
+#[derive(Debug, Clone)]
+struct ActivationSnapshot {
+    concepts: Vec<String>,
     hard_triggers: Vec<String>,
     soft_recommendations: Vec<String>,
 }
@@ -80,7 +79,7 @@ struct DecisionParsed {
 struct DecisionToolHandler {
     state: AppState,
     input_text: String,
-    router_output: RouterOutput,
+    activation_snapshot: ActivationSnapshot,
     base_handler: Arc<dyn ToolHandler>,
     module_instructions: HashMap<String, String>,
 }
@@ -278,23 +277,9 @@ fn is_decision_event(event: &Event) -> bool {
     event.meta.tags.iter().any(|tag| tag == "decision")
 }
 
-async fn run_router(input_text: &str, modules: &Modules, state: &AppState) -> RouterOutput {
-    let concept_activation = compute_concept_activation(input_text, state).await;
-    let active_module_names = match modules.registry.list_active().await {
-        Ok(defs) => defs.into_iter().map(|d| d.name).collect::<Vec<_>>(),
-        Err(err) => {
-            println!("MODULE_REGISTRY_ERROR error={}", err);
-            Vec::new()
-        }
-    };
-    let scores = compute_module_scores(input_text, &concept_activation, &active_module_names);
-    let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
-    let soft_recommendations =
-        select_modules_by_threshold(&scores, state.router.recommendation_threshold);
+async fn run_router(input_text: &str, _modules: &Modules, state: &AppState) -> RouterOutput {
     let router_output = RouterOutput {
-        concept_activation,
-        hard_triggers,
-        soft_recommendations,
+        activation_query_terms: build_activation_query_terms(input_text),
     };
     let router_event = build_event(
         "internal",
@@ -307,20 +292,28 @@ async fn run_router(input_text: &str, modules: &Modules, state: &AppState) -> Ro
     router_output
 }
 
-async fn compute_concept_activation(input_text: &str, state: &AppState) -> Vec<ConceptActivation> {
+fn build_activation_query_terms(input_text: &str) -> Vec<String> {
     let normalized = input_text.trim().to_lowercase();
     if normalized.is_empty() {
         return Vec::new();
     }
-    let tokens = tokenize(&normalized);
-    let mut score_map = BTreeMap::<String, f32>::new();
-    let search_limit = state.router.concept_top_n.saturating_mul(4).max(8);
-    let mut queries = tokens.clone();
-    queries.push(normalized.clone());
-    queries.dedup();
+    let mut terms = tokenize(&normalized);
+    terms.push(normalized);
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+async fn build_activation_snapshot(
+    input_text: &str,
+    router_output: &RouterOutput,
+    active_module_names: &[String],
+    state: &AppState,
+) -> ActivationSnapshot {
+    let concept_limit = state.router.concept_top_n.max(1);
     let concepts = match state
         .activation_concept_graph
-        .concept_search(&queries, search_limit)
+        .concept_search(&router_output.activation_query_terms, concept_limit)
         .await
     {
         Ok(values) => values,
@@ -332,65 +325,51 @@ async fn compute_concept_activation(input_text: &str, state: &AppState) -> Vec<C
             Vec::new()
         }
     };
-    for key in concepts {
-        let key_lc = key.to_lowercase();
-        let mut score = 0.0f32;
-        if key_lc.contains(&normalized) {
-            score += 0.7;
-        }
-        for token in &tokens {
-            if key_lc.contains(token) {
-                score += 0.25;
-            }
-        }
-        if score <= 0.0 {
-            score = 0.05;
-        }
-        let entry = score_map.entry(key).or_insert(0.0);
-        *entry = (*entry).max(score.min(1.0));
+    let scores = compute_module_scores_minimal(
+        input_text,
+        &router_output.activation_query_terms,
+        &concepts,
+        active_module_names,
+    );
+    let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
+    let soft_recommendations =
+        select_modules_by_threshold(&scores, state.router.recommendation_threshold);
+    ActivationSnapshot {
+        concepts,
+        hard_triggers,
+        soft_recommendations,
     }
-    let mut scored = score_map
-        .into_iter()
-        .map(|(concept, score)| ConceptActivation { concept, score })
-        .collect::<Vec<_>>();
-    scored.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.concept.cmp(&b.concept))
-    });
-    scored.truncate(state.router.concept_top_n.max(1));
-    scored
 }
 
-fn compute_module_scores(
+fn compute_module_scores_minimal(
     input_text: &str,
-    concept_activation: &[ConceptActivation],
+    activation_query_terms: &[String],
+    activation_concepts: &[String],
     active_module_names: &[String],
 ) -> Vec<(String, f32)> {
     let lower = input_text.to_lowercase();
-    let token_set = tokenize(&lower).into_iter().collect::<HashSet<_>>();
-    let concept_text = concept_activation
+    let query_terms = activation_query_terms
         .iter()
-        .map(|value| value.concept.to_lowercase())
-        .collect::<Vec<_>>()
-        .join(" ");
+        .map(|value| value.to_lowercase())
+        .collect::<HashSet<_>>();
+    let concept_terms = activation_concepts
+        .iter()
+        .map(|value| value.to_lowercase())
+        .collect::<Vec<_>>();
     let mut scored = Vec::<(String, f32)>::new();
     for name in active_module_names {
-        let mut score = 0.0f32;
         let name_lc = name.to_lowercase();
-        if token_set.contains(name_lc.as_str()) || lower.contains(name_lc.as_str()) {
-            score += 0.8;
-        }
-        if concept_text.contains(name_lc.as_str()) {
-            score += 0.4;
-        }
-        for (keyword, delta) in module_keywords(name) {
-            if lower.contains(keyword) || token_set.contains(keyword) {
-                score += delta;
-            }
-        }
-        scored.push((name.clone(), score.min(1.0)));
+        let matched_input = lower.contains(name_lc.as_str());
+        let matched_query = query_terms.contains(name_lc.as_str());
+        let matched_concept = concept_terms
+            .iter()
+            .any(|concept| concept == &name_lc || concept.contains(name_lc.as_str()));
+        let score = if matched_input || matched_query || matched_concept {
+            1.0
+        } else {
+            0.0
+        };
+        scored.push((name.clone(), score));
     }
     scored.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
@@ -407,44 +386,6 @@ fn select_modules_by_threshold(scores: &[(String, f32)], threshold: f32) -> Vec<
         .filter(|(_, score)| *score >= threshold)
         .map(|(name, _)| name.clone())
         .collect()
-}
-
-fn module_keywords(name: &str) -> Vec<(&'static str, f32)> {
-    match name {
-        "curiosity" => vec![
-            ("why", 0.25),
-            ("how", 0.2),
-            ("learn", 0.2),
-            ("explore", 0.2),
-            ("curious", 0.2),
-            ("なぜ", 0.25),
-            ("どうして", 0.25),
-            ("知りたい", 0.2),
-            ("気になる", 0.2),
-        ],
-        "self_preservation" => vec![
-            ("risk", 0.25),
-            ("safe", 0.25),
-            ("danger", 0.25),
-            ("error", 0.2),
-            ("security", 0.2),
-            ("危険", 0.25),
-            ("不安", 0.2),
-            ("安全", 0.25),
-            ("失敗", 0.2),
-        ],
-        "social_approval" => vec![
-            ("thanks", 0.2),
-            ("thank", 0.2),
-            ("sorry", 0.2),
-            ("help", 0.2),
-            ("ありがとう", 0.25),
-            ("ごめん", 0.2),
-            ("嬉しい", 0.2),
-            ("助けて", 0.2),
-        ],
-        _ => Vec::new(),
-    }
 }
 
 fn tokenize(text: &str) -> Vec<String> {
@@ -478,6 +419,10 @@ async fn run_decision(
             Vec::new()
         }
     };
+    let active_module_names = module_defs
+        .iter()
+        .map(|definition| definition.name.clone())
+        .collect::<Vec<_>>();
     let mut module_instructions = HashMap::new();
     for definition in module_defs {
         let module_name = definition.name;
@@ -488,12 +433,19 @@ async fn run_decision(
             .unwrap_or(definition.instructions);
         module_instructions.insert(module_name, instructions);
     }
-    let hard_trigger_results =
-        run_hard_triggers(input_text, router_output, &module_instructions, state).await;
+    let activation_snapshot =
+        build_activation_snapshot(input_text, router_output, &active_module_names, state).await;
+    let hard_trigger_results = run_hard_triggers(
+        input_text,
+        &activation_snapshot,
+        &module_instructions,
+        state,
+    )
+    .await;
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
-        router_output: router_output.clone(),
+        activation_snapshot: activation_snapshot.clone(),
         base_handler: modules.runtime.tool_handler.clone(),
         module_instructions: module_instructions.clone(),
     };
@@ -507,10 +459,10 @@ async fn run_decision(
         "Latest user input: {}\nConcept activation(top {}):\n{}\nHard triggers:\n{}\nHard trigger execution results:\n{}\nSubmodule recommendations:\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
         input_text,
         state.router.concept_top_n.max(1),
-        format_concept_activation(&router_output.concept_activation),
-        format_hard_triggers(&router_output.hard_triggers),
+        format_activation_concepts(&activation_snapshot.concepts),
+        format_hard_triggers(&activation_snapshot.hard_triggers),
         format_hard_trigger_results(&hard_trigger_results),
-        format_soft_recommendations(&router_output.soft_recommendations),
+        format_soft_recommendations(&activation_snapshot.soft_recommendations),
         history
     );
     println!(
@@ -589,6 +541,10 @@ async fn run_decision_debug(
         .list_active()
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let active_module_names = module_defs
+        .iter()
+        .map(|definition| definition.name.clone())
+        .collect::<Vec<_>>();
     let mut module_instructions = HashMap::new();
     for definition in module_defs {
         let module_name = definition.name;
@@ -599,12 +555,19 @@ async fn run_decision_debug(
             .unwrap_or(definition.instructions);
         module_instructions.insert(module_name, instructions);
     }
-    let hard_trigger_results =
-        run_hard_triggers(input_text, &router_output, &module_instructions, state).await;
+    let activation_snapshot =
+        build_activation_snapshot(input_text, &router_output, &active_module_names, state).await;
+    let hard_trigger_results = run_hard_triggers(
+        input_text,
+        &activation_snapshot,
+        &module_instructions,
+        state,
+    )
+    .await;
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
-        router_output: router_output.clone(),
+        activation_snapshot: activation_snapshot.clone(),
         base_handler: state.modules.runtime.tool_handler.clone(),
         module_instructions: module_instructions.clone(),
     };
@@ -622,10 +585,10 @@ async fn run_decision_debug(
             "Latest user input: {}\nConcept activation(top {}):\n{}\nHard triggers:\n{}\nHard trigger execution results:\n{}\nSubmodule recommendations:\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
             input_text,
             state.router.concept_top_n.max(1),
-            format_concept_activation(&router_output.concept_activation),
-            format_hard_triggers(&router_output.hard_triggers),
+            format_activation_concepts(&activation_snapshot.concepts),
+            format_hard_triggers(&activation_snapshot.hard_triggers),
             format_hard_trigger_results(&hard_trigger_results),
-            format_soft_recommendations(&router_output.soft_recommendations),
+            format_soft_recommendations(&activation_snapshot.soft_recommendations),
             history
         )
     });
@@ -891,7 +854,7 @@ impl ToolHandler for DecisionToolHandler {
                 Handle::current().block_on(run_submodule_tool(
                     &self.state,
                     &self.input_text,
-                    &self.router_output,
+                    &self.activation_snapshot,
                     module_name,
                     self.module_instructions
                         .get(module_name)
@@ -910,7 +873,7 @@ impl ToolHandler for DecisionToolHandler {
 async fn run_submodule_tool(
     state: &AppState,
     input_text: &str,
-    router_output: &RouterOutput,
+    activation_snapshot: &ActivationSnapshot,
     module_name: &str,
     module_instructions: &str,
     focus: Option<&str>,
@@ -926,8 +889,8 @@ async fn run_submodule_tool(
     let context = format!(
         "Latest user input: {}\nConcept activation:\n{}\nSubmodule recommendations:\n{}\nRecent events:\n{}\nTool focus: {}",
         input_text,
-        format_concept_activation(&router_output.concept_activation),
-        format_soft_recommendations(&router_output.soft_recommendations),
+        format_activation_concepts(&activation_snapshot.concepts),
+        format_soft_recommendations(&activation_snapshot.soft_recommendations),
         history,
         focus.unwrap_or("none")
     );
@@ -944,14 +907,14 @@ async fn run_submodule_tool(
 
 async fn run_hard_triggers(
     input_text: &str,
-    router_output: &RouterOutput,
+    activation_snapshot: &ActivationSnapshot,
     module_instructions: &HashMap<String, String>,
     state: &AppState,
 ) -> Vec<HardTriggerResult> {
-    if router_output.hard_triggers.is_empty() {
+    if activation_snapshot.hard_triggers.is_empty() {
         return Vec::new();
     }
-    let runs = router_output
+    let runs = activation_snapshot
         .hard_triggers
         .iter()
         .filter_map(|module_name| {
@@ -963,7 +926,7 @@ async fn run_hard_triggers(
             let result = run_submodule_tool(
                 state,
                 input_text,
-                router_output,
+                activation_snapshot,
                 &module_name,
                 &instructions,
                 Some("hard_trigger"),
@@ -1220,13 +1183,13 @@ fn decision_tools(
     tools
 }
 
-fn format_concept_activation(concepts: &[ConceptActivation]) -> String {
+fn format_activation_concepts(concepts: &[String]) -> String {
     if concepts.is_empty() {
         return "none".to_string();
     }
     concepts
         .iter()
-        .map(|value| format!("- {}: {:.3}", value.concept, value.score))
+        .map(|value| format!("- {}", value))
         .collect::<Vec<_>>()
         .join("\n")
 }

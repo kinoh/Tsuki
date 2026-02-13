@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 
-use crate::activation_concept_graph::ActivationConceptGraphStore;
+use crate::activation_concept_graph::{ActivationConceptGraphStore, ConceptGraphStore};
 use crate::config::{load_config, Config, LimitsConfig, RouterConfig};
 use crate::db::Db;
 use crate::event::Event;
@@ -42,7 +42,7 @@ pub(crate) struct AppState {
     pub(crate) tx: broadcast::Sender<Event>,
     pub(crate) auth_token: String,
     pub(crate) state_store: Arc<dyn StateStore>,
-    pub(crate) activation_concept_graph: Arc<ActivationConceptGraphStore>,
+    pub(crate) activation_concept_graph: Arc<dyn ConceptGraphStore>,
     pub(crate) modules: Modules,
     pub(crate) limits: LimitsConfig,
     pub(crate) router: RouterConfig,
