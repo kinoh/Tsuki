@@ -64,3 +64,20 @@ Technical specifics for developers
 ## Future Considerations
 Known limitations and potential improvements
 ```
+
+## Documentation Writing Guidelines
+
+Use the following rules to keep documents complete and reviewable.
+
+- Define responsibility boundaries explicitly (`Router`, `Application`, `Submodule`, etc.).
+- Keep statements scoped to the document purpose; avoid introducing side topics without context.
+- Do not mention optional or non-adopted interfaces unless a dedicated section defines status and rationale.
+- Prefer concrete contracts over vague descriptions (input/output schema, trait signatures, tool names).
+- When deprecating or removing behavior, state the reason directly and concretely.
+- If a document supersedes another, list the exact file names it supersedes.
+- Keep "why" as first-class content: constraints, trade-offs, rejected alternatives.
+- Use stable terms consistently; if a term changes, include a short migration note.
+- Avoid speculative language in normative sections (`must`, `should`, `out-of-scope` are preferred).
+- Ensure every normative claim can be traced to either:
+  - an implemented code path, or
+  - a clearly marked planned change.
