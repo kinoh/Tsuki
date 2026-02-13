@@ -17,11 +17,12 @@ This document consolidates the agreed direction and defines a concrete in-proces
 - Role: absorb linguistic ambiguity and output query-oriented terms.
 - No tool execution in activation path.
 - No direct relation updates in activation path.
+- No hard/soft trigger decision responsibility.
 
 ### Application Orchestrator
 - Input: router output (query terms), event history, active submodules.
-- Role: read current concept-graph state, compose decision context, execute hard triggers if configured.
-- Must not implement ad-hoc semantic scoring logic beyond deterministic shaping needed for prompt context.
+- Role: read current concept-graph state, decide hard/soft trigger policy, compose decision context, execute hard triggers if configured.
+- Must not implement ad-hoc semantic scoring logic beyond minimal shaping needed for prompt context.
 - Must not call MCP transport for activation path.
 
 ### Decision/Submodules
@@ -39,16 +40,14 @@ Router output should be minimal and query-oriented:
 
 ```json
 {
-  "activation_query_terms": ["..."],
-  "hard_triggers": ["optional_submodule_name"],
-  "soft_recommendations": ["optional_submodule_name"]
+  "activation_query_terms": ["..."]
 }
 ```
 
 Notes:
 - `activation_query_terms` is required.
-- `hard_triggers` and `soft_recommendations` are optional policy channels and may be empty.
 - Router generates terms; it does not execute concept-graph mutations.
+- Trigger decisions are made outside router.
 
 ## In-Process Concept-Graph Interface (Core-side)
 
@@ -76,9 +75,7 @@ pub trait ConceptGraphOps {
     async fn update_affect(&self, target: String, valence_delta: f64) -> Result<serde_json::Value, String>;
     async fn episode_add(&self, summary: String, concepts: Vec<String>) -> Result<serde_json::Value, String>;
     async fn relation_add(&self, from: String, to: String, relation_type: String) -> Result<serde_json::Value, String>;
-    async fn concept_search_structured(&self, keywords: Vec<String>, limit: Option<u32>) -> Result<serde_json::Value, String>;
     async fn recall_query(&self, seeds: Vec<String>, max_hop: u32) -> Result<serde_json::Value, String>;
-    async fn set_time(&self, now_ms: i64) -> Result<serde_json::Value, String>;
 }
 ```
 
@@ -86,20 +83,21 @@ Return shape and validation rules must remain equivalent to:
 - `mcp/concept-graph/README.md`
 - `mcp/concept-graph/src/service.rs`
 
+- `concept_search` is the application-facing read API with no side effects.
+
 ## What Should Be Removed from `pipeline_service`
 - Embedded module intent keyword dictionary (`module_keywords`) in application orchestration.
 - Ad-hoc concept scoring constants that are not part of concept-graph contract.
 - Any logic that effectively re-derives concept relevance after concept-graph already ranked candidates.
 
 Why:
-- These are policy heuristics, not activation-path orchestration responsibilities.
-- They blur boundaries and make behavior harder to align with concept-graph assets.
+- Current embedded heuristics are inferior to the existing core behavior and should be removed.
 
 ## What Must Stay in `pipeline_service`
 - Router orchestration.
 - Activation snapshot retrieval from concept-graph reader.
+- Hard/soft trigger decision and execution orchestration.
 - Decision context composition.
-- Hard/soft trigger application policy wiring (if enabled by configuration).
 - Event-stream-based trace consistency.
 
 ## Impact on Existing Docs
@@ -108,6 +106,6 @@ Why:
   - `docs/20260212_router-concept-activation-core-rust-implementation.md` (implementation notes where heuristics were introduced)
 
 ## Rationale
-- Keeps activation path deterministic and in-process.
+- Keeps activation path in-process.
 - Preserves compatibility with existing Memgraph concept assets and concept-graph behavior.
 - Avoids pushing submodule-purpose logic into application glue code.
