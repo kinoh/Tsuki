@@ -24,7 +24,7 @@
 
 4. Lightweight details (optional)
 - Normal operation must not depend on expansion-style interaction.
-- Detailed payload can be shown only as secondary information.
+- Detailed payload is shown in a dedicated right-side detail panel.
 
 ## Why
 - Operators need fast scanning, not deep trace reconstruction.
@@ -43,6 +43,18 @@
   - `output`: timestamp + assistant/system output summary
 - Keep rendering stable under continuous updates.
 - Avoid mixing monitoring output with debug-editing controls.
+- Timeline remains compact while detail inspection is done on the right panel.
+
+## Right Detail Panel
+- Selecting a timeline line updates the right panel.
+- Required fields:
+  - `event_id`
+  - `ts`
+  - `source`
+  - `module`
+  - `tags`
+  - `payload` (formatted JSON)
+- The right panel is for inspection only; no trace reconstruction controls.
 
 ## Interaction Model
 - Open monitor page and start receiving live events immediately.

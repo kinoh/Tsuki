@@ -14,9 +14,7 @@
         --ok: #83d19a;
         --warn: #efc36f;
       }
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
       body {
         margin: 0;
         font-family: "Iosevka", "SFMono-Regular", Menlo, Consolas, monospace;
@@ -24,7 +22,7 @@
         color: var(--text);
       }
       .wrap {
-        max-width: 1240px;
+        max-width: 1400px;
         margin: 0 auto;
         padding: 16px;
       }
@@ -45,9 +43,7 @@
         align-items: center;
         margin-bottom: 8px;
       }
-      input,
-      select,
-      button {
+      input, button {
         background: #102130;
         color: var(--text);
         border: 1px solid #355066;
@@ -56,24 +52,19 @@
         font: inherit;
         font-size: 13px;
       }
-      input {
-        min-width: 130px;
-      }
-      button {
-        cursor: pointer;
-      }
-      button:hover {
-        border-color: #90cbff;
-      }
+      input { min-width: 130px; }
+      button { cursor: pointer; }
+      button:hover { border-color: #90cbff; }
       .status {
         color: var(--muted);
         font-size: 12px;
       }
-      .ok {
-        color: var(--ok);
-      }
-      .warn {
-        color: var(--warn);
+      .ok { color: var(--ok); }
+      .warn { color: var(--warn); }
+      .layout {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 1.2fr 0.8fr;
       }
       .timeline {
         max-height: 72vh;
@@ -86,29 +77,63 @@
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         padding: 8px 10px;
       }
-      .turn:last-child {
-        border-bottom: none;
-      }
+      .turn:last-child { border-bottom: none; }
       .line {
         line-height: 1.5;
         font-size: 12px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        cursor: pointer;
+        border-radius: 6px;
+        padding: 2px 4px;
       }
+      .line:hover { background: rgba(255, 255, 255, 0.05); }
+      .line.active { background: rgba(109, 194, 255, 0.2); }
       .label {
         display: inline-block;
         width: 56px;
         color: var(--muted);
       }
-      .ts {
-        color: var(--muted);
-        margin-right: 8px;
-      }
+      .ts { color: var(--muted); margin-right: 8px; }
       .hint {
         margin-top: 8px;
         font-size: 12px;
         color: var(--muted);
+      }
+      .detail {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(8, 15, 22, 0.6);
+        padding: 10px;
+        max-height: 72vh;
+        overflow: auto;
+      }
+      .detail h2 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+      .kv {
+        margin: 2px 0;
+        font-size: 12px;
+      }
+      .k {
+        display: inline-block;
+        width: 68px;
+        color: var(--muted);
+      }
+      pre {
+        margin: 8px 0 0;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.25);
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+      }
+      @media (max-width: 1100px) {
+        .layout { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -128,8 +153,16 @@
           <input id="textFilter" placeholder="text" style="min-width: 220px" />
           <input id="maxItems" type="number" min="20" max="500" step="10" value="200" />
         </div>
-        <div id="timeline" class="timeline"></div>
-        <div class="hint">Newest on top. Default view is one input line and one output line per adjacent turn.</div>
+        <div class="layout">
+          <div>
+            <div id="timeline" class="timeline"></div>
+            <div class="hint">Newest on top. Default view is one input line and one output line per adjacent turn.</div>
+          </div>
+          <aside id="detail" class="detail">
+            <h2>Event Detail</h2>
+            <div class="status">Select an input/output line.</div>
+          </aside>
+        </div>
       </section>
     </div>
 
@@ -137,6 +170,7 @@
       const state = {
         eventSource: null,
         eventsById: new Map(),
+        selectedEventId: null,
       };
 
       const els = {
@@ -149,6 +183,7 @@
         textFilter: document.getElementById("textFilter"),
         maxItems: document.getElementById("maxItems"),
         timeline: document.getElementById("timeline"),
+        detail: document.getElementById("detail"),
       };
 
       function setStreamStatus(text, level = "status") {
@@ -170,9 +205,7 @@
       }
 
       function eventText(event) {
-        if (typeof event?.payload?.text === "string") {
-          return event.payload.text;
-        }
+        if (typeof event?.payload?.text === "string") return event.payload.text;
         try {
           return JSON.stringify(event?.payload || {});
         } catch {
@@ -208,21 +241,15 @@
 
       function eventMatchesFilters(event) {
         const source = (els.sourceFilter.value || "").trim().toLowerCase();
-        if (source && String(event?.source || "").toLowerCase() !== source) {
-          return false;
-        }
+        if (source && String(event?.source || "").toLowerCase() !== source) return false;
 
         const moduleFilter = (els.moduleFilter.value || "").trim().toLowerCase();
-        if (moduleFilter && eventModule(event).toLowerCase() !== moduleFilter) {
-          return false;
-        }
+        if (moduleFilter && eventModule(event).toLowerCase() !== moduleFilter) return false;
 
         const text = (els.textFilter.value || "").trim().toLowerCase();
         if (text) {
-          const haystack = `${eventText(event)} ${eventTags(event).join(" ")} ${event?.event_id || ""}`.toLowerCase();
-          if (!haystack.includes(text)) {
-            return false;
-          }
+          const hay = `${eventText(event)} ${eventTags(event).join(" ")} ${event?.event_id || ""}`.toLowerCase();
+          if (!hay.includes(text)) return false;
         }
         return true;
       }
@@ -241,18 +268,37 @@
             current = { input: event, output: null };
             return;
           }
-
-          if (!current) {
-            return;
-          }
-
-          if (isOutputEvent(event) && !current.output) {
-            current.output = event;
-          }
+          if (!current) return;
+          if (isOutputEvent(event) && !current.output) current.output = event;
         });
 
         if (current) turns.push(current);
         return turns.reverse();
+      }
+
+      function renderDetail(eventId) {
+        const event = state.eventsById.get(eventId);
+        if (!event) {
+          els.detail.innerHTML = '<h2>Event Detail</h2><div class="status">Select an input/output line.</div>';
+          return;
+        }
+        const tags = eventTags(event).join(", ") || "-";
+        const moduleName = eventModule(event) || "-";
+        let payloadText = "{}";
+        try {
+          payloadText = JSON.stringify(event.payload || {}, null, 2);
+        } catch {
+          payloadText = String(event.payload || "");
+        }
+        els.detail.innerHTML = `
+          <h2>Event Detail</h2>
+          <div class="kv"><span class="k">event_id</span>${event.event_id || "-"}</div>
+          <div class="kv"><span class="k">ts</span>${event.ts || "-"}</div>
+          <div class="kv"><span class="k">source</span>${event.source || "-"}</div>
+          <div class="kv"><span class="k">module</span>${moduleName}</div>
+          <div class="kv"><span class="k">tags</span>${tags}</div>
+          <pre>${payloadText.replace(/</g, "&lt;")}</pre>
+        `;
       }
 
       function renderTimeline() {
@@ -260,27 +306,28 @@
         const eventsDesc = Array.from(state.eventsById.values()).sort((a, b) => parseTs(b.ts) - parseTs(a.ts));
         const turns = buildTurnsFromEvents(eventsDesc)
           .filter((turn) => {
-            const inputOk = turn.input ? eventMatchesFilters(turn.input) : false;
-            const outputOk = turn.output ? eventMatchesFilters(turn.output) : false;
-            return inputOk || outputOk;
+            const inOk = turn.input ? eventMatchesFilters(turn.input) : false;
+            const outOk = turn.output ? eventMatchesFilters(turn.output) : false;
+            return inOk || outOk;
           })
           .slice(0, maxItems);
 
         if (turns.length === 0) {
           els.timeline.innerHTML = '<div class="turn"><div class="line">No input/output pairs.</div></div>';
+          renderDetail(null);
           return;
         }
 
         const html = turns
           .map((turn) => {
-            const inputTs = turn.input?.ts || "-";
-            const inputText = truncate(eventText(turn.input));
-            const outputTs = turn.output?.ts || "-";
-            const outputText = truncate(turn.output ? eventText(turn.output) : "(none)");
+            const input = turn.input;
+            const output = turn.output;
+            const inActive = state.selectedEventId && input?.event_id === state.selectedEventId ? " active" : "";
+            const outActive = state.selectedEventId && output?.event_id === state.selectedEventId ? " active" : "";
             return `
               <div class="turn">
-                <div class="line"><span class="label">input</span><span class="ts">${inputTs}</span>${inputText}</div>
-                <div class="line"><span class="label">output</span><span class="ts">${outputTs}</span>${outputText}</div>
+                <div class="line${inActive}" data-event-id="${input?.event_id || ""}"><span class="label">input</span><span class="ts">${input?.ts || "-"}</span>${truncate(eventText(input))}</div>
+                <div class="line${outActive}" data-event-id="${output?.event_id || ""}"><span class="label">output</span><span class="ts">${output?.ts || "-"}</span>${truncate(output ? eventText(output) : "(none)")}</div>
               </div>
             `;
           })
@@ -302,15 +349,22 @@
       async function loadHistory() {
         setStreamStatus("Loading history...", "status");
         try {
-          const params = new URLSearchParams({ limit: "1200" });
-          const res = await fetch(`/debug/events?${params.toString()}`);
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
-          }
+          const res = await fetch("/debug/events?limit=1200");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           const events = Array.isArray(data?.events) ? data.events : [];
           events.forEach((event) => upsertEvent(event));
           renderTimeline();
+          if (!state.selectedEventId && events.length > 0) {
+            const first = events.find((ev) => isInputEvent(ev) || isOutputEvent(ev));
+            if (first?.event_id) {
+              state.selectedEventId = first.event_id;
+              renderTimeline();
+              renderDetail(state.selectedEventId);
+            }
+          } else {
+            renderDetail(state.selectedEventId);
+          }
           setStreamStatus(state.eventSource ? "Connected" : "History loaded", state.eventSource ? "ok" : "status");
         } catch (err) {
           setStreamStatus(`History error: ${err}`, "warn");
@@ -331,36 +385,45 @@
         const es = new EventSource("/debug/events/stream");
         state.eventSource = es;
 
-        es.onopen = () => {
-          setStreamStatus("Connected", "ok");
-        };
-
+        es.onopen = () => setStreamStatus("Connected", "ok");
         es.onmessage = (message) => {
           try {
             const payload = JSON.parse(message.data || "{}");
             const event = payload?.event;
             upsertEvent(event);
             renderTimeline();
+            if (!state.selectedEventId && event?.event_id) {
+              state.selectedEventId = event.event_id;
+              renderDetail(state.selectedEventId);
+            }
           } catch (_err) {
             setStreamStatus("Malformed event received", "warn");
           }
         };
-
-        es.onerror = () => {
-          setStreamStatus("Reconnecting...", "warn");
-        };
+        es.onerror = () => setStreamStatus("Reconnecting...", "warn");
       }
+
+      els.timeline.addEventListener("click", (event) => {
+        const row = event.target.closest(".line");
+        if (!row) return;
+        const eventId = row.getAttribute("data-event-id");
+        if (!eventId) return;
+        state.selectedEventId = eventId;
+        renderTimeline();
+        renderDetail(eventId);
+      });
 
       els.connect.addEventListener("click", connectStream);
       els.disconnect.addEventListener("click", disconnectStream);
       els.refresh.addEventListener("click", loadHistory);
       [els.sourceFilter, els.moduleFilter, els.textFilter, els.maxItems].forEach((el) => {
-        el.addEventListener("input", renderTimeline);
+        el.addEventListener("input", () => {
+          renderTimeline();
+          renderDetail(state.selectedEventId);
+        });
       });
 
-      window.addEventListener("beforeunload", () => {
-        disconnectStream();
-      });
+      window.addEventListener("beforeunload", disconnectStream);
 
       loadHistory();
       connectStream();
