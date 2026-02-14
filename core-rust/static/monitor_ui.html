@@ -64,7 +64,10 @@
       .layout {
         display: grid;
         gap: 10px;
-        grid-template-columns: 1.2fr 0.8fr;
+        grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
+      }
+      .timeline-pane {
+        min-width: 0;
       }
       .timeline {
         max-height: 72vh;
@@ -92,8 +95,12 @@
       .line.active { background: rgba(109, 194, 255, 0.2); }
       .label {
         display: inline-block;
-        width: 56px;
+        width: 62px;
         color: var(--muted);
+      }
+      .issuer {
+        color: var(--muted);
+        margin-right: 8px;
       }
       .ts { color: var(--muted); margin-right: 8px; }
       .hint {
@@ -154,7 +161,7 @@
           <input id="maxItems" type="number" min="20" max="500" step="10" value="200" />
         </div>
         <div class="layout">
-          <div>
+          <div class="timeline-pane">
             <div id="timeline" class="timeline"></div>
             <div class="hint">Newest on top. Default view is one input line and one output line per adjacent turn.</div>
           </div>
@@ -273,7 +280,12 @@
         });
 
         if (current) turns.push(current);
-        return turns.reverse();
+        const desc = turns.reverse();
+        return desc.sort((a, b) => {
+          const aLatest = Math.max(parseTs(a.input?.ts), parseTs(a.output?.ts));
+          const bLatest = Math.max(parseTs(b.input?.ts), parseTs(b.output?.ts));
+          return bLatest - aLatest;
+        });
       }
 
       function renderDetail(eventId) {
@@ -324,10 +336,12 @@
             const output = turn.output;
             const inActive = state.selectedEventId && input?.event_id === state.selectedEventId ? " active" : "";
             const outActive = state.selectedEventId && output?.event_id === state.selectedEventId ? " active" : "";
+            const inputIssuer = input?.source || "-";
+            const outputIssuer = output?.source || "-";
             return `
               <div class="turn">
-                <div class="line${inActive}" data-event-id="${input?.event_id || ""}"><span class="label">input</span><span class="ts">${input?.ts || "-"}</span>${truncate(eventText(input))}</div>
-                <div class="line${outActive}" data-event-id="${output?.event_id || ""}"><span class="label">output</span><span class="ts">${output?.ts || "-"}</span>${truncate(output ? eventText(output) : "(none)")}</div>
+                <div class="line${inActive}" data-event-id="${input?.event_id || ""}"><span class="label">input</span><span class="issuer">[${inputIssuer}]</span><span class="ts">${input?.ts || "-"}</span>${truncate(eventText(input))}</div>
+                <div class="line${outActive}" data-event-id="${output?.event_id || ""}"><span class="label">output</span><span class="issuer">[${outputIssuer}]</span><span class="ts">${output?.ts || "-"}</span>${truncate(output ? eventText(output) : "(none)")}</div>
               </div>
             `;
           })
