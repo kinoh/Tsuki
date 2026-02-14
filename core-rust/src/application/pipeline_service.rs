@@ -75,6 +75,15 @@ struct DecisionParsed {
     reason: Option<String>,
 }
 
+struct DecisionContextTemplateVars<'a> {
+    latest_user_input: &'a str,
+    concept_top_n: usize,
+    active_concepts_from_concept_graph: &'a str,
+    outputs_from_immediately_executed_submodules: &'a str,
+    candidate_submodules_by_interest_match: &'a str,
+    recent_event_history: &'a str,
+}
+
 #[derive(Clone)]
 struct DecisionToolHandler {
     state: AppState,
@@ -462,15 +471,21 @@ async fn run_decision(
         decision_tools(&modules.runtime.tools, module_instructions.keys().cloned()),
         Arc::new(handler),
     ));
-    let context = format!(
-        "Latest user input: {}\nConcept activation(top {}):\n{}\nHard triggers:\n{}\nHard trigger execution results:\n{}\nSubmodule recommendations:\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
-        input_text,
-        state.router.concept_top_n.max(1),
-        format_activation_concepts(&activation_snapshot.concepts),
-        format_hard_triggers(&activation_snapshot.hard_triggers),
-        format_hard_trigger_results(&hard_trigger_results),
-        format_soft_recommendations(&activation_snapshot.soft_recommendations),
-        history
+    let concept_top_n = state.router.concept_top_n.max(1);
+    let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
+    let executed_submodule_outputs = format_hard_trigger_results(&hard_trigger_results);
+    let submodule_candidates =
+        format_soft_recommendations(&activation_snapshot.soft_recommendations);
+    let context = render_decision_context_template(
+        &state.input.decision_context_template,
+        DecisionContextTemplateVars {
+            latest_user_input: input_text,
+            concept_top_n,
+            active_concepts_from_concept_graph: &activation_concepts,
+            outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
+            candidate_submodules_by_interest_match: &submodule_candidates,
+            recent_event_history: &history,
+        },
     );
     println!(
         "MODULE_INPUT name=decision role=decision bytes={}",
@@ -597,15 +612,21 @@ async fn run_decision_debug(
         Arc::new(handler),
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
-        format!(
-            "Latest user input: {}\nConcept activation(top {}):\n{}\nHard triggers:\n{}\nHard trigger execution results:\n{}\nSubmodule recommendations:\n{}\nRecent event history:\n{}\nReturn: decision=<respond|ignore|question> reason=<short> question=<text|none>.",
-            input_text,
-            state.router.concept_top_n.max(1),
-            format_activation_concepts(&activation_snapshot.concepts),
-            format_hard_triggers(&activation_snapshot.hard_triggers),
-            format_hard_trigger_results(&hard_trigger_results),
-            format_soft_recommendations(&activation_snapshot.soft_recommendations),
-            history
+        let concept_top_n = state.router.concept_top_n.max(1);
+        let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
+        let executed_submodule_outputs = format_hard_trigger_results(&hard_trigger_results);
+        let submodule_candidates =
+            format_soft_recommendations(&activation_snapshot.soft_recommendations);
+        render_decision_context_template(
+            &state.input.decision_context_template,
+            DecisionContextTemplateVars {
+                latest_user_input: input_text,
+                concept_top_n,
+                active_concepts_from_concept_graph: &activation_concepts,
+                outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
+                candidate_submodules_by_interest_match: &submodule_candidates,
+                recent_event_history: &history,
+            },
         )
     });
     let response = match adapter
@@ -1239,6 +1260,28 @@ fn extract_field(text: &str, key: &str, end_keys: &[&str]) -> Option<String> {
     }
 }
 
+fn render_decision_context_template(
+    template: &str,
+    vars: DecisionContextTemplateVars<'_>,
+) -> String {
+    template
+        .replace("{{latest_user_input}}", vars.latest_user_input)
+        .replace("{{concept_top_n}}", &vars.concept_top_n.to_string())
+        .replace(
+            "{{active_concepts_from_concept_graph}}",
+            vars.active_concepts_from_concept_graph,
+        )
+        .replace(
+            "{{outputs_from_immediately_executed_submodules}}",
+            vars.outputs_from_immediately_executed_submodules,
+        )
+        .replace(
+            "{{candidate_submodules_by_interest_match}}",
+            vars.candidate_submodules_by_interest_match,
+        )
+        .replace("{{recent_event_history}}", vars.recent_event_history)
+}
+
 fn compose_instructions(base: &str, module_specific: &str) -> String {
     format!("{}\n\n{}", base, module_specific)
 }
@@ -1282,17 +1325,6 @@ fn format_activation_concepts(concepts: &[String]) -> String {
     concepts
         .iter()
         .map(|value| format!("- {}", value))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn format_hard_triggers(hard_triggers: &[String]) -> String {
-    if hard_triggers.is_empty() {
-        return "none".to_string();
-    }
-    hard_triggers
-        .iter()
-        .map(|name| format!("- {}", name))
         .collect::<Vec<_>>()
         .join("\n")
 }

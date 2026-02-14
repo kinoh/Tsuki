@@ -27,7 +27,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 
 use crate::activation_concept_graph::{ActivationConceptGraphStore, ConceptGraphStore};
-use crate::config::{load_config, Config, LimitsConfig, RouterConfig};
+use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig};
 use crate::db::Db;
 use crate::event::Event;
 use crate::event_store::EventStore;
@@ -46,6 +46,7 @@ pub(crate) struct AppState {
     pub(crate) modules: Modules,
     pub(crate) limits: LimitsConfig,
     pub(crate) router: RouterConfig,
+    pub(crate) input: InputConfig,
     pub(crate) prompts: Arc<RwLock<PromptOverrides>>,
     pub(crate) prompts_path: PathBuf,
     pub(crate) decision_instructions: String,
@@ -214,6 +215,7 @@ async fn main() {
         modules,
         limits: config.limits.clone(),
         router: config.router.clone(),
+        input: config.input.clone(),
         prompts,
         prompts_path,
         decision_instructions: config.llm.decision_instructions.clone(),

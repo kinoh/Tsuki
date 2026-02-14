@@ -26,6 +26,24 @@ concept_top_n = 5
 hard_trigger_threshold = 0.85
 recommendation_threshold = 0.6
 
+[input]
+decision_context_template = """latest_user_input:
+{{latest_user_input}}
+
+active_concepts_from_concept_graph (top {{concept_top_n}}):
+{{active_concepts_from_concept_graph}}
+
+outputs_from_immediately_executed_submodules:
+{{outputs_from_immediately_executed_submodules}}
+
+candidate_submodules_by_interest_match:
+{{candidate_submodules_by_interest_match}}
+
+recent_event_history:
+{{recent_event_history}}
+
+Return: decision=<respond|ignore|question> reason=<short> question=<text|none>."""
+
 [db]
 path = "./data/core-rust.db"
 # remote_url = "libsql://..."

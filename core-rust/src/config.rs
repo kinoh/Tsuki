@@ -7,6 +7,7 @@ pub struct Config {
     pub limits: LimitsConfig,
     #[serde(default)]
     pub router: RouterConfig,
+    pub input: InputConfig,
     pub db: DbConfig,
     pub modules: Vec<ModuleConfig>,
 }
@@ -69,6 +70,11 @@ fn default_recommendation_threshold() -> f32 {
 pub struct DbConfig {
     pub path: String,
     pub remote_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InputConfig {
+    pub decision_context_template: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
