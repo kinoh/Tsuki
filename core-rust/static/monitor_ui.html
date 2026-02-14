@@ -96,6 +96,10 @@
         background: rgba(113, 74, 244, 0.22);
         box-shadow: inset 0 0 0 1px rgba(255, 79, 167, 0.55);
       }
+      .line.error-log {
+        color: var(--warn);
+        cursor: default;
+      }
       .label {
         display: inline-block;
         width: 62px;
@@ -147,12 +151,6 @@
       <h1>Tsuki Monitoring Console</h1>
       <section class="panel">
         <div class="row">
-          <button id="connect">Connect</button>
-          <button id="disconnect">Disconnect</button>
-          <button id="refresh">Reload History</button>
-          <span id="streamStatus" class="status">Disconnected</span>
-        </div>
-        <div class="row">
           <input id="sourceFilter" placeholder="source" />
           <input id="moduleFilter" placeholder="module" />
           <input id="textFilter" placeholder="text" style="min-width: 220px" />
@@ -175,13 +173,10 @@
         eventSource: null,
         eventsById: new Map(),
         selectedEventId: null,
+        streamError: null,
       };
 
       const els = {
-        connect: document.getElementById("connect"),
-        disconnect: document.getElementById("disconnect"),
-        refresh: document.getElementById("refresh"),
-        streamStatus: document.getElementById("streamStatus"),
         sourceFilter: document.getElementById("sourceFilter"),
         moduleFilter: document.getElementById("moduleFilter"),
         textFilter: document.getElementById("textFilter"),
@@ -189,11 +184,6 @@
         timeline: document.getElementById("timeline"),
         detail: document.getElementById("detail"),
       };
-
-      function setStreamStatus(text, level = "status") {
-        els.streamStatus.className = level;
-        els.streamStatus.textContent = text;
-      }
 
       function eventTags(event) {
         return Array.isArray(event?.meta?.tags) ? event.meta.tags : [];
@@ -308,7 +298,10 @@
           })
           .join("");
 
-        els.timeline.innerHTML = html;
+        const errorHtml = state.streamError
+          ? `<div class="turn"><div class="line error-log"><span class="label">error</span>${state.streamError}</div></div>`
+          : "";
+        els.timeline.innerHTML = `${errorHtml}${html}`;
       }
 
       function upsertEvent(event) {
@@ -322,7 +315,6 @@
       }
 
       async function loadHistory() {
-        setStreamStatus("Loading history...", "status");
         try {
           const res = await fetch("/debug/events?limit=1200");
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -340,27 +332,18 @@
           } else {
             renderDetail(state.selectedEventId);
           }
-          setStreamStatus(state.eventSource ? "Connected" : "History loaded", state.eventSource ? "ok" : "status");
-        } catch (err) {
-          setStreamStatus(`History error: ${err}`, "warn");
-        }
-      }
-
-      function disconnectStream() {
-        if (state.eventSource) {
-          state.eventSource.close();
-          state.eventSource = null;
-        }
-        setStreamStatus("Disconnected", "status");
+        } catch (_err) {}
       }
 
       function connectStream() {
         if (state.eventSource) return;
-        setStreamStatus("Connecting...", "status");
         const es = new EventSource("/debug/events/stream");
         state.eventSource = es;
 
-        es.onopen = () => setStreamStatus("Connected", "ok");
+        es.onopen = () => {
+          state.streamError = null;
+          renderTimeline();
+        };
         es.onmessage = (message) => {
           try {
             const payload = JSON.parse(message.data || "{}");
@@ -371,11 +354,12 @@
               state.selectedEventId = event.event_id;
               renderDetail(state.selectedEventId);
             }
-          } catch (_err) {
-            setStreamStatus("Malformed event received", "warn");
-          }
+          } catch (_err) {}
         };
-        es.onerror = () => setStreamStatus("Reconnecting...", "warn");
+        es.onerror = () => {
+          state.streamError = `[${new Date().toISOString()}] SSE disconnected. Auto-reconnecting...`;
+          renderTimeline();
+        };
       }
 
       els.timeline.addEventListener("click", (event) => {
@@ -388,17 +372,12 @@
         renderDetail(eventId);
       });
 
-      els.connect.addEventListener("click", connectStream);
-      els.disconnect.addEventListener("click", disconnectStream);
-      els.refresh.addEventListener("click", loadHistory);
       [els.sourceFilter, els.moduleFilter, els.textFilter, els.maxItems].forEach((el) => {
         el.addEventListener("input", () => {
           renderTimeline();
           renderDetail(state.selectedEventId);
         });
       });
-
-      window.addEventListener("beforeunload", disconnectStream);
 
       loadHistory();
       connectStream();
