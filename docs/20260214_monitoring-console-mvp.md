@@ -2,20 +2,22 @@
 
 ## Decision
 - Keep `GET /debug/ui` focused on existing debug operations and event log.
-- Add a separate monitoring page at `GET /debug/monitor`.
-- Provide monitoring APIs:
-  - `GET /debug/decision-traces`
-  - `GET /debug/concepts/query`
+- Use `GET /debug/monitor` as the operational monitoring surface.
+- Monitoring UI must prioritize readability over analysis features.
+
+## Monitoring UX Rules
+1. Show newest items at the top.
+2. The default visible unit is two lines:
+- one `input` line
+- one `output` line
+3. Do not require expansion-style interaction for normal operation.
+4. Treat temporal adjacency as the primary way to interpret event relationships.
 
 ## Why
-- Monitoring and debug editing have different responsibilities.
-- A dedicated monitor reduces operational noise and keeps debug UI stable.
+- Operators need fast scanning, not deep trace reconstruction.
+- Full payload/event dumps hide important transitions.
+- A strict, minimal presentation reduces cognitive load and misreads.
 
-## Implemented Scope
-- Backend routes and handlers in `core-rust/src/main.rs`.
-- New monitoring page in `core-rust/static/monitor_ui.html`.
-
-## MVP Coverage
-1. Live stream monitor via `/debug/events/stream`.
-2. Decision trace view grouped by user input turns.
-3. Concept inspector using concept search and recall query.
+## Scope
+- `core-rust/static/monitor_ui.html`
+- `core-rust/src/main.rs` (monitor-facing endpoints only)
