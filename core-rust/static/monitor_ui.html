@@ -100,14 +100,19 @@
         color: var(--warn);
         cursor: default;
       }
-      .label {
+      .src {
         display: inline-block;
-        width: 62px;
+        width: 76px;
         color: var(--muted);
       }
-      .issuer {
+      .mod {
+        display: inline-block;
+        width: 96px;
         color: var(--muted);
-        margin-right: 8px;
+      }
+      .sep {
+        color: var(--muted);
+        margin-right: 6px;
       }
       .ts { color: var(--muted); margin-right: 8px; }
       .detail {
@@ -162,7 +167,7 @@
           </div>
           <aside id="detail" class="detail">
             <h2>Event Detail</h2>
-            <div class="status">Select an input/output line.</div>
+            <div class="status">Select an event line.</div>
           </aside>
         </div>
       </section>
@@ -250,7 +255,7 @@
       function renderDetail(eventId) {
         const event = state.eventsById.get(eventId);
         if (!event) {
-          els.detail.innerHTML = '<h2>Event Detail</h2><div class="status">Select an input/output line.</div>';
+          els.detail.innerHTML = '<h2>Event Detail</h2><div class="status">Select an event line.</div>';
           return;
         }
         const tags = eventTags(event).join(", ") || "-";
@@ -288,18 +293,18 @@
         const html = eventsDesc
           .map((event) => {
             const active = state.selectedEventId && event?.event_id === state.selectedEventId ? " active" : "";
-            const label = isInputEvent(event) ? "input" : "output";
-            const issuer = event?.source || "-";
+            const source = event?.source || "-";
+            const moduleName = eventModule(event) || "-";
             return `
               <div class="turn">
-                <div class="line${active}" data-event-id="${event?.event_id || ""}"><span class="label">${label}</span><span class="issuer">[${issuer}]</span><span class="ts">${event?.ts || "-"}</span>${truncate(eventText(event))}</div>
+                <div class="line${active}" data-event-id="${event?.event_id || ""}"><span class="src">${source}</span><span class="mod">${moduleName}</span><span class="sep">|</span><span class="ts">${event?.ts || "-"}</span>${truncate(eventText(event))}</div>
               </div>
             `;
           })
           .join("");
 
         const errorHtml = state.streamError
-          ? `<div class="turn"><div class="line error-log"><span class="label">error</span>${state.streamError}</div></div>`
+          ? `<div class="turn"><div class="line error-log"><span class="src">error</span><span class="mod">stream</span><span class="sep">|</span>${state.streamError}</div></div>`
           : "";
         els.timeline.innerHTML = `${errorHtml}${html}`;
       }
