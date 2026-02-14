@@ -6,55 +6,37 @@
     <title>Tsuki Monitor</title>
     <style>
       :root {
-        --bg: #0f1720;
-        --panel: #17212b;
-        --panel-border: #243342;
-        --text: #e5eef6;
-        --muted: #9fb3c8;
-        --ok: #7ad18a;
-        --warn: #f0c36a;
-        --bad: #f08a7a;
-        --accent: #7ec0ff;
+        --bg: #0d1720;
+        --panel: #142331;
+        --line: #2b4357;
+        --text: #e6eff7;
+        --muted: #9eb6c9;
+        --ok: #83d19a;
+        --warn: #efc36f;
       }
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
       body {
         margin: 0;
         font-family: "Iosevka", "SFMono-Regular", Menlo, Consolas, monospace;
-        background: radial-gradient(circle at 20% -10%, #1d2f43 0%, var(--bg) 55%);
+        background: radial-gradient(circle at 20% -10%, #1e3448 0%, var(--bg) 60%);
         color: var(--text);
       }
       .wrap {
-        max-width: 1400px;
+        max-width: 1240px;
         margin: 0 auto;
-        padding: 18px;
-        display: grid;
-        gap: 14px;
+        padding: 16px;
       }
-      .head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-      }
-      .head h1 {
-        margin: 0;
+      h1 {
+        margin: 0 0 10px;
         font-size: 22px;
       }
-      .head .muted { font-size: 13px; }
-      .grid {
-        display: grid;
-        gap: 14px;
-        grid-template-columns: 1.1fr 1.2fr;
-      }
       .panel {
-        border: 1px solid var(--panel-border);
-        background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
-        background-color: var(--panel);
+        border: 1px solid var(--line);
+        background: var(--panel);
         border-radius: 10px;
         padding: 12px;
-      }
-      .panel h2 {
-        margin: 0 0 10px;
-        font-size: 16px;
       }
       .row {
         display: flex;
@@ -63,177 +45,134 @@
         align-items: center;
         margin-bottom: 8px;
       }
-      .row input, .row select, .row button {
-        background: #102030;
+      input,
+      select,
+      button {
+        background: #102130;
         color: var(--text);
-        border: 1px solid #2a3d4f;
+        border: 1px solid #355066;
         border-radius: 8px;
         padding: 7px 9px;
         font: inherit;
         font-size: 13px;
       }
-      .row input { min-width: 120px; }
-      button { cursor: pointer; }
-      button:hover { border-color: var(--accent); }
-      .mono {
-        background: #0d1822;
-        border: 1px solid #263749;
-        border-radius: 8px;
-        padding: 8px;
-        max-height: 480px;
-        overflow: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-size: 12px;
-        line-height: 1.45;
+      input {
+        min-width: 130px;
       }
-      .muted { color: var(--muted); }
-      .ok { color: var(--ok); }
-      .warn { color: var(--warn); }
-      .bad { color: var(--bad); }
-      .chip {
-        display: inline-block;
-        border: 1px solid #35516b;
-        border-radius: 999px;
-        padding: 3px 8px;
-        margin: 2px;
-        font-size: 12px;
-        color: #cfe8ff;
-      }
-      .trace-list {
-        display: grid;
-        gap: 8px;
-        max-height: 640px;
-        overflow: auto;
-      }
-      .trace-item {
-        border: 1px solid #2b3f52;
-        border-radius: 8px;
-        padding: 8px;
-        background: #101d2a;
-      }
-      .trace-item summary {
+      button {
         cursor: pointer;
       }
-      .trace-head {
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
+      button:hover {
+        border-color: #90cbff;
+      }
+      .status {
+        color: var(--muted);
         font-size: 12px;
       }
-      .trace-body {
-        margin-top: 6px;
-        display: grid;
-        gap: 6px;
+      .ok {
+        color: var(--ok);
       }
-      .trace-label {
+      .warn {
+        color: var(--warn);
+      }
+      .timeline {
+        max-height: 72vh;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(8, 15, 22, 0.6);
+      }
+      .turn {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 8px 10px;
+      }
+      .turn:last-child {
+        border-bottom: none;
+      }
+      .line {
+        line-height: 1.5;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .label {
+        display: inline-block;
+        width: 56px;
         color: var(--muted);
-        font-size: 11px;
       }
-      .split {
-        display: grid;
-        gap: 14px;
-        grid-template-columns: 1fr;
+      .ts {
+        color: var(--muted);
+        margin-right: 8px;
       }
-      @media (max-width: 1100px) {
-        .grid { grid-template-columns: 1fr; }
+      .hint {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <header class="head">
-        <h1>Tsuki Monitoring Console</h1>
-        <div class="muted">/debug/monitor</div>
-      </header>
-
-      <div class="grid">
-        <section class="panel">
-          <h2>1) Live Event Console</h2>
-          <div class="row">
-            <button id="liveConnect">Connect</button>
-            <button id="liveDisconnect">Disconnect</button>
-            <button id="livePause">Pause</button>
-            <button id="liveClear">Clear</button>
-            <span id="liveStatus" class="muted">Disconnected</span>
-          </div>
-          <div class="row">
-            <input id="liveSource" placeholder="source (optional)" />
-            <input id="liveModule" placeholder="module (optional)" />
-            <input id="liveTag" placeholder="tag contains" />
-            <input id="liveSearch" placeholder="text contains" style="min-width: 220px" />
-            <input id="liveMax" type="number" min="50" max="1000" step="10" value="250" />
-          </div>
-          <div id="liveConsole" class="mono"></div>
-        </section>
-
-        <section class="panel split">
-          <div>
-            <h2>2) Decision Trace Viewer</h2>
-            <div class="row">
-              <input id="traceLimit" type="number" min="5" max="100" value="20" />
-              <button id="traceRefresh">Refresh</button>
-              <span id="traceStatus" class="muted"></span>
-            </div>
-            <div id="traceList" class="trace-list"></div>
-          </div>
-
-          <div>
-            <h2>3) Concept Graph Inspector</h2>
-            <div class="row">
-              <input id="conceptQuery" placeholder="comma or space separated terms" style="min-width: 320px" />
-              <input id="conceptLimit" type="number" min="1" max="100" value="20" />
-              <input id="conceptHop" type="number" min="1" max="4" value="2" />
-              <button id="conceptSearch">Search</button>
-            </div>
-            <div id="conceptStatus" class="muted" style="margin-bottom: 6px"></div>
-            <div id="conceptTerms"></div>
-            <div id="conceptMatches" style="margin-bottom: 8px"></div>
-            <div id="conceptRecall" class="mono" style="max-height: 220px"></div>
-            <div class="row" style="margin-top: 10px">
-              <button id="conceptRecentRefresh">Load Recent Query Events</button>
-            </div>
-            <div id="conceptRecent" class="mono" style="max-height: 220px"></div>
-          </div>
-        </section>
-      </div>
+      <h1>Tsuki Monitoring Console</h1>
+      <section class="panel">
+        <div class="row">
+          <button id="connect">Connect</button>
+          <button id="disconnect">Disconnect</button>
+          <button id="refresh">Reload History</button>
+          <span id="streamStatus" class="status">Disconnected</span>
+        </div>
+        <div class="row">
+          <input id="sourceFilter" placeholder="source" />
+          <input id="moduleFilter" placeholder="module" />
+          <input id="textFilter" placeholder="text" style="min-width: 220px" />
+          <input id="maxItems" type="number" min="20" max="500" step="10" value="200" />
+        </div>
+        <div id="timeline" class="timeline"></div>
+        <div class="hint">Newest on top. Default view is one input line and one output line per adjacent turn.</div>
+      </section>
     </div>
 
     <script>
       const state = {
-        live: {
-          source: null,
-          events: [],
-          eventIds: new Set(),
-          paused: false,
-          maxHard: 1000,
-        },
+        eventSource: null,
+        eventsById: new Map(),
       };
 
-      const liveEls = {
-        status: document.getElementById("liveStatus"),
-        source: document.getElementById("liveSource"),
-        module: document.getElementById("liveModule"),
-        tag: document.getElementById("liveTag"),
-        search: document.getElementById("liveSearch"),
-        max: document.getElementById("liveMax"),
-        console: document.getElementById("liveConsole"),
+      const els = {
+        connect: document.getElementById("connect"),
+        disconnect: document.getElementById("disconnect"),
+        refresh: document.getElementById("refresh"),
+        streamStatus: document.getElementById("streamStatus"),
+        sourceFilter: document.getElementById("sourceFilter"),
+        moduleFilter: document.getElementById("moduleFilter"),
+        textFilter: document.getElementById("textFilter"),
+        maxItems: document.getElementById("maxItems"),
+        timeline: document.getElementById("timeline"),
       };
 
-      function hasTag(event, expected) {
-        return Array.isArray(event?.meta?.tags) && event.meta.tags.includes(expected);
+      function setStreamStatus(text, level = "status") {
+        els.streamStatus.className = level;
+        els.streamStatus.textContent = text;
+      }
+
+      function eventTags(event) {
+        return Array.isArray(event?.meta?.tags) ? event.meta.tags : [];
       }
 
       function eventModule(event) {
-        if (typeof event?.payload?.module === "string" && event.payload.module.trim()) {
-          return event.payload.module.trim();
+        const payloadModule = event?.payload?.module;
+        if (typeof payloadModule === "string" && payloadModule.trim()) {
+          return payloadModule.trim();
         }
-        const tag = (event?.meta?.tags || []).find((t) => t.startsWith("module:"));
-        return tag ? tag.slice("module:".length) : "";
+        const fromTag = eventTags(event).find((tag) => tag.startsWith("module:"));
+        return fromTag ? fromTag.slice("module:".length) : "";
       }
 
       function eventText(event) {
-        if (typeof event?.payload?.text === "string") return event.payload.text;
+        if (typeof event?.payload?.text === "string") {
+          return event.payload.text;
+        }
         try {
           return JSON.stringify(event?.payload || {});
         } catch {
@@ -241,258 +180,190 @@
         }
       }
 
-      function formatLiveLine(event) {
-        const tags = (event?.meta?.tags || []).join(",");
-        return [
-          `${event.ts} | ${event.source}/${event.modality}`,
-          `id=${event.event_id}`,
-          `module=${eventModule(event) || "-"}`,
-          `tags=${tags || "-"}`,
-          eventText(event),
-        ].join("\n");
+      function truncate(value, max = 120) {
+        if (!value) return "";
+        return value.length <= max ? value : `${value.slice(0, max)}...`;
       }
 
-      function matchLiveFilters(event) {
-        const source = (liveEls.source.value || "").trim().toLowerCase();
-        if (source && (event.source || "").toLowerCase() !== source) return false;
+      function isInputEvent(event) {
+        return event?.source === "user";
+      }
 
-        const moduleName = (liveEls.module.value || "").trim().toLowerCase();
-        if (moduleName && eventModule(event).toLowerCase() !== moduleName) return false;
+      function isOutputEvent(event) {
+        const tags = eventTags(event);
+        return (tags.includes("action") && tags.includes("response")) || event?.source === "assistant";
+      }
 
-        const tagText = (liveEls.tag.value || "").trim().toLowerCase();
-        if (tagText) {
-          const tags = (event?.meta?.tags || []).map((v) => String(v).toLowerCase());
-          if (!tags.some((tag) => tag.includes(tagText))) return false;
+      function parseTs(ts) {
+        const ms = Date.parse(ts || "");
+        return Number.isFinite(ms) ? ms : 0;
+      }
+
+      function normalizeMaxItems() {
+        const parsed = Number.parseInt(els.maxItems.value || "200", 10);
+        const safe = Number.isFinite(parsed) ? Math.min(500, Math.max(20, parsed)) : 200;
+        els.maxItems.value = String(safe);
+        return safe;
+      }
+
+      function eventMatchesFilters(event) {
+        const source = (els.sourceFilter.value || "").trim().toLowerCase();
+        if (source && String(event?.source || "").toLowerCase() !== source) {
+          return false;
         }
 
-        const free = (liveEls.search.value || "").trim().toLowerCase();
-        if (free) {
-          const hay = `${eventText(event)} ${(event?.meta?.tags || []).join(" ")} ${event.event_id}`.toLowerCase();
-          if (!hay.includes(free)) return false;
+        const moduleFilter = (els.moduleFilter.value || "").trim().toLowerCase();
+        if (moduleFilter && eventModule(event).toLowerCase() !== moduleFilter) {
+          return false;
+        }
+
+        const text = (els.textFilter.value || "").trim().toLowerCase();
+        if (text) {
+          const haystack = `${eventText(event)} ${eventTags(event).join(" ")} ${event?.event_id || ""}`.toLowerCase();
+          if (!haystack.includes(text)) {
+            return false;
+          }
         }
         return true;
       }
 
-      function renderLiveConsole() {
-        const maxView = Math.max(50, Math.min(1000, Number(liveEls.max.value || 250)));
-        const lines = state.live.events
-          .filter(matchLiveFilters)
-          .slice(0, maxView)
-          .map((event) => formatLiveLine(event));
-        liveEls.console.textContent = lines.length ? lines.join("\n\n") : "(no events)";
+      function buildTurnsFromEvents(eventsDesc) {
+        const relevantDesc = eventsDesc.filter((event) => isInputEvent(event) || isOutputEvent(event));
+        if (relevantDesc.length === 0) return [];
+
+        const eventsAsc = relevantDesc.slice().reverse();
+        const turns = [];
+        let current = null;
+
+        eventsAsc.forEach((event) => {
+          if (isInputEvent(event)) {
+            if (current) turns.push(current);
+            current = { input: event, output: null };
+            return;
+          }
+
+          if (!current) {
+            return;
+          }
+
+          if (isOutputEvent(event) && !current.output) {
+            current.output = event;
+          }
+        });
+
+        if (current) turns.push(current);
+        return turns.reverse();
       }
 
-      function pushLiveEvent(event) {
+      function renderTimeline() {
+        const maxItems = normalizeMaxItems();
+        const eventsDesc = Array.from(state.eventsById.values()).sort((a, b) => parseTs(b.ts) - parseTs(a.ts));
+        const turns = buildTurnsFromEvents(eventsDesc)
+          .filter((turn) => {
+            const inputOk = turn.input ? eventMatchesFilters(turn.input) : false;
+            const outputOk = turn.output ? eventMatchesFilters(turn.output) : false;
+            return inputOk || outputOk;
+          })
+          .slice(0, maxItems);
+
+        if (turns.length === 0) {
+          els.timeline.innerHTML = '<div class="turn"><div class="line">No input/output pairs.</div></div>';
+          return;
+        }
+
+        const html = turns
+          .map((turn) => {
+            const inputTs = turn.input?.ts || "-";
+            const inputText = truncate(eventText(turn.input));
+            const outputTs = turn.output?.ts || "-";
+            const outputText = truncate(turn.output ? eventText(turn.output) : "(none)");
+            return `
+              <div class="turn">
+                <div class="line"><span class="label">input</span><span class="ts">${inputTs}</span>${inputText}</div>
+                <div class="line"><span class="label">output</span><span class="ts">${outputTs}</span>${outputText}</div>
+              </div>
+            `;
+          })
+          .join("");
+
+        els.timeline.innerHTML = html;
+      }
+
+      function upsertEvent(event) {
         if (!event || !event.event_id) return;
-        if (state.live.eventIds.has(event.event_id)) return;
-        state.live.eventIds.add(event.event_id);
-        state.live.events.unshift(event);
-        if (state.live.events.length > state.live.maxHard) {
-          const removed = state.live.events.splice(state.live.maxHard);
-          removed.forEach((ev) => state.live.eventIds.delete(ev.event_id));
+        state.eventsById.set(event.event_id, event);
+        if (state.eventsById.size > 6000) {
+          const evs = Array.from(state.eventsById.values()).sort((a, b) => parseTs(b.ts) - parseTs(a.ts));
+          state.eventsById.clear();
+          evs.slice(0, 3000).forEach((ev) => state.eventsById.set(ev.event_id, ev));
         }
       }
 
-      function setLiveStatus(text, level = "muted") {
-        liveEls.status.className = level;
-        liveEls.status.textContent = text;
-      }
-
-      function disconnectLiveStream() {
-        if (state.live.source) {
-          state.live.source.close();
-          state.live.source = null;
+      async function loadHistory() {
+        setStreamStatus("Loading history...", "status");
+        try {
+          const params = new URLSearchParams({ limit: "1200" });
+          const res = await fetch(`/debug/events?${params.toString()}`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+          const data = await res.json();
+          const events = Array.isArray(data?.events) ? data.events : [];
+          events.forEach((event) => upsertEvent(event));
+          renderTimeline();
+          setStreamStatus(state.eventSource ? "Connected" : "History loaded", state.eventSource ? "ok" : "status");
+        } catch (err) {
+          setStreamStatus(`History error: ${err}`, "warn");
         }
-        setLiveStatus("Disconnected", "muted");
       }
 
-      function connectLiveStream() {
-        if (state.live.source) return;
+      function disconnectStream() {
+        if (state.eventSource) {
+          state.eventSource.close();
+          state.eventSource = null;
+        }
+        setStreamStatus("Disconnected", "status");
+      }
+
+      function connectStream() {
+        if (state.eventSource) return;
+        setStreamStatus("Connecting...", "status");
         const es = new EventSource("/debug/events/stream");
-        state.live.source = es;
-        state.live.paused = false;
-        setLiveStatus("Connected", "ok");
+        state.eventSource = es;
 
-        es.onmessage = (msg) => {
-          if (state.live.paused) return;
+        es.onopen = () => {
+          setStreamStatus("Connected", "ok");
+        };
+
+        es.onmessage = (message) => {
           try {
-            const parsed = JSON.parse(msg.data);
-            if (parsed?.type === "event" && parsed.event) {
-              pushLiveEvent(parsed.event);
-              renderLiveConsole();
-            }
-          } catch (_) {
-            setLiveStatus("Parse error on SSE payload", "warn");
+            const payload = JSON.parse(message.data || "{}");
+            const event = payload?.event;
+            upsertEvent(event);
+            renderTimeline();
+          } catch (_err) {
+            setStreamStatus("Malformed event received", "warn");
           }
         };
 
         es.onerror = () => {
-          setLiveStatus("SSE disconnected, retrying...", "warn");
+          setStreamStatus("Reconnecting...", "warn");
         };
       }
 
-      const traceEls = {
-        limit: document.getElementById("traceLimit"),
-        status: document.getElementById("traceStatus"),
-        list: document.getElementById("traceList"),
-      };
-
-      function parseDecisionText(event) {
-        const text = event?.payload?.text || "";
-        const decision = /decision=([^\s]+)/i.exec(text)?.[1] || "unknown";
-        const reason = /reason=(.+)$/i.exec(text)?.[1] || "";
-        return { decision, reason, text };
-      }
-
-      function renderTraceList(traces) {
-        traceEls.list.innerHTML = "";
-        if (!Array.isArray(traces) || traces.length === 0) {
-          traceEls.list.textContent = "No traces found.";
-          return;
-        }
-
-        traces.forEach((trace) => {
-          const userText = trace?.input_event?.payload?.text || "";
-          const parsed = parseDecisionText(trace?.decision_event);
-          const details = document.createElement("details");
-          details.className = "trace-item";
-          details.open = false;
-
-          const summary = document.createElement("summary");
-          summary.innerHTML = `
-            <div class="trace-head">
-              <span>${trace?.input_event?.ts || "-"}</span>
-              <span class="${parsed.decision === "respond" ? "ok" : parsed.decision === "ignore" ? "warn" : "bad"}">${parsed.decision}</span>
-            </div>
-            <div>${userText ? userText.replace(/</g, "&lt;") : "(empty user text)"}</div>
-          `;
-
-          const body = document.createElement("div");
-          body.className = "trace-body";
-
-          const blocks = [
-            ["Decision event", trace?.decision_event ? JSON.stringify(trace.decision_event, null, 2) : "none"],
-            ["Decision raw event", trace?.decision_raw_event ? JSON.stringify(trace.decision_raw_event, null, 2) : "none"],
-            ["Concept query event", trace?.concept_query_event ? JSON.stringify(trace.concept_query_event, null, 2) : "none"],
-            ["Submodule events", trace?.submodule_events?.length ? JSON.stringify(trace.submodule_events, null, 2) : "none"],
-          ];
-
-          blocks.forEach(([label, text]) => {
-            const l = document.createElement("div");
-            l.className = "trace-label";
-            l.textContent = label;
-            const pre = document.createElement("div");
-            pre.className = "mono";
-            pre.style.maxHeight = "180px";
-            pre.textContent = text;
-            body.appendChild(l);
-            body.appendChild(pre);
-          });
-
-          details.appendChild(summary);
-          details.appendChild(body);
-          traceEls.list.appendChild(details);
-        });
-      }
-
-      async function refreshTraces() {
-        const limit = Math.max(5, Math.min(100, Number(traceEls.limit.value || 20)));
-        traceEls.status.textContent = "Loading...";
-        try {
-          const res = await fetch(`/debug/decision-traces?limit=${limit}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
-          renderTraceList(data.traces || []);
-          traceEls.status.textContent = `Loaded ${data.traces?.length || 0} traces`;
-        } catch (err) {
-          traceEls.status.textContent = `Failed: ${err}`;
-        }
-      }
-
-      const conceptEls = {
-        query: document.getElementById("conceptQuery"),
-        limit: document.getElementById("conceptLimit"),
-        hop: document.getElementById("conceptHop"),
-        status: document.getElementById("conceptStatus"),
-        terms: document.getElementById("conceptTerms"),
-        matches: document.getElementById("conceptMatches"),
-        recall: document.getElementById("conceptRecall"),
-        recent: document.getElementById("conceptRecent"),
-      };
-
-      function renderConceptChips(container, values) {
-        container.innerHTML = "";
-        (values || []).forEach((value) => {
-          const chip = document.createElement("span");
-          chip.className = "chip";
-          chip.textContent = value;
-          container.appendChild(chip);
-        });
-      }
-
-      async function runConceptQuery() {
-        const query = (conceptEls.query.value || "").trim();
-        if (!query) {
-          conceptEls.status.textContent = "Enter query terms.";
-          return;
-        }
-        const limit = Math.max(1, Math.min(100, Number(conceptEls.limit.value || 20)));
-        const maxHop = Math.max(1, Math.min(4, Number(conceptEls.hop.value || 2)));
-        conceptEls.status.textContent = "Loading...";
-        try {
-          const params = new URLSearchParams({ query, limit: String(limit), max_hop: String(maxHop) });
-          const res = await fetch(`/debug/concepts/query?${params.toString()}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
-          renderConceptChips(conceptEls.terms, data.query_terms || []);
-          renderConceptChips(conceptEls.matches, data.concepts || []);
-          conceptEls.recall.textContent = JSON.stringify(data.recall || { propositions: [] }, null, 2);
-          conceptEls.status.textContent = `Matched ${data.concepts?.length || 0} concepts`;
-        } catch (err) {
-          conceptEls.status.textContent = `Failed: ${err}`;
-        }
-      }
-
-      async function loadRecentConceptEvents() {
-        conceptEls.recent.textContent = "Loading...";
-        try {
-          const res = await fetch("/debug/events?tag=concept_graph.query&limit=60");
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
-          conceptEls.recent.textContent = JSON.stringify(data.events || [], null, 2);
-        } catch (err) {
-          conceptEls.recent.textContent = `Failed: ${err}`;
-        }
-      }
-
-      document.getElementById("liveConnect").addEventListener("click", connectLiveStream);
-      document.getElementById("liveDisconnect").addEventListener("click", disconnectLiveStream);
-      document.getElementById("livePause").addEventListener("click", () => {
-        state.live.paused = !state.live.paused;
-        document.getElementById("livePause").textContent = state.live.paused ? "Resume" : "Pause";
-        if (state.live.paused) setLiveStatus("Paused", "warn");
-        else setLiveStatus("Connected", "ok");
-      });
-      document.getElementById("liveClear").addEventListener("click", () => {
-        state.live.events = [];
-        state.live.eventIds.clear();
-        renderLiveConsole();
-      });
-      [liveEls.source, liveEls.module, liveEls.tag, liveEls.search, liveEls.max].forEach((el) => {
-        el.addEventListener("input", renderLiveConsole);
+      els.connect.addEventListener("click", connectStream);
+      els.disconnect.addEventListener("click", disconnectStream);
+      els.refresh.addEventListener("click", loadHistory);
+      [els.sourceFilter, els.moduleFilter, els.textFilter, els.maxItems].forEach((el) => {
+        el.addEventListener("input", renderTimeline);
       });
 
-      document.getElementById("traceRefresh").addEventListener("click", refreshTraces);
-      document.getElementById("conceptSearch").addEventListener("click", runConceptQuery);
-      document.getElementById("conceptRecentRefresh").addEventListener("click", loadRecentConceptEvents);
+      window.addEventListener("beforeunload", () => {
+        disconnectStream();
+      });
 
-      connectLiveStream();
-      refreshTraces();
-      loadRecentConceptEvents();
-      conceptEls.recall.textContent = JSON.stringify({ propositions: [] }, null, 2);
-      liveEls.console.textContent = "(waiting for events...)";
-
-      window.addEventListener("beforeunload", () => disconnectLiveStream());
+      loadHistory();
+      connectStream();
     </script>
   </body>
 </html>

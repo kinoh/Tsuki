@@ -132,39 +132,6 @@ struct DebugEventsResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct DebugDecisionTracesQuery {
-    limit: Option<usize>,
-}
-
-#[derive(Debug, Serialize)]
-struct DebugDecisionTracesResponse {
-    traces: Vec<DebugDecisionTrace>,
-}
-
-#[derive(Debug, Serialize)]
-struct DebugDecisionTrace {
-    input_event: Event,
-    decision_event: Option<Event>,
-    decision_raw_event: Option<Event>,
-    concept_query_event: Option<Event>,
-    submodule_events: Vec<Event>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DebugConceptQuery {
-    query: Option<String>,
-    limit: Option<usize>,
-    max_hop: Option<u32>,
-}
-
-#[derive(Debug, Serialize)]
-struct DebugConceptQueryResponse {
-    query_terms: Vec<String>,
-    concepts: Vec<String>,
-    recall: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize)]
 pub(crate) struct DebugImproveTriggerRequest {
     #[serde(default)]
     pub(crate) target: Option<String>,
@@ -277,8 +244,6 @@ async fn main() {
         .route("/debug/improve/review", post(debug_improve_review))
         .route("/debug/events/stream", get(debug_events_stream))
         .route("/debug/events", get(debug_events))
-        .route("/debug/decision-traces", get(debug_decision_traces))
-        .route("/debug/concepts/query", get(debug_concepts_query))
         .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
@@ -654,104 +619,6 @@ async fn debug_improve_review(
     Ok(Json(result))
 }
 
-async fn debug_decision_traces(
-    State(state): State<AppState>,
-    Query(query): Query<DebugDecisionTracesQuery>,
-) -> Result<Json<DebugDecisionTracesResponse>, (StatusCode, String)> {
-    let limit = query.limit.unwrap_or(20).max(1).min(100);
-    let fetch_limit = (limit * 80).clamp(500, 5000);
-    let mut events = state
-        .event_store
-        .latest(fetch_limit)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    events.reverse();
-
-    let user_indices = events
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, event)| (event.source == "user").then_some(idx))
-        .collect::<Vec<_>>();
-
-    let mut traces = Vec::with_capacity(user_indices.len().min(limit));
-    for (pos, start_idx) in user_indices.iter().enumerate().rev() {
-        let end_idx = user_indices.get(pos + 1).copied().unwrap_or(events.len());
-        let window = &events[*start_idx..end_idx];
-        let Some(input_event) = window.first().cloned() else {
-            continue;
-        };
-        let decision_event = window
-            .iter()
-            .find(|event| is_decision_event(event))
-            .cloned();
-        let decision_raw_event = window
-            .iter()
-            .rev()
-            .find(|event| is_debug_llm_raw_for_module(event, "decision"))
-            .cloned();
-        let concept_query_event = window
-            .iter()
-            .rev()
-            .find(|event| {
-                event_has_tag(event, "debug") && event_has_tag(event, "concept_graph.query")
-            })
-            .cloned();
-        let submodule_events = window
-            .iter()
-            .filter(|event| event_has_tag(event, "submodule"))
-            .take(5)
-            .cloned()
-            .collect::<Vec<_>>();
-        traces.push(DebugDecisionTrace {
-            input_event,
-            decision_event,
-            decision_raw_event,
-            concept_query_event,
-            submodule_events,
-        });
-        if traces.len() >= limit {
-            break;
-        }
-    }
-
-    Ok(Json(DebugDecisionTracesResponse { traces }))
-}
-
-async fn debug_concepts_query(
-    State(state): State<AppState>,
-    Query(query): Query<DebugConceptQuery>,
-) -> Result<Json<DebugConceptQueryResponse>, (StatusCode, String)> {
-    let limit = query.limit.unwrap_or(20).max(1).min(100);
-    let max_hop = query.max_hop.unwrap_or(2).max(1).min(4);
-    let terms = query
-        .query
-        .as_deref()
-        .map(parse_query_terms)
-        .unwrap_or_default();
-    if terms.is_empty() {
-        return Ok(Json(DebugConceptQueryResponse {
-            query_terms: Vec::new(),
-            concepts: Vec::new(),
-            recall: serde_json::json!({ "propositions": [] }),
-        }));
-    }
-    let concepts = state
-        .activation_concept_graph
-        .concept_search(&terms, limit)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
-    let recall = state
-        .activation_concept_graph
-        .recall_query(terms.clone(), max_hop)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
-    Ok(Json(DebugConceptQueryResponse {
-        query_terms: terms,
-        concepts,
-        recall,
-    }))
-}
-
 async fn debug_ui() -> Html<String> {
     const EMBEDDED: &str = include_str!("../static/debug_ui.html");
     const DEBUG_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/debug_ui.html");
@@ -787,33 +654,6 @@ fn verify_auth(message: &str, expected_token: &str) -> bool {
     let user = parts.next().unwrap_or("");
     let token = parts.next().unwrap_or("");
     !user.is_empty() && token == expected_token
-}
-
-fn parse_query_terms(value: &str) -> Vec<String> {
-    value
-        .split(|ch: char| ch == ',' || ch.is_whitespace())
-        .map(str::trim)
-        .filter(|term| !term.is_empty())
-        .map(|term| term.to_string())
-        .collect::<Vec<_>>()
-}
-
-fn event_has_tag(event: &Event, expected: &str) -> bool {
-    event.meta.tags.iter().any(|tag| tag == expected)
-}
-
-fn is_decision_event(event: &Event) -> bool {
-    event_has_tag(event, "decision")
-}
-
-fn is_debug_llm_raw_for_module(event: &Event, module_name: &str) -> bool {
-    event_has_tag(event, "debug")
-        && event_has_tag(event, "llm.raw")
-        && event
-            .meta
-            .tags
-            .iter()
-            .any(|tag| tag == &format!("module:{}", module_name))
 }
 
 async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (StatusCode, String)> {
