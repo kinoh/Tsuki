@@ -17,13 +17,16 @@ use axum::{
         Path, Query, State,
     },
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::{
+        sse::{Event as SseEvent, KeepAlive, Sse},
+        Html, IntoResponse,
+    },
     routing::{get, post},
     Json, Router,
 };
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 
 use crate::activation_concept_graph::{ActivationConceptGraphStore, ConceptGraphStore};
@@ -114,12 +117,51 @@ struct PromptsPayload {
 #[derive(Debug, Deserialize)]
 struct DebugEventsQuery {
     tag: Option<String>,
+    source: Option<String>,
+    module: Option<String>,
+    since_ts: Option<String>,
+    until_ts: Option<String>,
+    around_event_id: Option<String>,
+    around_window: Option<usize>,
     limit: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
 struct DebugEventsResponse {
     events: Vec<Event>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugDecisionTracesQuery {
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugDecisionTracesResponse {
+    traces: Vec<DebugDecisionTrace>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugDecisionTrace {
+    input_event: Event,
+    decision_event: Option<Event>,
+    decision_raw_event: Option<Event>,
+    concept_query_event: Option<Event>,
+    submodule_events: Vec<Event>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugConceptQuery {
+    query: Option<String>,
+    limit: Option<usize>,
+    max_hop: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugConceptQueryResponse {
+    query_terms: Vec<String>,
+    concepts: Vec<String>,
+    recall: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,6 +266,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(ws_handler))
         .route("/debug/ui", get(debug_ui))
+        .route("/debug/monitor", get(debug_monitor_ui))
         .route(
             "/debug/prompts",
             get(debug_get_prompts).post(debug_update_prompts),
@@ -232,7 +275,10 @@ async fn main() {
         .route("/debug/improve/trigger", post(debug_improve_trigger))
         .route("/debug/improve/proposal", post(debug_improve_proposal))
         .route("/debug/improve/review", post(debug_improve_review))
+        .route("/debug/events/stream", get(debug_events_stream))
         .route("/debug/events", get(debug_events))
+        .route("/debug/decision-traces", get(debug_decision_traces))
+        .route("/debug/concepts/query", get(debug_concepts_query))
         .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
@@ -441,12 +487,23 @@ async fn debug_events(
     State(state): State<AppState>,
     Query(query): Query<DebugEventsQuery>,
 ) -> Result<Json<DebugEventsResponse>, (StatusCode, String)> {
+    let around_mode = query
+        .around_event_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
     let limit = query.limit.unwrap_or(200).min(1000);
+    let fetch_limit = if around_mode.is_some() { 5000 } else { limit };
     let mut events = state
         .event_store
-        .latest(limit)
+        .latest(fetch_limit)
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    events = events
+        .into_iter()
+        .filter(|event| matches_debug_event_filters(event, &query))
+        .collect::<Vec<_>>();
 
     if let Some(raw_tags) = query.tag {
         let tags = raw_tags
@@ -465,7 +522,112 @@ async fn debug_events(
         }
     }
 
+    if let Some(target_event_id) = around_mode {
+        let window = query.around_window.unwrap_or(20).min(200);
+        let Some(index) = events
+            .iter()
+            .position(|event| event.event_id == target_event_id)
+        else {
+            events.clear();
+            return Ok(Json(DebugEventsResponse { events }));
+        };
+        let start = index.saturating_sub(window);
+        let end = (index + window + 1).min(events.len());
+        events = events[start..end].to_vec();
+    } else {
+        events.truncate(limit);
+    }
+
     Ok(Json(DebugEventsResponse { events }))
+}
+
+async fn debug_events_stream(
+    State(state): State<AppState>,
+) -> Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>> {
+    let rx = state.tx.subscribe();
+    let stream = futures::stream::unfold(rx, |mut rx| async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    let payload = OutboundEvent {
+                        kind: "event",
+                        event,
+                    };
+                    let data = match serde_json::to_string(&payload) {
+                        Ok(data) => data,
+                        Err(_) => continue,
+                    };
+                    return Some((Ok(SseEvent::default().data(data)), rx));
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn matches_debug_event_filters(event: &Event, query: &DebugEventsQuery) -> bool {
+    let source_ok = query
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|source| event.source.eq_ignore_ascii_case(source))
+        .unwrap_or(true);
+    if !source_ok {
+        return false;
+    }
+
+    let module_ok = query
+        .module
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|expected| {
+            event_module_name(event)
+                .map(|actual| actual.eq_ignore_ascii_case(expected))
+                .unwrap_or(false)
+        })
+        .unwrap_or(true);
+    if !module_ok {
+        return false;
+    }
+
+    let since_ok = query
+        .since_ts
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|since| event.ts.as_str() >= since)
+        .unwrap_or(true);
+    if !since_ok {
+        return false;
+    }
+
+    query
+        .until_ts
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|until| event.ts.as_str() <= until)
+        .unwrap_or(true)
+}
+
+fn event_module_name(event: &Event) -> Option<&str> {
+    event
+        .payload
+        .get("module")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            event
+                .meta
+                .tags
+                .iter()
+                .find_map(|tag| tag.strip_prefix("module:"))
+                .filter(|value| !value.trim().is_empty())
+        })
 }
 
 async fn debug_improve_trigger(
@@ -492,6 +654,104 @@ async fn debug_improve_review(
     Ok(Json(result))
 }
 
+async fn debug_decision_traces(
+    State(state): State<AppState>,
+    Query(query): Query<DebugDecisionTracesQuery>,
+) -> Result<Json<DebugDecisionTracesResponse>, (StatusCode, String)> {
+    let limit = query.limit.unwrap_or(20).max(1).min(100);
+    let fetch_limit = (limit * 80).clamp(500, 5000);
+    let mut events = state
+        .event_store
+        .latest(fetch_limit)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    events.reverse();
+
+    let user_indices = events
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, event)| (event.source == "user").then_some(idx))
+        .collect::<Vec<_>>();
+
+    let mut traces = Vec::with_capacity(user_indices.len().min(limit));
+    for (pos, start_idx) in user_indices.iter().enumerate().rev() {
+        let end_idx = user_indices.get(pos + 1).copied().unwrap_or(events.len());
+        let window = &events[*start_idx..end_idx];
+        let Some(input_event) = window.first().cloned() else {
+            continue;
+        };
+        let decision_event = window
+            .iter()
+            .find(|event| is_decision_event(event))
+            .cloned();
+        let decision_raw_event = window
+            .iter()
+            .rev()
+            .find(|event| is_debug_llm_raw_for_module(event, "decision"))
+            .cloned();
+        let concept_query_event = window
+            .iter()
+            .rev()
+            .find(|event| {
+                event_has_tag(event, "debug") && event_has_tag(event, "concept_graph.query")
+            })
+            .cloned();
+        let submodule_events = window
+            .iter()
+            .filter(|event| event_has_tag(event, "submodule"))
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>();
+        traces.push(DebugDecisionTrace {
+            input_event,
+            decision_event,
+            decision_raw_event,
+            concept_query_event,
+            submodule_events,
+        });
+        if traces.len() >= limit {
+            break;
+        }
+    }
+
+    Ok(Json(DebugDecisionTracesResponse { traces }))
+}
+
+async fn debug_concepts_query(
+    State(state): State<AppState>,
+    Query(query): Query<DebugConceptQuery>,
+) -> Result<Json<DebugConceptQueryResponse>, (StatusCode, String)> {
+    let limit = query.limit.unwrap_or(20).max(1).min(100);
+    let max_hop = query.max_hop.unwrap_or(2).max(1).min(4);
+    let terms = query
+        .query
+        .as_deref()
+        .map(parse_query_terms)
+        .unwrap_or_default();
+    if terms.is_empty() {
+        return Ok(Json(DebugConceptQueryResponse {
+            query_terms: Vec::new(),
+            concepts: Vec::new(),
+            recall: serde_json::json!({ "propositions": [] }),
+        }));
+    }
+    let concepts = state
+        .activation_concept_graph
+        .concept_search(&terms, limit)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    let recall = state
+        .activation_concept_graph
+        .recall_query(terms.clone(), max_hop)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(DebugConceptQueryResponse {
+        query_terms: terms,
+        concepts,
+        recall,
+    }))
+}
+
 async fn debug_ui() -> Html<String> {
     const EMBEDDED: &str = include_str!("../static/debug_ui.html");
     const DEBUG_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/debug_ui.html");
@@ -507,11 +767,53 @@ async fn debug_ui() -> Html<String> {
     }
 }
 
+async fn debug_monitor_ui() -> Html<String> {
+    const EMBEDDED: &str = include_str!("../static/monitor_ui.html");
+    const MONITOR_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/monitor_ui.html");
+    match tokio::fs::read_to_string(MONITOR_UI_PATH).await {
+        Ok(html) => Html(html),
+        Err(err) => {
+            println!(
+                "MONITOR_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                MONITOR_UI_PATH, err
+            );
+            Html(EMBEDDED.to_string())
+        }
+    }
+}
+
 fn verify_auth(message: &str, expected_token: &str) -> bool {
     let mut parts = message.splitn(2, ':');
     let user = parts.next().unwrap_or("");
     let token = parts.next().unwrap_or("");
     !user.is_empty() && token == expected_token
+}
+
+fn parse_query_terms(value: &str) -> Vec<String> {
+    value
+        .split(|ch: char| ch == ',' || ch.is_whitespace())
+        .map(str::trim)
+        .filter(|term| !term.is_empty())
+        .map(|term| term.to_string())
+        .collect::<Vec<_>>()
+}
+
+fn event_has_tag(event: &Event, expected: &str) -> bool {
+    event.meta.tags.iter().any(|tag| tag == expected)
+}
+
+fn is_decision_event(event: &Event) -> bool {
+    event_has_tag(event, "decision")
+}
+
+fn is_debug_llm_raw_for_module(event: &Event, module_name: &str) -> bool {
+    event_has_tag(event, "debug")
+        && event_has_tag(event, "llm.raw")
+        && event
+            .meta
+            .tags
+            .iter()
+            .any(|tag| tag == &format!("module:{}", module_name))
 }
 
 async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (StatusCode, String)> {
