@@ -6,11 +6,13 @@
     <title>Tsuki Monitor</title>
     <style>
       :root {
-        --bg: #0d1720;
-        --panel: #142331;
-        --line: #2b4357;
-        --text: #e6eff7;
-        --muted: #9eb6c9;
+        --bg: #0f1115;
+        --panel: #171a21;
+        --line: rgba(255, 255, 255, 0.08);
+        --text: #e8ecf2;
+        --muted: #9aa4b2;
+        --accent: #ff4fa7;
+        --accent-2: #714af4;
         --ok: #83d19a;
         --warn: #efc36f;
       }
@@ -18,7 +20,7 @@
       body {
         margin: 0;
         font-family: "Iosevka", "SFMono-Regular", Menlo, Consolas, monospace;
-        background: radial-gradient(circle at 20% -10%, #1e3448 0%, var(--bg) 60%);
+        background: radial-gradient(circle at top left, #1c2029 0%, #0f1115 60%);
         color: var(--text);
       }
       .wrap {
@@ -44,9 +46,9 @@
         margin-bottom: 8px;
       }
       input, button {
-        background: #102130;
+        background: #1c2029;
         color: var(--text);
-        border: 1px solid #355066;
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
         padding: 7px 9px;
         font: inherit;
@@ -54,7 +56,7 @@
       }
       input { min-width: 130px; }
       button { cursor: pointer; }
-      button:hover { border-color: #90cbff; }
+      button:hover { border-color: var(--accent); }
       .status {
         color: var(--muted);
         font-size: 12px;
@@ -74,7 +76,7 @@
         overflow: auto;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: rgba(8, 15, 22, 0.6);
+        background: #1c2029;
       }
       .turn {
         padding: 4px 8px;
@@ -90,7 +92,10 @@
         padding: 1px 3px;
       }
       .line:hover { background: rgba(255, 255, 255, 0.05); }
-      .line.active { background: rgba(109, 194, 255, 0.2); }
+      .line.active {
+        background: rgba(113, 74, 244, 0.22);
+        box-shadow: inset 0 0 0 1px rgba(255, 79, 167, 0.55);
+      }
       .label {
         display: inline-block;
         width: 62px;
@@ -104,7 +109,7 @@
       .detail {
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: rgba(8, 15, 22, 0.6);
+        background: #1c2029;
         padding: 10px;
         max-height: 72vh;
         overflow: auto;
@@ -127,7 +132,7 @@
         padding: 8px;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: rgba(0, 0, 0, 0.25);
+        background: #0f1115;
         white-space: pre-wrap;
         word-break: break-word;
         font-size: 12px;
