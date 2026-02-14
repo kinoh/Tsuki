@@ -311,17 +311,24 @@ async fn build_activation_snapshot(
     state: &AppState,
 ) -> ActivationSnapshot {
     let concept_limit = state.router.concept_top_n.max(1);
+    let query_terms = router_output.activation_query_terms.clone();
     let concepts = match state
         .activation_concept_graph
-        .concept_search(&router_output.activation_query_terms, concept_limit)
+        .concept_search(&query_terms, concept_limit)
         .await
     {
-        Ok(values) => values,
+        Ok(values) => {
+            emit_concept_graph_query_event(state, &query_terms, concept_limit, &values, None).await;
+            values
+        }
         Err(err) => {
             println!(
                 "ACTIVATION_CONCEPT_GRAPH_ERROR op=concept_search error={}",
                 err
             );
+            let error = err.to_string();
+            emit_concept_graph_query_event(state, &query_terms, concept_limit, &[], Some(&error))
+                .await;
             Vec::new()
         }
     };
@@ -592,12 +599,19 @@ async fn run_decision_debug(
             history
         )
     });
-    let response = adapter
+    let response = match adapter
         .respond(LlmRequest {
             input: context.clone(),
         })
         .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let error = err.to_string();
+            emit_debug_module_error_event(state, "decision", "module_only", &context, &error).await;
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, error));
+        }
+    };
     let parsed = parse_decision(&response.text);
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = build_event(
@@ -700,12 +714,19 @@ async fn run_submodule_debug(
     let context = context_override
         .map(str::to_string)
         .unwrap_or_else(|| format!("User input: {}\nRecent events:\n{}", input_text, history));
-    let response = adapter
+    let response = match adapter
         .respond(LlmRequest {
             input: context.clone(),
         })
         .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let error = err.to_string();
+            emit_debug_module_error_event(state, name, "module_only", &context, &error).await;
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, error));
+        }
+    };
     let response_event = build_event(
         "internal",
         "text",
@@ -839,6 +860,59 @@ async fn emit_debug_module_events(
     record_event(state, raw_event).await;
 }
 
+async fn emit_debug_module_error_event(
+    state: &AppState,
+    module: &str,
+    mode: &str,
+    context: &str,
+    error: &str,
+) {
+    let error_event = build_event(
+        "debug",
+        "text",
+        json!({
+            "module": module,
+            "mode": mode,
+            "context": context,
+            "error": error,
+        }),
+        vec![
+            "debug".to_string(),
+            "llm.error".to_string(),
+            "error".to_string(),
+            format!("module:{}", module),
+            format!("mode:{}", mode),
+        ],
+    );
+    record_event(state, error_event).await;
+}
+
+async fn emit_concept_graph_query_event(
+    state: &AppState,
+    query_terms: &[String],
+    limit: usize,
+    result_concepts: &[String],
+    error: Option<&str>,
+) {
+    let mut tags = vec!["debug".to_string(), "concept_graph.query".to_string()];
+    let payload = if let Some(error) = error {
+        tags.push("error".to_string());
+        json!({
+            "query_terms": query_terms,
+            "limit": limit,
+            "error": error,
+        })
+    } else {
+        json!({
+            "query_terms": query_terms,
+            "limit": limit,
+            "result_concepts": result_concepts,
+        })
+    };
+    let event = build_event("debug", "state", payload, tags);
+    record_event(state, event).await;
+}
+
 impl ToolHandler for DecisionToolHandler {
     fn handle(&self, tool_name: &str, arguments: &str) -> Result<String, ToolError> {
         if let Some(module_name) = tool_name.strip_prefix(SUBMODULE_TOOL_PREFIX) {
@@ -962,7 +1036,13 @@ async fn run_module(
         input.len()
     );
 
-    match adapter.respond(LlmRequest { input }).await {
+    let context = input;
+    match adapter
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
+        .await
+    {
         Ok(response) => {
             let response_event = build_event(
                 "internal",
@@ -971,12 +1051,14 @@ async fn run_module(
                 vec![role_tag.to_string(), format!("module:{}", name)],
             );
             record_event(state, response_event).await;
+            emit_debug_module_events(state, &name, "runtime", &context, &response).await;
             ModuleOutput {
                 text: response.text,
             }
         }
         Err(err) => {
-            let error_text = format!("error: {}", err);
+            let error_detail = err.to_string();
+            let error_text = format!("error: {}", error_detail);
             let error_event = build_event(
                 "internal",
                 "text",
@@ -988,8 +1070,9 @@ async fn run_module(
                 ],
             );
             record_event(state, error_event).await;
+            emit_debug_module_error_event(state, &name, "runtime", &context, &error_detail).await;
             ModuleOutput {
-                text: format!("error: {}", err),
+                text: format!("error: {}", error_detail),
             }
         }
     }
