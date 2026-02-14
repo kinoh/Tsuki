@@ -5,6 +5,20 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug core-rust",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--manifest-path",
+          "${workspaceFolder}/core-rust/Cargo.toml"
+        ],
+      },
+      "cwd": "${workspaceFolder}/core-rust",
+      "envFile": "${workspaceFolder}/core-rust/.env"
+    },
+    {
       // See https://tsx.is/vscode
       "name": "Debug core",
       "type": "node",
