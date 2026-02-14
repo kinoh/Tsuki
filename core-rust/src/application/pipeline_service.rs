@@ -1174,7 +1174,7 @@ fn decision_tools(
                 "properties": {
                     "focus": { "type": "string" }
                 },
-                "required": [],
+                "required": ["focus"],
                 "additionalProperties": false
             })),
             strict: Some(true),
