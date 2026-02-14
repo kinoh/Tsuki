@@ -77,19 +77,17 @@
         background: rgba(8, 15, 22, 0.6);
       }
       .turn {
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-        padding: 8px 10px;
+        padding: 4px 8px;
       }
-      .turn:last-child { border-bottom: none; }
       .line {
-        line-height: 1.5;
+        line-height: 1.35;
         font-size: 12px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         cursor: pointer;
         border-radius: 6px;
-        padding: 2px 4px;
+        padding: 1px 3px;
       }
       .line:hover { background: rgba(255, 255, 255, 0.05); }
       .line.active { background: rgba(109, 194, 255, 0.2); }
@@ -254,36 +252,6 @@
         return true;
       }
 
-      function buildTurnsFromEvents(eventsDesc) {
-        if (eventsDesc.length === 0) return [];
-        const eventsAsc = eventsDesc.slice().reverse();
-        const turns = [];
-        let current = null;
-
-        eventsAsc.forEach((event) => {
-          if (isInputEvent(event)) {
-            if (current) turns.push(current);
-            current = { input: event, output: null };
-            return;
-          }
-          if (!isOutputEvent(event)) return;
-          if (!current) {
-            // Keep non-user events visible even if no input was observed yet.
-            turns.push({ input: null, output: event });
-            return;
-          }
-          if (!current.output) current.output = event;
-        });
-
-        if (current) turns.push(current);
-        const desc = turns.reverse();
-        return desc.sort((a, b) => {
-          const aLatest = Math.max(parseTs(a.input?.ts), parseTs(a.output?.ts));
-          const bLatest = Math.max(parseTs(b.input?.ts), parseTs(b.output?.ts));
-          return bLatest - aLatest;
-        });
-      }
-
       function renderDetail(eventId) {
         const event = state.eventsById.get(eventId);
         if (!event) {
@@ -311,33 +279,25 @@
 
       function renderTimeline() {
         const maxItems = normalizeMaxItems();
-        const eventsDesc = Array.from(state.eventsById.values()).sort((a, b) => parseTs(b.ts) - parseTs(a.ts));
-        const turns = buildTurnsFromEvents(eventsDesc)
-          .filter((turn) => {
-            const inOk = turn.input ? eventMatchesFilters(turn.input) : false;
-            const outOk = turn.output ? eventMatchesFilters(turn.output) : false;
-            return inOk || outOk;
-          })
+        const eventsDesc = Array.from(state.eventsById.values())
+          .sort((a, b) => parseTs(b.ts) - parseTs(a.ts))
+          .filter((event) => eventMatchesFilters(event))
           .slice(0, maxItems);
 
-        if (turns.length === 0) {
-          els.timeline.innerHTML = '<div class="turn"><div class="line">No input/output pairs.</div></div>';
+        if (eventsDesc.length === 0) {
+          els.timeline.innerHTML = '<div class="turn"><div class="line">No events.</div></div>';
           renderDetail(null);
           return;
         }
 
-        const html = turns
-          .map((turn) => {
-            const input = turn.input;
-            const output = turn.output;
-            const inActive = state.selectedEventId && input?.event_id === state.selectedEventId ? " active" : "";
-            const outActive = state.selectedEventId && output?.event_id === state.selectedEventId ? " active" : "";
-            const inputIssuer = input?.source || "-";
-            const outputIssuer = output?.source || "-";
+        const html = eventsDesc
+          .map((event) => {
+            const active = state.selectedEventId && event?.event_id === state.selectedEventId ? " active" : "";
+            const label = isInputEvent(event) ? "input" : "output";
+            const issuer = event?.source || "-";
             return `
               <div class="turn">
-                <div class="line${inActive}" data-event-id="${input?.event_id || ""}"><span class="label">input</span><span class="issuer">[${inputIssuer}]</span><span class="ts">${input?.ts || "-"}</span>${truncate(eventText(input))}</div>
-                <div class="line${outActive}" data-event-id="${output?.event_id || ""}"><span class="label">output</span><span class="issuer">[${outputIssuer}]</span><span class="ts">${output?.ts || "-"}</span>${truncate(output ? eventText(output) : "(none)")}</div>
+                <div class="line${active}" data-event-id="${event?.event_id || ""}"><span class="label">${label}</span><span class="issuer">[${issuer}]</span><span class="ts">${event?.ts || "-"}</span>${truncate(eventText(event))}</div>
               </div>
             `;
           })
