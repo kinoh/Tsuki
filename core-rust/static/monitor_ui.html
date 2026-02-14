@@ -224,8 +224,7 @@
       }
 
       function isOutputEvent(event) {
-        const tags = eventTags(event);
-        return (tags.includes("action") && tags.includes("response")) || event?.source === "assistant";
+        return !!event && !isInputEvent(event);
       }
 
       function parseTs(ts) {
@@ -256,10 +255,8 @@
       }
 
       function buildTurnsFromEvents(eventsDesc) {
-        const relevantDesc = eventsDesc.filter((event) => isInputEvent(event) || isOutputEvent(event));
-        if (relevantDesc.length === 0) return [];
-
-        const eventsAsc = relevantDesc.slice().reverse();
+        if (eventsDesc.length === 0) return [];
+        const eventsAsc = eventsDesc.slice().reverse();
         const turns = [];
         let current = null;
 
@@ -269,8 +266,13 @@
             current = { input: event, output: null };
             return;
           }
-          if (!current) return;
-          if (isOutputEvent(event) && !current.output) current.output = event;
+          if (!isOutputEvent(event)) return;
+          if (!current) {
+            // Keep non-user events visible even if no input was observed yet.
+            turns.push({ input: null, output: event });
+            return;
+          }
+          if (!current.output) current.output = event;
         });
 
         if (current) turns.push(current);
@@ -364,7 +366,7 @@
           events.forEach((event) => upsertEvent(event));
           renderTimeline();
           if (!state.selectedEventId && events.length > 0) {
-            const first = events.find((ev) => isInputEvent(ev) || isOutputEvent(ev));
+            const first = events.find((ev) => !!ev);
             if (first?.event_id) {
               state.selectedEventId = first.event_id;
               renderTimeline();
