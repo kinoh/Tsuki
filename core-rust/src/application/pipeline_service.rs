@@ -477,10 +477,16 @@ async fn run_decision(
         context.len()
     );
 
-    let response = match adapter.respond(LlmRequest { input: context }).await {
+    let response = match adapter
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
+        .await
+    {
         Ok(response) => response,
         Err(err) => {
-            let error_text = format!("error: {}", err);
+            let error_detail = err.to_string();
+            let error_text = format!("error: {}", error_detail);
             let error_event = build_event(
                 "internal",
                 "text",
@@ -488,8 +494,10 @@ async fn run_decision(
                 vec!["decision".to_string(), "error".to_string()],
             );
             record_event(state, error_event).await;
+            emit_debug_module_error_event(state, "decision", "runtime", &context, &error_detail)
+                .await;
             return ModuleOutput {
-                text: format!("error: {}", err),
+                text: format!("error: {}", error_detail),
             };
         }
     };
@@ -503,6 +511,7 @@ async fn run_decision(
         vec!["decision".to_string()],
     );
     record_event(state, decision_event.clone()).await;
+    emit_debug_module_events(state, "decision", "runtime", &context, &response).await;
 
     ModuleOutput {
         text: response.text,
