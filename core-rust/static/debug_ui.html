@@ -996,27 +996,6 @@
         return "";
       }
 
-      function getModuleNameLegacy(event) {
-        const tags = getEventTags(event);
-        const moduleTag = tags.find((tag) => tag.startsWith("module:"));
-        if (moduleTag) {
-          return moduleTag.slice("module:".length);
-        }
-        if (tags.includes("decision")) {
-          return "decision";
-        }
-        if (isReplyEvent(event)) {
-          return "reply";
-        }
-        if (event.source === "user" && tags.includes("input")) {
-          return "input";
-        }
-        if (tags.some((tag) => tag.startsWith("improve."))) {
-          return "improve";
-        }
-        return "";
-      }
-
       function ownerSourceForModule(moduleName) {
         if (!moduleName) return "";
         return moduleName === "decision" ? "decision" : `submodule:${moduleName}`;
@@ -1053,8 +1032,6 @@
         if (event.source === "user" && tags.includes("input")) return "input";
         if (source === "decision") return "decision";
         if (source.startsWith("submodule:")) return "submodule";
-        if (tags.includes("decision")) return "decision";
-        if (tags.includes("submodule")) return "submodule";
         if (tags.includes("debug") && tags.includes("llm.raw")) return "debug.raw";
         return event.source || "event";
       }
@@ -1101,9 +1078,7 @@
         const data = await res.json();
         const expectedSource = ownerSourceForModule(moduleName);
         const candidates = (data.events || []).filter((rawEvent) => {
-          if (expectedSource && rawEvent.source === expectedSource) return true;
-          const legacyModuleName = getModuleNameLegacy(rawEvent);
-          return legacyModuleName === moduleName;
+          return expectedSource && rawEvent.source === expectedSource;
         });
         if (candidates.length === 0) {
           rawTextEl.textContent = "(none)";
@@ -1135,8 +1110,8 @@
         visibleEvents.forEach((event) => {
           const payload = event.payload || {};
           const kind = getEventKind(event);
-          const moduleName =
-            getModuleNameFromSource(event) || getModuleNameLegacy(event) || "event";
+          const moduleName = getModuleNameFromSource(event);
+          const titleLabel = event.source || "event";
           const mode = payload.mode || getModeFromTags(event) || "-";
           const isHistoryTarget = !isDebugEvent(event);
           const excluded = isHistoryTarget && state.excludedEventIds.has(event.event_id);
@@ -1153,7 +1128,7 @@
           }
           const summary = truncate(eventSummary(event), 120);
           item.innerHTML = `
-            <div><strong>${moduleName}</strong></div>
+            <div><strong>${titleLabel}</strong></div>
             <div class="worklog-meta">${kind} · ${mode} · ${formatTime(event.ts)}</div>
             <div class="muted">${summary}</div>
             <button class="exclude-btn" type="button" title="Exclude from history" ${isHistoryTarget ? "" : "disabled"}>&times;</button>
@@ -1323,8 +1298,7 @@
         const data = await res.json();
         const expectedSource = ownerSourceForModule(moduleName);
         const events = (data.events || []).filter((event) => {
-          if (expectedSource && event.source === expectedSource) return true;
-          return getModuleNameLegacy(event) === moduleName;
+          return expectedSource && event.source === expectedSource;
         });
         events.sort((a, b) => {
           const at = Date.parse(a.ts || "") || 0;
@@ -1367,7 +1341,8 @@
           if (!tags.includes("llm.raw")) return;
           const mode = extractTagValue(tags, "mode:");
           if (mode !== "module_only") return;
-          const moduleName = getModuleNameFromSource(event) || getModuleNameLegacy(event);
+          const moduleName = getModuleNameFromSource(event);
+          if (!moduleName) return;
           if (!state.submodules.has(moduleName)) return;
           if (matched.has(moduleName)) return;
           const context = payload.context || "";

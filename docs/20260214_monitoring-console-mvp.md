@@ -46,6 +46,7 @@
 - Support only operational filters required for scanning:
   - `source`
   - simple text match
+- Do not expose a separate `module` filter or `module` detail field in monitor UI.
 
 4. Lightweight details (optional)
 - Normal operation must not depend on expansion-style interaction.

@@ -157,7 +157,6 @@
       <section class="panel">
         <div class="row">
           <input id="sourceFilter" placeholder="source" />
-          <input id="moduleFilter" placeholder="module" />
           <input id="textFilter" placeholder="text" style="min-width: 220px" />
           <input id="maxItems" type="number" min="20" max="500" step="10" value="200" />
         </div>
@@ -183,7 +182,6 @@
 
       const els = {
         sourceFilter: document.getElementById("sourceFilter"),
-        moduleFilter: document.getElementById("moduleFilter"),
         textFilter: document.getElementById("textFilter"),
         maxItems: document.getElementById("maxItems"),
         timeline: document.getElementById("timeline"),
@@ -192,22 +190,6 @@
 
       function eventTags(event) {
         return Array.isArray(event?.meta?.tags) ? event.meta.tags : [];
-      }
-
-      function eventModule(event) {
-        const source = typeof event?.source === "string" ? event.source.trim() : "";
-        if (source === "decision") {
-          return "decision";
-        }
-        if (source.startsWith("submodule:")) {
-          return source.slice("submodule:".length);
-        }
-        const payloadModule = event?.payload?.module;
-        if (typeof payloadModule === "string" && payloadModule.trim()) {
-          return payloadModule.trim();
-        }
-        const fromTag = eventTags(event).find((tag) => tag.startsWith("module:"));
-        return fromTag ? fromTag.slice("module:".length) : "";
       }
 
       function eventText(event) {
@@ -248,9 +230,6 @@
         const source = (els.sourceFilter.value || "").trim().toLowerCase();
         if (source && String(event?.source || "").toLowerCase() !== source) return false;
 
-        const moduleFilter = (els.moduleFilter.value || "").trim().toLowerCase();
-        if (moduleFilter && eventModule(event).toLowerCase() !== moduleFilter) return false;
-
         const text = (els.textFilter.value || "").trim().toLowerCase();
         if (text) {
           const hay = `${eventText(event)} ${eventTags(event).join(" ")} ${event?.event_id || ""}`.toLowerCase();
@@ -266,7 +245,6 @@
           return;
         }
         const tags = eventTags(event).join(", ") || "-";
-        const moduleName = eventModule(event) || "-";
         let payloadText = "{}";
         try {
           payloadText = JSON.stringify(event.payload || {}, null, 2);
@@ -278,7 +256,6 @@
           <div class="kv"><span class="k">event_id</span>${event.event_id || "-"}</div>
           <div class="kv"><span class="k">ts</span>${event.ts || "-"}</div>
           <div class="kv"><span class="k">source</span>${event.source || "-"}</div>
-          <div class="kv"><span class="k">module</span>${moduleName}</div>
           <div class="kv"><span class="k">tags</span>${tags}</div>
           <pre>${payloadText.replace(/</g, "&lt;")}</pre>
         `;
@@ -301,17 +278,16 @@
           .map((event) => {
             const active = state.selectedEventId && event?.event_id === state.selectedEventId ? " active" : "";
             const source = event?.source || "-";
-            const moduleName = eventModule(event) || "-";
             return `
               <div class="turn">
-                <div class="line${active}" data-event-id="${event?.event_id || ""}"><span class="src">${source}</span><span class="mod">${moduleName}</span><span class="sep">|</span><span class="ts">${event?.ts || "-"}</span>${truncate(eventText(event))}</div>
+                <div class="line${active}" data-event-id="${event?.event_id || ""}"><span class="src">${source}</span><span class="sep">|</span><span class="ts">${event?.ts || "-"}</span>${truncate(eventText(event))}</div>
               </div>
             `;
           })
           .join("");
 
         const errorHtml = state.streamError
-          ? `<div class="turn"><div class="line error-log"><span class="src">error</span><span class="mod">stream</span><span class="sep">|</span>${state.streamError}</div></div>`
+          ? `<div class="turn"><div class="line error-log"><span class="src">error</span><span class="sep">|</span>${state.streamError}</div></div>`
           : "";
         els.timeline.innerHTML = `${errorHtml}${html}`;
       }
@@ -384,7 +360,7 @@
         renderDetail(eventId);
       });
 
-      [els.sourceFilter, els.moduleFilter, els.textFilter, els.maxItems].forEach((el) => {
+      [els.sourceFilter, els.textFilter, els.maxItems].forEach((el) => {
         el.addEventListener("input", () => {
           renderTimeline();
           renderDetail(state.selectedEventId);
