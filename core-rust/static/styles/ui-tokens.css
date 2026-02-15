@@ -1,0 +1,23 @@
+:root {
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-2: #1c2029;
+  --panel: var(--surface);
+  --panel-2: var(--surface-2);
+  --card: var(--surface);
+  --text: #e8ecf2;
+  --muted: #9aa4b2;
+  --accent: #ff4fa7;
+  --accent-2: #714af4;
+  --success: #83d19a;
+  --ok: var(--success);
+  --warning: #efc36f;
+  --warn: var(--warning);
+  --danger: #d46b6b;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --radius: 10px;
+  --radius-lg: 16px;
+  --shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  --page-bg: radial-gradient(circle at top left, #1c2029 0%, #0f1115 60%);
+}

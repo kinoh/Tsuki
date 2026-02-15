@@ -4,23 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tsuki Monitor</title>
+    <link rel="stylesheet" href="/debug/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/debug/styles/ui-base.css" />
     <style>
-      :root {
-        --bg: #0f1115;
-        --panel: #171a21;
-        --line: rgba(255, 255, 255, 0.08);
-        --text: #e8ecf2;
-        --muted: #9aa4b2;
-        --accent: #ff4fa7;
-        --accent-2: #714af4;
-        --ok: #83d19a;
-        --warn: #efc36f;
-      }
       * { box-sizing: border-box; }
       body {
         margin: 0;
         font-family: "Iosevka", "SFMono-Regular", Menlo, Consolas, monospace;
-        background: radial-gradient(circle at top left, #1c2029 0%, #0f1115 60%);
+        background: var(--page-bg);
         color: var(--text);
       }
       .wrap {
@@ -46,7 +37,7 @@
         margin-bottom: 8px;
       }
       input, button {
-        background: #1c2029;
+        background: var(--surface-2);
         color: var(--text);
         border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
@@ -76,7 +67,7 @@
         overflow: auto;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: #1c2029;
+        background: var(--surface-2);
       }
       .turn {
         padding: 4px 8px;
@@ -118,7 +109,7 @@
       .detail {
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: #1c2029;
+        background: var(--surface-2);
         padding: 10px;
         max-height: 72vh;
         overflow: auto;
@@ -141,7 +132,7 @@
         padding: 8px;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: #0f1115;
+        background: var(--bg);
         white-space: pre-wrap;
         word-break: break-word;
         font-size: 12px;

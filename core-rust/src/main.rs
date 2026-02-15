@@ -16,7 +16,7 @@ use axum::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
         Path, Query, State,
     },
-    http::StatusCode,
+    http::{header::CONTENT_TYPE, StatusCode},
     response::{
         sse::{Event as SseEvent, KeepAlive, Sse},
         Html, IntoResponse,
@@ -264,6 +264,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(ws_handler))
+        .route("/debug/styles/{name}", get(debug_style))
         .route("/debug/ui", get(debug_ui))
         .route("/debug/monitor", get(debug_monitor_ui))
         .route("/debug/concept-graph/ui", get(debug_concept_graph_ui))
@@ -871,6 +872,31 @@ async fn debug_monitor_ui() -> Html<String> {
             Html(EMBEDDED.to_string())
         }
     }
+}
+
+async fn debug_style(Path(name): Path<String>) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let (disk_path, embedded) = match name.as_str() {
+        "ui-tokens.css" => (
+            concat!(env!("CARGO_MANIFEST_DIR"), "/static/styles/ui-tokens.css"),
+            include_str!("../static/styles/ui-tokens.css"),
+        ),
+        "ui-base.css" => (
+            concat!(env!("CARGO_MANIFEST_DIR"), "/static/styles/ui-base.css"),
+            include_str!("../static/styles/ui-base.css"),
+        ),
+        _ => return Err((StatusCode::NOT_FOUND, "style not found".to_string())),
+    };
+    let css = match tokio::fs::read_to_string(disk_path).await {
+        Ok(value) => value,
+        Err(err) => {
+            println!(
+                "DEBUG_STYLE_READ_ERROR path={} error={} (falling back to embedded css)",
+                disk_path, err
+            );
+            embedded.to_string()
+        }
+    };
+    Ok(([(CONTENT_TYPE, "text/css; charset=utf-8")], css))
 }
 
 async fn debug_concept_graph_ui() -> Html<String> {

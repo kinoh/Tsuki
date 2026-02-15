@@ -1,0 +1,41 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--page-bg);
+}
+
+input,
+button,
+select,
+textarea {
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.status-ok,
+.ok {
+  color: var(--success);
+}
+
+.status-ng,
+.warn,
+.danger {
+  color: var(--danger);
+}

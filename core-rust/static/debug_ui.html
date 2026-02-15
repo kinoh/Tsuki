@@ -4,21 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Core Rust Debug UI</title>
+    <link rel="stylesheet" href="/debug/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/debug/styles/ui-base.css" />
     <style>
-      :root {
-        --bg: #0f1115;
-        --panel: #171a21;
-        --panel-2: #1c2029;
-        --text: #e8ecf2;
-        --muted: #9aa4b2;
-        --accent: #ff4fa7;
-        --accent-2: #714af4;
-        --danger: #d46b6b;
-        --line: rgba(255, 255, 255, 0.08);
-        --shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
-        --radius: 16px;
-      }
-
       * {
         box-sizing: border-box;
       }
@@ -27,7 +15,7 @@
         margin: 0;
         font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
         color: var(--text);
-        background: radial-gradient(circle at top left, #1c2029 0%, #0f1115 60%);
+        background: var(--page-bg);
         min-height: 100vh;
       }
 
@@ -351,7 +339,7 @@
 
       button {
         background: var(--accent);
-        color: #1a1a1a;
+        color: var(--bg);
         border: none;
         border-radius: 10px;
         padding: 10px 14px;
