@@ -26,9 +26,12 @@ The rebuild goal is:
 - Required scenario fields:
   - `tester_instructions`
   - `metrics_definition`
-- Metric outputs are scenario-specific and may differ by scenario.
+- A minimal common metric baseline is required across scenarios:
+  - `scenario_requirement_fit` (`0..1`)
+  - `dialog_naturalness` (`0..1`)
+- Metric outputs can add scenario-specific metrics beyond the common baseline.
 - Each metric is normalized to `0..1`.
-- Rationale: each scenario validates a different concern; fixed metric schema is intentionally avoided.
+- Rationale: every scenario validates a different concern, but baseline comparability is still needed.
 
 ### 4. Failure on missing output is strict
 - If required outputs cannot be obtained (conversation execution failure, timeout without usable trace, judge failure), the scenario is failed.
@@ -36,7 +39,30 @@ The rebuild goal is:
 
 ### 5. Coarse initial pass threshold
 - Initial pass policy is coarse (`score > 0.7` class) and can be refined later.
+- Shared pass/fail gating treats common metrics independently (AND):
+  - `mean(scenario_requirement_fit) > 0.7` and `min(scenario_requirement_fit) > 0.5`
+  - `mean(dialog_naturalness) > 0.7` and `min(dialog_naturalness) > 0.5`
 - Rationale: enable early adoption before policy hardening.
+
+### 6. Judge event input policy
+- Default judge input uses `primary events` only.
+- Scenarios may opt in to include debug events via `include_debug_events: true`.
+- Rationale: keep default evaluation tied to runtime semantics while preserving optional observability-based checks.
+
+### 7. Repeat-run aggregation policy
+- Use per-metric `mean` and `min` only.
+- Evaluate pass/fail with independent AND gates for common metrics.
+- Do not use weighted metric mixing in the initial design.
+- Rationale: preserve semantic separability between metric dimensions.
+
+### 8. Failure typing policy
+- Result artifacts use string error codes (not numeric code tables).
+- Initial error set:
+  - `EXEC_TIMEOUT`
+  - `EXEC_WS_ERROR`
+  - `JUDGE_ERROR`
+  - `INVALID_OUTPUT`
+- Rationale: simple, explicit, and extensible failure reporting without premature schema complexity.
 
 ## Runtime Architecture (Proposed)
 
@@ -66,15 +92,9 @@ The rebuild goal is:
 - Include snapshot id, scenario id, run index, verdict, metrics, and failure type if any.
 
 ## Non-Goals (Current Design Stage)
-- No global fixed metric taxonomy across all scenarios.
+- No large fixed global taxonomy beyond the common baseline metrics.
 - No final policy on exact aggregation across repeated runs.
 - No optimization policy for token/cost budgets yet.
-
-## Deferred Decisions
-These are intentionally postponed and should be finalized during implementation:
-- Default event selection policy for judging (`primary-only` vs optional debug inclusion).
-- Aggregation rule across repeated runs (mean, min, percentile, gating strategy).
-- Common runner-level controls (max turns, timeout profile, retry profile).
 
 ## Why This Fits `core-rust/AGENTS.md`
 - Keeps behavior event-first: judgment is based on persisted event streams.
