@@ -54,7 +54,7 @@ pub(crate) async fn trigger_improvement(
         .unwrap_or_else(|| "debug trigger".to_string());
     let feedback_refs = payload.feedback_refs.unwrap_or_default();
     let trigger_event = build_event(
-        "debug",
+        "system",
         "text",
         json!({
             "phase": "trigger",
@@ -84,7 +84,7 @@ pub(crate) async fn propose_improvement(
         return Err((StatusCode::BAD_REQUEST, "section is required".to_string()));
     }
     let proposal_event = build_event(
-        "debug",
+        "system",
         "text",
         json!({
             "phase": "proposal",
@@ -115,7 +115,7 @@ pub(crate) async fn propose_improvement(
     }
 
     let review_event = build_event(
-        "debug",
+        "system",
         "text",
         json!({
             "phase": "review",
@@ -180,7 +180,7 @@ pub(crate) async fn review_improvement(
     };
     let review_reason = payload.reason.clone().unwrap_or_else(|| "none".to_string());
     let review_event = build_event(
-        "debug",
+        "system",
         "text",
         json!({
             "phase": "review",
@@ -227,7 +227,7 @@ fn normalize_review_value(value: &str) -> Option<&'static str> {
 
 async fn emit_projection_error(state: &AppState, review_event_id: &str, err: &str) {
     let error_event = build_event(
-        "internal",
+        "system",
         "text",
         json!({
             "event_id": review_event_id,

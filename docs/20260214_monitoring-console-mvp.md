@@ -27,6 +27,10 @@
   - meaning/details = `tags` and `payload`
 - UI must not reinterpret `source` into mixed semantic categories.
 
+4. Emission rule for runtime.
+- `source` must be assigned explicitly at each event emission site.
+- Runtime must not infer ownership from tags/payload as a post-hoc normalization step.
+
 ## Functional Scope
 1. Live timeline view
 - Show newest items at the top.

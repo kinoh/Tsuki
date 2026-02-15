@@ -291,7 +291,7 @@ async fn run_router(input_text: &str, _modules: &Modules, state: &AppState) -> R
         activation_query_terms: build_activation_query_terms(input_text),
     };
     let router_event = build_event(
-        "internal",
+        "router",
         "state",
         serde_json::to_value(&router_output)
             .unwrap_or_else(|_| json!({ "error": "router_output_serialize_failed" })),
@@ -503,7 +503,7 @@ async fn run_decision(
             let error_detail = err.to_string();
             let error_text = format!("error: {}", error_detail);
             let error_event = build_event(
-                "internal",
+                "decision",
                 "text",
                 json!({ "text": error_text }),
                 vec!["decision".to_string(), "error".to_string()],
@@ -520,7 +520,7 @@ async fn run_decision(
     let parsed = parse_decision(&response.text);
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = build_event(
-        "internal",
+        "decision",
         "text",
         json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
         vec!["decision".to_string()],
@@ -645,7 +645,7 @@ async fn run_decision_debug(
     let parsed = parse_decision(&response.text);
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = build_event(
-        "internal",
+        "decision",
         "text",
         json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
         vec!["decision".to_string()],
@@ -758,7 +758,7 @@ async fn run_submodule_debug(
         }
     };
     let response_event = build_event(
-        "internal",
+        format!("submodule:{}", name).as_str(),
         "text",
         json!({ "text": response.text.clone() }),
         vec!["submodule".to_string(), format!("module:{}", name)],
@@ -841,7 +841,7 @@ fn apply_submodule_output_overrides(events: &mut Vec<Event>, overrides: &HashMap
         .into_iter()
         .map(|(name, text)| {
             build_event(
-                "internal",
+                format!("submodule:{}", name).as_str(),
                 "text",
                 json!({ "text": text }),
                 vec!["submodule".to_string(), format!("module:{}", name)],
@@ -871,7 +871,7 @@ async fn emit_debug_module_events(
     response: &crate::llm::LlmResponse,
 ) {
     let raw_event = build_event(
-        "debug",
+        module_owner_source(module).as_str(),
         "text",
         json!({
             "raw": response.raw.clone(),
@@ -898,7 +898,7 @@ async fn emit_debug_module_error_event(
     error: &str,
 ) {
     let error_event = build_event(
-        "debug",
+        module_owner_source(module).as_str(),
         "text",
         json!({
             "module": module,
@@ -939,7 +939,7 @@ async fn emit_concept_graph_query_event(
             "result_concepts": result_concepts,
         })
     };
-    let event = build_event("debug", "state", payload, tags);
+    let event = build_event("router", "state", payload, tags);
     record_event(state, event).await;
 }
 
@@ -1075,7 +1075,7 @@ async fn run_module(
     {
         Ok(response) => {
             let response_event = build_event(
-                "internal",
+                owner_source_for_role(role_tag, &name).as_str(),
                 "text",
                 json!({ "text": response.text }),
                 vec![role_tag.to_string(), format!("module:{}", name)],
@@ -1090,7 +1090,7 @@ async fn run_module(
             let error_detail = err.to_string();
             let error_text = format!("error: {}", error_detail);
             let error_event = build_event(
-                "internal",
+                owner_source_for_role(role_tag, &name).as_str(),
                 "text",
                 json!({ "text": error_text }),
                 vec![
@@ -1224,6 +1224,23 @@ fn truncate(value: &str, max: usize) -> String {
 
 fn is_debug_event(event: &Event) -> bool {
     event.meta.tags.iter().any(|tag| tag == "debug")
+}
+
+fn module_owner_source(module: &str) -> String {
+    if module.eq_ignore_ascii_case("decision") {
+        return "decision".to_string();
+    }
+    format!("submodule:{}", module)
+}
+
+fn owner_source_for_role(role_tag: &str, module_name: &str) -> String {
+    if role_tag == "decision" {
+        return "decision".to_string();
+    }
+    if role_tag == "submodule" {
+        return format!("submodule:{}", module_name);
+    }
+    "system".to_string()
 }
 
 fn parse_decision(text: &str) -> DecisionParsed {
@@ -1395,13 +1412,13 @@ mod tests {
                 vec!["input".to_string(), "type:message".to_string()],
             ),
             build_event(
-                "internal",
+                "submodule:curiosity",
                 "text",
                 json!({ "text": "old curiosity" }),
                 vec!["submodule".to_string(), "module:curiosity".to_string()],
             ),
             build_event(
-                "internal",
+                "decision",
                 "text",
                 json!({ "text": "decision=respond reason=test" }),
                 vec!["decision".to_string()],
