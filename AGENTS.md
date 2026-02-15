@@ -14,6 +14,7 @@ Guidance for coding agents working on Tsuki.
   - `src/mastra/`: Mastra setup, MCP wiring
   - `src/storage/`: LibSQL and usage tracking
   - `scripts/`: prompt encrypt/decrypt, manual checks
+- `core-rust/`: Rust backend to replace `core/` (WIP)
 - `gui/`: Tauri + Svelte client
   - `src/`: Svelte routes/components (e.g., `routes/+page.svelte`, `Config.svelte`, `Status.svelte`, `Note.svelte`)
   - `src-tauri/`: Tauri shell (Rust) with `src/main.rs`, `lib.rs`, `tauri.conf.json`, `capabilities/`, `icons/`
