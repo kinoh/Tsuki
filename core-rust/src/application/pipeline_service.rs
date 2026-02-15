@@ -18,6 +18,7 @@ use crate::prompts::PromptOverrides;
 use crate::{record_event, AppState, DebugRunRequest, DebugRunResponse, ModuleRuntime, Modules};
 
 const SUBMODULE_TOOL_PREFIX: &str = "run_submodule__";
+const ROUTER_QUERY_TERMS_MAX: usize = 8;
 
 #[derive(Debug, Deserialize)]
 struct InputMessage {
@@ -46,7 +47,7 @@ struct ModuleOutput {
     text: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 struct HardTriggerResult {
     module: String,
     text: String,
@@ -55,6 +56,10 @@ struct HardTriggerResult {
 #[derive(Debug, Clone, Serialize)]
 struct RouterOutput {
     activation_query_terms: Vec<String>,
+    concepts: Vec<String>,
+    hard_triggers: Vec<String>,
+    soft_recommendations: Vec<String>,
+    hard_trigger_results: Vec<HardTriggerResult>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,8 +220,19 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
         .trim()
         .to_string();
 
-    let router_output = run_router(&input_text, &state.modules, state).await;
-    let _decision_output = run_decision(&input_text, &router_output, &state.modules, state).await;
+    let overrides = current_prompt_overrides(state).await;
+    let module_instructions = load_active_module_instructions(state, &overrides).await;
+
+    let router_output = run_router(&input_text, &module_instructions, &state.modules, state).await;
+    let _decision_output = run_decision(
+        &input_text,
+        &router_output,
+        &state.modules,
+        state,
+        &module_instructions,
+        &overrides,
+    )
+    .await;
 }
 
 async fn maybe_append_debug_input_event(
@@ -286,9 +302,76 @@ fn is_decision_event(event: &Event) -> bool {
     event.meta.tags.iter().any(|tag| tag == "decision")
 }
 
-async fn run_router(input_text: &str, _modules: &Modules, state: &AppState) -> RouterOutput {
+async fn run_router(
+    input_text: &str,
+    module_instructions: &HashMap<String, String>,
+    modules: &Modules,
+    state: &AppState,
+) -> RouterOutput {
+    let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
+    let activation_query_terms =
+        infer_activation_query_terms(input_text, &active_module_names, modules, state).await;
+    let concept_limit = state.router.concept_top_n.max(1);
+    let concepts = match state
+        .activation_concept_graph
+        .concept_search(&activation_query_terms, concept_limit)
+        .await
+    {
+        Ok(values) => {
+            emit_concept_graph_query_event(
+                state,
+                &activation_query_terms,
+                concept_limit,
+                &values,
+                None,
+            )
+            .await;
+            values
+        }
+        Err(err) => {
+            println!(
+                "ACTIVATION_CONCEPT_GRAPH_ERROR op=concept_search error={}",
+                err
+            );
+            let error = err.to_string();
+            emit_concept_graph_query_event(
+                state,
+                &activation_query_terms,
+                concept_limit,
+                &[],
+                Some(&error),
+            )
+            .await;
+            Vec::new()
+        }
+    };
+    let scores = compute_module_scores_minimal(
+        input_text,
+        &activation_query_terms,
+        &concepts,
+        &active_module_names,
+    );
+    let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
+    let soft_recommendations =
+        select_modules_by_threshold(&scores, state.router.recommendation_threshold);
+    let activation_snapshot = ActivationSnapshot {
+        concepts: concepts.clone(),
+        hard_triggers: hard_triggers.clone(),
+        soft_recommendations: soft_recommendations.clone(),
+    };
+    let hard_trigger_results = run_hard_triggers(
+        input_text,
+        &activation_snapshot,
+        module_instructions,
+        state,
+    )
+    .await;
     let router_output = RouterOutput {
-        activation_query_terms: build_activation_query_terms(input_text),
+        activation_query_terms,
+        concepts,
+        hard_triggers,
+        soft_recommendations,
+        hard_trigger_results,
     };
     let router_event = build_event(
         "router",
@@ -299,6 +382,60 @@ async fn run_router(input_text: &str, _modules: &Modules, state: &AppState) -> R
     );
     record_event(state, router_event).await;
     router_output
+}
+
+async fn infer_activation_query_terms(
+    input_text: &str,
+    active_module_names: &[String],
+    modules: &Modules,
+    state: &AppState,
+) -> Vec<String> {
+    let fallback = build_activation_query_terms(input_text);
+    if input_text.trim().is_empty() {
+        return fallback;
+    }
+
+    let module_lines = if active_module_names.is_empty() {
+        "none".to_string()
+    } else {
+        active_module_names
+            .iter()
+            .map(|name| format!("- {}", name))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let context = format!(
+        "User input:\n{}\n\nActive submodules:\n{}\n\nReturn only compact JSON:\n{{\"activation_query_terms\":[\"...\"]}}\nRules:\n- 1 to {} terms\n- short lookup-oriented terms\n- no explanations",
+        input_text, module_lines, ROUTER_QUERY_TERMS_MAX
+    );
+    let instructions = compose_instructions(
+        &modules.runtime.base_instructions,
+        "You are the router. Extract activation query terms for concept-graph lookup only.",
+    );
+    let adapter = ResponseApiAdapter::new(build_router_config(instructions, &modules.runtime));
+    let response = match adapter
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let detail = err.to_string();
+            emit_debug_module_error_event(state, "router", "runtime", &context, &detail).await;
+            return fallback;
+        }
+    };
+    emit_debug_module_events(state, "router", "runtime", &context, &response).await;
+
+    let mut terms = parse_router_query_terms(&response.text);
+    if terms.is_empty() {
+        return fallback;
+    }
+    if terms.len() > ROUTER_QUERY_TERMS_MAX {
+        terms.truncate(ROUTER_QUERY_TERMS_MAX);
+    }
+    terms
 }
 
 fn build_activation_query_terms(input_text: &str) -> Vec<String> {
@@ -313,47 +450,11 @@ fn build_activation_query_terms(input_text: &str) -> Vec<String> {
     terms
 }
 
-async fn build_activation_snapshot(
-    input_text: &str,
-    router_output: &RouterOutput,
-    active_module_names: &[String],
-    state: &AppState,
-) -> ActivationSnapshot {
-    let concept_limit = state.router.concept_top_n.max(1);
-    let query_terms = router_output.activation_query_terms.clone();
-    let concepts = match state
-        .activation_concept_graph
-        .concept_search(&query_terms, concept_limit)
-        .await
-    {
-        Ok(values) => {
-            emit_concept_graph_query_event(state, &query_terms, concept_limit, &values, None).await;
-            values
-        }
-        Err(err) => {
-            println!(
-                "ACTIVATION_CONCEPT_GRAPH_ERROR op=concept_search error={}",
-                err
-            );
-            let error = err.to_string();
-            emit_concept_graph_query_event(state, &query_terms, concept_limit, &[], Some(&error))
-                .await;
-            Vec::new()
-        }
-    };
-    let scores = compute_module_scores_minimal(
-        input_text,
-        &router_output.activation_query_terms,
-        &concepts,
-        active_module_names,
-    );
-    let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
-    let soft_recommendations =
-        select_modules_by_threshold(&scores, state.router.recommendation_threshold);
+fn activation_snapshot_from_router_output(router_output: &RouterOutput) -> ActivationSnapshot {
     ActivationSnapshot {
-        concepts,
-        hard_triggers,
-        soft_recommendations,
+        concepts: router_output.concepts.clone(),
+        hard_triggers: router_output.hard_triggers.clone(),
+        soft_recommendations: router_output.soft_recommendations.clone(),
     }
 }
 
@@ -417,9 +518,10 @@ async fn run_decision(
     router_output: &RouterOutput,
     modules: &Modules,
     state: &AppState,
+    module_instructions: &HashMap<String, String>,
+    overrides: &PromptOverrides,
 ) -> ModuleOutput {
     let history = format_event_history(state, state.limits.decision_history, None, None).await;
-    let overrides = current_prompt_overrides(state).await;
     let base_instructions = overrides
         .base
         .clone()
@@ -428,36 +530,7 @@ async fn run_decision(
         .decision
         .clone()
         .unwrap_or_else(|| state.decision_instructions.clone());
-    let module_defs = match modules.registry.list_active().await {
-        Ok(list) => list,
-        Err(err) => {
-            println!("MODULE_REGISTRY_ERROR error={}", err);
-            Vec::new()
-        }
-    };
-    let active_module_names = module_defs
-        .iter()
-        .map(|definition| definition.name.clone())
-        .collect::<Vec<_>>();
-    let mut module_instructions = HashMap::new();
-    for definition in module_defs {
-        let module_name = definition.name;
-        let instructions = overrides
-            .submodules
-            .get(&module_name)
-            .cloned()
-            .unwrap_or(definition.instructions);
-        module_instructions.insert(module_name, instructions);
-    }
-    let activation_snapshot =
-        build_activation_snapshot(input_text, router_output, &active_module_names, state).await;
-    let hard_trigger_results = run_hard_triggers(
-        input_text,
-        &activation_snapshot,
-        &module_instructions,
-        state,
-    )
-    .await;
+    let activation_snapshot = activation_snapshot_from_router_output(router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
@@ -473,7 +546,7 @@ async fn run_decision(
     ));
     let concept_top_n = state.router.concept_top_n.max(1);
     let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
-    let executed_submodule_outputs = format_hard_trigger_results(&hard_trigger_results);
+    let executed_submodule_outputs = format_hard_trigger_results(&router_output.hard_trigger_results);
     let submodule_candidates =
         format_soft_recommendations(&activation_snapshot.soft_recommendations);
     let context = render_decision_context_template(
@@ -542,7 +615,9 @@ async fn run_decision_debug(
     excluded_event_ids: &HashSet<String>,
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
-    let router_output = run_router(input_text, &state.modules, state).await;
+    let overrides = current_prompt_overrides(state).await;
+    let module_instructions = load_active_module_instructions(state, &overrides).await;
+    let router_output = run_router(input_text, &module_instructions, &state.modules, state).await;
     let history = if context_override.is_some() {
         String::new()
     } else if include_history {
@@ -557,7 +632,6 @@ async fn run_decision_debug(
     } else {
         "none".to_string()
     };
-    let overrides = current_prompt_overrides(state).await;
     let base_instructions = overrides
         .base
         .clone()
@@ -566,35 +640,7 @@ async fn run_decision_debug(
         .decision
         .clone()
         .unwrap_or_else(|| state.decision_instructions.clone());
-    let module_defs = state
-        .modules
-        .registry
-        .list_active()
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
-    let active_module_names = module_defs
-        .iter()
-        .map(|definition| definition.name.clone())
-        .collect::<Vec<_>>();
-    let mut module_instructions = HashMap::new();
-    for definition in module_defs {
-        let module_name = definition.name;
-        let instructions = overrides
-            .submodules
-            .get(&module_name)
-            .cloned()
-            .unwrap_or(definition.instructions);
-        module_instructions.insert(module_name, instructions);
-    }
-    let activation_snapshot =
-        build_activation_snapshot(input_text, &router_output, &active_module_names, state).await;
-    let hard_trigger_results = run_hard_triggers(
-        input_text,
-        &activation_snapshot,
-        &module_instructions,
-        state,
-    )
-    .await;
+    let activation_snapshot = activation_snapshot_from_router_output(&router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
@@ -614,7 +660,7 @@ async fn run_decision_debug(
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         let concept_top_n = state.router.concept_top_n.max(1);
         let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
-        let executed_submodule_outputs = format_hard_trigger_results(&hard_trigger_results);
+        let executed_submodule_outputs = format_hard_trigger_results(&router_output.hard_trigger_results);
         let submodule_candidates =
             format_soft_recommendations(&activation_snapshot.soft_recommendations);
         render_decision_context_template(
@@ -1233,6 +1279,9 @@ fn is_debug_event(event: &Event) -> bool {
 }
 
 fn module_owner_source(module: &str) -> String {
+    if module.eq_ignore_ascii_case("router") {
+        return "router".to_string();
+    }
     if module.eq_ignore_ascii_case("decision") {
         return "decision".to_string();
     }
@@ -1372,6 +1421,86 @@ fn format_soft_recommendations(recommendations: &[String]) -> String {
         .map(|name| format!("- {}", name))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn parse_router_query_terms(text: &str) -> Vec<String> {
+    let parsed_json = serde_json::from_str::<serde_json::Value>(text).ok();
+    let mut terms = Vec::new();
+    if let Some(json) = parsed_json {
+        if let Some(items) = json
+            .get("activation_query_terms")
+            .and_then(|value| value.as_array())
+        {
+            for item in items {
+                if let Some(value) = item.as_str() {
+                    terms.push(value.to_string());
+                }
+            }
+        } else if let Some(items) = json.as_array() {
+            for item in items {
+                if let Some(value) = item.as_str() {
+                    terms.push(value.to_string());
+                }
+            }
+        }
+    }
+    if terms.is_empty() {
+        terms = text
+            .split([',', '\n', ';'])
+            .map(str::trim)
+            .map(|value| value.trim_matches(|c| c == '"' || c == '\'' || c == '-' || c == '*'))
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+    }
+    let mut normalized = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    for term in terms {
+        let value = term.trim().to_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        if seen.insert(value.clone()) {
+            normalized.push(value);
+        }
+    }
+    normalized
+}
+
+async fn load_active_module_instructions(
+    state: &AppState,
+    overrides: &PromptOverrides,
+) -> HashMap<String, String> {
+    let module_defs = match state.modules.registry.list_active().await {
+        Ok(list) => list,
+        Err(err) => {
+            println!("MODULE_REGISTRY_ERROR error={}", err);
+            Vec::new()
+        }
+    };
+    let mut module_instructions = HashMap::new();
+    for definition in module_defs {
+        let module_name = definition.name;
+        let instructions = overrides
+            .submodules
+            .get(&module_name)
+            .cloned()
+            .unwrap_or(definition.instructions);
+        module_instructions.insert(module_name, instructions);
+    }
+    module_instructions
+}
+
+fn build_router_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiConfig {
+    ResponseApiConfig {
+        model: runtime.model.clone(),
+        instructions,
+        temperature: runtime.temperature,
+        max_output_tokens: runtime.max_output_tokens,
+        tools: Vec::new(),
+        tool_handler: None,
+        max_tool_rounds: 0,
+    }
 }
 
 fn build_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiConfig {
