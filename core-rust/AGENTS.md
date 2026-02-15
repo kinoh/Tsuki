@@ -17,19 +17,19 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - Must not: unconditionally run all submodules for each input.
 
 ### `hard trigger`
-- Definition: a submodule execution request that Application must run before Decision.
-- Owned by: Application orchestration policy.
-- Must not: be treated as a Router-owned execution decision.
+- Definition: a submodule execution request selected and executed in Router path before Decision.
+- Owned by: Router policy/runtime.
+- Must not: be re-computed in Decision stage.
 
 ### `soft recommendation`
 - Definition: a candidate submodule hint derived from activation context.
-- Owned by: Application orchestration policy.
+- Owned by: Router policy/runtime.
 - Must not: be interpreted as mandatory execution.
 
 ### `activation query terms`
 - Definition: minimal query-oriented terms produced by Router for concept activation lookup.
 - Owned by: Router.
-- Must not: include trigger policy or tool execution.
+- Must not: include unrelated narrative output.
 
 ### `decision context`
 - Definition: fact-style input assembled for Decision from latest input, activation data, immediate outputs, and history.
@@ -62,16 +62,15 @@ It captures stable implementation rules and clearly marks active WIP areas.
 
 #### Router
 - Input: latest user text.
-- Output: query-oriented activation terms.
-- Router must not execute tools.
-- Router must not own hard/soft trigger policy.
+- Output: `activation_query_terms`, activation concepts, hard/soft trigger results.
+- Router performs concept-graph query in-process.
+- Router owns hard/soft trigger policy.
+- Router executes hard-triggered submodules before Decision.
 
 #### Application orchestration (`pipeline_service` and related application layer)
-- Reads concept-graph activation state via in-process interfaces.
-- Applies hard/soft trigger policy.
-- Application executes submodules only via hard triggers or decision-requested tool calls.
+- Invokes Router and consumes Router output.
 - Composes decision input context.
-- Executes hard triggers before decision when configured.
+- Runs Decision with Router-prepared activation and hard-trigger outputs.
 - Must not add ad-hoc semantic scoring that re-derives concept relevance.
 
 #### Decision module
@@ -134,6 +133,7 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - `docs/20260212_router-concept-activation-core-rust-implementation.md`
 - `docs/20260213_router-concept-graph-interface-and-responsibility-clarification.md`
 - `docs/20260213_router-concept-graph-core-rust-implementation-log.md`
+- `docs/20260215_router-responsibility-shift-to-integrated-routing.md`
 - `docs/20260214_decision-input-context-template-config.md`
 - `docs/20260214_always-on-debug-observability.md`
 - `docs/20260209_event-log-redefinition-and-debug-worklog-role.md`
