@@ -1065,9 +1065,18 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
         items.sort_by(|a, b| {
             let a_arousal = a.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
             let b_arousal = b.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
+            let a_accessed_at = a
+                .get("accessed_at")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0);
+            let b_accessed_at = b
+                .get("accessed_at")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0);
             b_arousal
                 .partial_cmp(&a_arousal)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b_accessed_at.cmp(&a_accessed_at))
                 .then_with(|| {
                     let a_name = a.get("name").and_then(|value| value.as_str()).unwrap_or("");
                     let b_name = b.get("name").and_then(|value| value.as_str()).unwrap_or("");
@@ -1187,9 +1196,18 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
         items.sort_by(|a, b| {
             let a_arousal = a.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
             let b_arousal = b.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
+            let a_accessed_at = a
+                .get("accessed_at")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0);
+            let b_accessed_at = b
+                .get("accessed_at")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0);
             b_arousal
                 .partial_cmp(&a_arousal)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b_accessed_at.cmp(&a_accessed_at))
                 .then_with(|| {
                     let a_name = a.get("name").and_then(|value| value.as_str()).unwrap_or("");
                     let b_name = b.get("name").and_then(|value| value.as_str()).unwrap_or("");
