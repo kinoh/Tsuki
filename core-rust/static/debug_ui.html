@@ -986,7 +986,17 @@
         return tags.includes("debug") && tags.includes("llm.raw");
       }
 
-      function getModuleNameFromTags(event) {
+      function getModuleNameFromSource(event) {
+        const source = typeof event?.source === "string" ? event.source.trim() : "";
+        if (!source) return "";
+        if (source === "decision") return "decision";
+        if (source.startsWith("submodule:")) {
+          return source.slice("submodule:".length);
+        }
+        return "";
+      }
+
+      function getModuleNameLegacy(event) {
         const tags = getEventTags(event);
         const moduleTag = tags.find((tag) => tag.startsWith("module:"));
         if (moduleTag) {
@@ -1005,6 +1015,11 @@
           return "improve";
         }
         return "";
+      }
+
+      function ownerSourceForModule(moduleName) {
+        if (!moduleName) return "";
+        return moduleName === "decision" ? "decision" : `submodule:${moduleName}`;
       }
 
       function getModeFromTags(event) {
@@ -1033,8 +1048,11 @@
 
       function getEventKind(event) {
         const tags = getEventTags(event);
+        const source = typeof event?.source === "string" ? event.source : "";
         if (isReplyEvent(event)) return "reply";
         if (event.source === "user" && tags.includes("input")) return "input";
+        if (source === "decision") return "decision";
+        if (source.startsWith("submodule:")) return "submodule";
         if (tags.includes("decision")) return "decision";
         if (tags.includes("submodule")) return "submodule";
         if (tags.includes("debug") && tags.includes("llm.raw")) return "debug.raw";
@@ -1081,10 +1099,11 @@
           return;
         }
         const data = await res.json();
+        const expectedSource = ownerSourceForModule(moduleName);
         const candidates = (data.events || []).filter((rawEvent) => {
-          const tags = getEventTags(rawEvent);
-          if (!tags.includes(`module:${moduleName}`)) return false;
-          return true;
+          if (expectedSource && rawEvent.source === expectedSource) return true;
+          const legacyModuleName = getModuleNameLegacy(rawEvent);
+          return legacyModuleName === moduleName;
         });
         if (candidates.length === 0) {
           rawTextEl.textContent = "(none)";
@@ -1116,7 +1135,8 @@
         visibleEvents.forEach((event) => {
           const payload = event.payload || {};
           const kind = getEventKind(event);
-          const moduleName = payload.module || getModuleNameFromTags(event) || "event";
+          const moduleName =
+            getModuleNameFromSource(event) || getModuleNameLegacy(event) || "event";
           const mode = payload.mode || getModeFromTags(event) || "-";
           const isHistoryTarget = !isDebugEvent(event);
           const excluded = isHistoryTarget && state.excludedEventIds.has(event.event_id);
@@ -1301,9 +1321,10 @@
           return;
         }
         const data = await res.json();
+        const expectedSource = ownerSourceForModule(moduleName);
         const events = (data.events || []).filter((event) => {
-          const tags = (event.meta && event.meta.tags) || [];
-          return tags.includes(`module:${moduleName}`);
+          if (expectedSource && event.source === expectedSource) return true;
+          return getModuleNameLegacy(event) === moduleName;
         });
         events.sort((a, b) => {
           const at = Date.parse(a.ts || "") || 0;
@@ -1346,7 +1367,7 @@
           if (!tags.includes("llm.raw")) return;
           const mode = extractTagValue(tags, "mode:");
           if (mode !== "module_only") return;
-          const moduleName = extractTagValue(tags, "module:");
+          const moduleName = getModuleNameFromSource(event) || getModuleNameLegacy(event);
           if (!state.submodules.has(moduleName)) return;
           if (matched.has(moduleName)) return;
           const context = payload.context || "";

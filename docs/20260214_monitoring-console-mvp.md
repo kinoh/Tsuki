@@ -30,6 +30,7 @@
 4. Emission rule for runtime.
 - `source` must be assigned explicitly at each event emission site.
 - Runtime must not infer ownership from tags/payload as a post-hoc normalization step.
+- Runtime should not duplicate ownership as `payload.module` or `tag=module:*`.
 
 ## Functional Scope
 1. Live timeline view

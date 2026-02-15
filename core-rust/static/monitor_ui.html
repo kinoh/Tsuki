@@ -195,6 +195,13 @@
       }
 
       function eventModule(event) {
+        const source = typeof event?.source === "string" ? event.source.trim() : "";
+        if (source === "decision") {
+          return "decision";
+        }
+        if (source.startsWith("submodule:")) {
+          return source.slice("submodule:".length);
+        }
         const payloadModule = event?.payload?.module;
         if (typeof payloadModule === "string" && payloadModule.trim()) {
           return payloadModule.trim();

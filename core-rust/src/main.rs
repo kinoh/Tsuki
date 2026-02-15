@@ -580,6 +580,17 @@ fn matches_debug_event_filters(event: &Event, query: &DebugEventsQuery) -> bool 
 }
 
 fn event_module_name(event: &Event) -> Option<&str> {
+    if event.source.eq_ignore_ascii_case("decision") {
+        return Some("decision");
+    }
+    if let Some(name) = event
+        .source
+        .strip_prefix("submodule:")
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(name);
+    }
+
     event
         .payload
         .get("module")

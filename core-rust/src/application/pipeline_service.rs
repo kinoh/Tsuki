@@ -761,7 +761,7 @@ async fn run_submodule_debug(
         format!("submodule:{}", name).as_str(),
         "text",
         json!({ "text": response.text.clone() }),
-        vec!["submodule".to_string(), format!("module:{}", name)],
+        vec!["submodule".to_string()],
     );
     record_event(state, response_event.clone()).await;
     emit_debug_module_events(state, name, "module_only", &context, &response).await;
@@ -844,7 +844,7 @@ fn apply_submodule_output_overrides(events: &mut Vec<Event>, overrides: &HashMap
                 format!("submodule:{}", name).as_str(),
                 "text",
                 json!({ "text": text }),
-                vec!["submodule".to_string(), format!("module:{}", name)],
+                vec!["submodule".to_string()],
             )
         })
         .collect::<Vec<_>>();
@@ -852,6 +852,13 @@ fn apply_submodule_output_overrides(events: &mut Vec<Event>, overrides: &HashMap
 }
 
 fn event_submodule_name(event: &Event) -> Option<&str> {
+    if let Some(name) = event
+        .source
+        .strip_prefix("submodule:")
+        .filter(|value| !value.is_empty())
+    {
+        return Some(name);
+    }
     if !event.meta.tags.iter().any(|tag| tag == "submodule") {
         return None;
     }
@@ -877,13 +884,11 @@ async fn emit_debug_module_events(
             "raw": response.raw.clone(),
             "context": context,
             "output_text": response.text.clone(),
-            "module": module,
             "mode": mode,
         }),
         vec![
             "debug".to_string(),
             "llm.raw".to_string(),
-            format!("module:{}", module),
             format!("mode:{}", mode),
         ],
     );
@@ -901,7 +906,6 @@ async fn emit_debug_module_error_event(
         module_owner_source(module).as_str(),
         "text",
         json!({
-            "module": module,
             "mode": mode,
             "context": context,
             "error": error,
@@ -910,7 +914,6 @@ async fn emit_debug_module_error_event(
             "debug".to_string(),
             "llm.error".to_string(),
             "error".to_string(),
-            format!("module:{}", module),
             format!("mode:{}", mode),
         ],
     );
@@ -1078,7 +1081,7 @@ async fn run_module(
                 owner_source_for_role(role_tag, &name).as_str(),
                 "text",
                 json!({ "text": response.text }),
-                vec![role_tag.to_string(), format!("module:{}", name)],
+                vec![role_tag.to_string()],
             );
             record_event(state, response_event).await;
             emit_debug_module_events(state, &name, "runtime", &context, &response).await;
@@ -1093,11 +1096,7 @@ async fn run_module(
                 owner_source_for_role(role_tag, &name).as_str(),
                 "text",
                 json!({ "text": error_text }),
-                vec![
-                    role_tag.to_string(),
-                    format!("module:{}", name),
-                    "error".to_string(),
-                ],
+                vec![role_tag.to_string(), "error".to_string()],
             );
             record_event(state, error_event).await;
             emit_debug_module_error_event(state, &name, "runtime", &context, &error_detail).await;
@@ -1181,6 +1180,13 @@ fn event_role(event: &Event) -> String {
     }
     if tags.iter().any(|tag| tag == "decision") {
         return "decision".to_string();
+    }
+    if let Some(module_name) = event
+        .source
+        .strip_prefix("submodule:")
+        .filter(|value| !value.is_empty())
+    {
+        return format!("submodule:{}", module_name);
     }
     if tags.iter().any(|tag| tag == "submodule") {
         if let Some(module_name) = tags
@@ -1415,7 +1421,7 @@ mod tests {
                 "submodule:curiosity",
                 "text",
                 json!({ "text": "old curiosity" }),
-                vec!["submodule".to_string(), "module:curiosity".to_string()],
+                vec!["submodule".to_string()],
             ),
             build_event(
                 "decision",
@@ -1432,7 +1438,7 @@ mod tests {
 
         let curiosity = events
             .iter()
-            .find(|event| event.meta.tags.iter().any(|tag| tag == "module:curiosity"))
+            .find(|event| event.source == "submodule:curiosity")
             .expect("curiosity event should exist");
         assert_eq!(
             curiosity
@@ -1445,13 +1451,7 @@ mod tests {
 
         let inserted = events
             .iter()
-            .find(|event| {
-                event
-                    .meta
-                    .tags
-                    .iter()
-                    .any(|tag| tag == "module:social_approval")
-            })
+            .find(|event| event.source == "submodule:social_approval")
             .expect("social_approval event should be inserted");
         assert_eq!(
             inserted
