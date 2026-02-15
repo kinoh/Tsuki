@@ -419,10 +419,10 @@ pub(crate) async fn load_active_module_instructions(
 }
 
 fn parse_decision(text: &str) -> DecisionParsed {
-    let decision = extract_field(text, "decision=", &["reason=", "question="])
+    let decision = extract_field(text, "decision=", &["reason="])
         .and_then(|value| value.split_whitespace().next().map(|s| s.to_lowercase()))
         .unwrap_or_else(|| "respond".to_string());
-    let reason = extract_field(text, "reason=", &["decision=", "question="]);
+    let reason = extract_field(text, "reason=", &["decision="]);
 
     DecisionParsed { decision, reason }
 }

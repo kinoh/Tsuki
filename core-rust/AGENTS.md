@@ -76,7 +76,7 @@ It captures stable implementation rules and clearly marks active WIP areas.
 #### Decision module
 - Receives composed context and available tools.
 - Decides whether to call submodule tools.
-- Emits decision/question/action outputs as events.
+- Emits decision/action outputs as events.
 
 #### Submodules
 - Execute only when explicitly invoked (hard trigger stage or decision tool call).

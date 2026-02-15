@@ -55,7 +55,7 @@ candidate_submodules_by_interest_match:
 recent_event_history:
 {{recent_event_history}}
 
-Return: decision=<respond|ignore|question> reason=<short> question=<text|none>."""
+Return: decision=<respond|ignore> reason=<short>."""
 
 submodule_context_template = """Latest user input: {{latest_user_input}}
 Concept activation:
