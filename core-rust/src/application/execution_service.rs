@@ -27,7 +27,7 @@ struct ModuleOutput {
 #[derive(Debug, Deserialize)]
 struct SubmoduleToolArgs {
     #[serde(default)]
-    focus: Option<String>,
+    execution_reason: Option<String>,
 }
 
 struct DecisionParsed {
@@ -361,7 +361,7 @@ pub(crate) async fn run_submodule_tool(
     activation_snapshot: &ActivationSnapshot,
     module_name: &str,
     module_instructions: &str,
-    focus: Option<&str>,
+    execution_reason: Option<&str>,
 ) -> Result<String, ToolError> {
     let history = format_event_history(state, state.limits.submodule_history, None, None).await;
     let overrides = current_prompt_overrides(state).await;
@@ -377,7 +377,7 @@ pub(crate) async fn run_submodule_tool(
         &format_activation_concepts(&activation_snapshot.concepts),
         &format_soft_recommendations(&activation_snapshot.soft_recommendations),
         &history,
-        focus.unwrap_or("none"),
+        execution_reason.unwrap_or("none"),
     );
     let output = run_module(
         state,
@@ -472,7 +472,7 @@ fn render_submodule_context_template(
     active_concepts_from_concept_graph: &str,
     candidate_submodules_by_interest_match: &str,
     recent_event_history: &str,
-    tool_focus: &str,
+    execution_reason: &str,
 ) -> String {
     template
         .replace("{{latest_user_input}}", latest_user_input)
@@ -485,7 +485,7 @@ fn render_submodule_context_template(
             candidate_submodules_by_interest_match,
         )
         .replace("{{recent_event_history}}", recent_event_history)
-        .replace("{{tool_focus}}", tool_focus)
+        .replace("{{execution_reason}}", execution_reason)
 }
 
 fn compose_instructions(base: &str, module_specific: &str) -> String {
@@ -513,9 +513,9 @@ fn decision_tools(
             parameters: Some(json!({
                 "type": "object",
                 "properties": {
-                    "focus": { "type": "string" }
+                    "execution_reason": { "type": "string" }
                 },
-                "required": ["focus"],
+                "required": ["execution_reason"],
                 "additionalProperties": false
             })),
             strict: Some(true),
@@ -690,7 +690,7 @@ impl ToolHandler for DecisionToolHandler {
                         .get(module_name)
                         .map(String::as_str)
                         .unwrap_or(""),
-                    args.focus.as_deref(),
+                    args.execution_reason.as_deref(),
                 ))
             })?;
             Ok(output)
