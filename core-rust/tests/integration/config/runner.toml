@@ -1,0 +1,18 @@
+# Runner-level defaults for integration tests.
+# These are operational defaults, not scenario-schema requirements.
+
+[tester]
+model = "gpt-5.2"
+prompt_file = "tests/integration/prompts/tester.md"
+
+[judge]
+model = "gpt-5.2"
+prompt_file = "tests/integration/prompts/judge.md"
+
+[execution]
+# Multi-run support: provide run_count at execution time when needed.
+run_count = 1
+max_turns = 12
+turn_timeout_ms = 45000
+scenario_timeout_ms = 480000
+transient_retry = 1

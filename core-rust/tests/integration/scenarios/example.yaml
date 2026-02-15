@@ -1,0 +1,19 @@
+name: "rainy_mood_support"
+include_debug_events: false
+
+# Tester LLM should follow this instruction to drive the dialogue.
+tester_instructions: |
+  You are the test-side conversational actor.
+  Drive a short multi-turn conversation to verify whether the assistant can:
+  1) acknowledge low mood without being pushy,
+  2) provide one practical suggestion,
+  3) close naturally when user ends the talk.
+
+# Judge LLM should score each metric in 0..1.
+metrics_definition:
+  scenario_requirement_fit:
+    description: "How well the run satisfies scenario-specific required behaviors."
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+  empathy_balance:
+    description: "Balance between emotional acknowledgment and practical help."

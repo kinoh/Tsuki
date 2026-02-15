@@ -3,6 +3,10 @@
 Scenario-driven WebSocket client and runner for manual E2E verification.
 These scripts do not assert behavior; they record logs for human review.
 
+## Test groups
+- `tests/client/`: manual WebSocket scenario tooling (current document).
+- `tests/integration/`: LLM-driven integration test assets (tester/judge/scenarios/results).
+
 ## Usage
 Run the full E2E flow (starts `tsuki-core-rust`):
 ```

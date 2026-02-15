@@ -44,6 +44,11 @@ cd core-rust
 cargo run --example test_runner -- --connect tests/client/scenarios/example.yaml
 ```
 
+## LLM-driven integration test assets
+- Integration-test assets are isolated under `tests/integration/`.
+- Use task orchestration from `core-rust/Taskfile.yaml`.
+- Memgraph restore policy for integration setup uses latest snapshot (`memgraph/restore/latest`).
+
 First message is auth: `USER_NAME:WEB_AUTH_TOKEN`.
 After auth, send JSON like:
 ```

@@ -1,0 +1,34 @@
+version: '3'
+
+dotenv: ['../.env', './.env']
+
+vars:
+  ROOT_TASKFILE: ../Taskfile.yaml
+  DOCKER_COMPOSE: docker compose -f ../compose.yaml -f ../compose.dev.yaml
+
+tasks:
+  integration/memgraph/up:
+    desc: Start test memgraph service
+    cmds:
+      - '{{.DOCKER_COMPOSE}} up -d memgraph'
+
+  integration/memgraph/restore/latest:
+    desc: Restore latest memgraph snapshot for integration tests
+    deps:
+      - integration/memgraph/up
+    cmds:
+      - task -t {{.ROOT_TASKFILE}} memgraph/restore/latest
+
+  integration/prepare:
+    desc: Prepare integration test runtime prerequisites
+    deps:
+      - integration/memgraph/restore/latest
+    cmds:
+      - mkdir -p tests/integration/logs tests/integration/results
+
+  integration/run:
+    desc: Prepare environment and run integration harness (placeholder)
+    deps:
+      - integration/prepare
+    cmds:
+      - 'echo "TODO: implement integration harness entrypoint"'

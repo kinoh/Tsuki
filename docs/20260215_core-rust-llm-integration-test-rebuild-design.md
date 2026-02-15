@@ -13,14 +13,20 @@ The rebuild goal is:
 
 ## Stable Decisions
 
-### 1. Memgraph restore input is explicit
-- The test run must require a backup snapshot file name (not `latest`).
-- Rationale: reproducibility across local runs and CI.
+### 1. Memgraph restore policy uses latest snapshot
+- Integration test setup restores Memgraph using `memgraph/restore/latest`.
+- Snapshot file name is not passed through test runner/task arguments.
+- Rationale: keep outer orchestration simple for local-first test operation.
 
 ### 2. Scenario execution supports repeated runs
 - The runner must support multi-run execution for a scenario.
 - The run count is not fixed in design; it is provided at execution time.
 - Rationale: absorb LLM variance without locking policy too early.
+
+### 2.1 Integration assets location
+- LLM-driven integration test assets are stored under `core-rust/tests/integration/`.
+- Existing manual scenario client assets under `core-rust/tests/client/` remain separate.
+- Rationale: avoid mixing manual WebSocket scripts and judge-based integration assets.
 
 ### 3. Scenario schema is minimal and variable-output friendly
 - Required scenario fields:
@@ -68,7 +74,7 @@ The rebuild goal is:
 
 ### Phase A: Environment setup
 1. Start/ensure test Memgraph instance.
-2. Restore the explicitly specified snapshot file.
+2. Restore latest snapshot (`memgraph/restore/latest`).
 3. Create a temporary test config from base `config.toml` with:
    - test-only `db.path` (temporary file),
    - test runtime ports/identifiers as needed.
@@ -76,8 +82,9 @@ The rebuild goal is:
 
 ### Phase B: Scenario execution by tester LLM
 1. Load scenario (`tester_instructions`, `metrics_definition`).
-2. Tester LLM runs dialogue turns through WebSocket client flow.
-3. Runtime persists events in libSQL event stream.
+2. Load tester/judge model and prompt from file-based runner config (not env vars).
+3. Tester LLM runs dialogue turns through WebSocket client flow.
+4. Runtime persists events in libSQL event stream.
 
 ### Phase C: Evaluation by independent judge LLM
 1. Read produced event stream from the test DB.
