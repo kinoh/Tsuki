@@ -4,6 +4,19 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Watch core-rust",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -a && source .env && set +a && bacon run-long"
+      ],
+      "options": { "cwd": "${workspaceFolder}/core-rust" },
+      "isBackground": true,
+      "problemMatcher": "$rustc",
+      "group": "build"
+    },
+    {
       "label": "Debug App",
       "type": "shell",
       "command": "pnpm",
