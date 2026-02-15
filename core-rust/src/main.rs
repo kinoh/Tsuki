@@ -281,6 +281,18 @@ async fn main() {
             get(debug_concept_graph_concept_detail),
         )
         .route(
+            "/debug/concept-graph/episodes",
+            get(debug_concept_graph_episodes),
+        )
+        .route(
+            "/debug/concept-graph/episodes/{name}",
+            get(debug_concept_graph_episode_detail),
+        )
+        .route(
+            "/debug/concept-graph/relations",
+            get(debug_concept_graph_relations),
+        )
+        .route(
             "/debug/concept-graph/queries",
             get(debug_concept_graph_queries),
         )
@@ -629,6 +641,45 @@ async fn debug_concept_graph_concept_detail(
         Some(concept) => Ok(Json(concept)),
         None => Err((StatusCode::NOT_FOUND, "concept not found".to_string())),
     }
+}
+
+async fn debug_concept_graph_episodes(
+    State(state): State<AppState>,
+    Query(query): Query<DebugConceptSearchQuery>,
+) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
+    let items = state
+        .activation_concept_graph
+        .debug_episode_search(query.q, query.limit.unwrap_or(50))
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(DebugConceptSearchResponse { items }))
+}
+
+async fn debug_concept_graph_episode_detail(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let value = state
+        .activation_concept_graph
+        .debug_episode_detail(name)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    match value {
+        Some(episode) => Ok(Json(episode)),
+        None => Err((StatusCode::NOT_FOUND, "episode not found".to_string())),
+    }
+}
+
+async fn debug_concept_graph_relations(
+    State(state): State<AppState>,
+    Query(query): Query<DebugConceptSearchQuery>,
+) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
+    let items = state
+        .activation_concept_graph
+        .debug_relation_search(query.q, query.limit.unwrap_or(80))
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(DebugConceptSearchResponse { items }))
 }
 
 async fn debug_concept_graph_queries(

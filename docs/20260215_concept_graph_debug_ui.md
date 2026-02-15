@@ -37,6 +37,19 @@ Implemented a read-only debug surface first, instead of direct mutation controls
 - No create/update/delete operations for concepts/relations/episodes.
 - No rollback, audit trail mutation UI, or batch maintenance actions.
 
+## Additional Decision (Tab Switch UX)
+- Updated the list/search panel to be mode-switchable by clicking the top entity cards:
+  - `Concepts`
+  - `Episodes`
+  - `Relations`
+- Why:
+  - The user needed a quick way to inspect each entity type from the same panel without changing pages.
+  - Reusing one panel keeps interaction cost low during debugging sessions.
+- Supporting APIs were added for read-only episode/relation retrieval:
+  - `GET /debug/concept-graph/episodes`
+  - `GET /debug/concept-graph/episodes/{name}`
+  - `GET /debug/concept-graph/relations`
+
 ## Notes
 - Timeline endpoint currently derives query history from persisted event log entries tagged `concept_graph.query`.
 - The UI polls health/counts/timeline periodically to stay useful during live debugging.

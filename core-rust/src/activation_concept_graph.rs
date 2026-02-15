@@ -33,6 +33,17 @@ pub(crate) trait ConceptGraphDebugReader: Send + Sync {
         limit: usize,
     ) -> Result<Vec<Value>, String>;
     async fn debug_concept_detail(&self, concept: String) -> Result<Option<Value>, String>;
+    async fn debug_episode_search(
+        &self,
+        query: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<Value>, String>;
+    async fn debug_episode_detail(&self, episode: String) -> Result<Option<Value>, String>;
+    async fn debug_relation_search(
+        &self,
+        query: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<Value>, String>;
 }
 
 #[async_trait]
@@ -1115,5 +1126,166 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             "relations": relations,
             "episodes": episodes,
         })))
+    }
+
+    async fn debug_episode_search(
+        &self,
+        query_text: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<Value>, String> {
+        let query_text = query_text.and_then(|value| Self::normalize_non_empty(&value));
+        let query_lower = query_text.as_deref().map(|value| value.to_lowercase());
+        let limit = Self::clamp_limit(limit, 50, 200);
+        let now = self.now_ms();
+        let q = query(
+            "MATCH (e:Episode)
+             RETURN e.name AS name, e.summary AS summary, e.valence AS valence,
+                    e.arousal_level AS arousal_level, e.accessed_at AS accessed_at
+             ORDER BY e.name",
+        );
+        let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
+        let mut items = Vec::<Value>::new();
+        while let Ok(Some(row)) = result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            let summary: String = row.get("summary").unwrap_or_default();
+            if let Some(expected) = query_lower.as_deref() {
+                let hay = format!("{} {}", name.to_lowercase(), summary.to_lowercase());
+                if !hay.contains(expected) {
+                    continue;
+                }
+            }
+            let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
+            let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
+            let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+            let q_linked =
+                query("MATCH (c:Concept)-[:EVOKES]->(e:Episode {name: $name}) RETURN count(c) AS count")
+                    .param("name", name.as_str());
+            let mut linked_result = self
+                .graph
+                .execute(q_linked)
+                .await
+                .map_err(|err| err.to_string())?;
+            let linked_concepts = if let Ok(Some(linked_row)) = linked_result.next().await {
+                linked_row.get("count").unwrap_or(0)
+            } else {
+                0
+            };
+            let arousal = Self::round_score(self.arousal(arousal_level, accessed_at, now));
+            items.push(json!({
+                "name": name,
+                "summary": summary,
+                "valence": valence,
+                "arousal": arousal,
+                "arousal_level": arousal_level,
+                "accessed_at": accessed_at,
+                "linked_concepts": linked_concepts,
+            }));
+        }
+        items.sort_by(|a, b| {
+            let a_arousal = a.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
+            let b_arousal = b.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
+            b_arousal
+                .partial_cmp(&a_arousal)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    let a_name = a.get("name").and_then(|value| value.as_str()).unwrap_or("");
+                    let b_name = b.get("name").and_then(|value| value.as_str()).unwrap_or("");
+                    a_name.cmp(b_name)
+                })
+        });
+        items.truncate(limit);
+        Ok(items)
+    }
+
+    async fn debug_episode_detail(&self, episode: String) -> Result<Option<Value>, String> {
+        let episode = match Self::normalize_non_empty(&episode) {
+            Some(value) => value,
+            None => return Ok(None),
+        };
+        let now = self.now_ms();
+        let Some(state) = self.fetch_episode_state(episode.as_str(), now).await? else {
+            return Ok(None);
+        };
+        let q = query(
+            "MATCH (e:Episode {name: $name})
+             OPTIONAL MATCH (c:Concept)-[r:EVOKES]->(e)
+             RETURN c.name AS concept, coalesce(r.weight, $default_weight) AS weight
+             ORDER BY concept",
+        )
+        .param("name", episode.as_str())
+        .param("default_weight", DEFAULT_RELATION_WEIGHT);
+        let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
+        let mut linked = Vec::<Value>::new();
+        while let Ok(Some(row)) = result.next().await {
+            let concept: String = row.get("concept").unwrap_or_default();
+            if concept.is_empty() {
+                continue;
+            }
+            let weight: f64 = row.get("weight").unwrap_or(DEFAULT_RELATION_WEIGHT);
+            linked.push(json!({
+                "concept": concept,
+                "weight": weight,
+            }));
+        }
+        Ok(Some(json!({
+            "name": episode,
+            "valence": state.valence,
+            "arousal": Self::round_score(self.arousal(state.arousal_level, state.accessed_at, now)),
+            "arousal_level": state.arousal_level,
+            "accessed_at": state.accessed_at,
+            "linked_concepts": linked,
+        })))
+    }
+
+    async fn debug_relation_search(
+        &self,
+        query_text: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<Value>, String> {
+        let query_text = query_text.and_then(|value| Self::normalize_non_empty(&value));
+        let query_lower = query_text.as_deref().map(|value| value.to_lowercase());
+        let limit = Self::clamp_limit(limit, 50, 200);
+        let q = query(
+            "MATCH (a)-[r:IS_A|PART_OF|EVOKES]->(b)
+             RETURN a.name AS from, b.name AS to, type(r) AS type, coalesce(r.weight, $default_weight) AS weight
+             ORDER BY weight DESC, from, to",
+        )
+        .param("default_weight", DEFAULT_RELATION_WEIGHT);
+        let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
+        let mut items = Vec::<Value>::new();
+        while let Ok(Some(row)) = result.next().await {
+            let from: String = row.get("from").unwrap_or_default();
+            let to: String = row.get("to").unwrap_or_default();
+            if from.is_empty() || to.is_empty() {
+                continue;
+            }
+            let relation_type_raw: String = row.get("type").unwrap_or_default();
+            let relation_type = Self::render_relation_type(relation_type_raw.as_str()).to_string();
+            if let Some(expected) = query_lower.as_deref() {
+                let hay = format!(
+                    "{} {} {}",
+                    from.to_lowercase(),
+                    relation_type.to_lowercase(),
+                    to.to_lowercase()
+                );
+                if !hay.contains(expected) {
+                    continue;
+                }
+            }
+            let weight: f64 = row.get("weight").unwrap_or(DEFAULT_RELATION_WEIGHT);
+            items.push(json!({
+                "from": from,
+                "to": to,
+                "type": relation_type,
+                "weight": weight,
+            }));
+            if items.len() >= limit {
+                break;
+            }
+        }
+        Ok(items)
     }
 }

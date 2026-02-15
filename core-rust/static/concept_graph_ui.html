@@ -16,7 +16,6 @@
       }
 
       * { box-sizing: border-box; }
-
       body {
         margin: 0;
         background: linear-gradient(160deg, #eef4f6 0%, #f7f9fb 60%, #f1f6f5 100%);
@@ -32,11 +31,7 @@
         gap: 12px;
       }
 
-      .row {
-        display: grid;
-        gap: 12px;
-      }
-
+      .row { display: grid; gap: 12px; }
       .row.top { grid-template-columns: 1fr 1fr; }
       .row.main { grid-template-columns: 380px 1fr; }
 
@@ -54,26 +49,26 @@
       .status-ok { color: var(--accent); font-weight: 700; }
       .status-ng { color: var(--danger); font-weight: 700; }
 
-      .grid3 {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 8px;
-      }
+      .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 
-      .metric {
+      .metric-btn {
         border: 1px solid var(--line);
         border-radius: 8px;
         padding: 8px;
+        text-align: left;
+        background: #f8fbfb;
+        cursor: pointer;
       }
 
-      .metric .name { font-size: 12px; color: var(--muted); }
-      .metric .value { font-size: 18px; font-weight: 700; margin-top: 4px; }
-
-      .toolbar {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 8px;
+      .metric-btn.active {
+        border-color: var(--accent);
+        background: #eaf4f5;
       }
+
+      .metric-btn .name { font-size: 12px; color: var(--muted); }
+      .metric-btn .value { font-size: 18px; font-weight: 700; margin-top: 4px; }
+
+      .toolbar { display: flex; gap: 8px; margin-bottom: 8px; }
 
       input, button {
         border: 1px solid var(--line);
@@ -83,12 +78,7 @@
       }
 
       input { flex: 1; }
-
-      button {
-        cursor: pointer;
-        background: #f8fbfb;
-      }
-
+      button { cursor: pointer; background: #f8fbfb; }
       button:hover { border-color: #9eb1bf; }
 
       .list {
@@ -107,25 +97,14 @@
       .item:last-child { border-bottom: 0; }
       .item:hover { background: #f6fafb; }
       .item.active { background: #eaf4f5; }
-
       .item .name { font-weight: 700; }
       .item .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
-      .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px; font-size: 13px; margin-bottom: 4px; }
+      .kv { display: grid; grid-template-columns: 180px 1fr; gap: 6px; font-size: 13px; margin-bottom: 4px; }
       .k { color: var(--muted); }
 
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-      }
-
-      th, td {
-        border: 1px solid var(--line);
-        text-align: left;
-        padding: 6px;
-      }
-
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { border: 1px solid var(--line); text-align: left; padding: 6px; }
       th { background: #f4f8fa; }
 
       .timeline {
@@ -153,7 +132,7 @@
     <main class="page">
       <div class="card">
         <h1>Concept Graph Debug</h1>
-        <div class="muted">Read-only monitor for graph health, concept exploration, and router query history.</div>
+        <div class="muted">Read-only monitor for graph health, entity exploration, and router query history.</div>
       </div>
 
       <section class="row top">
@@ -163,18 +142,18 @@
           <div id="healthMeta" class="muted"></div>
         </div>
         <div class="card">
-          <h2>Counts</h2>
+          <h2>Entities (click to switch list/search target)</h2>
           <div class="grid3">
-            <div class="metric"><div class="name">Concepts</div><div class="value" id="conceptCount">-</div></div>
-            <div class="metric"><div class="name">Episodes</div><div class="value" id="episodeCount">-</div></div>
-            <div class="metric"><div class="name">Relations</div><div class="value" id="relationCount">-</div></div>
+            <button id="tabConcept" class="metric-btn active" type="button"><div class="name">Concepts</div><div class="value" id="conceptCount">-</div></button>
+            <button id="tabEpisode" class="metric-btn" type="button"><div class="name">Episodes</div><div class="value" id="episodeCount">-</div></button>
+            <button id="tabRelation" class="metric-btn" type="button"><div class="name">Relations</div><div class="value" id="relationCount">-</div></button>
           </div>
         </div>
       </section>
 
       <section class="row main">
         <div class="card">
-          <h2>Concept Search</h2>
+          <h2 id="searchTitle">Concept Search</h2>
           <div class="toolbar">
             <input id="searchInput" placeholder="Search concept name" />
             <button id="searchBtn">Search</button>
@@ -183,8 +162,8 @@
         </div>
 
         <div class="card">
-          <h2>Concept Detail</h2>
-          <div id="detailBody" class="muted">Select a concept from search results.</div>
+          <h2 id="detailTitle">Concept Detail</h2>
+          <div id="detailBody" class="muted">Select an item from search results.</div>
         </div>
       </section>
 
@@ -198,8 +177,13 @@
     </main>
 
     <script>
+      const MODE_CONCEPT = "concept";
+      const MODE_EPISODE = "episode";
+      const MODE_RELATION = "relation";
+
       const state = {
-        selectedConceptName: null,
+        mode: MODE_CONCEPT,
+        selectedKey: null,
       };
 
       const els = {
@@ -208,6 +192,11 @@
         conceptCount: document.getElementById("conceptCount"),
         episodeCount: document.getElementById("episodeCount"),
         relationCount: document.getElementById("relationCount"),
+        tabConcept: document.getElementById("tabConcept"),
+        tabEpisode: document.getElementById("tabEpisode"),
+        tabRelation: document.getElementById("tabRelation"),
+        searchTitle: document.getElementById("searchTitle"),
+        detailTitle: document.getElementById("detailTitle"),
         searchInput: document.getElementById("searchInput"),
         searchBtn: document.getElementById("searchBtn"),
         searchList: document.getElementById("searchList"),
@@ -220,9 +209,7 @@
         const res = await fetch(path);
         if (!res.ok) {
           let message = `${res.status} ${res.statusText}`;
-          try {
-            message = await res.text();
-          } catch (_) {}
+          try { message = await res.text(); } catch (_) {}
           throw new Error(message);
         }
         return res.json();
@@ -242,6 +229,53 @@
           .replaceAll("'", "&#39;");
       }
 
+      function modeConfig(mode) {
+        if (mode === MODE_EPISODE) {
+          return {
+            searchTitle: "Episode Search",
+            detailTitle: "Episode Detail",
+            placeholder: "Search episode id or summary",
+            searchPath: (q) => q
+              ? `/debug/concept-graph/episodes?q=${encodeURIComponent(q)}&limit=80`
+              : "/debug/concept-graph/episodes?limit=80",
+            detailPath: (name) => `/debug/concept-graph/episodes/${encodeURIComponent(name)}`,
+          };
+        }
+        if (mode === MODE_RELATION) {
+          return {
+            searchTitle: "Relation Search",
+            detailTitle: "Relation Detail",
+            placeholder: "Search by from / type / to",
+            searchPath: (q) => q
+              ? `/debug/concept-graph/relations?q=${encodeURIComponent(q)}&limit=120`
+              : "/debug/concept-graph/relations?limit=120",
+            detailPath: null,
+          };
+        }
+        return {
+          searchTitle: "Concept Search",
+          detailTitle: "Concept Detail",
+          placeholder: "Search concept name",
+          searchPath: (q) => q
+            ? `/debug/concept-graph/concepts?q=${encodeURIComponent(q)}&limit=80`
+            : "/debug/concept-graph/concepts?limit=80",
+          detailPath: (name) => `/debug/concept-graph/concepts/${encodeURIComponent(name)}`,
+        };
+      }
+
+      function setMode(mode) {
+        state.mode = mode;
+        state.selectedKey = null;
+        const cfg = modeConfig(mode);
+        els.searchTitle.textContent = cfg.searchTitle;
+        els.detailTitle.textContent = cfg.detailTitle;
+        els.searchInput.placeholder = cfg.placeholder;
+        els.detailBody.innerHTML = '<div class="muted">Select an item from search results.</div>';
+        els.tabConcept.classList.toggle("active", mode === MODE_CONCEPT);
+        els.tabEpisode.classList.toggle("active", mode === MODE_EPISODE);
+        els.tabRelation.classList.toggle("active", mode === MODE_RELATION);
+      }
+
       async function loadHealth() {
         try {
           const health = await requestJson("/debug/concept-graph/health");
@@ -252,7 +286,7 @@
           const error = health.error ? `error=${health.error}` : "";
           els.healthMeta.textContent = `checked_at=${formatMs(Number(health.checked_at_ms))} tau_ms=${health.arousal_tau_ms ?? "-"} ${error}`.trim();
         } catch (error) {
-          els.healthStatus.innerHTML = `<span class="status-ng">Health fetch failed</span>`;
+          els.healthStatus.innerHTML = '<span class="status-ng">Health fetch failed</span>';
           els.healthMeta.textContent = String(error.message || error);
         }
       }
@@ -263,26 +297,46 @@
           els.conceptCount.textContent = String(stats.concept_count ?? "-");
           els.episodeCount.textContent = String(stats.episode_count ?? "-");
           els.relationCount.textContent = String(stats.relation_count ?? "-");
-        } catch (error) {
+        } catch (_) {
           els.conceptCount.textContent = "ERR";
           els.episodeCount.textContent = "ERR";
           els.relationCount.textContent = "ERR";
         }
       }
 
+      function itemKey(item) {
+        if (!item) return "";
+        if (state.mode === MODE_RELATION) {
+          return `${item.from || ""}|${item.type || ""}|${item.to || ""}`;
+        }
+        return item.name || "";
+      }
+
       function renderSearchList(items) {
         if (!Array.isArray(items) || items.length === 0) {
-          els.searchList.innerHTML = '<div class="item"><div class="meta">No concepts.</div></div>';
+          els.searchList.innerHTML = '<div class="item"><div class="meta">No data.</div></div>';
           return;
         }
         els.searchList.innerHTML = items
           .map((item) => {
-            const name = item.name || "";
-            const active = state.selectedConceptName === name ? " active" : "";
+            const key = itemKey(item);
+            const active = state.selectedKey === key ? " active" : "";
+            let title = "";
+            let meta = "";
+            if (state.mode === MODE_EPISODE) {
+              title = item.name || "";
+              meta = `summary=${item.summary || "-"} valence=${item.valence ?? "-"} arousal=${item.arousal ?? "-"}`;
+            } else if (state.mode === MODE_RELATION) {
+              title = `${item.from || "-"} ${item.type || "-"} ${item.to || "-"}`;
+              meta = `weight=${item.weight ?? "-"}`;
+            } else {
+              title = item.name || "";
+              meta = `valence=${item.valence ?? "-"} arousal=${item.arousal ?? "-"}`;
+            }
             return `
-              <div class="item${active}" data-concept-name="${escapeHtml(name)}">
-                <div class="name">${escapeHtml(name)}</div>
-                <div class="meta">valence=${item.valence ?? "-"} arousal=${item.arousal ?? "-"}</div>
+              <div class="item${active}" data-item-key="${escapeHtml(key)}" data-item-json="${escapeHtml(JSON.stringify(item))}">
+                <div class="name">${escapeHtml(title)}</div>
+                <div class="meta">${escapeHtml(meta)}</div>
               </div>
             `;
           })
@@ -291,66 +345,80 @@
 
       async function loadSearch() {
         const q = (els.searchInput.value || "").trim();
-        const path = q
-          ? `/debug/concept-graph/concepts?q=${encodeURIComponent(q)}&limit=80`
-          : "/debug/concept-graph/concepts?limit=80";
-        const data = await requestJson(path);
+        const cfg = modeConfig(state.mode);
+        const data = await requestJson(cfg.searchPath(q));
         renderSearchList(data.items || []);
       }
 
-      function renderDetail(concept) {
+      function renderConceptDetail(concept) {
         if (!concept || !concept.name) {
           els.detailBody.innerHTML = '<div class="muted">Select a concept from search results.</div>';
           return;
         }
-
         const relations = Array.isArray(concept.relations) ? concept.relations : [];
         const episodes = Array.isArray(concept.episodes) ? concept.episodes : [];
-
         const relationRows = relations.length
-          ? relations
-              .map(
-                (rel) =>
-                  `<tr><td>${escapeHtml(rel.direction)}</td><td>${escapeHtml(rel.from)}</td><td>${escapeHtml(rel.type)}</td><td>${escapeHtml(rel.to)}</td><td>${rel.weight ?? "-"}</td></tr>`,
-              )
-              .join("")
+          ? relations.map((rel) => `<tr><td>${escapeHtml(rel.direction)}</td><td>${escapeHtml(rel.from)}</td><td>${escapeHtml(rel.type)}</td><td>${escapeHtml(rel.to)}</td><td>${rel.weight ?? "-"}</td></tr>`).join("")
           : '<tr><td colspan="5">No relations</td></tr>';
-
         const episodeRows = episodes.length
-          ? episodes
-              .map(
-                (ep) =>
-                  `<tr><td>${escapeHtml(ep.summary)}</td><td>${ep.valence ?? "-"}</td></tr>`,
-              )
-              .join("")
+          ? episodes.map((ep) => `<tr><td>${escapeHtml(ep.summary)}</td><td>${ep.valence ?? "-"}</td></tr>`).join("")
           : '<tr><td colspan="2">No episodes</td></tr>';
-
         els.detailBody.innerHTML = `
           <div class="kv"><div class="k">name</div><div>${escapeHtml(concept.name)}</div></div>
           <div class="kv"><div class="k">valence</div><div>${concept.valence ?? "-"}</div></div>
           <div class="kv"><div class="k">arousal</div><div>${concept.arousal ?? "-"}</div></div>
           <div class="kv"><div class="k">arousal_level</div><div>${concept.arousal_level ?? "-"}</div></div>
           <div class="kv"><div class="k">accessed_at</div><div>${formatMs(Number(concept.accessed_at))}</div></div>
-
           <h2 style="margin-top:12px;">Relations</h2>
-          <table>
-            <thead><tr><th>direction</th><th>from</th><th>type</th><th>to</th><th>weight</th></tr></thead>
-            <tbody>${relationRows}</tbody>
-          </table>
-
+          <table><thead><tr><th>direction</th><th>from</th><th>type</th><th>to</th><th>weight</th></tr></thead><tbody>${relationRows}</tbody></table>
           <h2 style="margin-top:12px;">Episodes</h2>
-          <table>
-            <thead><tr><th>summary</th><th>valence</th></tr></thead>
-            <tbody>${episodeRows}</tbody>
-          </table>
+          <table><thead><tr><th>summary</th><th>valence</th></tr></thead><tbody>${episodeRows}</tbody></table>
         `;
       }
 
-      async function loadDetail(name) {
-        if (!name) return;
+      function renderEpisodeDetail(episode) {
+        if (!episode || !episode.name) {
+          els.detailBody.innerHTML = '<div class="muted">Select an episode from search results.</div>';
+          return;
+        }
+        const linked = Array.isArray(episode.linked_concepts) ? episode.linked_concepts : [];
+        const linkedRows = linked.length
+          ? linked.map((item) => `<tr><td>${escapeHtml(item.concept)}</td><td>${item.weight ?? "-"}</td></tr>`).join("")
+          : '<tr><td colspan="2">No linked concepts</td></tr>';
+        els.detailBody.innerHTML = `
+          <div class="kv"><div class="k">episode id</div><div>${escapeHtml(episode.name)}</div></div>
+          <div class="kv"><div class="k">valence</div><div>${episode.valence ?? "-"}</div></div>
+          <div class="kv"><div class="k">arousal</div><div>${episode.arousal ?? "-"}</div></div>
+          <div class="kv"><div class="k">arousal_level</div><div>${episode.arousal_level ?? "-"}</div></div>
+          <div class="kv"><div class="k">accessed_at</div><div>${formatMs(Number(episode.accessed_at))}</div></div>
+          <h2 style="margin-top:12px;">Linked Concepts</h2>
+          <table><thead><tr><th>concept</th><th>weight</th></tr></thead><tbody>${linkedRows}</tbody></table>
+        `;
+      }
+
+      function renderRelationDetail(relation) {
+        if (!relation) {
+          els.detailBody.innerHTML = '<div class="muted">Select a relation from search results.</div>';
+          return;
+        }
+        els.detailBody.innerHTML = `
+          <div class="kv"><div class="k">from</div><div>${escapeHtml(relation.from || "-")}</div></div>
+          <div class="kv"><div class="k">type</div><div>${escapeHtml(relation.type || "-")}</div></div>
+          <div class="kv"><div class="k">to</div><div>${escapeHtml(relation.to || "-")}</div></div>
+          <div class="kv"><div class="k">weight</div><div>${relation.weight ?? "-"}</div></div>
+        `;
+      }
+
+      async function loadDetailForName(name) {
+        const cfg = modeConfig(state.mode);
+        if (!cfg.detailPath || !name) return;
         try {
-          const concept = await requestJson(`/debug/concept-graph/concepts/${encodeURIComponent(name)}`);
-          renderDetail(concept);
+          const data = await requestJson(cfg.detailPath(name));
+          if (state.mode === MODE_EPISODE) {
+            renderEpisodeDetail(data);
+          } else {
+            renderConceptDetail(data);
+          }
         } catch (error) {
           els.detailBody.innerHTML = `<div class="status-ng">Failed to load detail: ${escapeHtml(error.message || error)}</div>`;
         }
@@ -364,9 +432,7 @@
         els.timeline.innerHTML = items
           .map((item) => {
             const terms = Array.isArray(item.query_terms) ? item.query_terms.join(", ") : "";
-            const concepts = Array.isArray(item.result_concepts)
-              ? item.result_concepts.join(", ")
-              : "";
+            const concepts = Array.isArray(item.result_concepts) ? item.result_concepts.join(", ") : "";
             const error = item.error ? `<div class="status-ng">error=${escapeHtml(item.error)}</div>` : "";
             return `
               <div class="timeline-item">
@@ -389,28 +455,47 @@
         }
       }
 
-      els.searchBtn.addEventListener("click", async () => {
+      els.tabConcept.addEventListener("click", async () => {
+        setMode(MODE_CONCEPT);
+        await loadSearch();
+      });
+      els.tabEpisode.addEventListener("click", async () => {
+        setMode(MODE_EPISODE);
+        await loadSearch();
+      });
+      els.tabRelation.addEventListener("click", async () => {
+        setMode(MODE_RELATION);
         await loadSearch();
       });
 
+      els.searchBtn.addEventListener("click", async () => { await loadSearch(); });
       els.searchInput.addEventListener("keydown", async (event) => {
         if (event.key !== "Enter") return;
         await loadSearch();
       });
 
       els.searchList.addEventListener("click", async (event) => {
-        const row = event.target.closest(".item[data-concept-name]");
+        const row = event.target.closest(".item[data-item-key]");
         if (!row) return;
-        const name = row.getAttribute("data-concept-name");
-        if (!name) return;
-        state.selectedConceptName = name;
+        const key = row.getAttribute("data-item-key");
+        if (!key) return;
+        state.selectedKey = key;
+        const rawJson = row.getAttribute("data-item-json") || "{}";
+        let item = {};
+        try { item = JSON.parse(rawJson); } catch (_) {}
         await loadSearch();
-        await loadDetail(name);
+
+        if (state.mode === MODE_RELATION) {
+          renderRelationDetail(item);
+          return;
+        }
+        await loadDetailForName(item.name || "");
       });
 
       els.refreshTimelineBtn.addEventListener("click", loadTimeline);
 
       async function init() {
+        setMode(MODE_CONCEPT);
         await Promise.all([loadHealth(), loadCounts(), loadSearch(), loadTimeline()]);
         setInterval(loadHealth, 8000);
         setInterval(loadCounts, 12000);
