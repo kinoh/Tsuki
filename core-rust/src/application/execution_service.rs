@@ -1,0 +1,709 @@
+use axum::http::StatusCode;
+use futures::future::join_all;
+use serde::Deserialize;
+use serde_json::json;
+use std::{collections::HashMap, sync::Arc};
+use tokio::runtime::Handle;
+
+use crate::application::history_service::{format_decision_debug_history, format_event_history};
+use crate::application::router_service::{
+    activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
+};
+use crate::event::build_event;
+use crate::llm::{
+    LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError, ToolHandler,
+};
+use crate::module_registry::ModuleRegistryReader;
+use crate::prompts::PromptOverrides;
+use crate::{record_event, AppState, ModuleRuntime, Modules};
+
+const SUBMODULE_TOOL_PREFIX: &str = "run_submodule__";
+
+#[derive(Debug, Clone)]
+struct ModuleOutput {
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubmoduleToolArgs {
+    #[serde(default)]
+    focus: Option<String>,
+}
+
+struct DecisionParsed {
+    decision: String,
+    reason: Option<String>,
+}
+
+struct DecisionContextTemplateVars<'a> {
+    latest_user_input: &'a str,
+    concept_top_n: usize,
+    active_concepts_from_concept_graph: &'a str,
+    outputs_from_immediately_executed_submodules: &'a str,
+    candidate_submodules_by_interest_match: &'a str,
+    recent_event_history: &'a str,
+}
+
+#[derive(Clone)]
+struct DecisionToolHandler {
+    state: AppState,
+    input_text: String,
+    activation_snapshot: ActivationSnapshot,
+    base_handler: Arc<dyn ToolHandler>,
+    module_instructions: HashMap<String, String>,
+}
+
+pub(crate) async fn run_decision(
+    input_text: &str,
+    router_output: &RouterOutput,
+    modules: &Modules,
+    state: &AppState,
+    module_instructions: &HashMap<String, String>,
+    overrides: &PromptOverrides,
+) -> String {
+    let history = format_event_history(state, state.limits.decision_history, None, None).await;
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
+    let decision_instructions = overrides
+        .decision
+        .clone()
+        .unwrap_or_else(|| state.decision_instructions.clone());
+    let activation_snapshot = activation_snapshot_from_router_output(router_output);
+    let handler = DecisionToolHandler {
+        state: state.clone(),
+        input_text: input_text.to_string(),
+        activation_snapshot: activation_snapshot.clone(),
+        base_handler: modules.runtime.tool_handler.clone(),
+        module_instructions: module_instructions.clone(),
+    };
+    let adapter = ResponseApiAdapter::new(build_config_with_tools_and_handler(
+        compose_instructions(&base_instructions, &decision_instructions),
+        &modules.runtime,
+        decision_tools(&modules.runtime.tools, module_instructions.keys().cloned()),
+        Arc::new(handler),
+    ));
+    let concept_top_n = state.router.concept_top_n.max(1);
+    let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
+    let executed_submodule_outputs = format_hard_trigger_results(&router_output.hard_trigger_results);
+    let submodule_candidates =
+        format_soft_recommendations(&activation_snapshot.soft_recommendations);
+    let context = render_decision_context_template(
+        &state.input.decision_context_template,
+        DecisionContextTemplateVars {
+            latest_user_input: input_text,
+            concept_top_n,
+            active_concepts_from_concept_graph: &activation_concepts,
+            outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
+            candidate_submodules_by_interest_match: &submodule_candidates,
+            recent_event_history: &history,
+        },
+    );
+
+    let response = match adapter
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let error_detail = err.to_string();
+            let error_text = format!("error: {}", error_detail);
+            let error_event = build_event(
+                "decision",
+                "text",
+                json!({ "text": error_text }),
+                vec!["decision".to_string(), "error".to_string()],
+            );
+            record_event(state, error_event).await;
+            emit_debug_module_error_event(state, "decision", "runtime", &context, &error_detail)
+                .await;
+            return format!("error: {}", error_detail);
+        }
+    };
+
+    let parsed = parse_decision(&response.text);
+    let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
+    let decision_event = build_event(
+        "decision",
+        "text",
+        json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
+        vec!["decision".to_string()],
+    );
+    record_event(state, decision_event).await;
+    emit_debug_module_events(state, "decision", "runtime", &context, &response).await;
+
+    response.text
+}
+
+pub(crate) async fn run_decision_debug(
+    input_text: &str,
+    context_override: Option<&str>,
+    submodule_outputs_raw: Option<&str>,
+    include_history: bool,
+    history_cutoff_ts: Option<&str>,
+    excluded_event_ids: &std::collections::HashSet<String>,
+    state: &AppState,
+    router_output: &RouterOutput,
+    module_instructions: &HashMap<String, String>,
+    overrides: &PromptOverrides,
+) -> Result<String, (StatusCode, String)> {
+    let history = if context_override.is_some() {
+        String::new()
+    } else if include_history {
+        format_decision_debug_history(
+            state,
+            state.limits.decision_history,
+            history_cutoff_ts,
+            Some(excluded_event_ids),
+            submodule_outputs_raw,
+        )
+        .await
+    } else {
+        "none".to_string()
+    };
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+    let decision_instructions = overrides
+        .decision
+        .clone()
+        .unwrap_or_else(|| state.decision_instructions.clone());
+    let activation_snapshot = activation_snapshot_from_router_output(router_output);
+    let handler = DecisionToolHandler {
+        state: state.clone(),
+        input_text: input_text.to_string(),
+        activation_snapshot: activation_snapshot.clone(),
+        base_handler: state.modules.runtime.tool_handler.clone(),
+        module_instructions: module_instructions.clone(),
+    };
+    let adapter = ResponseApiAdapter::new(build_config_with_tools_and_handler(
+        compose_instructions(&base_instructions, &decision_instructions),
+        &state.modules.runtime,
+        decision_tools(
+            &state.modules.runtime.tools,
+            module_instructions.keys().cloned(),
+        ),
+        Arc::new(handler),
+    ));
+    let context = context_override.map(str::to_string).unwrap_or_else(|| {
+        let concept_top_n = state.router.concept_top_n.max(1);
+        let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
+        let executed_submodule_outputs = format_hard_trigger_results(&router_output.hard_trigger_results);
+        let submodule_candidates =
+            format_soft_recommendations(&activation_snapshot.soft_recommendations);
+        render_decision_context_template(
+            &state.input.decision_context_template,
+            DecisionContextTemplateVars {
+                latest_user_input: input_text,
+                concept_top_n,
+                active_concepts_from_concept_graph: &activation_concepts,
+                outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
+                candidate_submodules_by_interest_match: &submodule_candidates,
+                recent_event_history: &history,
+            },
+        )
+    });
+    let response = match adapter
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let error = err.to_string();
+            emit_debug_module_error_event(state, "decision", "module_only", &context, &error).await;
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, error));
+        }
+    };
+    let parsed = parse_decision(&response.text);
+    let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
+    let decision_event = build_event(
+        "decision",
+        "text",
+        json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
+        vec!["decision".to_string()],
+    );
+    record_event(state, decision_event).await;
+    emit_debug_module_events(state, "decision", "module_only", &context, &response).await;
+    Ok(response.text)
+}
+
+pub(crate) async fn run_all_submodules_debug(
+    input_text: &str,
+    include_history: bool,
+    history_cutoff_ts: Option<&str>,
+    excluded_event_ids: &std::collections::HashSet<String>,
+    state: &AppState,
+) -> Result<String, (StatusCode, String)> {
+    let module_names = state
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<Vec<_>>();
+    if module_names.is_empty() {
+        return Ok("no active submodules".to_string());
+    }
+    let runs = module_names.iter().map(|name| async move {
+        let output = run_submodule_debug(
+            name.as_str(),
+            input_text,
+            None,
+            include_history,
+            history_cutoff_ts,
+            excluded_event_ids,
+            state,
+        )
+        .await?;
+        Ok::<(String, String), (StatusCode, String)>((name.clone(), output))
+    });
+    let mut outputs = Vec::with_capacity(module_names.len());
+    for result in join_all(runs).await {
+        let (name, output) = result?;
+        outputs.push(format!("{}: {}", name, output));
+    }
+    Ok(outputs.join("\n"))
+}
+
+pub(crate) async fn run_submodule_debug(
+    name: &str,
+    input_text: &str,
+    context_override: Option<&str>,
+    include_history: bool,
+    history_cutoff_ts: Option<&str>,
+    excluded_event_ids: &std::collections::HashSet<String>,
+    state: &AppState,
+) -> Result<String, (StatusCode, String)> {
+    let history = if context_override.is_some() {
+        String::new()
+    } else if include_history {
+        format_event_history(
+            state,
+            state.limits.submodule_history,
+            history_cutoff_ts,
+            Some(excluded_event_ids),
+        )
+        .await
+    } else {
+        "none".to_string()
+    };
+    let overrides = current_prompt_overrides(state).await;
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+    let module_defs = state
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let definition = module_defs
+        .into_iter()
+        .find(|definition| definition.name == name)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "module not found".to_string()))?;
+    let instructions = overrides
+        .submodules
+        .get(&definition.name)
+        .cloned()
+        .unwrap_or(definition.instructions);
+    let adapter = ResponseApiAdapter::new(build_config(
+        compose_instructions(&base_instructions, &instructions),
+        &state.modules.runtime,
+    ));
+    let context = context_override
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("User input: {}\nRecent events:\n{}", input_text, history));
+    let response = match adapter
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let error = err.to_string();
+            emit_debug_module_error_event(state, name, "module_only", &context, &error).await;
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, error));
+        }
+    };
+    let response_event = build_event(
+        format!("submodule:{}", name).as_str(),
+        "text",
+        json!({ "text": response.text.clone() }),
+        vec!["submodule".to_string()],
+    );
+    record_event(state, response_event).await;
+    emit_debug_module_events(state, name, "module_only", &context, &response).await;
+    Ok(response.text)
+}
+
+pub(crate) async fn run_submodule_tool(
+    state: &AppState,
+    input_text: &str,
+    activation_snapshot: &ActivationSnapshot,
+    module_name: &str,
+    module_instructions: &str,
+    focus: Option<&str>,
+) -> Result<String, ToolError> {
+    let history = format_event_history(state, state.limits.submodule_history, None, None).await;
+    let overrides = current_prompt_overrides(state).await;
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+    let instructions = compose_instructions(&base_instructions, module_instructions);
+    let adapter = ResponseApiAdapter::new(build_config(instructions, &state.modules.runtime));
+    let context = format!(
+        "Latest user input: {}\nConcept activation:\n{}\nSubmodule recommendations:\n{}\nRecent events:\n{}\nTool focus: {}",
+        input_text,
+        format_activation_concepts(&activation_snapshot.concepts),
+        format_soft_recommendations(&activation_snapshot.soft_recommendations),
+        history,
+        focus.unwrap_or("none")
+    );
+    let output = run_module(
+        state,
+        module_name.to_string(),
+        "submodule",
+        Arc::new(adapter),
+        context,
+    )
+    .await;
+    Ok(output.text)
+}
+
+pub(crate) async fn current_prompt_overrides(state: &AppState) -> PromptOverrides {
+    state.prompts.read().await.clone()
+}
+
+pub(crate) async fn load_active_module_instructions(
+    state: &AppState,
+    overrides: &PromptOverrides,
+) -> HashMap<String, String> {
+    let module_defs = match state.modules.registry.list_active().await {
+        Ok(list) => list,
+        Err(err) => {
+            println!("MODULE_REGISTRY_ERROR error={}", err);
+            Vec::new()
+        }
+    };
+    let mut module_instructions = HashMap::new();
+    for definition in module_defs {
+        let module_name = definition.name;
+        let instructions = overrides
+            .submodules
+            .get(&module_name)
+            .cloned()
+            .unwrap_or(definition.instructions);
+        module_instructions.insert(module_name, instructions);
+    }
+    module_instructions
+}
+
+fn parse_decision(text: &str) -> DecisionParsed {
+    let decision = extract_field(text, "decision=", &["reason=", "question="])
+        .and_then(|value| value.split_whitespace().next().map(|s| s.to_lowercase()))
+        .unwrap_or_else(|| "respond".to_string());
+    let reason = extract_field(text, "reason=", &["decision=", "question="]);
+
+    DecisionParsed { decision, reason }
+}
+
+fn extract_field(text: &str, key: &str, end_keys: &[&str]) -> Option<String> {
+    let start = text.find(key)?;
+    let after = &text[start + key.len()..];
+    let mut end = after.len();
+    for end_key in end_keys {
+        if let Some(idx) = after.find(end_key) {
+            end = end.min(idx);
+        }
+    }
+    let value = after[..end].trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn render_decision_context_template(
+    template: &str,
+    vars: DecisionContextTemplateVars<'_>,
+) -> String {
+    template
+        .replace("{{latest_user_input}}", vars.latest_user_input)
+        .replace("{{concept_top_n}}", &vars.concept_top_n.to_string())
+        .replace(
+            "{{active_concepts_from_concept_graph}}",
+            vars.active_concepts_from_concept_graph,
+        )
+        .replace(
+            "{{outputs_from_immediately_executed_submodules}}",
+            vars.outputs_from_immediately_executed_submodules,
+        )
+        .replace(
+            "{{candidate_submodules_by_interest_match}}",
+            vars.candidate_submodules_by_interest_match,
+        )
+        .replace("{{recent_event_history}}", vars.recent_event_history)
+}
+
+fn compose_instructions(base: &str, module_specific: &str) -> String {
+    format!("{}\n\n{}", base, module_specific)
+}
+
+fn decision_tools(
+    base_tools: &[async_openai::types::responses::Tool],
+    module_names: impl IntoIterator<Item = String>,
+) -> Vec<async_openai::types::responses::Tool> {
+    use async_openai::types::responses::{FunctionTool, Tool};
+    let mut tools = base_tools.to_vec();
+    let mut names = module_names.into_iter().collect::<Vec<_>>();
+    names.sort();
+    for module_name in names {
+        if module_name.trim().is_empty() {
+            continue;
+        }
+        tools.push(Tool::Function(FunctionTool {
+            name: format!("{}{}", SUBMODULE_TOOL_PREFIX, module_name),
+            description: Some(format!(
+                "Run submodule {} and return its recommendation text.",
+                module_name
+            )),
+            parameters: Some(json!({
+                "type": "object",
+                "properties": {
+                    "focus": { "type": "string" }
+                },
+                "required": ["focus"],
+                "additionalProperties": false
+            })),
+            strict: Some(true),
+        }));
+    }
+    tools
+}
+
+fn format_activation_concepts(concepts: &[String]) -> String {
+    if concepts.is_empty() {
+        return "none".to_string();
+    }
+    concepts
+        .iter()
+        .map(|value| format!("- {}", value))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {
+    if outputs.is_empty() {
+        return "none".to_string();
+    }
+    outputs
+        .iter()
+        .map(|output| format!("- {}: {}", output.module, truncate(&output.text, 160)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_soft_recommendations(recommendations: &[String]) -> String {
+    if recommendations.is_empty() {
+        return "none".to_string();
+    }
+    recommendations
+        .iter()
+        .map(|name| format!("- {}", name))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn truncate(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    value.chars().take(max).collect::<String>() + "…"
+}
+
+async fn emit_debug_module_events(
+    state: &AppState,
+    module: &str,
+    mode: &str,
+    context: &str,
+    response: &crate::llm::LlmResponse,
+) {
+    let raw_event = build_event(
+        module_owner_source(module).as_str(),
+        "text",
+        json!({
+            "raw": response.raw.clone(),
+            "context": context,
+            "output_text": response.text.clone(),
+            "mode": mode,
+        }),
+        vec![
+            "debug".to_string(),
+            "llm.raw".to_string(),
+            format!("mode:{}", mode),
+        ],
+    );
+    record_event(state, raw_event).await;
+}
+
+async fn emit_debug_module_error_event(
+    state: &AppState,
+    module: &str,
+    mode: &str,
+    context: &str,
+    error: &str,
+) {
+    let error_event = build_event(
+        module_owner_source(module).as_str(),
+        "text",
+        json!({
+            "mode": mode,
+            "context": context,
+            "error": error,
+        }),
+        vec![
+            "debug".to_string(),
+            "llm.error".to_string(),
+            "error".to_string(),
+            format!("mode:{}", mode),
+        ],
+    );
+    record_event(state, error_event).await;
+}
+
+fn module_owner_source(module: &str) -> String {
+    if module.eq_ignore_ascii_case("router") {
+        return "router".to_string();
+    }
+    if module.eq_ignore_ascii_case("decision") {
+        return "decision".to_string();
+    }
+    format!("submodule:{}", module)
+}
+
+async fn run_module(
+    state: &AppState,
+    name: String,
+    role_tag: &'static str,
+    adapter: Arc<dyn LlmAdapter>,
+    input: String,
+) -> ModuleOutput {
+    let context = input;
+    match adapter
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
+        .await
+    {
+        Ok(response) => {
+            let response_event = build_event(
+                owner_source_for_role(role_tag, &name).as_str(),
+                "text",
+                json!({ "text": response.text }),
+                vec![role_tag.to_string()],
+            );
+            record_event(state, response_event).await;
+            emit_debug_module_events(state, &name, "runtime", &context, &response).await;
+            ModuleOutput {
+                text: response.text,
+            }
+        }
+        Err(err) => {
+            let error_detail = err.to_string();
+            let error_text = format!("error: {}", error_detail);
+            let error_event = build_event(
+                owner_source_for_role(role_tag, &name).as_str(),
+                "text",
+                json!({ "text": error_text }),
+                vec![role_tag.to_string(), "error".to_string()],
+            );
+            record_event(state, error_event).await;
+            emit_debug_module_error_event(state, &name, "runtime", &context, &error_detail).await;
+            ModuleOutput {
+                text: format!("error: {}", error_detail),
+            }
+        }
+    }
+}
+
+impl ToolHandler for DecisionToolHandler {
+    fn handle(&self, tool_name: &str, arguments: &str) -> Result<String, ToolError> {
+        if let Some(module_name) = tool_name.strip_prefix(SUBMODULE_TOOL_PREFIX) {
+            if !self.module_instructions.contains_key(module_name) {
+                return Err(ToolError::new(format!(
+                    "unknown submodule: {}",
+                    module_name
+                )));
+            }
+            let args: SubmoduleToolArgs = serde_json::from_str(arguments)
+                .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+            let output = tokio::task::block_in_place(|| {
+                Handle::current().block_on(run_submodule_tool(
+                    &self.state,
+                    &self.input_text,
+                    &self.activation_snapshot,
+                    module_name,
+                    self.module_instructions
+                        .get(module_name)
+                        .map(String::as_str)
+                        .unwrap_or(""),
+                    args.focus.as_deref(),
+                ))
+            })?;
+            Ok(output)
+        } else {
+            self.base_handler.handle(tool_name, arguments)
+        }
+    }
+}
+
+fn owner_source_for_role(role_tag: &str, module_name: &str) -> String {
+    if role_tag == "decision" {
+        return "decision".to_string();
+    }
+    if role_tag == "submodule" {
+        return format!("submodule:{}", module_name);
+    }
+    "system".to_string()
+}
+
+fn build_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiConfig {
+    ResponseApiConfig {
+        model: runtime.model.clone(),
+        instructions,
+        temperature: runtime.temperature,
+        max_output_tokens: runtime.max_output_tokens,
+        tools: runtime.tools.clone(),
+        tool_handler: Some(runtime.tool_handler.clone()),
+        max_tool_rounds: runtime.max_tool_rounds,
+    }
+}
+
+fn build_config_with_tools_and_handler(
+    instructions: String,
+    runtime: &ModuleRuntime,
+    tools: Vec<async_openai::types::responses::Tool>,
+    tool_handler: Arc<dyn ToolHandler>,
+) -> ResponseApiConfig {
+    ResponseApiConfig {
+        model: runtime.model.clone(),
+        instructions,
+        temperature: runtime.temperature,
+        max_output_tokens: runtime.max_output_tokens,
+        tools,
+        tool_handler: Some(tool_handler),
+        max_tool_rounds: runtime.max_tool_rounds,
+    }
+}
