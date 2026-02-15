@@ -14,8 +14,9 @@ The rebuild goal is:
 ## Stable Decisions
 
 ### 1. Memgraph restore policy uses latest snapshot
-- Integration test setup restores Memgraph using `memgraph/restore/latest`.
+- Integration test setup restores Memgraph using `integration/memgraph/restore/latest`.
 - Snapshot file name is not passed through test runner/task arguments.
+- The restore target is isolated test Memgraph (`compose.test.yaml`, `memgraph-test`, `bolt://localhost:7697`).
 - Rationale: keep outer orchestration simple for local-first test operation.
 
 ### 2. Scenario execution supports repeated runs
@@ -73,10 +74,11 @@ The rebuild goal is:
 ## Runtime Architecture (Proposed)
 
 ### Phase A: Environment setup
-1. Start/ensure test Memgraph instance.
-2. Restore latest snapshot (`memgraph/restore/latest`).
+1. Start/ensure isolated test Memgraph instance (`compose.test.yaml`, `memgraph-test`).
+2. Restore latest snapshot (`integration/memgraph/restore/latest`).
 3. Create a temporary test config from base `config.toml` with:
    - test-only `db.path` (temporary file),
+   - `MEMGRAPH_URI=bolt://localhost:7697`,
    - test runtime ports/identifiers as needed.
 4. Start `tsuki-core-rust` with the temporary config.
 

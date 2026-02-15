@@ -1,0 +1,22 @@
+services:
+  memgraph-test-init:
+    image: alpine:3.23
+    command: sh -c "mkdir -p /data && chown -R 101:103 /data"
+    volumes:
+      - memgraph-test-data:/data
+    restart: "no"
+
+  memgraph-test:
+    image: memgraph/memgraph
+    command: ["--data-directory=/data"]
+    volumes:
+      - memgraph-test-data:/data
+    ports:
+      - "7697:7687"
+    depends_on:
+      memgraph-test-init:
+        condition: service_completed_successfully
+    restart: always
+
+volumes:
+  memgraph-test-data:

@@ -9,8 +9,14 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 - `logs/`: execution logs
 - `results/`: machine-readable run results
 
+## Environment separation
+- Integration tests use isolated Memgraph services defined in `compose.test.yaml`.
+- Test Memgraph endpoint is `bolt://localhost:7697`.
+- Setup command:
+  - `task -t core-rust/Taskfile.yaml integration/prepare`
+
 ## Principles
-- Memgraph restore uses `latest` snapshot through `task -t core-rust/Taskfile.yaml integration/memgraph/restore/latest`.
+- Memgraph restore uses latest snapshot through `integration/memgraph/restore/latest`.
 - Tester and judge configuration are file-based (not environment-variable based).
 - Common baseline metrics:
   - `scenario_requirement_fit` (`0..1`)

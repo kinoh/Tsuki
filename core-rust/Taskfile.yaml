@@ -3,21 +3,38 @@ version: '3'
 dotenv: ['../.env', './.env']
 
 vars:
-  ROOT_TASKFILE: ../Taskfile.yaml
-  DOCKER_COMPOSE: docker compose -f ../compose.yaml -f ../compose.dev.yaml
+  DOCKER_COMPOSE: docker compose -f ../compose.yaml -f ../compose.test.yaml
 
 tasks:
   integration/memgraph/up:
-    desc: Start test memgraph service
+    desc: Start isolated test memgraph service
     cmds:
-      - '{{.DOCKER_COMPOSE}} up -d memgraph'
+      - '{{.DOCKER_COMPOSE}} up -d memgraph-test'
+
+  integration/memgraph/down:
+    desc: Stop isolated test memgraph service
+    cmds:
+      - '{{.DOCKER_COMPOSE}} stop memgraph-test'
 
   integration/memgraph/restore/latest:
-    desc: Restore latest memgraph snapshot for integration tests
+    desc: Restore latest memgraph snapshot into isolated test memgraph
+    vars:
+      BACKUP_FILE_NAME:
+        sh: 'ls -t ${BACKUP_DIR:-../backup/memgraph} | head -1'
+    cmds:
+      - task integration/memgraph/restore/{{.BACKUP_FILE_NAME}}
+
+  integration/memgraph/restore/*:
+    desc: Restore memgraph snapshot into isolated test memgraph
+    vars:
+      BACKUP_DIR: ${BACKUP_DIR:-../backup/memgraph}
+      BACKUP_FILE_NAME: '{{index .MATCH 0}}'
     deps:
       - integration/memgraph/up
     cmds:
-      - task -t {{.ROOT_TASKFILE}} memgraph/restore/latest
+      - '{{.DOCKER_COMPOSE}} cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph-test:/data/snapshots/{{.BACKUP_FILE_NAME}}'
+      - '{{.DOCKER_COMPOSE}} exec -u root memgraph-test chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}'
+      - 'echo "RECOVER SNAPSHOT ''/data/snapshots/{{.BACKUP_FILE_NAME}}'' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph-test mgconsole'
 
   integration/prepare:
     desc: Prepare integration test runtime prerequisites
@@ -31,4 +48,4 @@ tasks:
     deps:
       - integration/prepare
     cmds:
-      - 'echo "TODO: implement integration harness entrypoint"'
+      - 'echo "TODO: implement integration harness entrypoint (set MEMGRAPH_URI=bolt://localhost:7697)"'
