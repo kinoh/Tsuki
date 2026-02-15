@@ -27,6 +27,19 @@ hard_trigger_threshold = 0.85
 recommendation_threshold = 0.6
 
 [input]
+router_context_template = """User input:
+{{latest_user_input}}
+
+Active submodules:
+{{active_submodules}}
+
+Return only compact JSON:
+{"activation_query_terms":["..."]}
+Rules:
+- 1 to {{router_query_terms_max}} terms
+- short lookup-oriented terms
+- no explanations"""
+
 decision_context_template = """latest_user_input:
 {{latest_user_input}}
 
@@ -43,6 +56,15 @@ recent_event_history:
 {{recent_event_history}}
 
 Return: decision=<respond|ignore|question> reason=<short> question=<text|none>."""
+
+submodule_context_template = """Latest user input: {{latest_user_input}}
+Concept activation:
+{{active_concepts_from_concept_graph}}
+Submodule recommendations:
+{{candidate_submodules_by_interest_match}}
+Recent events:
+{{recent_event_history}}
+Tool focus: {{tool_focus}}"""
 
 [db]
 path = "./data/core-rust.db"

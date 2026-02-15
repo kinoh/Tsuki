@@ -321,7 +321,16 @@ pub(crate) async fn run_submodule_debug(
     ));
     let context = context_override
         .map(str::to_string)
-        .unwrap_or_else(|| format!("User input: {}\nRecent events:\n{}", input_text, history));
+        .unwrap_or_else(|| {
+            render_submodule_context_template(
+                &state.input.submodule_context_template,
+                input_text,
+                "none",
+                "none",
+                &history,
+                "none",
+            )
+        });
     let response = match adapter
         .respond(LlmRequest {
             input: context.clone(),
@@ -362,13 +371,13 @@ pub(crate) async fn run_submodule_tool(
         .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
     let instructions = compose_instructions(&base_instructions, module_instructions);
     let adapter = ResponseApiAdapter::new(build_config(instructions, &state.modules.runtime));
-    let context = format!(
-        "Latest user input: {}\nConcept activation:\n{}\nSubmodule recommendations:\n{}\nRecent events:\n{}\nTool focus: {}",
+    let context = render_submodule_context_template(
+        &state.input.submodule_context_template,
         input_text,
-        format_activation_concepts(&activation_snapshot.concepts),
-        format_soft_recommendations(&activation_snapshot.soft_recommendations),
-        history,
-        focus.unwrap_or("none")
+        &format_activation_concepts(&activation_snapshot.concepts),
+        &format_soft_recommendations(&activation_snapshot.soft_recommendations),
+        &history,
+        focus.unwrap_or("none"),
     );
     let output = run_module(
         state,
@@ -455,6 +464,28 @@ fn render_decision_context_template(
             vars.candidate_submodules_by_interest_match,
         )
         .replace("{{recent_event_history}}", vars.recent_event_history)
+}
+
+fn render_submodule_context_template(
+    template: &str,
+    latest_user_input: &str,
+    active_concepts_from_concept_graph: &str,
+    candidate_submodules_by_interest_match: &str,
+    recent_event_history: &str,
+    tool_focus: &str,
+) -> String {
+    template
+        .replace("{{latest_user_input}}", latest_user_input)
+        .replace(
+            "{{active_concepts_from_concept_graph}}",
+            active_concepts_from_concept_graph,
+        )
+        .replace(
+            "{{candidate_submodules_by_interest_match}}",
+            candidate_submodules_by_interest_match,
+        )
+        .replace("{{recent_event_history}}", recent_event_history)
+        .replace("{{tool_focus}}", tool_focus)
 }
 
 fn compose_instructions(base: &str, module_specific: &str) -> String {

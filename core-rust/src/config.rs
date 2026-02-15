@@ -74,7 +74,9 @@ pub struct DbConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputConfig {
+    pub router_context_template: String,
     pub decision_context_template: String,
+    pub submodule_context_template: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

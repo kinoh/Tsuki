@@ -196,9 +196,11 @@ async fn infer_activation_query_terms(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let context = format!(
-        "User input:\n{}\n\nActive submodules:\n{}\n\nReturn only compact JSON:\n{{\"activation_query_terms\":[\"...\"]}}\nRules:\n- 1 to {} terms\n- short lookup-oriented terms\n- no explanations",
-        input_text, module_lines, ROUTER_QUERY_TERMS_MAX
+    let context = render_router_context_template(
+        &state.input.router_context_template,
+        input_text,
+        &module_lines,
+        ROUTER_QUERY_TERMS_MAX,
     );
     let instructions = format!(
         "{}\n\n{}",
@@ -241,6 +243,18 @@ fn build_activation_query_terms(input_text: &str) -> Vec<String> {
     terms.sort();
     terms.dedup();
     terms
+}
+
+fn render_router_context_template(
+    template: &str,
+    latest_user_input: &str,
+    active_submodules: &str,
+    router_query_terms_max: usize,
+) -> String {
+    template
+        .replace("{{latest_user_input}}", latest_user_input)
+        .replace("{{active_submodules}}", active_submodules)
+        .replace("{{router_query_terms_max}}", &router_query_terms_max.to_string())
 }
 
 fn compute_module_scores_minimal(
