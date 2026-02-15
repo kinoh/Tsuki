@@ -26,6 +26,7 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 
@@ -132,6 +133,37 @@ struct DebugEventsResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct DebugConceptSearchQuery {
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugConceptGraphQueriesQuery {
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugConceptSearchResponse {
+    items: Vec<Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugConceptGraphQueryItem {
+    event_id: String,
+    ts: String,
+    query_terms: Vec<String>,
+    limit: Option<usize>,
+    result_concepts: Vec<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugConceptGraphQueriesResponse {
+    items: Vec<DebugConceptGraphQueryItem>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(crate) struct DebugImproveTriggerRequest {
     #[serde(default)]
     pub(crate) target: Option<String>,
@@ -234,6 +266,24 @@ async fn main() {
         .route("/", get(ws_handler))
         .route("/debug/ui", get(debug_ui))
         .route("/debug/monitor", get(debug_monitor_ui))
+        .route("/debug/concept-graph/ui", get(debug_concept_graph_ui))
+        .route(
+            "/debug/concept-graph/health",
+            get(debug_concept_graph_health),
+        )
+        .route("/debug/concept-graph/stats", get(debug_concept_graph_stats))
+        .route(
+            "/debug/concept-graph/concepts",
+            get(debug_concept_graph_concepts),
+        )
+        .route(
+            "/debug/concept-graph/concepts/{name}",
+            get(debug_concept_graph_concept_detail),
+        )
+        .route(
+            "/debug/concept-graph/queries",
+            get(debug_concept_graph_queries),
+        )
         .route(
             "/debug/prompts",
             get(debug_get_prompts).post(debug_update_prompts),
@@ -532,6 +582,118 @@ async fn debug_events_stream(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+async fn debug_concept_graph_health(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let value = state
+        .activation_concept_graph
+        .debug_health()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(value))
+}
+
+async fn debug_concept_graph_stats(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let value = state
+        .activation_concept_graph
+        .debug_counts()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(value))
+}
+
+async fn debug_concept_graph_concepts(
+    State(state): State<AppState>,
+    Query(query): Query<DebugConceptSearchQuery>,
+) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
+    let items = state
+        .activation_concept_graph
+        .debug_concept_search(query.q, query.limit.unwrap_or(50))
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    Ok(Json(DebugConceptSearchResponse { items }))
+}
+
+async fn debug_concept_graph_concept_detail(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let value = state
+        .activation_concept_graph
+        .debug_concept_detail(name)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    match value {
+        Some(concept) => Ok(Json(concept)),
+        None => Err((StatusCode::NOT_FOUND, "concept not found".to_string())),
+    }
+}
+
+async fn debug_concept_graph_queries(
+    State(state): State<AppState>,
+    Query(query): Query<DebugConceptGraphQueriesQuery>,
+) -> Result<Json<DebugConceptGraphQueriesResponse>, (StatusCode, String)> {
+    let limit = query.limit.unwrap_or(100).max(1).min(500);
+    let fetch_limit = (limit * 5).min(2000);
+    let events = state
+        .event_store
+        .latest(fetch_limit)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let mut items = Vec::<DebugConceptGraphQueryItem>::new();
+    for event in events {
+        if !event.meta.tags.iter().any(|tag| tag == "concept_graph.query") {
+            continue;
+        }
+        let query_terms = event
+            .payload
+            .get("query_terms")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let result_concepts = event
+            .payload
+            .get("result_concepts")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let error = event
+            .payload
+            .get("error")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        let limit_value = event
+            .payload
+            .get("limit")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize);
+        items.push(DebugConceptGraphQueryItem {
+            event_id: event.event_id,
+            ts: event.ts,
+            query_terms,
+            limit: limit_value,
+            result_concepts,
+            error,
+        });
+        if items.len() >= limit {
+            break;
+        }
+    }
+    Ok(Json(DebugConceptGraphQueriesResponse { items }))
+}
+
 fn matches_debug_event_filters(event: &Event, query: &DebugEventsQuery) -> bool {
     let source_ok = query
         .source
@@ -654,6 +816,21 @@ async fn debug_monitor_ui() -> Html<String> {
             println!(
                 "MONITOR_UI_READ_ERROR path={} error={} (falling back to embedded html)",
                 MONITOR_UI_PATH, err
+            );
+            Html(EMBEDDED.to_string())
+        }
+    }
+}
+
+async fn debug_concept_graph_ui() -> Html<String> {
+    const EMBEDDED: &str = include_str!("../static/concept_graph_ui.html");
+    const UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/concept_graph_ui.html");
+    match tokio::fs::read_to_string(UI_PATH).await {
+        Ok(html) => Html(html),
+        Err(err) => {
+            println!(
+                "CONCEPT_GRAPH_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                UI_PATH, err
             );
             Html(EMBEDDED.to_string())
         }

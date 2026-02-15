@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Concept Graph Debug</title>
+    <style>
+      :root {
+        --bg: #f4f7f9;
+        --card: #ffffff;
+        --line: #d6dde3;
+        --text: #19222b;
+        --muted: #5a6773;
+        --accent: #006a6b;
+        --danger: #b3261e;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: linear-gradient(160deg, #eef4f6 0%, #f7f9fb 60%, #f1f6f5 100%);
+        color: var(--text);
+        font-family: "IBM Plex Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+      }
+
+      .page {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .row {
+        display: grid;
+        gap: 12px;
+      }
+
+      .row.top { grid-template-columns: 1fr 1fr; }
+      .row.main { grid-template-columns: 380px 1fr; }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+      }
+
+      h1 { margin: 0 0 6px; font-size: 20px; }
+      h2 { margin: 0 0 8px; font-size: 15px; }
+      .muted { color: var(--muted); font-size: 12px; }
+
+      .status-ok { color: var(--accent); font-weight: 700; }
+      .status-ng { color: var(--danger); font-weight: 700; }
+
+      .grid3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+      }
+
+      .metric .name { font-size: 12px; color: var(--muted); }
+      .metric .value { font-size: 18px; font-weight: 700; margin-top: 4px; }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      input, button {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        font: inherit;
+      }
+
+      input { flex: 1; }
+
+      button {
+        cursor: pointer;
+        background: #f8fbfb;
+      }
+
+      button:hover { border-color: #9eb1bf; }
+
+      .list {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        max-height: 480px;
+        overflow: auto;
+      }
+
+      .item {
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+        cursor: pointer;
+      }
+
+      .item:last-child { border-bottom: 0; }
+      .item:hover { background: #f6fafb; }
+      .item.active { background: #eaf4f5; }
+
+      .item .name { font-weight: 700; }
+      .item .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+      .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px; font-size: 13px; margin-bottom: 4px; }
+      .k { color: var(--muted); }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th, td {
+        border: 1px solid var(--line);
+        text-align: left;
+        padding: 6px;
+      }
+
+      th { background: #f4f8fa; }
+
+      .timeline {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        max-height: 280px;
+        overflow: auto;
+      }
+
+      .timeline-item {
+        border-bottom: 1px solid var(--line);
+        padding: 10px;
+        font-size: 13px;
+      }
+
+      .timeline-item:last-child { border-bottom: 0; }
+      .timeline-meta { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+
+      @media (max-width: 980px) {
+        .row.top, .row.main { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="card">
+        <h1>Concept Graph Debug</h1>
+        <div class="muted">Read-only monitor for graph health, concept exploration, and router query history.</div>
+      </div>
+
+      <section class="row top">
+        <div class="card">
+          <h2>Health</h2>
+          <div id="healthStatus" class="muted">Loading...</div>
+          <div id="healthMeta" class="muted"></div>
+        </div>
+        <div class="card">
+          <h2>Counts</h2>
+          <div class="grid3">
+            <div class="metric"><div class="name">Concepts</div><div class="value" id="conceptCount">-</div></div>
+            <div class="metric"><div class="name">Episodes</div><div class="value" id="episodeCount">-</div></div>
+            <div class="metric"><div class="name">Relations</div><div class="value" id="relationCount">-</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="row main">
+        <div class="card">
+          <h2>Concept Search</h2>
+          <div class="toolbar">
+            <input id="searchInput" placeholder="Search concept name" />
+            <button id="searchBtn">Search</button>
+          </div>
+          <div id="searchList" class="list"></div>
+        </div>
+
+        <div class="card">
+          <h2>Concept Detail</h2>
+          <div id="detailBody" class="muted">Select a concept from search results.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Concept Query Timeline</h2>
+        <div class="toolbar">
+          <button id="refreshTimelineBtn">Refresh</button>
+        </div>
+        <div id="timeline" class="timeline"></div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        selectedConceptName: null,
+      };
+
+      const els = {
+        healthStatus: document.getElementById("healthStatus"),
+        healthMeta: document.getElementById("healthMeta"),
+        conceptCount: document.getElementById("conceptCount"),
+        episodeCount: document.getElementById("episodeCount"),
+        relationCount: document.getElementById("relationCount"),
+        searchInput: document.getElementById("searchInput"),
+        searchBtn: document.getElementById("searchBtn"),
+        searchList: document.getElementById("searchList"),
+        detailBody: document.getElementById("detailBody"),
+        refreshTimelineBtn: document.getElementById("refreshTimelineBtn"),
+        timeline: document.getElementById("timeline"),
+      };
+
+      async function requestJson(path) {
+        const res = await fetch(path);
+        if (!res.ok) {
+          let message = `${res.status} ${res.statusText}`;
+          try {
+            message = await res.text();
+          } catch (_) {}
+          throw new Error(message);
+        }
+        return res.json();
+      }
+
+      function formatMs(ms) {
+        if (!Number.isFinite(ms) || ms <= 0) return "-";
+        return new Date(ms).toISOString();
+      }
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      async function loadHealth() {
+        try {
+          const health = await requestJson("/debug/concept-graph/health");
+          const connected = !!health.connected;
+          els.healthStatus.innerHTML = connected
+            ? '<span class="status-ok">Connected</span>'
+            : '<span class="status-ng">Disconnected</span>';
+          const error = health.error ? `error=${health.error}` : "";
+          els.healthMeta.textContent = `checked_at=${formatMs(Number(health.checked_at_ms))} tau_ms=${health.arousal_tau_ms ?? "-"} ${error}`.trim();
+        } catch (error) {
+          els.healthStatus.innerHTML = `<span class="status-ng">Health fetch failed</span>`;
+          els.healthMeta.textContent = String(error.message || error);
+        }
+      }
+
+      async function loadCounts() {
+        try {
+          const stats = await requestJson("/debug/concept-graph/stats");
+          els.conceptCount.textContent = String(stats.concept_count ?? "-");
+          els.episodeCount.textContent = String(stats.episode_count ?? "-");
+          els.relationCount.textContent = String(stats.relation_count ?? "-");
+        } catch (error) {
+          els.conceptCount.textContent = "ERR";
+          els.episodeCount.textContent = "ERR";
+          els.relationCount.textContent = "ERR";
+        }
+      }
+
+      function renderSearchList(items) {
+        if (!Array.isArray(items) || items.length === 0) {
+          els.searchList.innerHTML = '<div class="item"><div class="meta">No concepts.</div></div>';
+          return;
+        }
+        els.searchList.innerHTML = items
+          .map((item) => {
+            const name = item.name || "";
+            const active = state.selectedConceptName === name ? " active" : "";
+            return `
+              <div class="item${active}" data-concept-name="${escapeHtml(name)}">
+                <div class="name">${escapeHtml(name)}</div>
+                <div class="meta">valence=${item.valence ?? "-"} arousal=${item.arousal ?? "-"}</div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      async function loadSearch() {
+        const q = (els.searchInput.value || "").trim();
+        const path = q
+          ? `/debug/concept-graph/concepts?q=${encodeURIComponent(q)}&limit=80`
+          : "/debug/concept-graph/concepts?limit=80";
+        const data = await requestJson(path);
+        renderSearchList(data.items || []);
+      }
+
+      function renderDetail(concept) {
+        if (!concept || !concept.name) {
+          els.detailBody.innerHTML = '<div class="muted">Select a concept from search results.</div>';
+          return;
+        }
+
+        const relations = Array.isArray(concept.relations) ? concept.relations : [];
+        const episodes = Array.isArray(concept.episodes) ? concept.episodes : [];
+
+        const relationRows = relations.length
+          ? relations
+              .map(
+                (rel) =>
+                  `<tr><td>${escapeHtml(rel.direction)}</td><td>${escapeHtml(rel.from)}</td><td>${escapeHtml(rel.type)}</td><td>${escapeHtml(rel.to)}</td><td>${rel.weight ?? "-"}</td></tr>`,
+              )
+              .join("")
+          : '<tr><td colspan="5">No relations</td></tr>';
+
+        const episodeRows = episodes.length
+          ? episodes
+              .map(
+                (ep) =>
+                  `<tr><td>${escapeHtml(ep.summary)}</td><td>${ep.valence ?? "-"}</td></tr>`,
+              )
+              .join("")
+          : '<tr><td colspan="2">No episodes</td></tr>';
+
+        els.detailBody.innerHTML = `
+          <div class="kv"><div class="k">name</div><div>${escapeHtml(concept.name)}</div></div>
+          <div class="kv"><div class="k">valence</div><div>${concept.valence ?? "-"}</div></div>
+          <div class="kv"><div class="k">arousal</div><div>${concept.arousal ?? "-"}</div></div>
+          <div class="kv"><div class="k">arousal_level</div><div>${concept.arousal_level ?? "-"}</div></div>
+          <div class="kv"><div class="k">accessed_at</div><div>${formatMs(Number(concept.accessed_at))}</div></div>
+
+          <h2 style="margin-top:12px;">Relations</h2>
+          <table>
+            <thead><tr><th>direction</th><th>from</th><th>type</th><th>to</th><th>weight</th></tr></thead>
+            <tbody>${relationRows}</tbody>
+          </table>
+
+          <h2 style="margin-top:12px;">Episodes</h2>
+          <table>
+            <thead><tr><th>summary</th><th>valence</th></tr></thead>
+            <tbody>${episodeRows}</tbody>
+          </table>
+        `;
+      }
+
+      async function loadDetail(name) {
+        if (!name) return;
+        try {
+          const concept = await requestJson(`/debug/concept-graph/concepts/${encodeURIComponent(name)}`);
+          renderDetail(concept);
+        } catch (error) {
+          els.detailBody.innerHTML = `<div class="status-ng">Failed to load detail: ${escapeHtml(error.message || error)}</div>`;
+        }
+      }
+
+      function renderTimeline(items) {
+        if (!Array.isArray(items) || items.length === 0) {
+          els.timeline.innerHTML = '<div class="timeline-item muted">No concept_graph.query events.</div>';
+          return;
+        }
+        els.timeline.innerHTML = items
+          .map((item) => {
+            const terms = Array.isArray(item.query_terms) ? item.query_terms.join(", ") : "";
+            const concepts = Array.isArray(item.result_concepts)
+              ? item.result_concepts.join(", ")
+              : "";
+            const error = item.error ? `<div class="status-ng">error=${escapeHtml(item.error)}</div>` : "";
+            return `
+              <div class="timeline-item">
+                <div class="timeline-meta">${escapeHtml(item.ts || "-")} · event_id=${escapeHtml(item.event_id || "-")}</div>
+                <div>query_terms: ${escapeHtml(terms || "-")}</div>
+                <div>result_concepts: ${escapeHtml(concepts || "-")}</div>
+                ${error}
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      async function loadTimeline() {
+        try {
+          const data = await requestJson("/debug/concept-graph/queries?limit=120");
+          renderTimeline(data.items || []);
+        } catch (error) {
+          els.timeline.innerHTML = `<div class="timeline-item status-ng">Failed to load timeline: ${escapeHtml(error.message || error)}</div>`;
+        }
+      }
+
+      els.searchBtn.addEventListener("click", async () => {
+        await loadSearch();
+      });
+
+      els.searchInput.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter") return;
+        await loadSearch();
+      });
+
+      els.searchList.addEventListener("click", async (event) => {
+        const row = event.target.closest(".item[data-concept-name]");
+        if (!row) return;
+        const name = row.getAttribute("data-concept-name");
+        if (!name) return;
+        state.selectedConceptName = name;
+        await loadSearch();
+        await loadDetail(name);
+      });
+
+      els.refreshTimelineBtn.addEventListener("click", loadTimeline);
+
+      async function init() {
+        await Promise.all([loadHealth(), loadCounts(), loadSearch(), loadTimeline()]);
+        setInterval(loadHealth, 8000);
+        setInterval(loadCounts, 12000);
+        setInterval(loadTimeline, 5000);
+      }
+
+      init();
+    </script>
+  </body>
+</html>
