@@ -14,10 +14,15 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 - Test Memgraph endpoint is `bolt://localhost:7697`.
 - Setup command:
   - `task -t core-rust/Taskfile.yaml integration/prepare`
+- Run command:
+  - `task -t core-rust/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/example.yaml --run-count 1`
+- Help:
+  - `task -t core-rust/Taskfile.yaml integration/run -- --help`
 
 ## Principles
 - Memgraph restore uses latest snapshot through `integration/memgraph/restore/latest`.
 - Tester and judge configuration are file-based (not environment-variable based).
+- Runtime requires `OPENAI_API_KEY`.
 - Common baseline metrics:
   - `scenario_requirement_fit` (`0..1`)
   - `dialog_naturalness` (`0..1`)

@@ -1063,8 +1063,14 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             }));
         }
         items.sort_by(|a, b| {
-            let a_arousal = a.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
-            let b_arousal = b.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
+            let a_arousal = a
+                .get("arousal")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
+            let b_arousal = b
+                .get("arousal")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
             let a_accessed_at = a
                 .get("accessed_at")
                 .and_then(|value| value.as_i64())
@@ -1169,9 +1175,10 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
             let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
             let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
-            let q_linked =
-                query("MATCH (c:Concept)-[:EVOKES]->(e:Episode {name: $name}) RETURN count(c) AS count")
-                    .param("name", name.as_str());
+            let q_linked = query(
+                "MATCH (c:Concept)-[:EVOKES]->(e:Episode {name: $name}) RETURN count(c) AS count",
+            )
+            .param("name", name.as_str());
             let mut linked_result = self
                 .graph
                 .execute(q_linked)
@@ -1194,8 +1201,14 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             }));
         }
         items.sort_by(|a, b| {
-            let a_arousal = a.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
-            let b_arousal = b.get("arousal").and_then(|value| value.as_f64()).unwrap_or(0.0);
+            let a_arousal = a
+                .get("arousal")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
+            let b_arousal = b
+                .get("arousal")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0);
             let a_accessed_at = a
                 .get("accessed_at")
                 .and_then(|value| value.as_i64())

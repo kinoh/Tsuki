@@ -254,7 +254,10 @@ fn render_router_context_template(
     template
         .replace("{{latest_user_input}}", latest_user_input)
         .replace("{{active_submodules}}", active_submodules)
-        .replace("{{router_query_terms_max}}", &router_query_terms_max.to_string())
+        .replace(
+            "{{router_query_terms_max}}",
+            &router_query_terms_max.to_string(),
+        )
 }
 
 fn compute_module_scores_minimal(

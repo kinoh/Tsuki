@@ -100,6 +100,17 @@ The rebuild goal is:
 - Persist machine-readable result artifact per run (JSON).
 - Include snapshot id, scenario id, run index, verdict, metrics, and failure type if any.
 
+## Implementation Notes (2026-02-16)
+- Implemented harness entrypoint as `core-rust/examples/integration_harness.rs`.
+- `core-rust/Taskfile.yaml` now executes the harness via `integration/run`.
+- Harness behavior:
+  - creates a temporary runtime `config.toml` and temporary `db.path`,
+  - starts `tsuki-core-rust` with `MEMGRAPH_URI=bolt://localhost:7697`,
+  - runs tester LLM conversation through WebSocket,
+  - reads persisted events from libSQL,
+  - runs judge LLM on filtered event stream,
+  - writes result artifact under `core-rust/tests/integration/results/`.
+
 ## Non-Goals (Current Design Stage)
 - No large fixed global taxonomy beyond the common baseline metrics.
 - No final policy on exact aggregation across repeated runs.

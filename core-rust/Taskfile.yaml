@@ -45,8 +45,8 @@ tasks:
       - mkdir -p tests/integration/logs tests/integration/results
 
   integration/run:
-    desc: Prepare environment and run integration harness (placeholder)
+    desc: Prepare environment and run integration harness
     deps:
       - integration/prepare
     cmds:
-      - 'echo "TODO: implement integration harness entrypoint (set MEMGRAPH_URI=bolt://localhost:7697)"'
+      - cargo run --example integration_harness -- {{.CLI_ARGS}}

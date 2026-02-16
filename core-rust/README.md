@@ -49,6 +49,9 @@ cargo run --example test_runner -- --connect tests/client/scenarios/example.yaml
 - Use task orchestration from `core-rust/Taskfile.yaml`.
 - Integration tests use isolated Memgraph in `compose.test.yaml` (`memgraph-test`, `bolt://localhost:7697`).
 - Memgraph restore policy for integration setup uses latest snapshot (`integration/memgraph/restore/latest`).
+- Harness entrypoint: `cargo run --example integration_harness -- --help`.
+- Full run example:
+  - `task -t core-rust/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/example.yaml --run-count 1`
 
 First message is auth: `USER_NAME:WEB_AUTH_TOKEN`.
 After auth, send JSON like:

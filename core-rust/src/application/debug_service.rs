@@ -181,15 +181,13 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
     );
     record_event(state, input_event.clone()).await;
 
-    Ok(
-        input_event
-            .payload
-            .get("text")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string(),
-    )
+    Ok(input_event
+        .payload
+        .get("text")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string())
 }
 
 async fn maybe_append_debug_input_event(
@@ -227,7 +225,10 @@ async fn maybe_append_debug_input_event(
     record_event(state, event).await;
 }
 
-fn should_append_debug_input_for_reuse_open(input_text: &str, events: &[crate::event::Event]) -> bool {
+fn should_append_debug_input_for_reuse_open(
+    input_text: &str,
+    events: &[crate::event::Event],
+) -> bool {
     let mut saw_decision_after_input = false;
     for event in events {
         if is_decision_event(event) {

@@ -86,7 +86,8 @@ pub(crate) async fn run_decision(
     ));
     let concept_top_n = state.router.concept_top_n.max(1);
     let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
-    let executed_submodule_outputs = format_hard_trigger_results(&router_output.hard_trigger_results);
+    let executed_submodule_outputs =
+        format_hard_trigger_results(&router_output.hard_trigger_results);
     let submodule_candidates =
         format_soft_recommendations(&activation_snapshot.soft_recommendations);
     let context = render_decision_context_template(
@@ -192,7 +193,8 @@ pub(crate) async fn run_decision_debug(
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         let concept_top_n = state.router.concept_top_n.max(1);
         let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
-        let executed_submodule_outputs = format_hard_trigger_results(&router_output.hard_trigger_results);
+        let executed_submodule_outputs =
+            format_hard_trigger_results(&router_output.hard_trigger_results);
         let submodule_candidates =
             format_soft_recommendations(&activation_snapshot.soft_recommendations);
         render_decision_context_template(
@@ -319,18 +321,16 @@ pub(crate) async fn run_submodule_debug(
         compose_instructions(&base_instructions, &instructions),
         &state.modules.runtime,
     ));
-    let context = context_override
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            render_submodule_context_template(
-                &state.input.submodule_context_template,
-                input_text,
-                "none",
-                "none",
-                &history,
-                "none",
-            )
-        });
+    let context = context_override.map(str::to_string).unwrap_or_else(|| {
+        render_submodule_context_template(
+            &state.input.submodule_context_template,
+            input_text,
+            "none",
+            "none",
+            &history,
+            "none",
+        )
+    });
     let response = match adapter
         .respond(LlmRequest {
             input: context.clone(),

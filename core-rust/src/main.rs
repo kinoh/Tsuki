@@ -696,7 +696,12 @@ async fn debug_concept_graph_queries(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     let mut items = Vec::<DebugConceptGraphQueryItem>::new();
     for event in events {
-        if !event.meta.tags.iter().any(|tag| tag == "concept_graph.query") {
+        if !event
+            .meta
+            .tags
+            .iter()
+            .any(|tag| tag == "concept_graph.query")
+        {
             continue;
         }
         let query_terms = event
