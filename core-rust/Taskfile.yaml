@@ -2,6 +2,9 @@ version: '3'
 
 dotenv: ['../.env', './.env']
 
+env:
+  DOCKER_HOST: ""
+
 vars:
   DOCKER_COMPOSE: docker compose -f ../compose.test.yaml
 
@@ -37,11 +40,25 @@ tasks:
       - '{{.DOCKER_COMPOSE}} exec -u root memgraph-test chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}'
       - 'echo "RECOVER SNAPSHOT ''/data/snapshots/{{.BACKUP_FILE_NAME}}'' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph-test mgconsole'
 
+  integration/memgraph/wait:
+    desc: Wait until isolated test memgraph can answer queries
+    cmds:
+      - |
+        for i in $(seq 1 60); do
+          if echo "RETURN 1;" | {{.DOCKER_COMPOSE}} exec -T memgraph-test mgconsole >/dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 1
+        done
+        echo "memgraph-test did not become ready in time" >&2
+        exit 1
+
   integration/prepare:
     desc: Prepare integration test runtime prerequisites
     deps:
       - integration/memgraph/restore/latest
     cmds:
+      - task integration/memgraph/wait
       - mkdir -p tests/integration/logs tests/integration/results
 
   integration/run:
