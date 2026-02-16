@@ -6,7 +6,7 @@ use async_openai::{
 use futures::{SinkExt, StreamExt};
 use libsql::params;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -84,6 +84,8 @@ struct RunResult {
     judge_summary: Option<String>,
     turn_count: usize,
     event_count: usize,
+    message_log: Vec<TranscriptTurn>,
+    log_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -452,6 +454,18 @@ async fn execute_runs(
         }
 
         let raw_events = read_events_since(&runtime.db_path, before_count).await?;
+        let log_file = write_event_log(
+            assets.scenario.name.as_str(),
+            run_index,
+            &raw_events,
+            assets.scenario.include_debug_events,
+        )?;
+        let log_file = log_file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(log_file.as_path())
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .to_string();
         let filtered_events = filter_events(raw_events, assets.scenario.include_debug_events);
 
         if let Some((code, detail)) = convo_error {
@@ -464,6 +478,8 @@ async fn execute_runs(
                 judge_summary: None,
                 turn_count: transcript.len(),
                 event_count: filtered_events.len(),
+                message_log: transcript.clone(),
+                log_file: Some(log_file),
             });
             continue;
         }
@@ -482,6 +498,8 @@ async fn execute_runs(
                         judge_summary: output.summary,
                         turn_count: transcript.len(),
                         event_count: filtered_events.len(),
+                        message_log: transcript.clone(),
+                        log_file: Some(log_file.clone()),
                     });
                     continue;
                 }
@@ -495,6 +513,8 @@ async fn execute_runs(
                     judge_summary: output.summary,
                     turn_count: transcript.len(),
                     event_count: filtered_events.len(),
+                    message_log: transcript.clone(),
+                    log_file: Some(log_file.clone()),
                 });
             }
             Err(err) => {
@@ -507,6 +527,8 @@ async fn execute_runs(
                     judge_summary: None,
                     turn_count: transcript.len(),
                     event_count: filtered_events.len(),
+                    message_log: transcript.clone(),
+                    log_file: Some(log_file.clone()),
                 });
             }
         }
@@ -805,7 +827,7 @@ async fn read_events_since(db_path: &Path, offset: usize) -> Result<Vec<Value>, 
         .map_err(|err| format!("failed to connect db: {}", err))?;
     let mut rows = conn
         .query(
-            "SELECT ts, source, modality, payload_json, tags_json FROM events ORDER BY ts ASC LIMIT -1 OFFSET ?",
+            "SELECT event_id, ts, source, modality, payload_json, tags_json FROM events ORDER BY ts ASC LIMIT -1 OFFSET ?",
             params![offset as i64],
         )
         .await
@@ -813,50 +835,27 @@ async fn read_events_since(db_path: &Path, offset: usize) -> Result<Vec<Value>, 
 
     let mut out = Vec::new();
     while let Some(row) = rows.next().await.map_err(|err| err.to_string())? {
-        let ts: String = row.get(0).map_err(|err| err.to_string())?;
-        let source: String = row.get(1).map_err(|err| err.to_string())?;
-        let modality: String = row.get(2).map_err(|err| err.to_string())?;
-        let payload_json: String = row.get(3).map_err(|err| err.to_string())?;
-        let tags_json: String = row.get(4).map_err(|err| err.to_string())?;
+        let event_id: String = row.get(0).map_err(|err| err.to_string())?;
+        let ts: String = row.get(1).map_err(|err| err.to_string())?;
+        let source: String = row.get(2).map_err(|err| err.to_string())?;
+        let modality: String = row.get(3).map_err(|err| err.to_string())?;
+        let payload_json: String = row.get(4).map_err(|err| err.to_string())?;
+        let tags_json: String = row.get(5).map_err(|err| err.to_string())?;
 
         let payload = serde_json::from_str::<Value>(&payload_json).unwrap_or(Value::Null);
         let tags = serde_json::from_str::<Vec<String>>(&tags_json).unwrap_or_default();
-        let compact_payload = compact_payload(&payload);
 
         out.push(json!({
+            "event_id": event_id,
             "ts": ts,
             "source": source,
             "modality": modality,
             "tags": tags,
-            "payload": compact_payload,
+            "payload": payload,
         }));
     }
 
     Ok(out)
-}
-
-fn compact_payload(payload: &Value) -> Value {
-    let mut out = Map::new();
-
-    if let Some(text) = payload.get("text").and_then(Value::as_str) {
-        out.insert("text".to_string(), Value::String(text.to_string()));
-    }
-    if let Some(target) = payload.get("target").and_then(Value::as_str) {
-        out.insert("target".to_string(), Value::String(target.to_string()));
-    }
-
-    if out.is_empty() {
-        if let Some(obj) = payload.as_object() {
-            for (key, value) in obj.iter() {
-                if key == "raw" {
-                    continue;
-                }
-                out.insert(key.clone(), value.clone());
-            }
-        }
-    }
-
-    Value::Object(out)
 }
 
 fn filter_events(events: Vec<Value>, include_debug_events: bool) -> Vec<Value> {
@@ -981,6 +980,40 @@ fn extract_json_object(text: &str) -> Option<String> {
 fn round3(value: f64) -> f64 {
     let factor = 1000.0;
     (value * factor).round() / factor
+}
+
+fn write_event_log(
+    scenario_name: &str,
+    run_index: usize,
+    events: &[Value],
+    include_debug_events: bool,
+) -> Result<PathBuf, String> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/integration/logs");
+    fs::create_dir_all(&base_dir).map_err(|err| format!("failed to create logs dir: {}", err))?;
+
+    let ts_format = format_description::parse("[year][month][day]-[hour][minute][second]")
+        .map_err(|err| format!("failed to parse time format: {}", err))?;
+    let stamp = OffsetDateTime::now_utc()
+        .format(&ts_format)
+        .unwrap_or_else(|_| "log".to_string());
+    let safe_name = scenario_name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>();
+    let file_name = format!("{}__{}__run-{}.events.json", stamp, safe_name, run_index);
+    let path = base_dir.join(file_name);
+
+    let body = json!({
+        "scenario_name": scenario_name,
+        "run_index": run_index,
+        "event_count": events.len(),
+        "filter_mode": if include_debug_events { "include_debug" } else { "primary_only" },
+        "events": events,
+    });
+    let text = serde_json::to_string_pretty(&body)
+        .map_err(|err| format!("failed to serialize event log: {}", err))?;
+    fs::write(&path, text).map_err(|err| format!("failed to write event log: {}", err))?;
+    Ok(path)
 }
 
 fn write_result_artifact(result: &IntegrationResult) -> Result<PathBuf, String> {
