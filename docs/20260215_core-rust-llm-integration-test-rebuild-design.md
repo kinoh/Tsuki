@@ -107,6 +107,7 @@ The rebuild goal is:
 - Harness behavior:
   - creates a temporary runtime `config.toml` and temporary `db.path`,
   - starts `tsuki-core-rust` with `MEMGRAPH_URI=bolt://localhost:7697`,
+  - expands scenario secret placeholders `{{filename}}` from `tests/integration/secrets/filename.age`,
   - runs tester LLM conversation through WebSocket,
   - reads persisted events from libSQL,
   - runs judge LLM on filtered event stream,

@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command as StdCommand;
 use std::process::Stdio;
 use time::{format_description, OffsetDateTime};
 use tokio::net::TcpStream;
@@ -24,6 +25,8 @@ const DEFAULT_USER_NAME: &str = "integration-tester";
 const READY_TIMEOUT_MS: u64 = 90_000;
 const READY_INTERVAL_MS: u64 = 500;
 const REQUIRED_BASELINE_METRICS: [&str; 2] = ["scenario_requirement_fit", "dialog_naturalness"];
+const DEFAULT_SECRET_IDENTITY_PATH: &str = "tests/integration/secrets/identity.txt";
+const SECRET_DIR_PATH: &str = "tests/integration/secrets";
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -37,6 +40,8 @@ struct RunnerConfig {
     tester: RoleConfig,
     judge: RoleConfig,
     execution: ExecutionConfig,
+    #[serde(default)]
+    secrets: SecretsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,6 +57,24 @@ struct ExecutionConfig {
     turn_timeout_ms: u64,
     scenario_timeout_ms: u64,
     transient_retry: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SecretsConfig {
+    #[serde(default = "default_identity_file")]
+    identity_file: String,
+}
+
+impl Default for SecretsConfig {
+    fn default() -> Self {
+        Self {
+            identity_file: default_identity_file(),
+        }
+    }
+}
+
+fn default_identity_file() -> String {
+    DEFAULT_SECRET_IDENTITY_PATH.to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -222,6 +245,141 @@ fn usage() -> String {
     "Usage: cargo run --example integration_harness -- [--scenario <path>] [--config <path>] [--run-count <n>]".to_string()
 }
 
+fn resolve_to_manifest_path(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
+    }
+}
+
+fn load_scenario_with_secrets(path: &Path, secrets: &SecretsConfig) -> Result<Scenario, String> {
+    let scenario_raw =
+        fs::read_to_string(path).map_err(|err| format!("failed to read scenario: {}", err))?;
+    let mut scenario_yaml: serde_yaml::Value = serde_yaml::from_str(&scenario_raw)
+        .map_err(|err| format!("failed to parse scenario yaml: {}", err))?;
+    let mut cache = HashMap::<String, String>::new();
+    let identity_path = resolve_to_manifest_path(PathBuf::from(secrets.identity_file.as_str()));
+    apply_secret_templates(&mut scenario_yaml, &identity_path, &mut cache)?;
+    serde_yaml::from_value::<Scenario>(scenario_yaml)
+        .map_err(|err| format!("failed to parse scenario after template expansion: {}", err))
+}
+
+fn apply_secret_templates(
+    value: &mut serde_yaml::Value,
+    identity_path: &Path,
+    cache: &mut HashMap<String, String>,
+) -> Result<(), String> {
+    match value {
+        serde_yaml::Value::String(text) => {
+            *text = resolve_secret_placeholders(text, identity_path, cache)?;
+            Ok(())
+        }
+        serde_yaml::Value::Sequence(items) => {
+            for item in items {
+                apply_secret_templates(item, identity_path, cache)?;
+            }
+            Ok(())
+        }
+        serde_yaml::Value::Mapping(map) => {
+            for (_, entry) in map.iter_mut() {
+                apply_secret_templates(entry, identity_path, cache)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn resolve_secret_placeholders(
+    text: &str,
+    identity_path: &Path,
+    cache: &mut HashMap<String, String>,
+) -> Result<String, String> {
+    let mut out = String::new();
+    let mut index = 0usize;
+
+    while let Some(start_rel) = text[index..].find("{{") {
+        let start = index + start_rel;
+        out.push_str(&text[index..start]);
+        let after = start + 2;
+        let Some(end_rel) = text[after..].find("}}") else {
+            return Err(format!("unclosed secret placeholder in text: {}", text));
+        };
+        let end = after + end_rel;
+        let name = text[after..end].trim();
+        let secret = decrypt_secret_placeholder(name, identity_path, cache)?;
+        out.push_str(secret.as_str());
+        index = end + 2;
+    }
+
+    out.push_str(&text[index..]);
+    Ok(out)
+}
+
+fn decrypt_secret_placeholder(
+    name: &str,
+    identity_path: &Path,
+    cache: &mut HashMap<String, String>,
+) -> Result<String, String> {
+    if let Some(value) = cache.get(name) {
+        return Ok(value.clone());
+    }
+    if name.is_empty() {
+        return Err("empty secret placeholder is not allowed".to_string());
+    }
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
+    {
+        return Err(format!("invalid secret placeholder name: {}", name));
+    }
+
+    let secret_path =
+        resolve_to_manifest_path(PathBuf::from(SECRET_DIR_PATH)).join(format!("{}.age", name));
+    if !secret_path.exists() {
+        return Err(format!(
+            "secret file not found for placeholder '{}': {}",
+            name,
+            secret_path.display()
+        ));
+    }
+    if !identity_path.exists() {
+        return Err(format!(
+            "secret identity file not found: {}",
+            identity_path.display()
+        ));
+    }
+
+    let output = StdCommand::new("age")
+        .args([
+            "--decrypt",
+            "--identity",
+            identity_path.to_string_lossy().as_ref(),
+            secret_path.to_string_lossy().as_ref(),
+        ])
+        .output()
+        .map_err(|err| format!("failed to run age decrypt: {}", err))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!(
+            "failed to decrypt secret '{}': {}",
+            name,
+            if stderr.is_empty() {
+                "age command failed".to_string()
+            } else {
+                stderr
+            }
+        ));
+    }
+
+    let decrypted = String::from_utf8(output.stdout)
+        .map_err(|err| format!("secret '{}' is not valid utf-8: {}", name, err))?;
+    let decrypted = decrypted.trim_end_matches('\n').to_string();
+    cache.insert(name.to_string(), decrypted.clone());
+    Ok(decrypted)
+}
+
 fn load_assets(args: &Args) -> Result<TestAssets, String> {
     let runner_raw = fs::read_to_string(&args.runner_config_path)
         .map_err(|err| format!("failed to read runner config: {}", err))?;
@@ -232,10 +390,7 @@ fn load_assets(args: &Args) -> Result<TestAssets, String> {
         runner.execution.run_count = value;
     }
 
-    let scenario_raw = fs::read_to_string(&args.scenario_path)
-        .map_err(|err| format!("failed to read scenario: {}", err))?;
-    let scenario: Scenario = serde_yaml::from_str(&scenario_raw)
-        .map_err(|err| format!("failed to parse scenario: {}", err))?;
+    let scenario = load_scenario_with_secrets(&args.scenario_path, &runner.secrets)?;
 
     for key in REQUIRED_BASELINE_METRICS {
         if !scenario.metrics_definition.contains_key(key) {
