@@ -23,7 +23,7 @@ const DEFAULT_AUTH_TOKEN: &str = "test-token";
 const DEFAULT_USER_NAME: &str = "integration-tester";
 const READY_TIMEOUT_MS: u64 = 90_000;
 const READY_INTERVAL_MS: u64 = 500;
-const COMMON_METRICS: [&str; 2] = ["scenario_requirement_fit", "dialog_naturalness"];
+const REQUIRED_BASELINE_METRICS: [&str; 2] = ["scenario_requirement_fit", "dialog_naturalness"];
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -235,7 +235,7 @@ fn load_assets(args: &Args) -> Result<TestAssets, String> {
     let scenario: Scenario = serde_yaml::from_str(&scenario_raw)
         .map_err(|err| format!("failed to parse scenario: {}", err))?;
 
-    for key in COMMON_METRICS {
+    for key in REQUIRED_BASELINE_METRICS {
         if !scenario.metrics_definition.contains_key(key) {
             return Err(format!(
                 "scenario missing required common metric '{}': {}",
@@ -512,8 +512,9 @@ async fn execute_runs(
         }
     }
 
-    let gates = compute_gates(&runs)?;
-    let overall_pass = evaluate_overall_pass(&runs, &gates);
+    let metric_keys = collect_metric_keys(&assets.scenario);
+    let gates = compute_gates(&runs, &metric_keys)?;
+    let overall_pass = evaluate_overall_pass(&runs, &gates, &metric_keys);
 
     Ok(IntegrationResult {
         scenario_name: assets.scenario.name.clone(),
@@ -531,13 +532,17 @@ async fn execute_runs(
     })
 }
 
-fn evaluate_overall_pass(runs: &[RunResult], gates: &HashMap<String, AggregateMetric>) -> bool {
+fn evaluate_overall_pass(
+    runs: &[RunResult],
+    gates: &HashMap<String, AggregateMetric>,
+    metric_keys: &[String],
+) -> bool {
     if runs.iter().any(|run| run.failure_code.is_some()) {
         return false;
     }
 
-    for key in COMMON_METRICS {
-        let Some(metric) = gates.get(key) else {
+    for key in metric_keys {
+        let Some(metric) = gates.get(key.as_str()) else {
             return false;
         };
         if metric.mean <= 0.7 || metric.min <= 0.5 {
@@ -547,21 +552,21 @@ fn evaluate_overall_pass(runs: &[RunResult], gates: &HashMap<String, AggregateMe
     true
 }
 
-fn compute_gates(runs: &[RunResult]) -> Result<HashMap<String, AggregateMetric>, String> {
+fn compute_gates(
+    runs: &[RunResult],
+    metric_keys: &[String],
+) -> Result<HashMap<String, AggregateMetric>, String> {
     let mut gates = HashMap::new();
 
-    for key in COMMON_METRICS {
+    for key in metric_keys {
         let mut values = Vec::new();
         for run in runs {
-            if let Some(value) = run.metrics.get(key) {
+            if let Some(value) = run.metrics.get(key.as_str()) {
                 values.push(*value);
             }
         }
         if values.len() != runs.len() {
-            return Err(format!(
-                "missing common metric '{}' in one or more runs",
-                key
-            ));
+            return Err(format!("missing metric '{}' in one or more runs", key));
         }
         let mean = values.iter().sum::<f64>() / values.len() as f64;
         let min = values.iter().fold(
@@ -578,6 +583,16 @@ fn compute_gates(runs: &[RunResult]) -> Result<HashMap<String, AggregateMetric>,
     }
 
     Ok(gates)
+}
+
+fn collect_metric_keys(scenario: &Scenario) -> Vec<String> {
+    let mut keys = scenario
+        .metrics_definition
+        .keys()
+        .cloned()
+        .collect::<Vec<String>>();
+    keys.sort();
+    keys
 }
 
 fn validate_metrics(scenario: &Scenario, metrics: &HashMap<String, f64>) -> Result<(), String> {

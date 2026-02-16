@@ -46,9 +46,10 @@ The rebuild goal is:
 
 ### 5. Coarse initial pass threshold
 - Initial pass policy is coarse (`score > 0.7` class) and can be refined later.
-- Shared pass/fail gating treats common metrics independently (AND):
-  - `mean(scenario_requirement_fit) > 0.7` and `min(scenario_requirement_fit) > 0.5`
-  - `mean(dialog_naturalness) > 0.7` and `min(dialog_naturalness) > 0.5`
+- Shared pass/fail gating applies to all scenario metrics independently (AND):
+  - for each metric defined in `metrics_definition`, require:
+    - `mean(metric) > 0.7`
+    - `min(metric) > 0.5`
 - Rationale: enable early adoption before policy hardening.
 
 ### 6. Judge event input policy
@@ -58,7 +59,7 @@ The rebuild goal is:
 
 ### 7. Repeat-run aggregation policy
 - Use per-metric `mean` and `min` only.
-- Evaluate pass/fail with independent AND gates for common metrics.
+- Evaluate pass/fail with independent AND gates for all metrics defined in each scenario.
 - Do not use weighted metric mixing in the initial design.
 - Rationale: preserve semantic separability between metric dimensions.
 
