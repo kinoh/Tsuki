@@ -3,7 +3,7 @@ version: '3'
 dotenv: ['../.env', './.env']
 
 vars:
-  DOCKER_COMPOSE: docker compose -f ../compose.yaml -f ../compose.test.yaml
+  DOCKER_COMPOSE: docker compose -f ../compose.test.yaml
 
 tasks:
   integration/memgraph/up:
@@ -32,6 +32,7 @@ tasks:
     deps:
       - integration/memgraph/up
     cmds:
+      - '{{.DOCKER_COMPOSE}} exec -u root memgraph-test mkdir -p /data/snapshots'
       - '{{.DOCKER_COMPOSE}} cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph-test:/data/snapshots/{{.BACKUP_FILE_NAME}}'
       - '{{.DOCKER_COMPOSE}} exec -u root memgraph-test chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}'
       - 'echo "RECOVER SNAPSHOT ''/data/snapshots/{{.BACKUP_FILE_NAME}}'' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph-test mgconsole'
