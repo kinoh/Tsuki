@@ -27,8 +27,8 @@ This directory contains the rebuilt integration test assets for `core-rust`.
   - `{{filename}}` resolves from `tests/integration/secrets/filename.age`.
   - Placeholder names allow `[a-zA-Z0-9._-]` only.
   - Missing/invalid placeholder or decrypt failure fails the run.
-- Decrypt key path is configured in `tests/integration/config/runner.toml`:
-  - `[secrets].identity_file`
+- Secret decryption key must be provided via environment variable:
+  - `PROMPT_PRIVATE_KEY` (X25519 JWK JSON)
 - Common baseline metrics:
   - `scenario_requirement_fit` (`0..1`)
   - `dialog_naturalness` (`0..1`)

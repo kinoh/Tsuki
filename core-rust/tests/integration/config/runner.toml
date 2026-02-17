@@ -16,7 +16,3 @@ max_turns = 12
 turn_timeout_ms = 45000
 scenario_timeout_ms = 480000
 transient_retry = 1
-
-[secrets]
-# AGE identity file for decrypting tests/integration/secrets/*.age placeholders.
-identity_file = "tests/integration/secrets/identity.txt"
