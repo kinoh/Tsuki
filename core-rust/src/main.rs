@@ -36,7 +36,7 @@ use crate::db::Db;
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::module_registry::{ModuleDefinition, ModuleRegistry, ModuleRegistryReader};
-use crate::prompts::{load_prompts, write_prompts, PromptOverrides, DEFAULT_PROMPTS_PATH};
+use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
 use crate::state::{DbStateStore, StateStore};
 use crate::tools::{state_tools, StateToolHandler};
 
@@ -208,7 +208,7 @@ async fn main() {
     let (tx, _) = broadcast::channel(256);
     let db = Db::connect(&config.db).await.expect("failed to init db");
     let event_store = Arc::new(EventStore::new(db.clone()));
-    let prompts_path = PathBuf::from(DEFAULT_PROMPTS_PATH);
+    let prompts_path = PathBuf::from(config.prompts.path.as_str());
     let prompt_overrides = load_prompts(&prompts_path).unwrap_or_default();
     let prompts = Arc::new(RwLock::new(prompt_overrides));
     let emit_event_store = event_store.clone();

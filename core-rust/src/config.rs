@@ -8,6 +8,8 @@ pub struct Config {
     #[serde(default)]
     pub router: RouterConfig,
     pub input: InputConfig,
+    #[serde(default)]
+    pub prompts: PromptsConfig,
     pub db: DbConfig,
     pub modules: Vec<ModuleConfig>,
 }
@@ -77,6 +79,24 @@ pub struct InputConfig {
     pub router_context_template: String,
     pub decision_context_template: String,
     pub submodule_context_template: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PromptsConfig {
+    #[serde(default = "default_prompts_path")]
+    pub path: String,
+}
+
+impl Default for PromptsConfig {
+    fn default() -> Self {
+        Self {
+            path: default_prompts_path(),
+        }
+    }
+}
+
+fn default_prompts_path() -> String {
+    "data/prompts.md".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]

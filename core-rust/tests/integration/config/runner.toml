@@ -16,3 +16,7 @@ max_turns = 12
 turn_timeout_ms = 45000
 scenario_timeout_ms = 480000
 transient_retry = 1
+
+[core]
+# Optional: override config.toml [prompts].path during integration runs.
+# prompts_file = "tests/integration/prompts/core_prompts.md"

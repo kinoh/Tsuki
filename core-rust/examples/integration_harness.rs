@@ -42,6 +42,8 @@ struct RunnerConfig {
     tester: RoleConfig,
     judge: RoleConfig,
     execution: ExecutionConfig,
+    #[serde(default)]
+    core: CoreConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -57,6 +59,12 @@ struct ExecutionConfig {
     turn_timeout_ms: u64,
     scenario_timeout_ms: u64,
     transient_retry: usize,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CoreConfig {
+    #[serde(default)]
+    prompts_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -144,6 +152,7 @@ struct TestAssets {
     tester: RoleRuntime,
     judge: RoleRuntime,
     execution: ExecutionConfig,
+    core: CoreConfig,
 }
 
 #[tokio::main]
@@ -163,7 +172,7 @@ async fn run() -> Result<(), String> {
     let secret_identity = load_secret_identity_from_env()?;
     let assets = load_assets(&args, &secret_identity)?;
 
-    let runtime = prepare_runtime()?;
+    let runtime = prepare_runtime(&assets.core)?;
     let mut core = start_core(&runtime).await?;
     wait_for_ws(&runtime.ws_url, &mut core).await?;
 
@@ -436,6 +445,7 @@ fn load_assets(args: &Args, identity: &age::x25519::Identity) -> Result<TestAsse
             prompt: judge_prompt,
         },
         execution: runner.execution,
+        core: runner.core,
     })
 }
 
@@ -446,7 +456,7 @@ fn ensure_openai_key() -> Result<(), String> {
     }
 }
 
-fn prepare_runtime() -> Result<RuntimeContext, String> {
+fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let base_config_path = manifest_dir.join("config.toml");
     let base_config_raw = fs::read_to_string(&base_config_path)
@@ -479,6 +489,25 @@ fn prepare_runtime() -> Result<RuntimeContext, String> {
         .and_then(toml::Value::as_table_mut)
         .ok_or("config.toml missing [server]")?;
     server_table.insert("port".to_string(), toml::Value::Integer(port as i64));
+
+    if let Some(prompts_file) = core.prompts_file.as_deref() {
+        let prompts_table = if let Some(table) = root.get_mut("prompts") {
+            table
+                .as_table_mut()
+                .ok_or("config.toml [prompts] must be a table")?
+        } else {
+            root.as_table_mut()
+                .ok_or("config.toml root must be a table")?
+                .entry("prompts")
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+                .as_table_mut()
+                .ok_or("failed to create [prompts] table")?
+        };
+        prompts_table.insert(
+            "path".to_string(),
+            toml::Value::String(prompts_file.to_string()),
+        );
+    }
 
     let patched =
         toml::to_string(&root).map_err(|err| format!("failed to render config: {}", err))?;
