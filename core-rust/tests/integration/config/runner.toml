@@ -19,4 +19,4 @@ transient_retry = 1
 
 [core]
 # Optional: override config.toml [prompts].path during integration runs.
-# prompts_file = "tests/integration/prompts/core_prompts.md"
+prompts_file = "data/prompts.md"

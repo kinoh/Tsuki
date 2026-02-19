@@ -491,6 +491,14 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
     server_table.insert("port".to_string(), toml::Value::Integer(port as i64));
 
     if let Some(prompts_file) = core.prompts_file.as_deref() {
+        let prompts_path = resolve_to_manifest_path(PathBuf::from(prompts_file));
+        if !prompts_path.exists() {
+            return Err(format!(
+                "core.prompts_file not found: {}",
+                prompts_path.display()
+            ));
+        }
+
         let prompts_table = if let Some(table) = root.get_mut("prompts") {
             table
                 .as_table_mut()
@@ -505,7 +513,7 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
         };
         prompts_table.insert(
             "path".to_string(),
-            toml::Value::String(prompts_file.to_string()),
+            toml::Value::String(prompts_path.to_string_lossy().to_string()),
         );
     }
 
