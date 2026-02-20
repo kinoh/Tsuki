@@ -27,6 +27,7 @@ pub struct LlmConfig {
     pub max_output_tokens: u32,
     pub max_tool_rounds: usize,
     pub base_personality: String,
+    pub router_instructions: String,
     pub decision_instructions: String,
 }
 

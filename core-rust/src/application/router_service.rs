@@ -8,6 +8,7 @@ use std::{
 
 use crate::event::build_event;
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError};
+use crate::prompts::PromptOverrides;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const ROUTER_QUERY_TERMS_MAX: usize = 8;
@@ -39,6 +40,7 @@ pub(crate) async fn run_router<F, Fut>(
     module_instructions: &HashMap<String, String>,
     modules: &Modules,
     state: &AppState,
+    overrides: &PromptOverrides,
     execute_submodule: F,
 ) -> RouterOutput
 where
@@ -47,7 +49,8 @@ where
 {
     let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
     let activation_query_terms =
-        infer_activation_query_terms(input_text, &active_module_names, modules, state).await;
+        infer_activation_query_terms(input_text, &active_module_names, modules, state, overrides)
+            .await;
     let concept_limit = state.router.concept_top_n.max(1);
     let concepts = match state
         .activation_concept_graph
@@ -181,6 +184,7 @@ async fn infer_activation_query_terms(
     active_module_names: &[String],
     modules: &Modules,
     state: &AppState,
+    overrides: &PromptOverrides,
 ) -> Vec<String> {
     let fallback = build_activation_query_terms(input_text);
     if input_text.trim().is_empty() {
@@ -202,10 +206,17 @@ async fn infer_activation_query_terms(
         &module_lines,
         ROUTER_QUERY_TERMS_MAX,
     );
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
+    let router_instructions = overrides
+        .router
+        .clone()
+        .unwrap_or_else(|| state.router_instructions.clone());
     let instructions = format!(
         "{}\n\n{}",
-        modules.runtime.base_instructions,
-        "You are the router. Extract activation query terms for concept-graph lookup only."
+        base_instructions, router_instructions
     );
     let adapter = ResponseApiAdapter::new(build_router_config(instructions, &modules.runtime));
     let response = match adapter

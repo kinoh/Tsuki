@@ -81,6 +81,7 @@ pub(crate) async fn run_debug_module(
         &module_instructions,
         &state.modules,
         state,
+        &overrides,
         |module_name, activation_snapshot, instructions, focus| {
             let module_name = module_name.to_string();
             let activation_snapshot = activation_snapshot.clone();

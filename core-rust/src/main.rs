@@ -53,6 +53,7 @@ pub(crate) struct AppState {
     pub(crate) input: InputConfig,
     pub(crate) prompts: Arc<RwLock<PromptOverrides>>,
     pub(crate) prompts_path: PathBuf,
+    pub(crate) router_instructions: String,
     pub(crate) decision_instructions: String,
 }
 
@@ -111,6 +112,7 @@ struct PromptModulePayload {
 #[derive(Debug, Deserialize, Serialize)]
 struct PromptsPayload {
     base: String,
+    router: String,
     decision: String,
     submodules: Vec<PromptModulePayload>,
 }
@@ -259,6 +261,7 @@ async fn main() {
         input: config.input.clone(),
         prompts,
         prompts_path,
+        router_instructions: config.llm.router_instructions.clone(),
         decision_instructions: config.llm.decision_instructions.clone(),
     };
 
@@ -492,6 +495,7 @@ async fn debug_update_prompts(
     }
     let overrides = PromptOverrides {
         base: Some(payload.base.clone()),
+        router: Some(payload.router.clone()),
         decision: Some(payload.decision.clone()),
         submodules,
     };
@@ -936,6 +940,10 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
         .decision
         .clone()
         .unwrap_or_else(|| state.decision_instructions.clone());
+    let router = overrides
+        .router
+        .clone()
+        .unwrap_or_else(|| state.router_instructions.clone());
     let module_defs = state
         .modules
         .registry
@@ -956,6 +964,7 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
     }
     Ok(PromptsPayload {
         base,
+        router,
         decision,
         submodules,
     })

@@ -12,6 +12,7 @@ use crate::{
 #[derive(Debug, Clone)]
 enum PromptTarget {
     Base,
+    Router,
     Decision,
     Submodule(String),
 }
@@ -21,6 +22,9 @@ impl PromptTarget {
         let value = raw.trim();
         if value.eq_ignore_ascii_case("base") {
             return Some(Self::Base);
+        }
+        if value.eq_ignore_ascii_case("router") {
+            return Some(Self::Router);
         }
         if value.eq_ignore_ascii_case("decision") {
             return Some(Self::Decision);
@@ -260,6 +264,9 @@ async fn apply_projection(state: &AppState, proposal_event: &Event) -> Result<()
         PromptTarget::Base => {
             overrides.base = Some(next_target_prompt);
         }
+        PromptTarget::Router => {
+            overrides.router = Some(next_target_prompt);
+        }
         PromptTarget::Decision => {
             overrides.decision = Some(next_target_prompt);
         }
@@ -299,6 +306,10 @@ async fn resolve_target_prompt_text(
             .base
             .clone()
             .unwrap_or_else(|| state.modules.runtime.base_instructions.clone())),
+        PromptTarget::Router => Ok(overrides
+            .router
+            .clone()
+            .unwrap_or_else(|| state.router_instructions.clone())),
         PromptTarget::Decision => Ok(overrides
             .decision
             .clone()

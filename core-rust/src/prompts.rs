@@ -5,6 +5,7 @@ use std::path::Path;
 #[derive(Clone, Default)]
 pub struct PromptOverrides {
     pub base: Option<String>,
+    pub router: Option<String>,
     pub decision: Option<String>,
     pub submodules: HashMap<String, String>,
 }
@@ -28,6 +29,10 @@ pub fn write_prompts(path: &Path, prompts: &PromptOverrides) -> Result<(), Strin
     output.push_str("# Base\n\n");
     output.push_str("```text\n");
     output.push_str(prompts.base.as_deref().unwrap_or(""));
+    output.push_str("\n```\n\n");
+    output.push_str("# Router\n\n");
+    output.push_str("```text\n");
+    output.push_str(prompts.router.as_deref().unwrap_or(""));
     output.push_str("\n```\n\n");
     output.push_str("# Decision\n\n");
     output.push_str("```text\n");
@@ -53,6 +58,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
     enum Section {
         None,
         Base,
+        Router,
         Decision,
         Submodule(String),
     }
@@ -70,6 +76,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
                 in_submodules = false;
                 section = match trimmed {
                     "# Base" => Section::Base,
+                    "# Router" => Section::Router,
                     "# Decision" => Section::Decision,
                     "# Submodules" => {
                         in_submodules = true;
@@ -95,6 +102,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
             let text = buffer.join("\n");
             match &section {
                 Section::Base => overrides.base = Some(text),
+                Section::Router => overrides.router = Some(text),
                 Section::Decision => overrides.decision = Some(text),
                 Section::Submodule(name) => {
                     overrides.submodules.insert(name.clone(), text);
