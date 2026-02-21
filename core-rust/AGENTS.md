@@ -8,6 +8,8 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - Keep behavior observable through persisted events.
 - Prefer explicit contracts over implicit behavior.
 - `core-rust` is under development and has not been deployed; it requires absolutely no backward compatibility.
+- Backward-compatibility layers are prohibited by default in `core-rust`.
+- Avoid dual paths (`old/new`), compatibility flags, and migration-only fallbacks unless explicitly required by a new written decision.
 
 ## Terms
 
@@ -127,6 +129,9 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - When changing stable rules in this file, add a dated decision note under `docs/`.
 - If a rule is not stable yet, place it under `WIP` instead of presenting it as fixed policy.
 - If documents conflict, prefer the newest explicit clarification doc and record the reconciliation.
+- For `core-rust` design/implementation docs, include a short `Compatibility Impact` statement:
+  - default expectation: `breaking-by-default (no compatibility layer)`.
+  - if compatibility is introduced, the document must justify why replacement/removal was not acceptable.
 
 ## Key references
 - `docs/20260131_thinking-core-rust-design.md`

@@ -81,3 +81,6 @@ Use the following rules to keep documents complete and reviewable.
 - Ensure every normative claim can be traced to either:
   - an implemented code path, or
   - a clearly marked planned change.
+- For `core-rust`, treat compatibility as breaking-by-default:
+  - do not add compatibility layers, dual paths, migration flags, or fallback behavior unless explicitly justified.
+  - add a short `Compatibility Impact` line in design docs to make this decision visible during review.
