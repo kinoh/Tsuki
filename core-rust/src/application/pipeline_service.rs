@@ -6,6 +6,7 @@ use crate::application::router_service::run_router;
 use crate::{AppState, DebugRunRequest, DebugRunResponse};
 
 use axum::http::StatusCode;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) async fn run_debug_module(
     state: &AppState,
@@ -16,14 +17,45 @@ pub(crate) async fn run_debug_module(
 }
 
 pub(crate) async fn handle_input(raw: String, state: &AppState) {
+    let trace_id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let pipeline_started = Instant::now();
+    println!(
+        "PERF pipeline trace={} stage=start raw_len={}",
+        trace_id,
+        raw.len()
+    );
+
+    let parse_started = Instant::now();
     let Ok(input_text) = debug_service::parse_and_append_input(&raw, state).await else {
+        println!(
+            "PERF pipeline trace={} stage=parse_input ok=false ms={}",
+            trace_id,
+            parse_started.elapsed().as_millis()
+        );
         return;
     };
+    println!(
+        "PERF pipeline trace={} stage=parse_input ok=true ms={} input_len={}",
+        trace_id,
+        parse_started.elapsed().as_millis(),
+        input_text.len()
+    );
 
+    let prep_started = Instant::now();
     let overrides = current_prompt_overrides(state).await;
     let module_instructions = load_active_module_instructions(state, &overrides).await;
+    println!(
+        "PERF pipeline trace={} stage=prepare ms={} active_modules={}",
+        trace_id,
+        prep_started.elapsed().as_millis(),
+        module_instructions.len()
+    );
     let input_text_for_router = input_text.clone();
 
+    let router_started = Instant::now();
     let router_output = run_router(
         &input_text,
         &module_instructions,
@@ -50,7 +82,16 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
         },
     )
     .await;
+    println!(
+        "PERF pipeline trace={} stage=router ms={} hard_triggers={} hard_results={} soft_recommendations={}",
+        trace_id,
+        router_started.elapsed().as_millis(),
+        router_output.hard_triggers.len(),
+        router_output.hard_trigger_results.len(),
+        router_output.soft_recommendations.len()
+    );
 
+    let decision_started = Instant::now();
     let _decision_output = run_decision(
         &input_text,
         &router_output,
@@ -60,4 +101,14 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
         &overrides,
     )
     .await;
+    println!(
+        "PERF pipeline trace={} stage=decision ms={}",
+        trace_id,
+        decision_started.elapsed().as_millis(),
+    );
+    println!(
+        "PERF pipeline trace={} stage=end total_ms={}",
+        trace_id,
+        pipeline_started.elapsed().as_millis(),
+    );
 }

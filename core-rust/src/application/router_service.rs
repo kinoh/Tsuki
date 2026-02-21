@@ -4,6 +4,7 @@ use serde_json::json;
 use std::{
     collections::HashMap,
     future::Future,
+    time::Instant,
 };
 
 use crate::event::build_event;
@@ -46,6 +47,7 @@ where
     F: Fn(&str, &ActivationSnapshot, &str, Option<&str>) -> Fut + Send + Sync,
     Fut: Future<Output = Result<String, ToolError>> + Send,
 {
+    let router_started = Instant::now();
     let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
     let concept_limit = state.router.query_terms_max.max(1);
     let active_concepts_from_concept_graph = resolve_active_concepts_from_concept_graph(
@@ -97,6 +99,15 @@ where
         vec!["router".to_string()],
     );
     record_event(state, router_event).await;
+    println!(
+        "PERF router stage=end total_ms={} active_modules={} hard_triggers={} hard_results={} soft_recommendations={} concepts_len={}",
+        router_started.elapsed().as_millis(),
+        active_module_names.len(),
+        router_output.hard_triggers.len(),
+        router_output.hard_trigger_results.len(),
+        router_output.soft_recommendations.len(),
+        router_output.active_concepts_from_concept_graph.len()
+    );
     router_output
 }
 
@@ -122,6 +133,7 @@ where
     if activation_snapshot.hard_triggers.is_empty() {
         return Vec::new();
     }
+    let started = Instant::now();
     let runs = activation_snapshot
         .hard_triggers
         .iter()
@@ -131,6 +143,7 @@ where
                 .map(|instructions| (module_name.clone(), instructions.clone()))
         })
         .map(|(module_name, instructions)| async move {
+            let module_started = Instant::now();
             let result = execute_submodule(
                 &module_name,
                 activation_snapshot,
@@ -138,10 +151,16 @@ where
                 Some("hard_trigger"),
             )
             .await;
+            println!(
+                "PERF router.hard_trigger module={} ms={} ok={}",
+                module_name,
+                module_started.elapsed().as_millis(),
+                result.is_ok()
+            );
             (module_name, result)
         })
         .collect::<Vec<_>>();
-    join_all(runs)
+    let outputs = join_all(runs)
         .await
         .into_iter()
         .map(|(module, result)| match result {
@@ -151,7 +170,13 @@ where
                 text: format!("error: {}", err),
             },
         })
-        .collect()
+        .collect::<Vec<_>>();
+    println!(
+        "PERF router.hard_trigger stage=end total_ms={} count={}",
+        started.elapsed().as_millis(),
+        outputs.len()
+    );
+    outputs
 }
 
 fn render_router_context_template(
@@ -160,6 +185,7 @@ fn render_router_context_template(
     active_submodules: &str,
     router_query_terms_max: usize,
 ) -> String {
+    let started = Instant::now();
     template
         .replace("{{latest_user_input}}", latest_user_input)
         .replace("{{active_submodules}}", active_submodules)
@@ -316,15 +342,29 @@ async fn resolve_active_concepts_from_concept_graph(
         base_instructions, router_instructions
     );
     let adapter = ResponseApiAdapter::new(build_router_config(instructions, &modules.runtime));
+    let llm_started = Instant::now();
     let response = match adapter
         .respond(LlmRequest {
             input: context.clone(),
         })
         .await
     {
-        Ok(response) => response,
+        Ok(response) => {
+            println!(
+                "PERF router.llm stage=respond ms={} ok=true output_len={} tool_calls={}",
+                llm_started.elapsed().as_millis(),
+                response.text.len(),
+                response.tool_calls.len()
+            );
+            response
+        }
         Err(err) => {
             let detail = err.to_string();
+            println!(
+                "PERF router.llm stage=respond ms={} ok=false error={}",
+                llm_started.elapsed().as_millis(),
+                detail
+            );
             emit_router_debug_error(state, &context, &detail).await;
             return "none".to_string();
         }
@@ -339,8 +379,17 @@ async fn resolve_active_concepts_from_concept_graph(
     .await;
     let trimmed = response.text.trim();
     if trimmed.is_empty() {
+        println!(
+            "PERF router stage=resolve_concepts total_ms={} output=none_empty",
+            started.elapsed().as_millis()
+        );
         "none".to_string()
     } else {
+        println!(
+            "PERF router stage=resolve_concepts total_ms={} output_len={}",
+            started.elapsed().as_millis(),
+            trimmed.len()
+        );
         trimmed.to_string()
     }
 }

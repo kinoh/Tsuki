@@ -3,6 +3,7 @@ use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc};
+use std::time::Instant;
 use tokio::runtime::Handle;
 
 use crate::application::history_service::{format_decision_debug_history, format_event_history};
@@ -60,7 +61,20 @@ pub(crate) async fn run_decision(
     module_instructions: &HashMap<String, String>,
     overrides: &PromptOverrides,
 ) -> String {
+    let decision_started = Instant::now();
+    println!(
+        "PERF decision stage=start input_len={} hard_trigger_results={} soft_recommendations={}",
+        input_text.len(),
+        router_output.hard_trigger_results.len(),
+        router_output.soft_recommendations.len()
+    );
+    let history_started = Instant::now();
     let history = format_event_history(state, state.limits.decision_history, None, None).await;
+    println!(
+        "PERF decision stage=history ms={} history_len={}",
+        history_started.elapsed().as_millis(),
+        history.len()
+    );
     let base_instructions = overrides
         .base
         .clone()
@@ -100,15 +114,29 @@ pub(crate) async fn run_decision(
         },
     );
 
+    let llm_started = Instant::now();
     let response = match adapter
         .respond(LlmRequest {
             input: context.clone(),
         })
         .await
     {
-        Ok(response) => response,
+        Ok(response) => {
+            println!(
+                "PERF decision stage=respond ms={} ok=true output_len={} tool_calls={}",
+                llm_started.elapsed().as_millis(),
+                response.text.len(),
+                response.tool_calls.len()
+            );
+            response
+        }
         Err(err) => {
             let error_detail = err.to_string();
+            println!(
+                "PERF decision stage=respond ms={} ok=false error={}",
+                llm_started.elapsed().as_millis(),
+                error_detail
+            );
             let error_text = format!("error: {}", error_detail);
             let error_event = build_event(
                 "decision",
@@ -119,6 +147,10 @@ pub(crate) async fn run_decision(
             record_event(state, error_event).await;
             emit_debug_module_error_event(state, "decision", "runtime", &context, &error_detail)
                 .await;
+            println!(
+                "PERF decision stage=end total_ms={} decision=error",
+                decision_started.elapsed().as_millis()
+            );
             return format!("error: {}", error_detail);
         }
     };
@@ -133,6 +165,11 @@ pub(crate) async fn run_decision(
     );
     record_event(state, decision_event).await;
     emit_debug_module_events(state, "decision", "runtime", &context, &response).await;
+    println!(
+        "PERF decision stage=end total_ms={} decision={}",
+        decision_started.elapsed().as_millis(),
+        parsed.decision
+    );
 
     response.text
 }
