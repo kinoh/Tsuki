@@ -18,8 +18,8 @@
 - No taxonomy split between "activated concepts" and "recalled facts".
 - No distinction between concept and episode at runtime selection level.
 - Router output should expose a single node list:
-  - `router_context_nodes: Vec<String>`
-- `router_context_nodes` is produced from `recall_query` results only.
+  - `active_concepts_from_concept_graph: Vec<String>`
+- `active_concepts_from_concept_graph` is the current recalled state produced from `recall_query` results.
 - `concept_search` results are intermediate router-internal data and must not be emitted as router module output.
 
 ## Scope Constraints
@@ -32,5 +32,5 @@
 - Enable tool usage in router runtime path.
 - Provide router tool handlers for `concept_search` and `recall_query`.
 - Keep `concept_search` as intermediate lookup for recall seeding only.
-- Keep router output centered on unified `router_context_nodes` from recall.
-- Pass `router_context_nodes` to downstream modules as the shared recalled context.
+- Keep router output centered on unified `active_concepts_from_concept_graph` from recall.
+- Pass `active_concepts_from_concept_graph` to downstream modules as the shared recalled context.
