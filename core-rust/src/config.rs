@@ -22,6 +22,8 @@ pub struct ServerConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct LlmConfig {
     pub model: String,
+    #[serde(default)]
+    pub router_model: Option<String>,
     pub temperature: f32,
     pub temperature_enabled: bool,
     pub max_output_tokens: u32,

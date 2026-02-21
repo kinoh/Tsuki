@@ -3,6 +3,7 @@ port = 2953
 
 [llm]
 model = "gpt-5-nano"
+router_model = "gpt-4.1-nano"
 temperature = 0.7
 temperature_enabled = false
 max_output_tokens = 10000

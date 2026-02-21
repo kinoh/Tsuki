@@ -228,9 +228,13 @@ fn select_modules_by_threshold(scores: &[(String, f32)], threshold: f32) -> Vec<
 }
 
 
-fn build_router_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiConfig {
+fn build_router_config(
+    instructions: String,
+    runtime: &ModuleRuntime,
+    router_model: &str,
+) -> ResponseApiConfig {
     ResponseApiConfig {
-        model: runtime.model.clone(),
+        model: router_model.to_string(),
         instructions,
         temperature: runtime.temperature,
         max_output_tokens: runtime.max_output_tokens,
@@ -341,7 +345,11 @@ async fn resolve_active_concepts_from_concept_graph(
         "{}\n\n{}\n\nYou are the router preconscious module. You must call concept_search first, then use its results only to make recall_query calls. Do not output concept_search intermediate results.",
         base_instructions, router_instructions
     );
-    let adapter = ResponseApiAdapter::new(build_router_config(instructions, &modules.runtime));
+    let adapter = ResponseApiAdapter::new(build_router_config(
+        instructions,
+        &modules.runtime,
+        state.router_model.as_str(),
+    ));
     let llm_started = Instant::now();
     let response = match adapter
         .respond(LlmRequest {
