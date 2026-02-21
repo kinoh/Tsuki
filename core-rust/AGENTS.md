@@ -129,6 +129,8 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - When changing stable rules in this file, add a dated decision note under `docs/`.
 - If a rule is not stable yet, place it under `WIP` instead of presenting it as fixed policy.
 - If documents conflict, prefer the newest explicit clarification doc and record the reconciliation.
+- If implementation strictly follows an existing design decision without adding interpretation or policy change, do not add a new decision doc.
+- Add/update docs only when introducing, changing, or clarifying decisions (including conflict resolution).
 - For `core-rust` design/implementation docs, include a short `Compatibility Impact` statement:
   - default expectation: `breaking-by-default (no compatibility layer)`.
   - if compatibility is introduced, the document must justify why replacement/removal was not acceptable.
