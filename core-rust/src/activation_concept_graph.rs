@@ -102,6 +102,7 @@ struct RelationEdge {
 struct EpisodeEntry {
     summary: String,
     valence: f64,
+    weight: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -504,16 +505,18 @@ impl ActivationConceptGraphStore {
 
     async fn fetch_episodes(&self, concept: &str) -> Result<Vec<EpisodeEntry>, String> {
         let q = query(
-            "MATCH (c:Concept {name: $name})-[:EVOKES]->(e:Episode)
-             RETURN e.summary AS summary, e.valence AS valence",
+            "MATCH (c:Concept {name: $name})-[r:EVOKES]->(e:Episode)
+             RETURN e.summary AS summary, e.valence AS valence, coalesce(r.weight, $default_weight) AS weight",
         )
-        .param("name", concept);
+        .param("name", concept)
+        .param("default_weight", DEFAULT_RELATION_WEIGHT);
         let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
         let mut episodes = Vec::new();
         while let Ok(Some(row)) = result.next().await {
             episodes.push(EpisodeEntry {
                 summary: row.get("summary").unwrap_or_default(),
                 valence: row.get("valence").unwrap_or(DEFAULT_VALENCE),
+                weight: row.get("weight").unwrap_or(DEFAULT_RELATION_WEIGHT),
             });
         }
         Ok(episodes)
@@ -923,8 +926,8 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
                     let hop_decay = Self::hop_decay(next_hop);
                     let arousal =
                         self.arousal(concept_state.arousal_level, concept_state.accessed_at, now);
-                    let score = arousal * hop_decay;
                     for episode in episodes {
+                        let score = arousal * hop_decay * episode.weight;
                         let text = format!("{} evokes {}", concept, episode.summary);
                         let proposition = Proposition {
                             text: text.clone(),
@@ -1129,6 +1132,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
                 json!({
                     "summary": episode.summary,
                     "valence": episode.valence,
+                    "weight": episode.weight,
                 })
             })
             .collect::<Vec<_>>();
