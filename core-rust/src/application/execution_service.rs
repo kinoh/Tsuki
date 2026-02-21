@@ -85,9 +85,8 @@ pub(crate) async fn run_decision(
         Arc::new(handler),
     ));
     let concept_top_n = state.router.concept_top_n.max(1);
-    let activation_concepts = format_activation_concepts(
-        &activation_snapshot.active_concepts_from_concept_graph,
-    );
+    let activation_concepts =
+        format_activation_context(&activation_snapshot.active_concepts_from_concept_graph);
     let executed_submodule_outputs =
         format_hard_trigger_results(&router_output.hard_trigger_results);
     let submodule_candidates =
@@ -194,9 +193,8 @@ pub(crate) async fn run_decision_debug(
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         let concept_top_n = state.router.concept_top_n.max(1);
-        let activation_concepts = format_activation_concepts(
-            &activation_snapshot.active_concepts_from_concept_graph,
-        );
+        let activation_concepts =
+            format_activation_context(&activation_snapshot.active_concepts_from_concept_graph);
         let executed_submodule_outputs =
             format_hard_trigger_results(&router_output.hard_trigger_results);
         let submodule_candidates =
@@ -378,7 +376,7 @@ pub(crate) async fn run_submodule_tool(
     let context = render_submodule_context_template(
         &state.input.submodule_context_template,
         input_text,
-        &format_activation_concepts(&activation_snapshot.active_concepts_from_concept_graph),
+        &format_activation_context(&activation_snapshot.active_concepts_from_concept_graph),
         &format_soft_recommendations(&activation_snapshot.soft_recommendations),
         &history,
         execution_reason.unwrap_or("none"),
@@ -528,15 +526,12 @@ fn decision_tools(
     tools
 }
 
-fn format_activation_concepts(concepts: &[String]) -> String {
-    if concepts.is_empty() {
+fn format_activation_context(raw: &str) -> String {
+    let value = raw.trim();
+    if value.is_empty() {
         return "none".to_string();
     }
-    concepts
-        .iter()
-        .map(|value| format!("- {}", value))
-        .collect::<Vec<_>>()
-        .join("\n")
+    value.to_string()
 }
 
 fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {

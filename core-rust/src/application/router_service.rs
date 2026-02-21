@@ -23,7 +23,7 @@ pub(crate) struct HardTriggerResult {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RouterOutput {
     pub(crate) activation_query_terms: Vec<String>,
-    pub(crate) active_concepts_from_concept_graph: Vec<String>,
+    pub(crate) active_concepts_from_concept_graph: String,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
     pub(crate) hard_trigger_results: Vec<HardTriggerResult>,
@@ -31,7 +31,7 @@ pub(crate) struct RouterOutput {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ActivationSnapshot {
-    pub(crate) active_concepts_from_concept_graph: Vec<String>,
+    pub(crate) active_concepts_from_concept_graph: String,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
 }
@@ -70,12 +70,8 @@ where
     )
     .await;
 
-    let scores = compute_module_scores_minimal(
-        input_text,
-        &activation_query_terms,
-        &active_concepts_from_concept_graph,
-        &active_module_names,
-    );
+    let scores =
+        compute_module_scores_minimal(input_text, &activation_query_terms, &active_module_names);
     let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
     let soft_recommendations =
         select_modules_by_threshold(&scores, state.router.recommendation_threshold);
@@ -258,7 +254,6 @@ fn render_router_context_template(
 fn compute_module_scores_minimal(
     input_text: &str,
     activation_query_terms: &[String],
-    activation_concepts: &[String],
     active_module_names: &[String],
 ) -> Vec<(String, f32)> {
     let lower = input_text.to_lowercase();
@@ -266,19 +261,12 @@ fn compute_module_scores_minimal(
         .iter()
         .map(|value| value.to_lowercase())
         .collect::<HashSet<_>>();
-    let concept_terms = activation_concepts
-        .iter()
-        .map(|value| value.to_lowercase())
-        .collect::<Vec<_>>();
     let mut scored = Vec::<(String, f32)>::new();
     for name in active_module_names {
         let name_lc = name.to_lowercase();
         let matched_input = lower.contains(name_lc.as_str());
         let matched_query = query_terms.contains(name_lc.as_str());
-        let matched_concept = concept_terms
-            .iter()
-            .any(|concept| concept == &name_lc || concept.contains(name_lc.as_str()));
-        let score = if matched_input || matched_query || matched_concept {
+        let score = if matched_input || matched_query {
             1.0
         } else {
             0.0
@@ -413,7 +401,7 @@ async fn emit_concept_graph_query_event(
     state: &AppState,
     query_terms: &[String],
     limit: usize,
-    active_concepts_from_concept_graph: &[String],
+    active_concepts_from_concept_graph: &str,
 ) {
     let event = build_event(
         "router",
@@ -435,14 +423,14 @@ async fn resolve_active_concepts_from_concept_graph(
     modules: &Modules,
     state: &AppState,
     overrides: &PromptOverrides,
-) -> Vec<String> {
+) -> String {
     let query_terms_text = if activation_query_terms.is_empty() {
         "none".to_string()
     } else {
         activation_query_terms.join(", ")
     };
     let context = format!(
-        "latest_user_input:\n{}\n\nactivation_query_terms:\n{}\n\nconcept_limit:\n{}\n\nUse concept_search only as intermediate lookup for ambiguity absorption. Use recall_query to produce the final active concepts state. Return only compact JSON: {{\"active_concepts_from_concept_graph\":[\"...\"]}}",
+        "latest_user_input:\n{}\n\nactivation_query_terms:\n{}\n\nconcept_limit:\n{}\n\nUse concept_search only as intermediate lookup for ambiguity absorption. Use recall_query to produce the final active concepts state.\nReturn only compact JSON: {{\"active_concepts_from_concept_graph\":{{\"propositions\":[{{\"text\":\"...\",\"score\":0.0,\"valence\":0.0}}]}}}}",
         input_text, query_terms_text, concept_limit
     );
     let base_instructions = overrides
@@ -468,55 +456,16 @@ async fn resolve_active_concepts_from_concept_graph(
         Err(err) => {
             let detail = err.to_string();
             emit_router_debug_error(state, &context, &detail).await;
-            return Vec::new();
+            return "none".to_string();
         }
     };
     emit_router_debug_raw(state, &context, &response.raw, &response.text).await;
-    parse_active_concepts_from_router_output(&response.text)
-}
-
-fn parse_active_concepts_from_router_output(text: &str) -> Vec<String> {
-    let parsed_json = serde_json::from_str::<serde_json::Value>(text).ok();
-    let mut values = Vec::new();
-    if let Some(json) = parsed_json {
-        if let Some(items) = json
-            .get("active_concepts_from_concept_graph")
-            .and_then(|value| value.as_array())
-        {
-            for item in items {
-                if let Some(value) = item.as_str() {
-                    values.push(value.to_string());
-                }
-            }
-        } else if let Some(items) = json.as_array() {
-            for item in items {
-                if let Some(value) = item.as_str() {
-                    values.push(value.to_string());
-                }
-            }
-        }
+    let trimmed = response.text.trim();
+    if trimmed.is_empty() {
+        "none".to_string()
+    } else {
+        trimmed.to_string()
     }
-    if values.is_empty() {
-        values = text
-            .split([',', '\n', ';'])
-            .map(str::trim)
-            .map(|value| value.trim_matches(|c| c == '"' || c == '\'' || c == '-' || c == '*'))
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_string())
-            .collect::<Vec<_>>();
-    }
-    let mut normalized = Vec::new();
-    let mut seen = HashSet::<String>::new();
-    for value in values {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if seen.insert(trimmed.to_string()) {
-            normalized.push(trimmed.to_string());
-        }
-    }
-    normalized
 }
 
 #[cfg(test)]
