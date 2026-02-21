@@ -99,6 +99,7 @@ struct RunResult {
     event_count: usize,
     message_log: Vec<TranscriptTurn>,
     log_file: Option<String>,
+    ws_trace_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,6 +137,30 @@ struct JudgeOutput {
     summary: Option<String>,
     #[serde(default)]
     pass: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WsTraceEntry {
+    ts: String,
+    turn_index: usize,
+    phase: String,
+    event_id: Option<String>,
+    source: Option<String>,
+    tags: Option<Vec<String>>,
+    text_preview: Option<String>,
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct DialogueRun {
+    transcript: Vec<TranscriptTurn>,
+    ws_trace: Vec<WsTraceEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct DialogueError {
+    message: String,
+    ws_trace: Vec<WsTraceEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -621,6 +646,7 @@ async fn execute_runs(
     for run_index in 1..=run_count {
         let before_count = read_event_count(&runtime.db_path).await?;
         let mut transcript: Vec<TranscriptTurn> = Vec::new();
+        let mut ws_trace: Vec<WsTraceEntry> = Vec::new();
         let mut convo_error: Option<(String, String)> = None;
         let max_attempts = assets.execution.transient_retry.saturating_add(1);
 
@@ -633,14 +659,25 @@ async fn execute_runs(
 
             match convo {
                 Ok(Ok(value)) => {
-                    transcript = value;
+                    transcript = value.transcript;
+                    ws_trace = value.ws_trace;
                     convo_error = None;
                     break;
                 }
                 Ok(Err(err)) => {
-                    convo_error = Some(("EXEC_WS_ERROR".to_string(), err));
+                    ws_trace = err.ws_trace;
+                    convo_error = Some(("EXEC_WS_ERROR".to_string(), err.message));
                 }
                 Err(_) => {
+                    ws_trace.push(new_ws_trace_entry(
+                        0,
+                        "timeout",
+                        None,
+                        Some(format!(
+                            "scenario execution timed out after {}ms on attempt {}/{}",
+                            assets.execution.scenario_timeout_ms, attempt, max_attempts
+                        )),
+                    ));
                     convo_error = Some((
                         "EXEC_TIMEOUT".to_string(),
                         "scenario execution timed out".to_string(),
@@ -660,9 +697,16 @@ async fn execute_runs(
             &raw_events,
             assets.scenario.include_debug_events,
         )?;
+        let ws_trace_file = write_ws_trace_log(assets.scenario.name.as_str(), run_index, &ws_trace)?;
         let log_file = log_file
             .strip_prefix(env!("CARGO_MANIFEST_DIR"))
             .unwrap_or(log_file.as_path())
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .to_string();
+        let ws_trace_file = ws_trace_file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(ws_trace_file.as_path())
             .to_string_lossy()
             .trim_start_matches('/')
             .to_string();
@@ -680,6 +724,7 @@ async fn execute_runs(
                 event_count: filtered_events.len(),
                 message_log: transcript.clone(),
                 log_file: Some(log_file),
+                ws_trace_file: Some(ws_trace_file),
             });
             continue;
         }
@@ -700,6 +745,7 @@ async fn execute_runs(
                         event_count: filtered_events.len(),
                         message_log: transcript.clone(),
                         log_file: Some(log_file.clone()),
+                        ws_trace_file: Some(ws_trace_file.clone()),
                     });
                     continue;
                 }
@@ -715,6 +761,7 @@ async fn execute_runs(
                     event_count: filtered_events.len(),
                     message_log: transcript.clone(),
                     log_file: Some(log_file.clone()),
+                    ws_trace_file: Some(ws_trace_file.clone()),
                 });
             }
             Err(err) => {
@@ -729,6 +776,7 @@ async fn execute_runs(
                     event_count: filtered_events.len(),
                     message_log: transcript.clone(),
                     log_file: Some(log_file.clone()),
+                    ws_trace_file: Some(ws_trace_file.clone()),
                 });
             }
         }
@@ -827,29 +875,50 @@ fn validate_metrics(scenario: &Scenario, metrics: &HashMap<String, f64>) -> Resu
 async fn run_tester_dialogue(
     assets: &TestAssets,
     runtime: &RuntimeContext,
-) -> Result<Vec<TranscriptTurn>, String> {
+) -> Result<DialogueRun, DialogueError> {
     let (mut ws_stream, _) = connect_async(runtime.ws_url.as_str())
         .await
-        .map_err(|err| format!("websocket connect failed: {}", err))?;
+        .map_err(|err| DialogueError {
+            message: format!("websocket connect failed: {}", err),
+            ws_trace: Vec::new(),
+        })?;
 
     let auth = format!("{}:{}", DEFAULT_USER_NAME, runtime.auth_token);
     ws_stream
         .send(Message::Text(auth.into()))
         .await
-        .map_err(|err| format!("auth send failed: {}", err))?;
+        .map_err(|err| DialogueError {
+            message: format!("auth send failed: {}", err),
+            ws_trace: Vec::new(),
+        })?;
 
     let mut transcript: Vec<TranscriptTurn> = Vec::new();
     let mut processed_reply_event_ids: HashSet<String> = HashSet::new();
+    let mut ws_trace: Vec<WsTraceEntry> = Vec::new();
 
-    for _ in 0..assets.execution.max_turns {
-        let utterance = generate_tester_utterance(assets, &transcript).await?;
+    for turn_index in 1..=assets.execution.max_turns {
+        let utterance = generate_tester_utterance(assets, &transcript)
+            .await
+            .map_err(|message| DialogueError {
+                message,
+                ws_trace: ws_trace.clone(),
+            })?;
         if utterance == "__TEST_DONE__" {
             break;
         }
         if utterance.trim().is_empty() {
-            return Err("tester returned empty utterance".to_string());
+            return Err(DialogueError {
+                message: "tester returned empty utterance".to_string(),
+                ws_trace,
+            });
         }
 
+        ws_trace.push(new_ws_trace_entry(
+            turn_index,
+            "send",
+            None,
+            Some(format!("tester_text={}", preview_text(&utterance, 240))),
+        ));
         let payload = json!({
             "type": "message",
             "text": utterance,
@@ -857,14 +926,23 @@ async fn run_tester_dialogue(
         ws_stream
             .send(Message::Text(payload.to_string().into()))
             .await
-            .map_err(|err| format!("message send failed: {}", err))?;
+            .map_err(|err| DialogueError {
+                message: format!("message send failed: {}", err),
+                ws_trace: ws_trace.clone(),
+            })?;
 
         let assistant = wait_for_reply_text(
             &mut ws_stream,
             assets.execution.turn_timeout_ms,
             &mut processed_reply_event_ids,
+            turn_index,
+            &mut ws_trace,
         )
-        .await?;
+        .await
+        .map_err(|message| DialogueError {
+            message,
+            ws_trace: ws_trace.clone(),
+        })?;
         transcript.push(TranscriptTurn {
             user: payload
                 .get("text")
@@ -878,10 +956,16 @@ async fn run_tester_dialogue(
     let _ = ws_stream.send(Message::Close(None)).await;
 
     if transcript.is_empty() {
-        return Err("tester produced no conversation turns".to_string());
+        return Err(DialogueError {
+            message: "tester produced no conversation turns".to_string(),
+            ws_trace,
+        });
     }
 
-    Ok(transcript)
+    Ok(DialogueRun {
+        transcript,
+        ws_trace,
+    })
 }
 
 async fn generate_tester_utterance(
@@ -920,12 +1004,20 @@ async fn wait_for_reply_text(
     >,
     timeout_ms: u64,
     processed_reply_event_ids: &mut HashSet<String>,
+    turn_index: usize,
+    ws_trace: &mut Vec<WsTraceEntry>,
 ) -> Result<String, String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
     loop {
         let now = Instant::now();
         if now >= deadline {
+            ws_trace.push(new_ws_trace_entry(
+                turn_index,
+                "timeout",
+                None,
+                Some(format!("timed out waiting for reply after {}ms", timeout_ms)),
+            ));
             return Err(format!(
                 "timed out waiting for reply after {}ms",
                 timeout_ms
@@ -933,30 +1025,156 @@ async fn wait_for_reply_text(
         }
 
         let remaining = deadline - now;
-        let message = timeout(remaining, ws_stream.next())
-            .await
-            .map_err(|_| format!("timed out waiting for reply after {}ms", timeout_ms))?;
+        let message = match timeout(remaining, ws_stream.next()).await {
+            Ok(value) => value,
+            Err(_) => {
+                ws_trace.push(new_ws_trace_entry(
+                    turn_index,
+                    "timeout",
+                    None,
+                    Some(format!("timed out waiting for reply after {}ms", timeout_ms)),
+                ));
+                return Err(format!("timed out waiting for reply after {}ms", timeout_ms));
+            }
+        };
 
         match message {
             Some(Ok(Message::Text(text))) => {
                 let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
+                let summary = extract_event_summary(&parsed);
+                let mut trace = new_ws_trace_entry(
+                    turn_index,
+                    "recv_text",
+                    summary.as_ref().and_then(|value| value.event_id.clone()),
+                    Some(format!(
+                        "source={}; tags={}; reply_candidate={}",
+                        summary
+                            .as_ref()
+                            .and_then(|value| value.source.clone())
+                            .unwrap_or_else(|| "n/a".to_string()),
+                        summary
+                            .as_ref()
+                            .map(|value| value.tags.join(","))
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or_else(|| "n/a".to_string()),
+                        summary
+                            .as_ref()
+                            .map(|value| value.is_reply)
+                            .unwrap_or(false)
+                    )),
+                );
+                trace.source = summary.as_ref().and_then(|value| value.source.clone());
+                trace.tags = summary.as_ref().map(|value| value.tags.clone());
+                trace.text_preview = Some(preview_text(&text, 240));
+                ws_trace.push(trace);
                 if is_reply_event(&parsed) {
                     let Some(event_id) = extract_event_id(&parsed) else {
+                        ws_trace.push(new_ws_trace_entry(
+                            turn_index,
+                            "reply_skip",
+                            None,
+                            Some("reply event without event_id".to_string()),
+                        ));
                         continue;
                     };
                     if processed_reply_event_ids.contains(&event_id) {
+                        ws_trace.push(new_ws_trace_entry(
+                            turn_index,
+                            "reply_skip_duplicate",
+                            Some(event_id.clone()),
+                            Some("already processed reply event id".to_string()),
+                        ));
                         continue;
                     }
                     processed_reply_event_ids.insert(event_id);
-                    return Ok(extract_reply_text(&parsed));
+                    let reply = extract_reply_text(&parsed);
+                    ws_trace.push(new_ws_trace_entry(
+                        turn_index,
+                        "reply_accept",
+                        extract_event_id(&parsed),
+                        Some(format!("assistant_text={}", preview_text(&reply, 240))),
+                    ));
+                    return Ok(reply);
                 }
             }
-            Some(Ok(Message::Close(_))) => return Err("websocket closed before reply".to_string()),
-            Some(Ok(_)) => {}
-            Some(Err(err)) => return Err(format!("websocket receive failed: {}", err)),
-            None => return Err("websocket stream ended before reply".to_string()),
+            Some(Ok(Message::Close(_))) => {
+                ws_trace.push(new_ws_trace_entry(
+                    turn_index,
+                    "ws_close",
+                    None,
+                    Some("websocket closed before reply".to_string()),
+                ));
+                return Err("websocket closed before reply".to_string());
+            }
+            Some(Ok(_)) => {
+                ws_trace.push(new_ws_trace_entry(
+                    turn_index,
+                    "recv_non_text",
+                    None,
+                    Some("received non-text websocket message".to_string()),
+                ));
+            }
+            Some(Err(err)) => {
+                ws_trace.push(new_ws_trace_entry(
+                    turn_index,
+                    "ws_error",
+                    None,
+                    Some(format!("websocket receive failed: {}", err)),
+                ));
+                return Err(format!("websocket receive failed: {}", err));
+            }
+            None => {
+                ws_trace.push(new_ws_trace_entry(
+                    turn_index,
+                    "ws_end",
+                    None,
+                    Some("websocket stream ended before reply".to_string()),
+                ));
+                return Err("websocket stream ended before reply".to_string());
+            }
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct EventSummary {
+    event_id: Option<String>,
+    source: Option<String>,
+    tags: Vec<String>,
+    is_reply: bool,
+}
+
+fn extract_event_summary(message: &Value) -> Option<EventSummary> {
+    let obj = message.as_object()?;
+    if obj.get("type").and_then(Value::as_str) != Some("event") {
+        return None;
+    }
+    let event = obj.get("event").and_then(Value::as_object)?;
+    let tags = event
+        .get("meta")
+        .and_then(|value| value.get("tags"))
+        .and_then(Value::as_array)
+        .map(|array| {
+            array
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let is_reply = tags.iter().any(|tag| tag == "action") && tags.iter().any(|tag| tag == "response");
+    Some(EventSummary {
+        event_id: event
+            .get("event_id")
+            .and_then(Value::as_str)
+            .map(|value| value.to_string()),
+        source: event
+            .get("source")
+            .and_then(Value::as_str)
+            .map(|value| value.to_string()),
+        tags,
+        is_reply,
+    })
 }
 
 fn extract_event_id(message: &Value) -> Option<String> {
@@ -1199,6 +1417,40 @@ fn round3(value: f64) -> f64 {
     (value * factor).round() / factor
 }
 
+fn preview_text(text: &str, max_chars: usize) -> String {
+    let mut preview = String::new();
+    let mut count = 0usize;
+    for ch in text.chars() {
+        if count >= max_chars {
+            preview.push('…');
+            break;
+        }
+        preview.push(ch);
+        count += 1;
+    }
+    preview
+}
+
+fn new_ws_trace_entry(
+    turn_index: usize,
+    phase: &str,
+    event_id: Option<String>,
+    note: Option<String>,
+) -> WsTraceEntry {
+    WsTraceEntry {
+        ts: OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "".to_string()),
+        turn_index,
+        phase: phase.to_string(),
+        event_id,
+        source: None,
+        tags: None,
+        text_preview: None,
+        note,
+    }
+}
+
 fn write_event_log(
     scenario_name: &str,
     run_index: usize,
@@ -1230,6 +1482,38 @@ fn write_event_log(
     let text = serde_json::to_string_pretty(&body)
         .map_err(|err| format!("failed to serialize event log: {}", err))?;
     fs::write(&path, text).map_err(|err| format!("failed to write event log: {}", err))?;
+    Ok(path)
+}
+
+fn write_ws_trace_log(
+    scenario_name: &str,
+    run_index: usize,
+    ws_trace: &[WsTraceEntry],
+) -> Result<PathBuf, String> {
+    let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/integration/logs");
+    fs::create_dir_all(&base_dir).map_err(|err| format!("failed to create logs dir: {}", err))?;
+
+    let ts_format = format_description::parse("[year][month][day]-[hour][minute][second]")
+        .map_err(|err| format!("failed to parse time format: {}", err))?;
+    let stamp = OffsetDateTime::now_utc()
+        .format(&ts_format)
+        .unwrap_or_else(|_| "log".to_string());
+    let safe_name = scenario_name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>();
+    let file_name = format!("{}__{}__run-{}.ws.json", stamp, safe_name, run_index);
+    let path = base_dir.join(file_name);
+
+    let body = json!({
+        "scenario_name": scenario_name,
+        "run_index": run_index,
+        "entry_count": ws_trace.len(),
+        "entries": ws_trace,
+    });
+    let text = serde_json::to_string_pretty(&body)
+        .map_err(|err| format!("failed to serialize ws trace log: {}", err))?;
+    fs::write(&path, text).map_err(|err| format!("failed to write ws trace log: {}", err))?;
     Ok(path)
 }
 
