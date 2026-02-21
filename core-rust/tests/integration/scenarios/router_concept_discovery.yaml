@@ -25,13 +25,23 @@ metrics_definition:
       Low-score off-topic lines are acceptable.
       Consider it poor only when high-score lines are repeatedly off-topic.
 
-  concept_discovery_stability:
+  concept_score_separation:
     description: |
-      Judge whether high-score concept discovery remains stable across turns.
-      Focus on:
-      - limited drift in high-score lines
-      - key high-score concepts not disappearing unnaturally across adjacent turns
-      Mostly ignore low-score fluctuations.
+      Judge whether concept scores show meaningful separation.
+      Focus on whether higher-ranked lines are clearly distinguishable from lower-ranked lines.
+      Penalize runs where most lines collapse into nearly identical scores without clear prioritization.
+
+  concept_episode_coverage:
+    description: |
+      Judge whether retrieved concept graph context contains both:
+      - concept-level relations (e.g., is-a / part-of style lines)
+      - episode-style recalled lines (descriptive evokes lines)
+      Partial coverage is acceptable, but sustained one-sided retrieval should score lower.
+
+  concept_information_richness:
+    description: |
+      Judge whether top retrieved lines provide diverse and non-redundant information relevant to the active topic.
+      Favor runs with richer, varied propositions over repetitive paraphrases of the same fact.
 
   identity:
     description: |
