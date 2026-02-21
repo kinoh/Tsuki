@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
 pub struct LlmRequest {
@@ -112,22 +113,80 @@ impl ResponseApiAdapter {
 #[async_trait]
 impl LlmAdapter for ResponseApiAdapter {
     async fn respond(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        let respond_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let total_started = Instant::now();
+        println!(
+            "PERF llm respond_id={} stage=start model={} input_chars={} max_tool_rounds={} tools={}",
+            respond_id,
+            self.config.model,
+            request.input.len(),
+            self.config.max_tool_rounds,
+            self.config.tools.len()
+        );
         let mut tool_calls = Vec::<ToolCallTrace>::new();
-        let mut response = self
+        let mut llm_round_count = 0usize;
+        let initial_started = Instant::now();
+        let mut response = match self
             .create_response(InputParam::Text(request.input), None)
-            .await?;
+            .await
+        {
+            Ok(value) => {
+                llm_round_count += 1;
+                println!(
+                    "PERF llm respond_id={} stage=llm_call round={} ms={} ok=true",
+                    respond_id,
+                    llm_round_count,
+                    initial_started.elapsed().as_millis()
+                );
+                value
+            }
+            Err(err) => {
+                println!(
+                    "PERF llm respond_id={} stage=llm_call round={} ms={} ok=false error={}",
+                    respond_id,
+                    llm_round_count + 1,
+                    initial_started.elapsed().as_millis(),
+                    err
+                );
+                return Err(err);
+            }
+        };
 
         if let Some(handler) = &self.config.tool_handler {
-            for _ in 0..self.config.max_tool_rounds {
+            for round in 0..self.config.max_tool_rounds {
                 let calls = extract_function_calls(&response.output);
                 if calls.is_empty() {
+                    println!(
+                        "PERF llm respond_id={} stage=tool_round round={} calls=0 stop=true",
+                        respond_id,
+                        round + 1
+                    );
                     break;
                 }
+                println!(
+                    "PERF llm respond_id={} stage=tool_round round={} calls={}",
+                    respond_id,
+                    round + 1,
+                    calls.len()
+                );
 
-                let outputs_with_trace = calls
-                    .iter()
-                    .map(|call| build_tool_output_with_trace(call, handler.as_ref()))
-                    .collect::<Vec<_>>();
+                let mut outputs_with_trace = Vec::with_capacity(calls.len());
+                for call in &calls {
+                    let tool_started = Instant::now();
+                    let (output, trace) = build_tool_output_with_trace(call, handler.as_ref());
+                    println!(
+                        "PERF llm respond_id={} stage=tool_call round={} name={} ms={} error={}",
+                        respond_id,
+                        round + 1,
+                        trace.name,
+                        tool_started.elapsed().as_millis(),
+                        trace.error.is_some()
+                    );
+                    outputs_with_trace.push((output, trace));
+                }
                 tool_calls.extend(outputs_with_trace.iter().map(|(_, trace)| trace.clone()));
 
                 let items = outputs_with_trace
@@ -135,9 +194,32 @@ impl LlmAdapter for ResponseApiAdapter {
                     .map(|(output, _)| InputItem::Item(Item::FunctionCallOutput(output)))
                     .collect::<Vec<_>>();
 
-                response = self
+                let followup_started = Instant::now();
+                response = match self
                     .create_response(InputParam::Items(items), Some(response.id.clone()))
-                    .await?;
+                    .await
+                {
+                    Ok(value) => {
+                        llm_round_count += 1;
+                        println!(
+                            "PERF llm respond_id={} stage=llm_call round={} ms={} ok=true",
+                            respond_id,
+                            llm_round_count,
+                            followup_started.elapsed().as_millis()
+                        );
+                        value
+                    }
+                    Err(err) => {
+                        println!(
+                            "PERF llm respond_id={} stage=llm_call round={} ms={} ok=false error={}",
+                            respond_id,
+                            llm_round_count + 1,
+                            followup_started.elapsed().as_millis(),
+                            err
+                        );
+                        return Err(err);
+                    }
+                };
             }
         }
 
@@ -147,6 +229,14 @@ impl LlmAdapter for ResponseApiAdapter {
             .unwrap_or_else(|| "(empty response)".to_string());
         let raw = serde_json::to_value(&response)
             .unwrap_or_else(|_| json!({ "error": "failed to serialize response" }));
+        println!(
+            "PERF llm respond_id={} stage=end total_ms={} output_chars={} tool_calls={} llm_rounds={}",
+            respond_id,
+            total_started.elapsed().as_millis(),
+            text.len(),
+            tool_calls.len(),
+            llm_round_count
+        );
 
         Ok(LlmResponse {
             text,
