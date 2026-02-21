@@ -142,6 +142,13 @@ It captures stable implementation rules and clearly marks active WIP areas.
   - default expectation: `breaking-by-default (no compatibility layer)`.
   - if compatibility is introduced, the document must justify why replacement/removal was not acceptable.
 
+## Test-scope separation
+- Treat scenario-spec changes and test-harness changes as different scopes.
+- Scenario scope: files under `tests/integration/scenarios/*.yaml` only (metric definitions, tester instructions, scenario intent).
+- Harness scope: runner/judge/execution behavior under `examples/integration_harness.rs` and related runtime tooling.
+- Do not mix scenario and harness edits in one step without explicit confirmation.
+- When asked to improve a scenario, default to scenario-file-only edits unless the user explicitly asks to change test mechanism behavior.
+
 ## Key references
 - `docs/20260131_thinking-core-rust-design.md`
 - `docs/20260212_router-concept-activation-core-rust-implementation.md`
