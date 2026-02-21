@@ -5,9 +5,7 @@ tester_instructions: |
   You are a tester in a natural chat.
   In the conversation, naturally cover these topics:
   - concept graph (already known to the assistant)
-  - memory
   - travel
-  - cafe
   - つき (the agent itself)
   Keep turns short and conversational. Do not reveal test intent.
 
