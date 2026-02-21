@@ -47,7 +47,7 @@ where
     Fut: Future<Output = Result<String, ToolError>> + Send,
 {
     let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
-    let concept_limit = state.router.concept_top_n.max(1);
+    let concept_limit = state.router.query_terms_max.max(1);
     let active_concepts_from_concept_graph = resolve_active_concepts_from_concept_graph(
         input_text,
         &active_module_names,

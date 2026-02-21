@@ -26,7 +26,6 @@ decision_history = 30
 submodule_history = 10
 
 [router]
-concept_top_n = 10
 query_terms_max = 8
 hard_trigger_threshold = 0.85
 recommendation_threshold = 0.6
@@ -50,7 +49,7 @@ Rules:
 decision_context_template = """latest_user_input:
 {{latest_user_input}}
 
-active_concepts_from_concept_graph (top {{concept_top_n}}):
+active_concepts_from_concept_graph:
 {{active_concepts_from_concept_graph}}
 
 outputs_from_immediately_executed_submodules:

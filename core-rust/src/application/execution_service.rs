@@ -37,7 +37,6 @@ struct DecisionParsed {
 
 struct DecisionContextTemplateVars<'a> {
     latest_user_input: &'a str,
-    concept_top_n: usize,
     active_concepts_from_concept_graph: &'a str,
     outputs_from_immediately_executed_submodules: &'a str,
     candidate_submodules_by_interest_match: &'a str,
@@ -84,7 +83,6 @@ pub(crate) async fn run_decision(
         decision_tools(&modules.runtime.tools, module_instructions.keys().cloned()),
         Arc::new(handler),
     ));
-    let concept_top_n = state.router.concept_top_n.max(1);
     let activation_concepts =
         format_activation_context(&activation_snapshot.active_concepts_from_concept_graph);
     let executed_submodule_outputs =
@@ -95,7 +93,6 @@ pub(crate) async fn run_decision(
         &state.input.decision_context_template,
         DecisionContextTemplateVars {
             latest_user_input: input_text,
-            concept_top_n,
             active_concepts_from_concept_graph: &activation_concepts,
             outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
             candidate_submodules_by_interest_match: &submodule_candidates,
@@ -192,7 +189,6 @@ pub(crate) async fn run_decision_debug(
         Arc::new(handler),
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
-        let concept_top_n = state.router.concept_top_n.max(1);
         let activation_concepts =
             format_activation_context(&activation_snapshot.active_concepts_from_concept_graph);
         let executed_submodule_outputs =
@@ -203,7 +199,6 @@ pub(crate) async fn run_decision_debug(
             &state.input.decision_context_template,
             DecisionContextTemplateVars {
                 latest_user_input: input_text,
-                concept_top_n,
                 active_concepts_from_concept_graph: &activation_concepts,
                 outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
                 candidate_submodules_by_interest_match: &submodule_candidates,
@@ -452,7 +447,6 @@ fn render_decision_context_template(
 ) -> String {
     template
         .replace("{{latest_user_input}}", vars.latest_user_input)
-        .replace("{{concept_top_n}}", &vars.concept_top_n.to_string())
         .replace(
             "{{active_concepts_from_concept_graph}}",
             vars.active_concepts_from_concept_graph,
