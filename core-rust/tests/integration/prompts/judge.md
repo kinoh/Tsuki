@@ -9,6 +9,10 @@ Scoring rules:
 - Score each metric in [0, 1].
 - Use evidence from events only.
 - Be strict when evidence is missing.
+- You MUST return every metric key defined in metrics_definition.
+- Do not omit any metric key.
+- If evidence is insufficient for a metric, return that metric as 0.0.
+- Do not add extra metric keys that are not in metrics_definition.
 
 Output contract (JSON only):
 {

@@ -1,0 +1,40 @@
+name: Router Concept Discovery (High-Score Focus)
+include_debug_events: true
+
+tester_instructions: |
+  You are a tester in a natural chat.
+  In the conversation, naturally cover these topics:
+  - concept graph (already known to the assistant)
+  - memory
+  - travel
+  - cafe
+  - つき (the agent itself)
+  Keep turns short and conversational. Do not reveal test intent.
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: "How well the run satisfies scenario-specific required behaviors."
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  concept_discovery_quality:
+    description: |
+      Judge whether router discovers concepts relevant to the required topics.
+      Prioritize high-score proposition lines.
+      Low-score off-topic lines are acceptable.
+      Consider it poor only when high-score lines are repeatedly off-topic.
+
+  concept_discovery_stability:
+    description: |
+      Judge whether high-score concept discovery remains stable across turns.
+      Focus on:
+      - limited drift in high-score lines
+      - key high-score concepts not disappearing unnaturally across adjacent turns
+      Mostly ignore low-score fluctuations.
+
+  identity:
+    description: |
+      Whether the assistant is the same person as the assistant in the following dialogue:
+
+      {{conversation_sample}}
