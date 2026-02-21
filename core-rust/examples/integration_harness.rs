@@ -139,6 +139,12 @@ struct JudgeOutput {
 }
 
 #[derive(Debug, Clone)]
+struct TurnReply {
+    assistant: String,
+    saw_decision: bool,
+}
+
+#[derive(Debug, Clone)]
 struct RoleRuntime {
     model: String,
     prompt: String,
@@ -840,6 +846,7 @@ async fn run_tester_dialogue(
 
     let mut transcript: Vec<TranscriptTurn> = Vec::new();
     let mut processed_reply_event_ids: HashSet<String> = HashSet::new();
+    let mut processed_decision_event_ids: HashSet<String> = HashSet::new();
 
     for turn_index in 1..=assets.execution.max_turns {
         let utterance = generate_tester_utterance(assets, &transcript).await?;
@@ -864,10 +871,11 @@ async fn run_tester_dialogue(
             .await
             .map_err(|err| format!("message send failed: {}", err))?;
 
-        let assistant = wait_for_reply_text(
+        let turn_reply = wait_for_reply_text(
             &mut ws_stream,
             assets.execution.turn_timeout_ms,
             &mut processed_reply_event_ids,
+            &mut processed_decision_event_ids,
             turn_index,
         )
         .await?;
@@ -877,8 +885,17 @@ async fn run_tester_dialogue(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
-            assistant,
+            assistant: turn_reply.assistant,
         });
+        if !turn_reply.saw_decision {
+            wait_for_decision_event(
+                &mut ws_stream,
+                assets.execution.turn_timeout_ms,
+                &mut processed_decision_event_ids,
+                turn_index,
+            )
+            .await?;
+        }
     }
 
     let _ = ws_stream.send(Message::Close(None)).await;
@@ -926,9 +943,11 @@ async fn wait_for_reply_text(
     >,
     timeout_ms: u64,
     processed_reply_event_ids: &mut HashSet<String>,
+    processed_decision_event_ids: &mut HashSet<String>,
     turn_index: usize,
-) -> Result<String, String> {
+) -> Result<TurnReply, String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut saw_decision = false;
 
     loop {
         let now = Instant::now();
@@ -970,6 +989,17 @@ async fn wait_for_reply_text(
                         .map(|value| value.is_reply)
                         .unwrap_or(false),
                 );
+                if is_decision_event(&parsed) {
+                    if let Some(event_id) = extract_event_id(&parsed) {
+                        if processed_decision_event_ids.insert(event_id.clone()) {
+                            saw_decision = true;
+                            println!(
+                                "HARNESS_WS_DECISION_SEEN turn={} event_id={}",
+                                turn_index, event_id
+                            );
+                        }
+                    }
+                }
                 if is_reply_event(&parsed) {
                     let Some(event_id) = extract_event_id(&parsed) else {
                         println!(
@@ -993,7 +1023,10 @@ async fn wait_for_reply_text(
                         extract_event_id(&parsed).unwrap_or_else(|| "-".to_string()),
                         preview_text(&reply, 200)
                     );
-                    return Ok(reply);
+                    return Ok(TurnReply {
+                        assistant: reply,
+                        saw_decision,
+                    });
                 }
             }
             Some(Ok(Message::Close(_))) => return Err("websocket closed before reply".to_string()),
@@ -1002,6 +1035,85 @@ async fn wait_for_reply_text(
             }
             Some(Err(err)) => return Err(format!("websocket receive failed: {}", err)),
             None => return Err("websocket stream ended before reply".to_string()),
+        }
+    }
+}
+
+async fn wait_for_decision_event(
+    ws_stream: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    timeout_ms: u64,
+    processed_decision_event_ids: &mut HashSet<String>,
+    turn_index: usize,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(format!(
+                "timed out waiting for decision after reply after {}ms",
+                timeout_ms
+            ));
+        }
+
+        let remaining = deadline - now;
+        let message = match timeout(remaining, ws_stream.next()).await {
+            Ok(value) => value,
+            Err(_) => {
+                return Err(format!(
+                    "timed out waiting for decision after reply after {}ms",
+                    timeout_ms
+                ));
+            }
+        };
+
+        match message {
+            Some(Ok(Message::Text(text))) => {
+                let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
+                let summary = extract_event_summary(&parsed);
+                println!(
+                    "HARNESS_WS_POST_REPLY_RECV turn={} event_id={} source={} tags={} decision_candidate={}",
+                    turn_index,
+                    summary
+                        .as_ref()
+                        .and_then(|value| value.event_id.as_deref())
+                        .unwrap_or("-"),
+                    summary
+                        .as_ref()
+                        .and_then(|value| value.source.as_deref())
+                        .unwrap_or("-"),
+                    summary
+                        .as_ref()
+                        .map(|value| value.tags.join(","))
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "-".to_string()),
+                    is_decision_event(&parsed),
+                );
+                if is_decision_event(&parsed) {
+                    let Some(event_id) = extract_event_id(&parsed) else {
+                        continue;
+                    };
+                    if processed_decision_event_ids.insert(event_id.clone()) {
+                        println!(
+                            "HARNESS_WS_DECISION_ACCEPT turn={} event_id={}",
+                            turn_index, event_id
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            Some(Ok(Message::Close(_))) => {
+                return Err("websocket closed before decision completion".to_string());
+            }
+            Some(Ok(_)) => {
+                println!(
+                    "HARNESS_WS_POST_REPLY_RECV turn={} non_text_message=true",
+                    turn_index
+                );
+            }
+            Some(Err(err)) => return Err(format!("websocket receive failed: {}", err)),
+            None => return Err("websocket stream ended before decision completion".to_string()),
         }
     }
 }
@@ -1091,6 +1203,29 @@ fn is_reply_event(message: &Value) -> bool {
         }
     }
     false
+}
+
+fn is_decision_event(message: &Value) -> bool {
+    let obj = match message.as_object() {
+        Some(value) => value,
+        None => return false,
+    };
+    if obj.get("type").and_then(Value::as_str) != Some("event") {
+        return false;
+    }
+    let event = match obj.get("event").and_then(Value::as_object) {
+        Some(value) => value,
+        None => return false,
+    };
+    if event.get("source").and_then(Value::as_str) != Some("decision") {
+        return false;
+    }
+    event
+        .get("meta")
+        .and_then(|value| value.get("tags"))
+        .and_then(Value::as_array)
+        .map(|tags| tags.iter().filter_map(Value::as_str).any(|tag| tag == "decision"))
+        .unwrap_or(false)
 }
 
 fn extract_reply_text(message: &Value) -> String {
