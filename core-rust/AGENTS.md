@@ -101,6 +101,13 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - Keep debug observability events available, but exclude debug-tagged events from model input history.
 - Keep decision context structure configurable through `config.toml` template fields.
 
+### Event stream semantics
+- Event stream follows an Event Storming-style domain-event observability model, not a causally strict transaction log.
+- It is intentionally non-transactional for ordering guarantees; consumers must not require strict total ordering as a runtime contract.
+- Event order, timing, and adjacency are not guaranteed to encode exact request/response causality.
+- Missing, delayed, duplicated, or out-of-order observations must be treated as valid stream behavior unless a specific API contract states otherwise.
+- Runtime behavior must not rely on stream order as a control-plane guarantee; stream consumers should interpret events as best-effort facts.
+
 ## Configuration policy
 - Non-secret runtime settings belong in `config.toml`.
 - Secrets belong to environment variables.
