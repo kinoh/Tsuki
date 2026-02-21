@@ -12,8 +12,6 @@ use crate::prompts::PromptOverrides;
 use crate::tools::concept_graph_tools;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
-const ROUTER_QUERY_TERMS_MAX: usize = 8;
-
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct HardTriggerResult {
     pub(crate) module: String,
@@ -300,7 +298,7 @@ async fn resolve_active_concepts_from_concept_graph(
         &state.input.router_context_template,
         input_text,
         &module_lines,
-        ROUTER_QUERY_TERMS_MAX,
+        state.router.query_terms_max.max(1),
     );
     let context = format!("{}\n\nconcept_limit:\n{}", base_context, concept_limit);
     let base_instructions = overrides
