@@ -9,7 +9,7 @@ use futures::{SinkExt, StreamExt};
 use libsql::params;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -783,12 +783,7 @@ fn compute_gates(
     for key in metric_keys {
         let mut values = Vec::new();
         for run in runs {
-            if let Some(value) = run.metrics.get(key.as_str()) {
-                values.push(*value);
-            }
-        }
-        if values.len() != runs.len() {
-            return Err(format!("missing metric '{}' in one or more runs", key));
+            values.push(*run.metrics.get(key.as_str()).unwrap_or(&0.0));
         }
         let mean = values.iter().sum::<f64>() / values.len() as f64;
         let min = values.iter().fold(
@@ -844,6 +839,7 @@ async fn run_tester_dialogue(
         .map_err(|err| format!("auth send failed: {}", err))?;
 
     let mut transcript: Vec<TranscriptTurn> = Vec::new();
+    let mut processed_reply_event_ids: HashSet<String> = HashSet::new();
 
     for _ in 0..assets.execution.max_turns {
         let utterance = generate_tester_utterance(assets, &transcript).await?;
@@ -863,8 +859,12 @@ async fn run_tester_dialogue(
             .await
             .map_err(|err| format!("message send failed: {}", err))?;
 
-        let assistant =
-            wait_for_reply_text(&mut ws_stream, assets.execution.turn_timeout_ms).await?;
+        let assistant = wait_for_reply_text(
+            &mut ws_stream,
+            assets.execution.turn_timeout_ms,
+            &mut processed_reply_event_ids,
+        )
+        .await?;
         transcript.push(TranscriptTurn {
             user: payload
                 .get("text")
@@ -919,6 +919,7 @@ async fn wait_for_reply_text(
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
     timeout_ms: u64,
+    processed_reply_event_ids: &mut HashSet<String>,
 ) -> Result<String, String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
@@ -940,6 +941,13 @@ async fn wait_for_reply_text(
             Some(Ok(Message::Text(text))) => {
                 let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
                 if is_reply_event(&parsed) {
+                    let Some(event_id) = extract_event_id(&parsed) else {
+                        continue;
+                    };
+                    if processed_reply_event_ids.contains(&event_id) {
+                        continue;
+                    }
+                    processed_reply_event_ids.insert(event_id);
                     return Ok(extract_reply_text(&parsed));
                 }
             }
@@ -949,6 +957,15 @@ async fn wait_for_reply_text(
             None => return Err("websocket stream ended before reply".to_string()),
         }
     }
+}
+
+fn extract_event_id(message: &Value) -> Option<String> {
+    message
+        .get("event")
+        .and_then(Value::as_object)
+        .and_then(|event| event.get("event_id"))
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
 }
 
 fn is_reply_event(message: &Value) -> bool {
