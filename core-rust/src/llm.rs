@@ -7,6 +7,7 @@ use async_openai::{
     Client,
 };
 use async_trait::async_trait;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::error::Error;
 use std::fmt;
@@ -21,6 +22,15 @@ pub struct LlmRequest {
 pub struct LlmResponse {
     pub text: String,
     pub raw: Value,
+    pub tool_calls: Vec<ToolCallTrace>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolCallTrace {
+    pub call_id: String,
+    pub name: String,
+    pub output: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -102,6 +112,7 @@ impl ResponseApiAdapter {
 #[async_trait]
 impl LlmAdapter for ResponseApiAdapter {
     async fn respond(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        let mut tool_calls = Vec::<ToolCallTrace>::new();
         let mut response = self
             .create_response(InputParam::Text(request.input), None)
             .await?;
@@ -113,14 +124,15 @@ impl LlmAdapter for ResponseApiAdapter {
                     break;
                 }
 
-                let outputs = calls
+                let outputs_with_trace = calls
                     .iter()
-                    .map(|call| build_tool_output(call, handler.as_ref()))
+                    .map(|call| build_tool_output_with_trace(call, handler.as_ref()))
                     .collect::<Vec<_>>();
+                tool_calls.extend(outputs_with_trace.iter().map(|(_, trace)| trace.clone()));
 
-                let items = outputs
+                let items = outputs_with_trace
                     .into_iter()
-                    .map(|output| InputItem::Item(Item::FunctionCallOutput(output)))
+                    .map(|(output, _)| InputItem::Item(Item::FunctionCallOutput(output)))
                     .collect::<Vec<_>>();
 
                 response = self
@@ -136,7 +148,11 @@ impl LlmAdapter for ResponseApiAdapter {
         let raw = serde_json::to_value(&response)
             .unwrap_or_else(|_| json!({ "error": "failed to serialize response" }));
 
-        Ok(LlmResponse { text, raw })
+        Ok(LlmResponse {
+            text,
+            raw,
+            tool_calls,
+        })
     }
 }
 
@@ -189,18 +205,28 @@ fn extract_function_calls(items: &[OutputItem]) -> Vec<FunctionToolCall> {
         .collect()
 }
 
-fn build_tool_output(
+fn build_tool_output_with_trace(
     call: &FunctionToolCall,
     handler: &dyn ToolHandler,
-) -> FunctionCallOutputItemParam {
-    let output = match handler.handle(&call.name, &call.arguments) {
-        Ok(value) => value,
-        Err(err) => format!("error: {}", err),
+) -> (FunctionCallOutputItemParam, ToolCallTrace) {
+    let (output, error) = match handler.handle(&call.name, &call.arguments) {
+        Ok(value) => (value, None),
+        Err(err) => {
+            let message = err.to_string();
+            (format!("error: {}", message), Some(message))
+        }
     };
-    FunctionCallOutputItemParam {
+    let item = FunctionCallOutputItemParam {
         call_id: call.call_id.clone(),
-        output: FunctionCallOutput::Text(output),
+        output: FunctionCallOutput::Text(output.clone()),
         id: None,
         status: None,
-    }
+    };
+    let trace = ToolCallTrace {
+        call_id: call.call_id.clone(),
+        name: call.name.clone(),
+        output,
+        error,
+    };
+    (item, trace)
 }

@@ -571,6 +571,7 @@ async fn emit_debug_module_events(
             "raw": response.raw.clone(),
             "context": context,
             "output_text": response.text.clone(),
+            "tool_calls": response.tool_calls.clone(),
             "mode": mode,
         }),
         vec![

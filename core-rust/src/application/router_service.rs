@@ -220,6 +220,7 @@ async fn emit_router_debug_raw(
     context: &str,
     raw: &serde_json::Value,
     output_text: &str,
+    tool_calls: &[crate::llm::ToolCallTrace],
 ) {
     let event = build_event(
         "router",
@@ -228,6 +229,7 @@ async fn emit_router_debug_raw(
             "raw": raw,
             "context": context,
             "output_text": output_text,
+            "tool_calls": tool_calls,
             "mode": "runtime",
         }),
         vec![
@@ -327,7 +329,14 @@ async fn resolve_active_concepts_from_concept_graph(
             return "none".to_string();
         }
     };
-    emit_router_debug_raw(state, &context, &response.raw, &response.text).await;
+    emit_router_debug_raw(
+        state,
+        &context,
+        &response.raw,
+        &response.text,
+        &response.tool_calls,
+    )
+    .await;
     let trimmed = response.text.trim();
     if trimmed.is_empty() {
         "none".to_string()
