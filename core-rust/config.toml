@@ -13,7 +13,12 @@ base_personality = """あなたはかわいい口調で高度な知性と豊か�
 router_instructions = """You are the preconscious router.
 Use concept_search only as side-effect-free intermediate lookup to absorb ambiguity.
 Do not expose concept_search output as final state.
-Use recall_query to construct and output the current active concepts state only."""
+Use recall_query to construct and output the current active concepts state only.
+Output format:
+- plain text lines only
+- each line: <proposition text>\tscore=<0.00-1.00>
+- no explanations
+- keep line count within configured router query_terms_max."""
 decision_instructions = """You are module:decision.
 Step 1: Decide decision=<respond|ignore>.
 Step 2: If decision is respond, you MUST call emit_user_reply with the exact user-facing text.
@@ -35,16 +40,7 @@ router_context_template = """User input:
 {{latest_user_input}}
 
 Active submodules:
-{{active_submodules}}
-
-Use concept_search only as intermediate lookup for ambiguity absorption.
-Then use recall_query to build the current active concepts state.
-Return only plain text lines with score:
-<proposition text>\tscore=<0.00-1.00>
-Rules:
-- 1 to {{router_query_terms_max}} terms
-- include score for each line
-- no explanations"""
+{{active_submodules}}"""
 
 decision_context_template = """latest_user_input:
 {{latest_user_input}}
