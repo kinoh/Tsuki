@@ -98,6 +98,10 @@ struct RunResult {
     judge_summary: Option<String>,
     turn_count: usize,
     event_count: usize,
+    response_time_ms_mean: Option<f64>,
+    response_time_ms_min: Option<u64>,
+    response_time_ms_max: Option<u64>,
+    response_time_ms_by_turn: Vec<u64>,
     message_log: Vec<TranscriptTurn>,
     log_file: Option<String>,
 }
@@ -143,6 +147,12 @@ struct JudgeOutput {
 struct TurnReply {
     assistant: String,
     saw_decision: bool,
+}
+
+#[derive(Debug, Clone)]
+struct DialogueRun {
+    transcript: Vec<TranscriptTurn>,
+    response_times_ms: Vec<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -628,6 +638,7 @@ async fn execute_runs(
     for run_index in 1..=run_count {
         let before_count = read_event_count(&runtime.db_path).await?;
         let mut transcript: Vec<TranscriptTurn> = Vec::new();
+        let mut response_times_ms: Vec<u64> = Vec::new();
         let mut convo_error: Option<(String, String)> = None;
         let max_attempts = assets.execution.transient_retry.saturating_add(1);
 
@@ -640,7 +651,8 @@ async fn execute_runs(
 
             match convo {
                 Ok(Ok(value)) => {
-                    transcript = value;
+                    transcript = value.transcript;
+                    response_times_ms = value.response_times_ms;
                     convo_error = None;
                     break;
                 }
@@ -674,6 +686,8 @@ async fn execute_runs(
             .trim_start_matches('/')
             .to_string();
         let filtered_events = filter_events(raw_events, assets.scenario.include_debug_events);
+        let (response_time_ms_mean, response_time_ms_min, response_time_ms_max) =
+            response_time_stats(&response_times_ms);
 
         if let Some((code, detail)) = convo_error {
             let mut metrics = HashMap::new();
@@ -711,6 +725,10 @@ async fn execute_runs(
                 judge_summary,
                 turn_count: transcript.len(),
                 event_count: filtered_events.len(),
+                response_time_ms_mean,
+                response_time_ms_min,
+                response_time_ms_max,
+                response_time_ms_by_turn: response_times_ms.clone(),
                 message_log: transcript.clone(),
                 log_file: Some(log_file),
             });
@@ -731,6 +749,10 @@ async fn execute_runs(
                         judge_summary: output.summary,
                         turn_count: transcript.len(),
                         event_count: filtered_events.len(),
+                        response_time_ms_mean,
+                        response_time_ms_min,
+                        response_time_ms_max,
+                        response_time_ms_by_turn: response_times_ms.clone(),
                         message_log: transcript.clone(),
                         log_file: Some(log_file.clone()),
                     });
@@ -746,6 +768,10 @@ async fn execute_runs(
                     judge_summary: output.summary,
                     turn_count: transcript.len(),
                     event_count: filtered_events.len(),
+                    response_time_ms_mean,
+                    response_time_ms_min,
+                    response_time_ms_max,
+                    response_time_ms_by_turn: response_times_ms.clone(),
                     message_log: transcript.clone(),
                     log_file: Some(log_file.clone()),
                 });
@@ -760,6 +786,10 @@ async fn execute_runs(
                     judge_summary: None,
                     turn_count: transcript.len(),
                     event_count: filtered_events.len(),
+                    response_time_ms_mean,
+                    response_time_ms_min,
+                    response_time_ms_max,
+                    response_time_ms_by_turn: response_times_ms.clone(),
                     message_log: transcript.clone(),
                     log_file: Some(log_file.clone()),
                 });
@@ -860,7 +890,7 @@ fn validate_metrics(scenario: &Scenario, metrics: &HashMap<String, f64>) -> Resu
 async fn run_tester_dialogue(
     assets: &TestAssets,
     runtime: &RuntimeContext,
-) -> Result<Vec<TranscriptTurn>, String> {
+) -> Result<DialogueRun, String> {
     let (mut ws_stream, _) = connect_async(runtime.ws_url.as_str())
         .await
         .map_err(|err| format!("websocket connect failed: {}", err))?;
@@ -872,6 +902,7 @@ async fn run_tester_dialogue(
         .map_err(|err| format!("auth send failed: {}", err))?;
 
     let mut transcript: Vec<TranscriptTurn> = Vec::new();
+    let mut response_times_ms: Vec<u64> = Vec::new();
     let mut processed_reply_event_ids: HashSet<String> = HashSet::new();
     let mut processed_decision_event_ids: HashSet<String> = HashSet::new();
 
@@ -893,6 +924,7 @@ async fn run_tester_dialogue(
             "type": "message",
             "text": utterance,
         });
+        let turn_started = Instant::now();
         ws_stream
             .send(Message::Text(payload.to_string().into()))
             .await
@@ -906,6 +938,7 @@ async fn run_tester_dialogue(
             turn_index,
         )
         .await?;
+        response_times_ms.push(turn_started.elapsed().as_millis() as u64);
         transcript.push(TranscriptTurn {
             user: payload
                 .get("text")
@@ -931,7 +964,21 @@ async fn run_tester_dialogue(
         return Err("tester produced no conversation turns".to_string());
     }
 
-    Ok(transcript)
+    Ok(DialogueRun {
+        transcript,
+        response_times_ms,
+    })
+}
+
+fn response_time_stats(values: &[u64]) -> (Option<f64>, Option<u64>, Option<u64>) {
+    if values.is_empty() {
+        return (None, None, None);
+    }
+    let sum = values.iter().map(|value| *value as f64).sum::<f64>();
+    let mean = round3(sum / values.len() as f64);
+    let min = values.iter().copied().min();
+    let max = values.iter().copied().max();
+    (Some(mean), min, max)
 }
 
 async fn generate_tester_utterance(
