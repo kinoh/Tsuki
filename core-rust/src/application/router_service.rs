@@ -2,7 +2,7 @@ use futures::future::join_all;
 use serde::Serialize;
 use serde_json::json;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     future::Future,
 };
 
@@ -49,29 +49,26 @@ where
     Fut: Future<Output = Result<String, ToolError>> + Send,
 {
     let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
-    let activation_query_terms =
-        infer_activation_query_terms(input_text, &active_module_names, modules, state, overrides)
-            .await;
     let concept_limit = state.router.concept_top_n.max(1);
     let active_concepts_from_concept_graph = resolve_active_concepts_from_concept_graph(
         input_text,
-        &activation_query_terms,
+        &active_module_names,
         concept_limit,
         modules,
         state,
         overrides,
     )
     .await;
+    let activation_query_terms = Vec::<String>::new();
     emit_concept_graph_query_event(
         state,
-        &activation_query_terms,
+        &[],
         concept_limit,
         &active_concepts_from_concept_graph,
     )
     .await;
 
-    let scores =
-        compute_module_scores_minimal(input_text, &activation_query_terms, &active_module_names);
+    let scores = compute_module_scores_minimal(input_text, &active_module_names);
     let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
     let soft_recommendations =
         select_modules_by_threshold(&scores, state.router.recommendation_threshold);
@@ -159,83 +156,6 @@ where
         .collect()
 }
 
-async fn infer_activation_query_terms(
-    input_text: &str,
-    active_module_names: &[String],
-    modules: &Modules,
-    state: &AppState,
-    overrides: &PromptOverrides,
-) -> Vec<String> {
-    let fallback = build_activation_query_terms(input_text);
-    if input_text.trim().is_empty() {
-        return fallback;
-    }
-
-    let module_lines = if active_module_names.is_empty() {
-        "none".to_string()
-    } else {
-        active_module_names
-            .iter()
-            .map(|name| format!("- {}", name))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let context = render_router_context_template(
-        &state.input.router_context_template,
-        input_text,
-        &module_lines,
-        ROUTER_QUERY_TERMS_MAX,
-    );
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
-    let router_instructions = overrides
-        .router
-        .clone()
-        .unwrap_or_else(|| state.router_instructions.clone());
-    let instructions = format!(
-        "{}\n\n{}",
-        base_instructions, router_instructions
-    );
-    let adapter = ResponseApiAdapter::new(build_router_config(instructions, &modules.runtime));
-    let response = match adapter
-        .respond(LlmRequest {
-            input: context.clone(),
-        })
-        .await
-    {
-        Ok(response) => response,
-        Err(err) => {
-            let detail = err.to_string();
-            emit_router_debug_error(state, &context, &detail).await;
-            return fallback;
-        }
-    };
-    emit_router_debug_raw(state, &context, &response.raw, &response.text).await;
-
-    let mut terms = parse_router_query_terms(&response.text);
-    if terms.is_empty() {
-        return fallback;
-    }
-    if terms.len() > ROUTER_QUERY_TERMS_MAX {
-        terms.truncate(ROUTER_QUERY_TERMS_MAX);
-    }
-    terms
-}
-
-fn build_activation_query_terms(input_text: &str) -> Vec<String> {
-    let normalized = input_text.trim().to_lowercase();
-    if normalized.is_empty() {
-        return Vec::new();
-    }
-    let mut terms = tokenize(&normalized);
-    terms.push(normalized);
-    terms.sort();
-    terms.dedup();
-    terms
-}
-
 fn render_router_context_template(
     template: &str,
     latest_user_input: &str,
@@ -253,20 +173,14 @@ fn render_router_context_template(
 
 fn compute_module_scores_minimal(
     input_text: &str,
-    activation_query_terms: &[String],
     active_module_names: &[String],
 ) -> Vec<(String, f32)> {
     let lower = input_text.to_lowercase();
-    let query_terms = activation_query_terms
-        .iter()
-        .map(|value| value.to_lowercase())
-        .collect::<HashSet<_>>();
     let mut scored = Vec::<(String, f32)>::new();
     for name in active_module_names {
         let name_lc = name.to_lowercase();
         let matched_input = lower.contains(name_lc.as_str());
-        let matched_query = query_terms.contains(name_lc.as_str());
-        let score = if matched_input || matched_query {
+        let score = if matched_input {
             1.0
         } else {
             0.0
@@ -290,57 +204,6 @@ fn select_modules_by_threshold(scores: &[(String, f32)], threshold: f32) -> Vec<
         .collect()
 }
 
-fn tokenize(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric())
-        .map(str::trim)
-        .filter(|token| token.chars().count() >= 2)
-        .map(|token| token.to_lowercase())
-        .collect()
-}
-
-fn parse_router_query_terms(text: &str) -> Vec<String> {
-    let parsed_json = serde_json::from_str::<serde_json::Value>(text).ok();
-    let mut terms = Vec::new();
-    if let Some(json) = parsed_json {
-        if let Some(items) = json
-            .get("activation_query_terms")
-            .and_then(|value| value.as_array())
-        {
-            for item in items {
-                if let Some(value) = item.as_str() {
-                    terms.push(value.to_string());
-                }
-            }
-        } else if let Some(items) = json.as_array() {
-            for item in items {
-                if let Some(value) = item.as_str() {
-                    terms.push(value.to_string());
-                }
-            }
-        }
-    }
-    if terms.is_empty() {
-        terms = text
-            .split([',', '\n', ';'])
-            .map(str::trim)
-            .map(|value| value.trim_matches(|c| c == '"' || c == '\'' || c == '-' || c == '*'))
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_string())
-            .collect::<Vec<_>>();
-    }
-    let mut normalized = Vec::new();
-    let mut seen = HashSet::<String>::new();
-    for term in terms {
-        let value = term.trim().to_lowercase();
-        if value.is_empty() {
-            continue;
-        }
-        if seen.insert(value.clone()) {
-            normalized.push(value);
-        }
-    }
-    normalized
-}
 
 fn build_router_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiConfig {
     ResponseApiConfig {
@@ -418,21 +281,28 @@ async fn emit_concept_graph_query_event(
 
 async fn resolve_active_concepts_from_concept_graph(
     input_text: &str,
-    activation_query_terms: &[String],
+    active_module_names: &[String],
     concept_limit: usize,
     modules: &Modules,
     state: &AppState,
     overrides: &PromptOverrides,
 ) -> String {
-    let query_terms_text = if activation_query_terms.is_empty() {
+    let module_lines = if active_module_names.is_empty() {
         "none".to_string()
     } else {
-        activation_query_terms.join(", ")
+        active_module_names
+            .iter()
+            .map(|name| format!("- {}", name))
+            .collect::<Vec<_>>()
+            .join("\n")
     };
-    let context = format!(
-        "latest_user_input:\n{}\n\nactivation_query_terms:\n{}\n\nconcept_limit:\n{}\n\nUse concept_search only as intermediate lookup for ambiguity absorption. Use recall_query to produce the final active concepts state.\nReturn only compact JSON: {{\"active_concepts_from_concept_graph\":{{\"propositions\":[{{\"text\":\"...\",\"score\":0.0,\"valence\":0.0}}]}}}}",
-        input_text, query_terms_text, concept_limit
+    let base_context = render_router_context_template(
+        &state.input.router_context_template,
+        input_text,
+        &module_lines,
+        ROUTER_QUERY_TERMS_MAX,
     );
+    let context = format!("{}\n\nconcept_limit:\n{}", base_context, concept_limit);
     let base_instructions = overrides
         .base
         .clone()
@@ -487,4 +357,5 @@ mod tests {
             vec!["curiosity".to_string(), "self_preservation".to_string()]
         );
     }
+
 }

@@ -26,7 +26,7 @@ decision_history = 30
 submodule_history = 10
 
 [router]
-concept_top_n = 5
+concept_top_n = 10
 hard_trigger_threshold = 0.85
 recommendation_threshold = 0.6
 
@@ -37,11 +37,13 @@ router_context_template = """User input:
 Active submodules:
 {{active_submodules}}
 
-Return only compact JSON:
-{"activation_query_terms":["..."]}
+Use concept_search only as intermediate lookup for ambiguity absorption.
+Then use recall_query to build the current active concepts state.
+Return only plain text lines with score:
+<proposition text>\tscore=<0.00-1.00>
 Rules:
 - 1 to {{router_query_terms_max}} terms
-- short lookup-oriented terms
+- include score for each line
 - no explanations"""
 
 decision_context_template = """latest_user_input:
