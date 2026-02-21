@@ -185,7 +185,6 @@ fn render_router_context_template(
     active_submodules: &str,
     router_query_terms_max: usize,
 ) -> String {
-    let started = Instant::now();
     template
         .replace("{{latest_user_input}}", latest_user_input)
         .replace("{{active_submodules}}", active_submodules)
@@ -313,6 +312,7 @@ async fn resolve_active_concepts_from_concept_graph(
     state: &AppState,
     overrides: &PromptOverrides,
 ) -> String {
+    let started = Instant::now();
     let module_lines = if active_module_names.is_empty() {
         "none".to_string()
     } else {
