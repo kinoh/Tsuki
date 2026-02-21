@@ -85,7 +85,9 @@ pub(crate) async fn run_decision(
         Arc::new(handler),
     ));
     let concept_top_n = state.router.concept_top_n.max(1);
-    let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
+    let activation_concepts = format_activation_concepts(
+        &activation_snapshot.active_concepts_from_concept_graph,
+    );
     let executed_submodule_outputs =
         format_hard_trigger_results(&router_output.hard_trigger_results);
     let submodule_candidates =
@@ -192,7 +194,9 @@ pub(crate) async fn run_decision_debug(
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         let concept_top_n = state.router.concept_top_n.max(1);
-        let activation_concepts = format_activation_concepts(&activation_snapshot.concepts);
+        let activation_concepts = format_activation_concepts(
+            &activation_snapshot.active_concepts_from_concept_graph,
+        );
         let executed_submodule_outputs =
             format_hard_trigger_results(&router_output.hard_trigger_results);
         let submodule_candidates =
@@ -374,7 +378,7 @@ pub(crate) async fn run_submodule_tool(
     let context = render_submodule_context_template(
         &state.input.submodule_context_template,
         input_text,
-        &format_activation_concepts(&activation_snapshot.concepts),
+        &format_activation_concepts(&activation_snapshot.active_concepts_from_concept_graph),
         &format_soft_recommendations(&activation_snapshot.soft_recommendations),
         &history,
         execution_reason.unwrap_or("none"),

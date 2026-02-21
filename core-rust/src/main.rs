@@ -38,7 +38,7 @@ use crate::event_store::EventStore;
 use crate::module_registry::{ModuleDefinition, ModuleRegistry, ModuleRegistryReader};
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
 use crate::state::{DbStateStore, StateStore};
-use crate::tools::{state_tools, StateToolHandler};
+use crate::tools::{concept_graph_tools, state_tools, StateToolHandler};
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -247,7 +247,13 @@ async fn main() {
         .ensure_defaults(defaults)
         .await
         .expect("failed to seed module registry");
-    let modules = build_modules(state_store.clone(), module_registry, &config, emit_event);
+    let modules = build_modules(
+        state_store.clone(),
+        activation_concept_graph.clone(),
+        module_registry,
+        &config,
+        emit_event,
+    );
 
     let state = AppState {
         event_store,
@@ -335,6 +341,7 @@ fn module_defaults_from_config(config: &Config) -> Vec<ModuleDefinition> {
 
 fn build_modules(
     state_store: Arc<dyn StateStore>,
+    concept_graph: Arc<dyn ConceptGraphStore>,
     registry: ModuleRegistry,
     config: &Config,
     emit_event: Arc<dyn Fn(Event) + Send + Sync>,
@@ -346,8 +353,9 @@ fn build_modules(
         None
     };
     let max_output_tokens = Some(config.llm.max_output_tokens);
-    let tools = state_tools();
-    let tool_handler = Arc::new(StateToolHandler::new(state_store, emit_event));
+    let mut tools = state_tools();
+    tools.extend(concept_graph_tools(false, true));
+    let tool_handler = Arc::new(StateToolHandler::new(state_store, concept_graph, emit_event));
 
     let runtime = ModuleRuntime {
         base_instructions: config.llm.base_personality.clone(),

@@ -9,6 +9,7 @@ use std::{
 use crate::event::build_event;
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError};
 use crate::prompts::PromptOverrides;
+use crate::tools::concept_graph_tools;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const ROUTER_QUERY_TERMS_MAX: usize = 8;
@@ -22,7 +23,7 @@ pub(crate) struct HardTriggerResult {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RouterOutput {
     pub(crate) activation_query_terms: Vec<String>,
-    pub(crate) concepts: Vec<String>,
+    pub(crate) active_concepts_from_concept_graph: Vec<String>,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
     pub(crate) hard_trigger_results: Vec<HardTriggerResult>,
@@ -30,7 +31,7 @@ pub(crate) struct RouterOutput {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ActivationSnapshot {
-    pub(crate) concepts: Vec<String>,
+    pub(crate) active_concepts_from_concept_graph: Vec<String>,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
 }
@@ -52,51 +53,34 @@ where
         infer_activation_query_terms(input_text, &active_module_names, modules, state, overrides)
             .await;
     let concept_limit = state.router.concept_top_n.max(1);
-    let concepts = match state
-        .activation_concept_graph
-        .concept_search(&activation_query_terms, concept_limit)
-        .await
-    {
-        Ok(values) => {
-            emit_concept_graph_query_event(
-                state,
-                &activation_query_terms,
-                concept_limit,
-                &values,
-                None,
-            )
-            .await;
-            values
-        }
-        Err(err) => {
-            println!(
-                "ACTIVATION_CONCEPT_GRAPH_ERROR op=concept_search error={}",
-                err
-            );
-            let error = err.to_string();
-            emit_concept_graph_query_event(
-                state,
-                &activation_query_terms,
-                concept_limit,
-                &[],
-                Some(&error),
-            )
-            .await;
-            Vec::new()
-        }
-    };
+    let active_concepts_from_concept_graph = resolve_active_concepts_from_concept_graph(
+        input_text,
+        &activation_query_terms,
+        concept_limit,
+        modules,
+        state,
+        overrides,
+    )
+    .await;
+    emit_concept_graph_query_event(
+        state,
+        &activation_query_terms,
+        concept_limit,
+        &active_concepts_from_concept_graph,
+    )
+    .await;
 
     let scores = compute_module_scores_minimal(
         input_text,
         &activation_query_terms,
-        &concepts,
+        &active_concepts_from_concept_graph,
         &active_module_names,
     );
     let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
     let soft_recommendations =
         select_modules_by_threshold(&scores, state.router.recommendation_threshold);
     let activation_snapshot = ActivationSnapshot {
-        concepts: concepts.clone(),
+        active_concepts_from_concept_graph: active_concepts_from_concept_graph.clone(),
         hard_triggers: hard_triggers.clone(),
         soft_recommendations: soft_recommendations.clone(),
     };
@@ -109,7 +93,7 @@ where
 
     let router_output = RouterOutput {
         activation_query_terms,
-        concepts,
+        active_concepts_from_concept_graph,
         hard_triggers,
         soft_recommendations,
         hard_trigger_results,
@@ -129,7 +113,7 @@ pub(crate) fn activation_snapshot_from_router_output(
     router_output: &RouterOutput,
 ) -> ActivationSnapshot {
     ActivationSnapshot {
-        concepts: router_output.concepts.clone(),
+        active_concepts_from_concept_graph: router_output.active_concepts_from_concept_graph.clone(),
         hard_triggers: router_output.hard_triggers.clone(),
         soft_recommendations: router_output.soft_recommendations.clone(),
     }
@@ -376,9 +360,9 @@ fn build_router_config(instructions: String, runtime: &ModuleRuntime) -> Respons
         instructions,
         temperature: runtime.temperature,
         max_output_tokens: runtime.max_output_tokens,
-        tools: Vec::new(),
-        tool_handler: None,
-        max_tool_rounds: 0,
+        tools: concept_graph_tools(true, true),
+        tool_handler: Some(runtime.tool_handler.clone()),
+        max_tool_rounds: runtime.max_tool_rounds,
     }
 }
 
@@ -429,26 +413,110 @@ async fn emit_concept_graph_query_event(
     state: &AppState,
     query_terms: &[String],
     limit: usize,
-    result_concepts: &[String],
-    error: Option<&str>,
+    active_concepts_from_concept_graph: &[String],
 ) {
-    let mut tags = vec!["debug".to_string(), "concept_graph.query".to_string()];
-    let payload = if let Some(error) = error {
-        tags.push("error".to_string());
+    let event = build_event(
+        "router",
+        "state",
         json!({
             "query_terms": query_terms,
             "limit": limit,
-            "error": error,
-        })
-    } else {
-        json!({
-            "query_terms": query_terms,
-            "limit": limit,
-            "result_concepts": result_concepts,
-        })
-    };
-    let event = build_event("router", "state", payload, tags);
+            "active_concepts_from_concept_graph": active_concepts_from_concept_graph,
+        }),
+        vec!["debug".to_string(), "concept_graph.query".to_string()],
+    );
     record_event(state, event).await;
+}
+
+async fn resolve_active_concepts_from_concept_graph(
+    input_text: &str,
+    activation_query_terms: &[String],
+    concept_limit: usize,
+    modules: &Modules,
+    state: &AppState,
+    overrides: &PromptOverrides,
+) -> Vec<String> {
+    let query_terms_text = if activation_query_terms.is_empty() {
+        "none".to_string()
+    } else {
+        activation_query_terms.join(", ")
+    };
+    let context = format!(
+        "latest_user_input:\n{}\n\nactivation_query_terms:\n{}\n\nconcept_limit:\n{}\n\nUse concept_search only as intermediate lookup for ambiguity absorption. Use recall_query to produce the final active concepts state. Return only compact JSON: {{\"active_concepts_from_concept_graph\":[\"...\"]}}",
+        input_text, query_terms_text, concept_limit
+    );
+    let base_instructions = overrides
+        .base
+        .clone()
+        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
+    let router_instructions = overrides
+        .router
+        .clone()
+        .unwrap_or_else(|| state.router_instructions.clone());
+    let instructions = format!(
+        "{}\n\n{}\n\nYou are the router preconscious module. You must call concept_search first, then use its results only to make recall_query calls. Do not output concept_search intermediate results.",
+        base_instructions, router_instructions
+    );
+    let adapter = ResponseApiAdapter::new(build_router_config(instructions, &modules.runtime));
+    let response = match adapter
+        .respond(LlmRequest {
+            input: context.clone(),
+        })
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            let detail = err.to_string();
+            emit_router_debug_error(state, &context, &detail).await;
+            return Vec::new();
+        }
+    };
+    emit_router_debug_raw(state, &context, &response.raw, &response.text).await;
+    parse_active_concepts_from_router_output(&response.text)
+}
+
+fn parse_active_concepts_from_router_output(text: &str) -> Vec<String> {
+    let parsed_json = serde_json::from_str::<serde_json::Value>(text).ok();
+    let mut values = Vec::new();
+    if let Some(json) = parsed_json {
+        if let Some(items) = json
+            .get("active_concepts_from_concept_graph")
+            .and_then(|value| value.as_array())
+        {
+            for item in items {
+                if let Some(value) = item.as_str() {
+                    values.push(value.to_string());
+                }
+            }
+        } else if let Some(items) = json.as_array() {
+            for item in items {
+                if let Some(value) = item.as_str() {
+                    values.push(value.to_string());
+                }
+            }
+        }
+    }
+    if values.is_empty() {
+        values = text
+            .split([',', '\n', ';'])
+            .map(str::trim)
+            .map(|value| value.trim_matches(|c| c == '"' || c == '\'' || c == '-' || c == '*'))
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+    }
+    let mut normalized = Vec::new();
+    let mut seen = HashSet::<String>::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            normalized.push(trimmed.to_string());
+        }
+    }
+    normalized
 }
 
 #[cfg(test)]
