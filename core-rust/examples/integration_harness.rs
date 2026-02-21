@@ -961,7 +961,12 @@ async fn wait_for_reply_text(
         let remaining = deadline - now;
         let message = match timeout(remaining, ws_stream.next()).await {
             Ok(value) => value,
-            Err(_) => return Err(format!("timed out waiting for reply after {}ms", timeout_ms)),
+            Err(_) => {
+                return Err(format!(
+                    "timed out waiting for reply after {}ms",
+                    timeout_ms
+                ))
+            }
         };
 
         match message {
@@ -1144,7 +1149,8 @@ fn extract_event_summary(message: &Value) -> Option<EventSummary> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let is_reply = tags.iter().any(|tag| tag == "action") && tags.iter().any(|tag| tag == "response");
+    let is_reply =
+        tags.iter().any(|tag| tag == "action") && tags.iter().any(|tag| tag == "response");
     Some(EventSummary {
         event_id: event
             .get("event_id")
@@ -1224,7 +1230,11 @@ fn is_decision_event(message: &Value) -> bool {
         .get("meta")
         .and_then(|value| value.get("tags"))
         .and_then(Value::as_array)
-        .map(|tags| tags.iter().filter_map(Value::as_str).any(|tag| tag == "decision"))
+        .map(|tags| {
+            tags.iter()
+                .filter_map(Value::as_str)
+                .any(|tag| tag == "decision")
+        })
         .unwrap_or(false)
 }
 

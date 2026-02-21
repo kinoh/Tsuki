@@ -2,8 +2,8 @@ use axum::http::StatusCode;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::json;
-use std::{collections::HashMap, sync::Arc};
 use std::time::Instant;
+use std::{collections::HashMap, sync::Arc};
 use tokio::runtime::Handle;
 
 use crate::application::history_service::{format_decision_debug_history, format_event_history};

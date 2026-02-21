@@ -361,7 +361,11 @@ fn build_modules(
     let max_output_tokens = Some(config.llm.max_output_tokens);
     let mut tools = state_tools();
     tools.extend(concept_graph_tools(false, true));
-    let tool_handler = Arc::new(StateToolHandler::new(state_store, concept_graph, emit_event));
+    let tool_handler = Arc::new(StateToolHandler::new(
+        state_store,
+        concept_graph,
+        emit_event,
+    ));
 
     let runtime = ModuleRuntime {
         base_instructions: config.llm.base_personality.clone(),

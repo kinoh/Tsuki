@@ -148,8 +148,7 @@ impl ToolHandler for StateToolHandler {
                 let max_hop = args.max_hop.max(1).min(8);
                 let seeds = args.seeds;
                 let value = tokio::task::block_in_place(|| {
-                    Handle::current()
-                        .block_on(self.concept_graph.recall_query(seeds, max_hop))
+                    Handle::current().block_on(self.concept_graph.recall_query(seeds, max_hop))
                 })
                 .map_err(ToolError::new)?;
                 Ok(to_json_string(&value))
