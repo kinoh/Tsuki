@@ -29,6 +29,7 @@ const READY_INTERVAL_MS: u64 = 500;
 const REQUIRED_BASELINE_METRICS: [&str; 2] = ["scenario_requirement_fit", "dialog_naturalness"];
 const SECRET_DIR_PATH: &str = "tests/integration/secrets";
 const SECRET_KEY_ENV_VAR: &str = "PROMPT_PRIVATE_KEY";
+const INCOMPLETE_SCENARIO_REQUIREMENT_CAP: f64 = 0.5;
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -675,13 +676,39 @@ async fn execute_runs(
         let filtered_events = filter_events(raw_events, assets.scenario.include_debug_events);
 
         if let Some((code, detail)) = convo_error {
+            let mut metrics = HashMap::new();
+            let mut judge_summary = None;
+            let mut failure_detail = detail;
+
+            if !transcript.is_empty() || !filtered_events.is_empty() {
+                match judge_run(assets, &transcript, &filtered_events).await {
+                    Ok(output) => match validate_metrics(&assets.scenario, &output.metrics) {
+                        Ok(()) => {
+                            metrics = output.metrics;
+                            judge_summary = output.summary;
+                            if let Some(value) = metrics.get_mut("scenario_requirement_fit") {
+                                *value = value.min(INCOMPLETE_SCENARIO_REQUIREMENT_CAP);
+                            }
+                        }
+                        Err(err) => {
+                            failure_detail =
+                                format!("{} | partial_judge_invalid: {}", failure_detail, err);
+                        }
+                    },
+                    Err(err) => {
+                        failure_detail =
+                            format!("{} | partial_judge_error: {}", failure_detail, err);
+                    }
+                }
+            }
+
             runs.push(RunResult {
                 run_index,
                 pass: false,
                 failure_code: Some(code),
-                failure_detail: Some(detail),
-                metrics: HashMap::new(),
-                judge_summary: None,
+                failure_detail: Some(failure_detail),
+                metrics,
+                judge_summary,
                 turn_count: transcript.len(),
                 event_count: filtered_events.len(),
                 message_log: transcript.clone(),
