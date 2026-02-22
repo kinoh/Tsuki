@@ -179,27 +179,31 @@ pub(crate) struct DebugImproveTriggerRequest {
 #[derive(Debug, Deserialize)]
 pub(crate) struct DebugImproveProposalRequest {
     pub(crate) target: String,
-    pub(crate) section: String,
+    pub(crate) job_id: String,
+    pub(crate) diff_text: String,
     #[serde(default)]
-    pub(crate) reason: Option<String>,
-    pub(crate) content: String,
+    pub(crate) requires_approval: Option<bool>,
     #[serde(default)]
-    pub(crate) feedback_refs: Option<Vec<String>>,
+    pub(crate) created_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DebugImproveReviewRequest {
-    pub(crate) proposal_event_id: String,
-    pub(crate) review: String,
+    pub(crate) proposal_id: String,
+    pub(crate) job_id: String,
+    pub(crate) target: String,
+    pub(crate) decision: String,
     #[serde(default)]
-    pub(crate) reason: Option<String>,
+    pub(crate) reviewed_by: Option<String>,
+    #[serde(default)]
+    pub(crate) review_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct DebugImproveResponse {
-    pub(crate) proposal_event_id: Option<String>,
+    pub(crate) proposal_id: Option<String>,
     pub(crate) review_event_id: Option<String>,
-    pub(crate) auto_approved: bool,
+    pub(crate) apply_event_id: Option<String>,
     pub(crate) applied: bool,
 }
 
@@ -317,9 +321,9 @@ async fn main() {
             get(debug_get_prompts).post(debug_update_prompts),
         )
         .route("/debug/modules/{name}/run", post(debug_run_module))
-        .route("/debug/improve/trigger", post(debug_improve_trigger))
-        .route("/debug/improve/proposal", post(debug_improve_proposal))
-        .route("/debug/improve/review", post(debug_improve_review))
+        .route("/improvements/trigger", post(improve_trigger))
+        .route("/improvements/proposal", post(improve_proposal))
+        .route("/improvements/review", post(improve_review))
         .route("/debug/events/stream", get(debug_events_stream))
         .route("/debug/events", get(debug_events))
         .with_state(state);
@@ -847,7 +851,7 @@ fn event_module_name(event: &Event) -> Option<&str> {
         })
 }
 
-async fn debug_improve_trigger(
+async fn improve_trigger(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveTriggerRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
@@ -855,7 +859,7 @@ async fn debug_improve_trigger(
     Ok(Json(result))
 }
 
-async fn debug_improve_proposal(
+async fn improve_proposal(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveProposalRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
@@ -863,7 +867,7 @@ async fn debug_improve_proposal(
     Ok(Json(result))
 }
 
-async fn debug_improve_review(
+async fn improve_review(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveReviewRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {

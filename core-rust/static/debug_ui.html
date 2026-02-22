@@ -516,19 +516,19 @@
         <div class="control-section" id="improveSection">
           <h2>Self-Improvement</h2>
           <label for="improveTarget">Target</label>
-          <input id="improveTarget" placeholder="base | decision | submodule:curiosity" />
-          <label for="improveSectionName">Section</label>
-          <input id="improveSectionName" value="Memory" />
+          <input id="improveTarget" placeholder="base | router | decision | submodule:curiosity" />
+          <label for="improveSectionName">Job ID</label>
+          <input id="improveSectionName" value="manual-debug-job" />
           <label for="improveReason">Reason</label>
           <textarea id="improveReason" placeholder="Why this update should happen..."></textarea>
-          <label for="improveContent">Proposal Content</label>
-          <textarea id="improveContent" placeholder="Replacement content"></textarea>
+          <label for="improveContent">Diff Text</label>
+          <textarea id="improveContent" placeholder="Unified diff text"></textarea>
           <div class="button-row">
             <button id="improveTrigger">Trigger</button>
             <button id="improvePropose">Propose</button>
           </div>
-          <label for="improveProposalId">Proposal Event ID</label>
-          <input id="improveProposalId" placeholder="event_id for review" />
+          <label for="improveProposalId">Proposal ID</label>
+          <input id="improveProposalId" placeholder="proposal_id for review" />
           <div class="button-row">
             <button class="secondary" id="improveApprove">Approve</button>
             <button class="secondary" id="improveReject">Reject</button>
@@ -1168,8 +1168,8 @@
             if (moduleName === "improve") {
               rawTextEl.textContent = "(none)";
               setContextViewText("(none)");
-              if (payload.event_id) {
-                improveProposalId.value = payload.event_id;
+              if (payload.proposal_id) {
+                improveProposalId.value = payload.proposal_id;
               }
               return;
             }
@@ -1374,7 +1374,7 @@
           target: (improveTarget.value || "").trim() || "manual",
           reason: (improveReason.value || "").trim(),
         };
-        const res = await fetch("/debug/improve/trigger", {
+        const res = await fetch("/improvements/trigger", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -1389,23 +1389,24 @@
 
       async function improvePropose() {
         const target = (improveTarget.value || "").trim();
-        const section = (improveSectionName.value || "").trim();
+        const jobId = (improveSectionName.value || "").trim();
         if (!target) {
           improveStatus.textContent = "Target is required.";
           return;
         }
-        if (!section) {
-          improveStatus.textContent = "Section is required.";
+        if (!jobId) {
+          improveStatus.textContent = "Job ID is required.";
           return;
         }
         improveStatus.textContent = "Submitting proposal...";
         const payload = {
           target,
-          section,
-          reason: (improveReason.value || "").trim(),
-          content: improveContent.value || "",
+          job_id: jobId,
+          diff_text: improveContent.value || "",
+          requires_approval: true,
+          created_by: "debug_ui",
         };
-        const res = await fetch("/debug/improve/proposal", {
+        const res = await fetch("/improvements/proposal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -1415,28 +1416,36 @@
           return;
         }
         const data = await res.json();
-        if (data.proposal_event_id) {
-          improveProposalId.value = data.proposal_event_id;
+        if (data.proposal_id) {
+          improveProposalId.value = data.proposal_id;
         }
-        improveStatus.textContent = data.auto_approved
-          ? "Proposed and auto-approved."
-          : "Proposal emitted.";
+        improveStatus.textContent = "Proposal emitted.";
         await fetchWorklogs();
       }
 
       async function improveReview(review) {
-        const proposalEventId = (improveProposalId.value || "").trim();
-        if (!proposalEventId) {
-          improveStatus.textContent = "Proposal Event ID is required.";
+        const proposalId = (improveProposalId.value || "").trim();
+        const target = (improveTarget.value || "").trim();
+        const jobId = (improveSectionName.value || "").trim();
+        if (!proposalId) {
+          improveStatus.textContent = "Proposal ID is required.";
           return;
         }
+        if (!target || !jobId) {
+          improveStatus.textContent = "Target and Job ID are required.";
+          return;
+        }
+        const decision = review === "approval" ? "approved" : "rejected";
         improveStatus.textContent = `Sending ${review}...`;
         const payload = {
-          proposal_event_id: proposalEventId,
-          review,
-          reason: (improveReason.value || "").trim(),
+          proposal_id: proposalId,
+          job_id: jobId,
+          target,
+          decision,
+          reviewed_by: "debug_ui",
+          review_reason: (improveReason.value || "").trim(),
         };
-        const res = await fetch("/debug/improve/review", {
+        const res = await fetch("/improvements/review", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
