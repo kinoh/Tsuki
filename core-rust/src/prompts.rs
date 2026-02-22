@@ -17,7 +17,9 @@ pub fn load_prompts(path: &Path) -> Result<PromptOverrides, String> {
         return Ok(PromptOverrides::default());
     }
     let raw = fs::read_to_string(path).map_err(|err| format!("failed to read prompts: {}", err))?;
-    parse_prompts(&raw)
+    let prompts = parse_prompts(&raw)?;
+    validate_memory_sections(&prompts)?;
+    Ok(prompts)
 }
 
 pub fn write_prompts(path: &Path, prompts: &PromptOverrides) -> Result<(), String> {
@@ -118,4 +120,71 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
     }
 
     Ok(overrides)
+}
+
+fn validate_memory_sections(prompts: &PromptOverrides) -> Result<(), String> {
+    let mut missing = Vec::<String>::new();
+    if let Some(base) = prompts.base.as_deref() {
+        if !has_markdown_h2_section(base, "Memory") {
+            missing.push("Base".to_string());
+        }
+    }
+    if let Some(router) = prompts.router.as_deref() {
+        if !has_markdown_h2_section(router, "Memory") {
+            missing.push("Router".to_string());
+        }
+    }
+    if let Some(decision) = prompts.decision.as_deref() {
+        if !has_markdown_h2_section(decision, "Memory") {
+            missing.push("Decision".to_string());
+        }
+    }
+    for (name, body) in &prompts.submodules {
+        if !has_markdown_h2_section(body, "Memory") {
+            missing.push(format!("Submodule:{}", name));
+        }
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    missing.sort();
+    Err(format!(
+        "prompts.md requires `## Memory` section in: {}",
+        missing.join(", ")
+    ))
+}
+
+fn has_markdown_h2_section(source: &str, section_name: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("## ") {
+            return false;
+        }
+        let title = trimmed.trim_start_matches('#').trim();
+        title == section_name
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_markdown_h2_section, validate_memory_sections, PromptOverrides};
+
+    #[test]
+    fn detects_memory_section() {
+        let text = "hello\n## Memory\nvalue\n";
+        assert!(has_markdown_h2_section(text, "Memory"));
+    }
+
+    #[test]
+    fn validates_memory_sections_for_loaded_overrides() {
+        let prompts = PromptOverrides {
+            base: Some("## Memory\nbase".to_string()),
+            router: Some("## Memory\nrouter".to_string()),
+            decision: Some("## Memory\ndecision".to_string()),
+            submodules: [("curiosity".to_string(), "## Memory\ns".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        assert!(validate_memory_sections(&prompts).is_ok());
+    }
 }

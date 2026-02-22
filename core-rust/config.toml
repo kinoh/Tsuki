@@ -78,7 +78,7 @@ Schema:
 {
   "memory_section_update": {"target": "base|router|decision|submodule:<name>", "content": "..."} | null,
   "concept_upserts": ["concept_name", ...],
-  "relation_additions": [{"from": "...", "to": "...", "relation_type": "IS_A|PART_OF|EVOKES"}, ...],
+  "relation_additions": [{"from": "...", "to": "...", "relation_type": "is-a|part-of|evokes"}, ...],
   "proposal": {"target": "base|router|decision|submodule:<name>", "diff_text": "unified diff text"} | null
 }
 If there is not enough signal, return null/empty fields instead of guessing."""

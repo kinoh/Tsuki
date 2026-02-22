@@ -26,6 +26,14 @@ Date: 2026-02-22
   - Added runtime step planning with validation.
   - Added `emit_event` execution over the same WebSocket session.
   - Added wait loop for emitted-event completion via DB polling.
+- `core-rust/src/prompts.rs`
+  - Added fail-fast validation at prompts load time:
+    - every loaded section (`Base`, `Router`, `Decision`, and each `Submodule`) must contain `## Memory`.
+  - Added unit tests for section detection/validation.
+- `core-rust/config.toml`
+  - Updated self-improvement relation schema wording to `is-a|part-of|evokes` to match runtime parser expectations.
+- `core-rust/data/prompts.md`
+  - Added explicit `## Memory` sections for loaded `Base` and `Decision` prompt bodies.
 - `core-rust/tests/integration/README.md`
   - Added step schema documentation and defaults.
 - `core-rust/tests/integration/scenarios/self_improvement_trigger.yaml`
@@ -38,3 +46,4 @@ Date: 2026-02-22
 ## Compatibility Impact
 - breaking-by-default (no compatibility layer): Yes.
 - Scenario files must define `steps`; top-level `tester_instructions` is no longer accepted.
+- Prompt override files now fail to load if a loaded section is missing `## Memory`.
