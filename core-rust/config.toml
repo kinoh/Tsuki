@@ -2,7 +2,7 @@
 port = 2953
 
 [llm]
-model = "gpt-5-nano"
+model = "gpt-5.2"
 router_model = "gpt-5-nano"
 temperature = 0.7
 temperature_enabled = false
@@ -76,11 +76,12 @@ Do not include markdown or explanations.
 The input includes a fixed module_target. Focus only on that module.
 Schema:
 {
-  "memory_section_update": {"target": "base|router|decision|submodule:<name>", "content": "..."} | null,
+  "memory_section_update": {"target": "router|decision|submodule:<name>", "content": "..."} | null,
   "concept_upserts": ["concept_name", ...],
   "relation_additions": [{"from": "...", "to": "...", "relation_type": "is-a|part-of|evokes"}, ...],
   "proposal": {"target": "base|router|decision|submodule:<name>", "diff_text": "unified diff text"} | null
 }
+Base is shared/common behavior. Do not write memory_section_update targeting base.
 For proposal.diff_text:
 - Output MUST be a valid unified diff only.
 - Do NOT output custom patch formats such as "*** Begin Patch".

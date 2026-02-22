@@ -124,11 +124,6 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
 
 fn validate_memory_sections(prompts: &PromptOverrides) -> Result<(), String> {
     let mut missing = Vec::<String>::new();
-    if let Some(base) = prompts.base.as_deref() {
-        if !has_markdown_h2_section(base, "Memory") {
-            missing.push("Base".to_string());
-        }
-    }
     if let Some(router) = prompts.router.as_deref() {
         if !has_markdown_h2_section(router, "Memory") {
             missing.push("Router".to_string());
@@ -178,7 +173,7 @@ mod tests {
     #[test]
     fn validates_memory_sections_for_loaded_overrides() {
         let prompts = PromptOverrides {
-            base: Some("## Memory\nbase".to_string()),
+            base: Some("base without memory section".to_string()),
             router: Some("## Memory\nrouter".to_string()),
             decision: Some("## Memory\ndecision".to_string()),
             submodules: [("curiosity".to_string(), "## Memory\ns".to_string())]

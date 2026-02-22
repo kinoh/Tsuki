@@ -673,7 +673,18 @@ async fn apply_memory_section_update(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(fallback_target);
-    let target = PromptTarget::parse(target_raw).unwrap_or(PromptTarget::Base);
+    let target = match PromptTarget::parse(target_raw) {
+        Some(value) => value,
+        None => {
+            return Err(format!(
+                "invalid memory_section_update target: {}",
+                target_raw
+            ));
+        }
+    };
+    if matches!(target, PromptTarget::Base) {
+        return Err("memory_section_update target 'base' is not allowed".to_string());
+    }
 
     let mut overrides = state.prompts.read().await.clone();
     let current = resolve_target_prompt_text(state, &overrides, &target).await?;
@@ -721,7 +732,7 @@ mod tests {
     #[test]
     fn parse_trigger_plan_accepts_plain_json() {
         let raw = r#"{
-            "memory_section_update": {"target":"base","content":"updated"},
+            "memory_section_update": {"target":"router","content":"updated"},
             "concept_upserts": ["submodule:curiosity"],
             "relation_additions": [{"from":"submodule:curiosity","to":"旅行","relation_type":"EVOKES"}],
             "proposal": {"target":"router","diff_text":"@@ -1 +1 @@\n-old\n+new"}
