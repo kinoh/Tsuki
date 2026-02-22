@@ -4,7 +4,7 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 
 ## Layout
 - `config/`: runner-level configuration (`tester` and `judge` model/prompt settings)
-- `scenarios/`: scenario definitions (`tester_instructions`, `metrics_definition`)
+- `scenarios/`: scenario definitions (`tester_instructions` or `steps`, `metrics_definition`)
 - `prompts/`: prompt templates for tester and judge roles
 - `logs/`: execution logs
 - `results/`: machine-readable run results
@@ -33,3 +33,18 @@ This directory contains the rebuilt integration test assets for `core-rust`.
   - `scenario_requirement_fit` (`0..1`)
   - `dialog_naturalness` (`0..1`)
 - Additional metrics are scenario-specific and defined in each scenario.
+
+## Scenario steps
+- Legacy mode remains supported:
+  - top-level `tester_instructions` drives one conversation phase.
+- Step mode can define a sequence of conversation and fixed event emission:
+  - `steps[].kind: conversation`
+  - `steps[].tester_instructions` (required)
+  - `steps[].max_turns` (optional, defaults to runner `execution.max_turns`)
+  - `steps[].kind: emit_event`
+  - `steps[].event.type: trigger` (currently only supported event type)
+  - `steps[].event.target` (optional, default `all`)
+  - `steps[].event.reason` (optional)
+  - `steps[].wait_for.tags_any` (optional, defaults to self-improvement processed tags)
+  - `steps[].wait_for.timeout_ms` (optional, default `15000`)
+- Conversation completion token is fixed to `__TEST_DONE__`.

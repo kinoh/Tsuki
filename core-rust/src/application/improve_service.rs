@@ -3,13 +3,13 @@ use serde_json::{json, Value};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{broadcast::error::RecvError, Semaphore};
 
+use crate::application::history_service::format_event_history;
 use crate::clock::now_iso8601;
 use crate::event::build_event;
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::write_prompts;
 use crate::{AppState, DebugImproveProposalRequest};
-use crate::application::history_service::format_event_history;
 
 use super::improve_approval_service::{
     ensure_active_submodule_exists, propose_improvement, replace_markdown_section_body,
@@ -167,13 +167,8 @@ async fn run_trigger_orchestrator(
 
     let mut results = Vec::<ModuleProcessResult>::new();
     for module_target in &module_targets {
-        let result = run_module_worker(
-            state,
-            trigger_event_id,
-            module_target.as_str(),
-            reason,
-        )
-        .await;
+        let result =
+            run_module_worker(state, trigger_event_id, module_target.as_str(), reason).await;
         emit_module_processed_event(state, trigger_event_id, &result).await;
         results.push(result);
     }

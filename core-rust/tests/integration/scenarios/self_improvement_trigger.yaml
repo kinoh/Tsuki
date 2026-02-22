@@ -1,0 +1,39 @@
+name: Self Improvement Trigger
+include_debug_events: true
+
+steps:
+  - kind: conversation
+    tester_instructions: |
+      Start with natural small talk in 1-2 short turns.
+      Ask about current mood and keep the tone casual.
+    max_turns: 4
+
+  - kind: emit_event
+    event:
+      type: trigger
+      target: all
+      reason: integration scenario fixed trigger
+    wait_for:
+      tags_any:
+        - self_improvement.module_processed
+        - self_improvement.trigger_processed
+      timeout_ms: 15000
+
+  - kind: conversation
+    tester_instructions: |
+      Continue the chat for 1-2 short turns and check whether answers stay coherent.
+      Keep it casual and avoid revealing test intent.
+    max_turns: 4
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: "How well the run satisfies scenario-specific required behaviors."
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  self_improvement_event_observability:
+    description: |
+      Judge whether the self-improvement trigger and processed events are clearly observable
+      in the event stream with coherent timing relative to the scenario steps.
+

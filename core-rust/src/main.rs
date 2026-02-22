@@ -859,8 +859,8 @@ async fn improve_trigger(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveTriggerRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    let result = crate::application::trigger_ingress_api::trigger_improvement(&state, payload)
-        .await?;
+    let result =
+        crate::application::trigger_ingress_api::trigger_improvement(&state, payload).await?;
     Ok(Json(result))
 }
 

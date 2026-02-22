@@ -30,6 +30,12 @@ const REQUIRED_BASELINE_METRICS: [&str; 2] = ["scenario_requirement_fit", "dialo
 const SECRET_DIR_PATH: &str = "tests/integration/secrets";
 const SECRET_KEY_ENV_VAR: &str = "PROMPT_PRIVATE_KEY";
 const INCOMPLETE_SCENARIO_REQUIREMENT_CAP: f64 = 0.5;
+const DEFAULT_EMIT_WAIT_TIMEOUT_MS: u64 = 15_000;
+const EMIT_WAIT_POLL_INTERVAL_MS: u64 = 200;
+const DEFAULT_TRIGGER_WAIT_TAGS: [&str; 2] = [
+    "self_improvement.module_processed",
+    "self_improvement.trigger_processed",
+];
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -73,13 +79,49 @@ struct Scenario {
     name: String,
     #[serde(default)]
     include_debug_events: bool,
+    #[serde(default)]
     tester_instructions: String,
+    #[serde(default)]
+    steps: Vec<ScenarioStep>,
     metrics_definition: HashMap<String, MetricDefinition>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct MetricDefinition {
     description: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ScenarioStep {
+    Conversation {
+        tester_instructions: String,
+        #[serde(default)]
+        max_turns: Option<usize>,
+    },
+    EmitEvent {
+        event: EmitEventPayload,
+        #[serde(default)]
+        wait_for: Option<WaitForSpec>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct EmitEventPayload {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WaitForSpec {
+    #[serde(default)]
+    tags_any: Vec<String>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -153,6 +195,25 @@ struct TurnReply {
 struct DialogueRun {
     transcript: Vec<TranscriptTurn>,
     response_times_ms: Vec<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct ConversationRuntimeStep {
+    tester_instructions: String,
+    max_turns: usize,
+}
+
+#[derive(Debug, Clone)]
+struct EmitEventRuntimeStep {
+    event: EmitEventPayload,
+    wait_for_tags_any: Vec<String>,
+    wait_for_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+enum RuntimeScenarioStep {
+    Conversation(ConversationRuntimeStep),
+    EmitEvent(EmitEventRuntimeStep),
 }
 
 #[derive(Debug, Clone)]
@@ -425,6 +486,7 @@ fn load_assets(args: &Args, identity: &age::x25519::Identity) -> Result<TestAsse
     }
 
     let scenario = load_scenario_with_secrets(&args.scenario_path, identity)?;
+    validate_scenario_definition(&scenario)?;
 
     for key in REQUIRED_BASELINE_METRICS {
         if !scenario.metrics_definition.contains_key(key) {
@@ -464,6 +526,57 @@ fn load_assets(args: &Args, identity: &age::x25519::Identity) -> Result<TestAsse
         execution: runner.execution,
         core: runner.core,
     })
+}
+
+fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
+    if scenario.steps.is_empty() {
+        if scenario.tester_instructions.trim().is_empty() {
+            return Err(
+                "scenario requires non-empty tester_instructions when steps is omitted".to_string(),
+            );
+        }
+        return Ok(());
+    }
+
+    for (index, step) in scenario.steps.iter().enumerate() {
+        match step {
+            ScenarioStep::Conversation {
+                tester_instructions,
+                max_turns,
+            } => {
+                if tester_instructions.trim().is_empty() {
+                    return Err(format!(
+                        "steps[{}] conversation requires non-empty tester_instructions",
+                        index
+                    ));
+                }
+                if matches!(max_turns, Some(0)) {
+                    return Err(format!(
+                        "steps[{}] conversation max_turns must be >= 1 when specified",
+                        index
+                    ));
+                }
+            }
+            ScenarioStep::EmitEvent { event, wait_for } => {
+                if !event.kind.eq_ignore_ascii_case("trigger") {
+                    return Err(format!(
+                        "steps[{}] emit_event supports only event.type='trigger' currently",
+                        index
+                    ));
+                }
+                if let Some(spec) = wait_for {
+                    if matches!(spec.timeout_ms, Some(0)) {
+                        return Err(format!(
+                            "steps[{}] emit_event wait_for.timeout_ms must be >= 1 when specified",
+                            index
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn ensure_openai_key() -> Result<(), String> {
@@ -891,6 +1004,7 @@ async fn run_tester_dialogue(
     assets: &TestAssets,
     runtime: &RuntimeContext,
 ) -> Result<DialogueRun, String> {
+    let steps = build_runtime_scenario_steps(&assets.scenario, assets.execution.max_turns)?;
     let (mut ws_stream, _) = connect_async(runtime.ws_url.as_str())
         .await
         .map_err(|err| format!("websocket connect failed: {}", err))?;
@@ -905,9 +1019,65 @@ async fn run_tester_dialogue(
     let mut response_times_ms: Vec<u64> = Vec::new();
     let mut processed_reply_event_ids: HashSet<String> = HashSet::new();
     let mut processed_decision_event_ids: HashSet<String> = HashSet::new();
+    let mut global_turn_index = 1_usize;
 
-    for turn_index in 1..=assets.execution.max_turns {
-        let utterance = generate_tester_utterance(assets, &transcript).await?;
+    for (step_index, step) in steps.iter().enumerate() {
+        match step {
+            RuntimeScenarioStep::Conversation(conversation) => {
+                run_conversation_step(
+                    assets,
+                    &mut ws_stream,
+                    conversation,
+                    &mut transcript,
+                    &mut response_times_ms,
+                    &mut processed_reply_event_ids,
+                    &mut processed_decision_event_ids,
+                    &mut global_turn_index,
+                )
+                .await?;
+            }
+            RuntimeScenarioStep::EmitEvent(emit) => {
+                run_emit_event_step(
+                    &mut ws_stream,
+                    runtime,
+                    emit,
+                    assets.execution.turn_timeout_ms,
+                    step_index + 1,
+                )
+                .await?;
+            }
+        }
+    }
+
+    let _ = ws_stream.send(Message::Close(None)).await;
+
+    if transcript.is_empty() {
+        return Err("tester produced no conversation turns".to_string());
+    }
+
+    Ok(DialogueRun {
+        transcript,
+        response_times_ms,
+    })
+}
+
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn run_conversation_step(
+    assets: &TestAssets,
+    ws_stream: &mut WsStream,
+    step: &ConversationRuntimeStep,
+    transcript: &mut Vec<TranscriptTurn>,
+    response_times_ms: &mut Vec<u64>,
+    processed_reply_event_ids: &mut HashSet<String>,
+    processed_decision_event_ids: &mut HashSet<String>,
+    global_turn_index: &mut usize,
+) -> Result<(), String> {
+    for _ in 0..step.max_turns {
+        let utterance =
+            generate_tester_utterance(assets, transcript, step.tester_instructions.as_str())
+                .await?;
         if utterance == "__TEST_DONE__" {
             break;
         }
@@ -915,6 +1085,7 @@ async fn run_tester_dialogue(
             return Err("tester returned empty utterance".to_string());
         }
 
+        let turn_index = *global_turn_index;
         println!(
             "HARNESS_WS_SEND turn={} tester_text={}",
             turn_index,
@@ -931,10 +1102,10 @@ async fn run_tester_dialogue(
             .map_err(|err| format!("message send failed: {}", err))?;
 
         let turn_reply = wait_for_reply_text(
-            &mut ws_stream,
+            ws_stream,
             assets.execution.turn_timeout_ms,
-            &mut processed_reply_event_ids,
-            &mut processed_decision_event_ids,
+            processed_reply_event_ids,
+            processed_decision_event_ids,
             turn_index,
         )
         .await?;
@@ -949,25 +1120,200 @@ async fn run_tester_dialogue(
         });
         if !turn_reply.saw_decision {
             wait_for_decision_event(
-                &mut ws_stream,
+                ws_stream,
                 assets.execution.turn_timeout_ms,
-                &mut processed_decision_event_ids,
+                processed_decision_event_ids,
                 turn_index,
             )
             .await?;
         }
+        *global_turn_index += 1;
+    }
+    Ok(())
+}
+
+async fn run_emit_event_step(
+    ws_stream: &mut WsStream,
+    runtime: &RuntimeContext,
+    step: &EmitEventRuntimeStep,
+    fallback_timeout_ms: u64,
+    step_index: usize,
+) -> Result<(), String> {
+    let before_count = read_event_count(&runtime.db_path).await?;
+    let payload = emit_event_payload_json(&step.event)?;
+    println!("HARNESS_WS_SEND step={} emit_event={}", step_index, payload);
+    ws_stream
+        .send(Message::Text(payload.into()))
+        .await
+        .map_err(|err| format!("emit event send failed: {}", err))?;
+
+    let timeout_ms = if step.wait_for_timeout_ms == 0 {
+        fallback_timeout_ms
+    } else {
+        step.wait_for_timeout_ms
+    };
+    wait_for_emit_event_completion(
+        &runtime.db_path,
+        before_count,
+        &step.wait_for_tags_any,
+        timeout_ms,
+        step_index,
+    )
+    .await
+}
+
+fn build_runtime_scenario_steps(
+    scenario: &Scenario,
+    default_conversation_max_turns: usize,
+) -> Result<Vec<RuntimeScenarioStep>, String> {
+    if default_conversation_max_turns == 0 {
+        return Err("execution.max_turns must be >= 1".to_string());
     }
 
-    let _ = ws_stream.send(Message::Close(None)).await;
-
-    if transcript.is_empty() {
-        return Err("tester produced no conversation turns".to_string());
+    if scenario.steps.is_empty() {
+        return Ok(vec![RuntimeScenarioStep::Conversation(
+            ConversationRuntimeStep {
+                tester_instructions: scenario.tester_instructions.clone(),
+                max_turns: default_conversation_max_turns,
+            },
+        )]);
     }
 
-    Ok(DialogueRun {
-        transcript,
-        response_times_ms,
+    let mut out = Vec::with_capacity(scenario.steps.len());
+    for (index, step) in scenario.steps.iter().enumerate() {
+        match step {
+            ScenarioStep::Conversation {
+                tester_instructions,
+                max_turns,
+            } => {
+                let resolved_max_turns = max_turns.unwrap_or(default_conversation_max_turns);
+                if resolved_max_turns == 0 {
+                    return Err(format!(
+                        "steps[{}] conversation max_turns must be >= 1",
+                        index
+                    ));
+                }
+                out.push(RuntimeScenarioStep::Conversation(ConversationRuntimeStep {
+                    tester_instructions: tester_instructions.clone(),
+                    max_turns: resolved_max_turns,
+                }));
+            }
+            ScenarioStep::EmitEvent { event, wait_for } => {
+                let wait_for_tags_any = wait_for
+                    .as_ref()
+                    .map(|spec| {
+                        if spec.tags_any.is_empty() {
+                            DEFAULT_TRIGGER_WAIT_TAGS
+                                .iter()
+                                .map(|tag| tag.to_string())
+                                .collect::<Vec<_>>()
+                        } else {
+                            spec.tags_any.clone()
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        DEFAULT_TRIGGER_WAIT_TAGS
+                            .iter()
+                            .map(|tag| tag.to_string())
+                            .collect::<Vec<_>>()
+                    });
+                let wait_for_timeout_ms = wait_for
+                    .as_ref()
+                    .and_then(|spec| spec.timeout_ms)
+                    .unwrap_or(DEFAULT_EMIT_WAIT_TIMEOUT_MS);
+                out.push(RuntimeScenarioStep::EmitEvent(EmitEventRuntimeStep {
+                    event: event.clone(),
+                    wait_for_tags_any,
+                    wait_for_timeout_ms,
+                }));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn emit_event_payload_json(event: &EmitEventPayload) -> Result<String, String> {
+    if !event.kind.eq_ignore_ascii_case("trigger") {
+        return Err(format!(
+            "unsupported emit_event type '{}': only 'trigger' is supported",
+            event.kind
+        ));
+    }
+    let target = event
+        .target
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("all");
+    let reason = event
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("integration scenario trigger");
+    Ok(json!({
+        "type": "trigger",
+        "target": target,
+        "reason": reason,
     })
+    .to_string())
+}
+
+async fn wait_for_emit_event_completion(
+    db_path: &Path,
+    offset: usize,
+    tags_any: &[String],
+    timeout_ms: u64,
+    step_index: usize,
+) -> Result<(), String> {
+    let effective_timeout_ms = timeout_ms.max(1);
+    let deadline = Instant::now() + Duration::from_millis(effective_timeout_ms);
+    loop {
+        let events = read_events_since(db_path, offset).await?;
+        if let Some(event_id) = find_first_event_with_any_tag(&events, tags_any) {
+            println!(
+                "HARNESS_EMIT_EVENT_WAIT_OK step={} matched_event_id={} tags_any={}",
+                step_index,
+                event_id,
+                tags_any.join(",")
+            );
+            return Ok(());
+        }
+
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "WAIT_FOR_EVENT_TIMEOUT step={} tags_any={} timeout_ms={}",
+                step_index,
+                tags_any.join(","),
+                effective_timeout_ms
+            ));
+        }
+        sleep(Duration::from_millis(EMIT_WAIT_POLL_INTERVAL_MS)).await;
+    }
+}
+
+fn find_first_event_with_any_tag(events: &[Value], tags_any: &[String]) -> Option<String> {
+    if tags_any.is_empty() {
+        return None;
+    }
+    for event in events {
+        let tags = event
+            .get("tags")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .unwrap_or_default();
+        if tags
+            .iter()
+            .any(|tag| tags_any.iter().any(|expected| expected == tag))
+        {
+            return event
+                .get("event_id")
+                .and_then(Value::as_str)
+                .map(|value| value.to_string())
+                .or_else(|| Some("-".to_string()));
+        }
+    }
+    None
 }
 
 fn response_time_stats(values: &[u64]) -> (Option<f64>, Option<u64>, Option<u64>) {
@@ -984,12 +1330,13 @@ fn response_time_stats(values: &[u64]) -> (Option<f64>, Option<u64>, Option<u64>
 async fn generate_tester_utterance(
     assets: &TestAssets,
     transcript: &[TranscriptTurn],
+    tester_instructions: &str,
 ) -> Result<String, String> {
     let transcript_json = serde_json::to_string_pretty(transcript)
         .map_err(|err| format!("failed to serialize transcript: {}", err))?;
     let input = format!(
         "Scenario instructions:\n{}\n\nConversation transcript:\n{}\n\nIf scenario goals are already sufficiently exercised, output exactly __TEST_DONE__. Otherwise output exactly one next user utterance.",
-        assets.scenario.tester_instructions, transcript_json
+        tester_instructions, transcript_json
     );
 
     let response = call_llm(
@@ -1407,6 +1754,7 @@ async fn judge_run(
     transcript: &[TranscriptTurn],
     events: &[Value],
 ) -> Result<JudgeOutput, String> {
+    let scenario_instruction_text = scenario_instructions_for_judge(&assets.scenario);
     let metrics_json = serde_json::to_string_pretty(&assets.scenario.metrics_definition)
         .map_err(|err| format!("failed to serialize metrics_definition: {}", err))?;
     let transcript_json = serde_json::to_string_pretty(transcript)
@@ -1416,7 +1764,7 @@ async fn judge_run(
 
     let input = format!(
         "Scenario tester_instructions:\n{}\n\nMetrics definition:\n{}\n\nTranscript:\n{}\n\nEvents:\n{}\n\nReturn JSON only.",
-        assets.scenario.tester_instructions, metrics_json, transcript_json, events_json
+        scenario_instruction_text, metrics_json, transcript_json, events_json
     );
 
     let raw = call_llm(
@@ -1430,6 +1778,70 @@ async fn judge_run(
         .ok_or_else(|| format!("judge output is not valid JSON object: {}", raw))?;
     serde_json::from_str::<JudgeOutput>(json_text.as_str())
         .map_err(|err| format!("failed to parse judge JSON: {}", err))
+}
+
+fn scenario_instructions_for_judge(scenario: &Scenario) -> String {
+    if scenario.steps.is_empty() {
+        return scenario.tester_instructions.clone();
+    }
+
+    let mut lines = Vec::<String>::new();
+    if !scenario.tester_instructions.trim().is_empty() {
+        lines.push("Legacy tester_instructions:".to_string());
+        lines.push(scenario.tester_instructions.trim().to_string());
+    }
+    lines.push("Scenario steps:".to_string());
+    for (index, step) in scenario.steps.iter().enumerate() {
+        match step {
+            ScenarioStep::Conversation {
+                tester_instructions,
+                max_turns,
+            } => {
+                let turns_text = max_turns
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "runner_default".to_string());
+                lines.push(format!(
+                    "{}. conversation max_turns={} instructions={}",
+                    index + 1,
+                    turns_text,
+                    tester_instructions.trim()
+                ));
+            }
+            ScenarioStep::EmitEvent { event, wait_for } => {
+                let target = event
+                    .target
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("all");
+                let reason = event
+                    .reason
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("integration scenario trigger");
+                let timeout_ms = wait_for
+                    .as_ref()
+                    .and_then(|spec| spec.timeout_ms)
+                    .unwrap_or(DEFAULT_EMIT_WAIT_TIMEOUT_MS);
+                let tags_text = wait_for
+                    .as_ref()
+                    .map(|spec| spec.tags_any.join(","))
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or_else(|| DEFAULT_TRIGGER_WAIT_TAGS.join(","));
+                lines.push(format!(
+                    "{}. emit_event type={} target={} reason={} wait_for_tags_any={} wait_timeout_ms={}",
+                    index + 1,
+                    event.kind,
+                    target,
+                    reason,
+                    tags_text,
+                    timeout_ms
+                ));
+            }
+        }
+    }
+    lines.join("\n")
 }
 
 async fn call_llm(model: &str, instructions: &str, input: &str) -> Result<String, String> {
