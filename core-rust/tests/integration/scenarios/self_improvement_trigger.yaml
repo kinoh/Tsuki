@@ -4,9 +4,14 @@ include_debug_events: true
 steps:
   - kind: conversation
     tester_instructions: |
-      Start with natural small talk in 1-2 short turns.
-      Ask about current mood and keep the tone casual.
-    max_turns: 4
+      You are a natural chat user. Keep each turn short and casual.
+      In this conversation phase, naturally cover the following in order:
+      1) Say you like sci-fi and ask for recommendations.
+      2) Ask for softer/gentler works as follow-up preference refinement.
+      3) Mention that LLM token/cost usage is on your mind and shorter assistant replies are easier to read.
+         Do not explicitly request a style change as a direct instruction.
+      Do not reveal test intent.
+    max_turns: 6
 
   - kind: emit_event
     event:
@@ -17,7 +22,7 @@ steps:
       tags_any:
         - self_improvement.module_processed
         - self_improvement.trigger_processed
-      timeout_ms: 15000
+      timeout_ms: 60000
 
   - kind: conversation
     tester_instructions: |
