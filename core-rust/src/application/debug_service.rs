@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashSet;
 
+use crate::clock::now_iso8601;
 use crate::application::execution_service::{
     current_prompt_overrides, load_active_module_instructions, run_all_submodules_debug,
     run_decision_debug, run_submodule_debug, run_submodule_tool,
@@ -31,7 +32,12 @@ impl AppendInputMode {
 struct InputMessage {
     #[serde(default, rename = "type")]
     kind: String,
+    #[serde(default)]
     text: String,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 pub(crate) async fn run_debug_module(
@@ -162,6 +168,35 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
     } else {
         input.kind.trim().to_string()
     };
+
+    if kind == "trigger" {
+        let target = input
+            .target
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("all")
+            .to_string();
+        let reason = input
+            .reason
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("websocket trigger")
+            .to_string();
+        let trigger_event = build_event(
+            "system",
+            "text",
+            json!({
+                "target": target,
+                "reason": reason,
+                "created_at": now_iso8601(),
+            }),
+            vec!["self_improvement.triggered".to_string()],
+        );
+        record_event(state, trigger_event).await;
+        return Err(());
+    }
 
     if kind != "message" && kind != "sensory" {
         let event = build_event(

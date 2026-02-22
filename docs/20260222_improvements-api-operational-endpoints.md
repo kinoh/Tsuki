@@ -52,8 +52,11 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
   - Why: avoid hidden fallback behavior that silently changes runtime semantics.
   - Policy: for self-improvement worker prompt, runtime reads configured text directly instead of constructing defaults in code.
 - Self-improvement worker input now includes `recent_event_history` in the same text format used by normal module execution (`ts | role | message`):
-  - Why: scheduled automatic runs should rely on runtime event history (including user reactions) as first-class signal, not only manual `feedback_refs`.
-  - `feedback_refs` remains optional supplemental hints.
+  - Why: scheduled automatic runs should rely on runtime event history (including user reactions) as first-class signal.
+- Trigger request contract was simplified to `target` + `reason` only:
+  - Why: remove manual-hint semantics (`feedback_refs`) from the operational trigger surface.
+- WebSocket input now supports trigger ingress with `{"type":"trigger","target":"...","reason":"..."}`:
+  - Why: debug/integration flows can request the same trigger event path without introducing scenario-only action DSL.
 
 ## Why
 - Operational endpoints remove unnecessary debug-path coupling for this flow.
