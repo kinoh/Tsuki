@@ -6,7 +6,6 @@ use async_openai::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use bech32::{ToBase32, Variant};
 use futures::{SinkExt, StreamExt};
-use libsql::params;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -31,7 +30,6 @@ const SECRET_DIR_PATH: &str = "tests/integration/secrets";
 const SECRET_KEY_ENV_VAR: &str = "PROMPT_PRIVATE_KEY";
 const INCOMPLETE_SCENARIO_REQUIREMENT_CAP: f64 = 0.5;
 const DEFAULT_EMIT_WAIT_TIMEOUT_MS: u64 = 15_000;
-const EMIT_WAIT_POLL_INTERVAL_MS: u64 = 200;
 const DEFAULT_TRIGGER_WAIT_TAGS: [&str; 2] = [
     "self_improvement.module_processed",
     "self_improvement.trigger_processed",
@@ -193,6 +191,7 @@ struct TurnReply {
 struct DialogueRun {
     transcript: Vec<TranscriptTurn>,
     response_times_ms: Vec<u64>,
+    events: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -742,9 +741,9 @@ async fn execute_runs(
     let mut runs = Vec::with_capacity(run_count);
 
     for run_index in 1..=run_count {
-        let before_count = read_event_count(&runtime.db_path).await?;
         let mut transcript: Vec<TranscriptTurn> = Vec::new();
         let mut response_times_ms: Vec<u64> = Vec::new();
+        let mut raw_events: Vec<Value> = Vec::new();
         let mut convo_error: Option<(String, String)> = None;
         let max_attempts = assets.execution.transient_retry.saturating_add(1);
 
@@ -759,6 +758,7 @@ async fn execute_runs(
                 Ok(Ok(value)) => {
                     transcript = value.transcript;
                     response_times_ms = value.response_times_ms;
+                    raw_events = value.events;
                     convo_error = None;
                     break;
                 }
@@ -778,7 +778,6 @@ async fn execute_runs(
             }
         }
 
-        let raw_events = read_events_since(&runtime.db_path, before_count).await?;
         let log_file = write_event_log(
             assets.scenario.name.as_str(),
             run_index,
@@ -1012,6 +1011,8 @@ async fn run_tester_dialogue(
     let mut response_times_ms: Vec<u64> = Vec::new();
     let mut processed_reply_event_ids: HashSet<String> = HashSet::new();
     let mut processed_decision_event_ids: HashSet<String> = HashSet::new();
+    let mut observed_event_ids: HashSet<String> = HashSet::new();
+    let mut observed_events: Vec<Value> = Vec::new();
     let mut global_turn_index = 1_usize;
 
     for (step_index, step) in steps.iter().enumerate() {
@@ -1025,6 +1026,8 @@ async fn run_tester_dialogue(
                     &mut response_times_ms,
                     &mut processed_reply_event_ids,
                     &mut processed_decision_event_ids,
+                    &mut observed_event_ids,
+                    &mut observed_events,
                     &mut global_turn_index,
                 )
                 .await?;
@@ -1032,10 +1035,11 @@ async fn run_tester_dialogue(
             RuntimeScenarioStep::EmitEvent(emit) => {
                 run_emit_event_step(
                     &mut ws_stream,
-                    runtime,
                     emit,
                     assets.execution.turn_timeout_ms,
                     step_index + 1,
+                    &mut observed_event_ids,
+                    &mut observed_events,
                 )
                 .await?;
             }
@@ -1051,6 +1055,7 @@ async fn run_tester_dialogue(
     Ok(DialogueRun {
         transcript,
         response_times_ms,
+        events: observed_events,
     })
 }
 
@@ -1065,6 +1070,8 @@ async fn run_conversation_step(
     response_times_ms: &mut Vec<u64>,
     processed_reply_event_ids: &mut HashSet<String>,
     processed_decision_event_ids: &mut HashSet<String>,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
     global_turn_index: &mut usize,
 ) -> Result<(), String> {
     for _ in 0..step.max_turns {
@@ -1099,6 +1106,8 @@ async fn run_conversation_step(
             assets.execution.turn_timeout_ms,
             processed_reply_event_ids,
             processed_decision_event_ids,
+            observed_event_ids,
+            observed_events,
             turn_index,
         )
         .await?;
@@ -1116,6 +1125,8 @@ async fn run_conversation_step(
                 ws_stream,
                 assets.execution.turn_timeout_ms,
                 processed_decision_event_ids,
+                observed_event_ids,
+                observed_events,
                 turn_index,
             )
             .await?;
@@ -1127,12 +1138,12 @@ async fn run_conversation_step(
 
 async fn run_emit_event_step(
     ws_stream: &mut WsStream,
-    runtime: &RuntimeContext,
     step: &EmitEventRuntimeStep,
     fallback_timeout_ms: u64,
     step_index: usize,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
 ) -> Result<(), String> {
-    let before_count = read_event_count(&runtime.db_path).await?;
     let payload = emit_event_payload_json(&step.event)?;
     println!("HARNESS_WS_SEND step={} emit_event={}", step_index, payload);
     ws_stream
@@ -1145,12 +1156,13 @@ async fn run_emit_event_step(
     } else {
         step.wait_for_timeout_ms
     };
-    wait_for_emit_event_completion(
-        &runtime.db_path,
-        before_count,
+    wait_for_emit_event_completion_ws(
+        ws_stream,
         &step.wait_for_tags_any,
         timeout_ms,
         step_index,
+        observed_event_ids,
+        observed_events,
     )
     .await
 }
@@ -1243,27 +1255,18 @@ fn emit_event_payload_json(event: &EmitEventPayload) -> Result<String, String> {
     .to_string())
 }
 
-async fn wait_for_emit_event_completion(
-    db_path: &Path,
-    offset: usize,
+async fn wait_for_emit_event_completion_ws(
+    ws_stream: &mut WsStream,
     tags_any: &[String],
     timeout_ms: u64,
     step_index: usize,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
 ) -> Result<(), String> {
     let effective_timeout_ms = timeout_ms.max(1);
     let deadline = Instant::now() + Duration::from_millis(effective_timeout_ms);
+    let mut trigger_event_id: Option<String> = None;
     loop {
-        let events = read_events_since(db_path, offset).await?;
-        if let Some(event_id) = find_first_event_with_any_tag(&events, tags_any) {
-            println!(
-                "HARNESS_EMIT_EVENT_WAIT_OK step={} matched_event_id={} tags_any={}",
-                step_index,
-                event_id,
-                tags_any.join(",")
-            );
-            return Ok(());
-        }
-
         if Instant::now() >= deadline {
             return Err(format!(
                 "WAIT_FOR_EVENT_TIMEOUT step={} tags_any={} timeout_ms={}",
@@ -1272,32 +1275,52 @@ async fn wait_for_emit_event_completion(
                 effective_timeout_ms
             ));
         }
-        sleep(Duration::from_millis(EMIT_WAIT_POLL_INTERVAL_MS)).await;
-    }
-}
 
-fn find_first_event_with_any_tag(events: &[Value], tags_any: &[String]) -> Option<String> {
-    if tags_any.is_empty() {
-        return None;
-    }
-    for event in events {
-        let tags = event
-            .get("tags")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>())
-            .unwrap_or_default();
-        if tags
-            .iter()
-            .any(|tag| tags_any.iter().any(|expected| expected == tag))
-        {
-            return event
-                .get("event_id")
-                .and_then(Value::as_str)
-                .map(|value| value.to_string())
-                .or_else(|| Some("-".to_string()));
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let message = match timeout(remaining, ws_stream.next()).await {
+            Ok(value) => value,
+            Err(_) => {
+                return Err(format!(
+                    "WAIT_FOR_EVENT_TIMEOUT step={} tags_any={} timeout_ms={}",
+                    step_index,
+                    tags_any.join(","),
+                    effective_timeout_ms
+                ))
+            }
+        };
+
+        match message {
+            Some(Ok(Message::Text(text))) => {
+                let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
+                maybe_record_runtime_event(&parsed, observed_event_ids, observed_events);
+
+                if trigger_event_id.is_none()
+                    && has_event_tag(&parsed, "self_improvement.triggered")
+                {
+                    trigger_event_id = extract_event_id(&parsed);
+                }
+
+                if event_matches_emit_completion(&parsed, tags_any, trigger_event_id.as_deref()) {
+                    let matched_event_id =
+                        extract_event_id(&parsed).unwrap_or_else(|| "-".to_string());
+                    println!(
+                        "HARNESS_EMIT_EVENT_WAIT_OK step={} matched_event_id={} trigger_event_id={} tags_any={}",
+                        step_index,
+                        matched_event_id,
+                        trigger_event_id.as_deref().unwrap_or("-"),
+                        tags_any.join(",")
+                    );
+                    return Ok(());
+                }
+            }
+            Some(Ok(Message::Close(_))) => {
+                return Err("websocket closed before emit_event completion".to_string());
+            }
+            Some(Ok(_)) => {}
+            Some(Err(err)) => return Err(format!("websocket receive failed: {}", err)),
+            None => return Err("websocket stream ended before emit_event completion".to_string()),
         }
     }
-    None
 }
 
 fn response_time_stats(values: &[u64]) -> (Option<f64>, Option<u64>, Option<u64>) {
@@ -1343,12 +1366,12 @@ async fn generate_tester_utterance(
 }
 
 async fn wait_for_reply_text(
-    ws_stream: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
+    ws_stream: &mut WsStream,
     timeout_ms: u64,
     processed_reply_event_ids: &mut HashSet<String>,
     processed_decision_event_ids: &mut HashSet<String>,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
     turn_index: usize,
 ) -> Result<TurnReply, String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
@@ -1377,6 +1400,7 @@ async fn wait_for_reply_text(
         match message {
             Some(Ok(Message::Text(text))) => {
                 let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
+                maybe_record_runtime_event(&parsed, observed_event_ids, observed_events);
                 let summary = extract_event_summary(&parsed);
                 println!(
                     "HARNESS_WS_RECV turn={} event_id={} source={} tags={} reply_candidate={}",
@@ -1450,11 +1474,11 @@ async fn wait_for_reply_text(
 }
 
 async fn wait_for_decision_event(
-    ws_stream: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
+    ws_stream: &mut WsStream,
     timeout_ms: u64,
     processed_decision_event_ids: &mut HashSet<String>,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
     turn_index: usize,
 ) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
@@ -1481,6 +1505,7 @@ async fn wait_for_decision_event(
         match message {
             Some(Ok(Message::Text(text))) => {
                 let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
+                maybe_record_runtime_event(&parsed, observed_event_ids, observed_events);
                 let summary = extract_event_summary(&parsed);
                 println!(
                     "HARNESS_WS_POST_REPLY_RECV turn={} event_id={} source={} tags={} decision_candidate={}",
@@ -1579,6 +1604,102 @@ fn extract_event_id(message: &Value) -> Option<String> {
         .map(|value| value.to_string())
 }
 
+fn has_event_tag(message: &Value, expected: &str) -> bool {
+    message
+        .get("event")
+        .and_then(|value| value.get("meta"))
+        .and_then(|value| value.get("tags"))
+        .and_then(Value::as_array)
+        .map(|tags| {
+            tags.iter()
+                .filter_map(Value::as_str)
+                .any(|tag| tag == expected)
+        })
+        .unwrap_or(false)
+}
+
+fn event_matches_emit_completion(
+    message: &Value,
+    tags_any: &[String],
+    trigger_event_id: Option<&str>,
+) -> bool {
+    let event = match extract_runtime_event(message) {
+        Some(value) => value,
+        None => return false,
+    };
+    let tags = event
+        .get("tags")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let has_tag = tags
+        .iter()
+        .any(|tag| tags_any.iter().any(|expected| expected == tag));
+    if !has_tag {
+        return false;
+    }
+
+    let Some(trigger_id) = trigger_event_id else {
+        return true;
+    };
+    event
+        .get("payload")
+        .and_then(|value| value.get("trigger_event_id"))
+        .and_then(Value::as_str)
+        .map(|value| value == trigger_id)
+        .unwrap_or(false)
+}
+
+fn maybe_record_runtime_event(
+    message: &Value,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
+) {
+    let Some(event) = extract_runtime_event(message) else {
+        return;
+    };
+    let Some(event_id) = event
+        .get("event_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    if !observed_event_ids.insert(event_id) {
+        return;
+    }
+    observed_events.push(event);
+}
+
+fn extract_runtime_event(message: &Value) -> Option<Value> {
+    let obj = message.as_object()?;
+    if obj.get("type").and_then(Value::as_str) != Some("event") {
+        return None;
+    }
+    let event = obj.get("event").and_then(Value::as_object)?;
+    let tags = event
+        .get("meta")
+        .and_then(|value| value.get("tags"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Some(json!({
+        "event_id": event.get("event_id").and_then(Value::as_str).unwrap_or(""),
+        "ts": event.get("ts").and_then(Value::as_str).unwrap_or(""),
+        "source": event.get("source").and_then(Value::as_str).unwrap_or(""),
+        "modality": event.get("modality").and_then(Value::as_str).unwrap_or(""),
+        "tags": tags,
+        "payload": event.get("payload").cloned().unwrap_or(Value::Null),
+    }))
+}
+
 fn is_reply_event(message: &Value) -> bool {
     let obj = match message.as_object() {
         Some(value) => value,
@@ -1651,66 +1772,6 @@ fn extract_reply_text(message: &Value) -> String {
         .and_then(Value::as_str)
         .map(|value| value.to_string())
         .unwrap_or_else(|| "(missing text payload)".to_string())
-}
-
-async fn read_event_count(db_path: &Path) -> Result<usize, String> {
-    let db = libsql::Builder::new_local(db_path.to_string_lossy().as_ref())
-        .build()
-        .await
-        .map_err(|err| format!("failed to open db: {}", err))?;
-    let conn = db
-        .connect()
-        .map_err(|err| format!("failed to connect db: {}", err))?;
-    let mut rows = conn
-        .query("SELECT COUNT(*) FROM events", params![])
-        .await
-        .map_err(|err| format!("failed to query event count: {}", err))?;
-    if let Some(row) = rows.next().await.map_err(|err| err.to_string())? {
-        let count: i64 = row.get(0).map_err(|err| err.to_string())?;
-        return Ok(count.max(0) as usize);
-    }
-    Ok(0)
-}
-
-async fn read_events_since(db_path: &Path, offset: usize) -> Result<Vec<Value>, String> {
-    let db = libsql::Builder::new_local(db_path.to_string_lossy().as_ref())
-        .build()
-        .await
-        .map_err(|err| format!("failed to open db: {}", err))?;
-    let conn = db
-        .connect()
-        .map_err(|err| format!("failed to connect db: {}", err))?;
-    let mut rows = conn
-        .query(
-            "SELECT event_id, ts, source, modality, payload_json, tags_json FROM events ORDER BY ts ASC LIMIT -1 OFFSET ?",
-            params![offset as i64],
-        )
-        .await
-        .map_err(|err| format!("failed to query events: {}", err))?;
-
-    let mut out = Vec::new();
-    while let Some(row) = rows.next().await.map_err(|err| err.to_string())? {
-        let event_id: String = row.get(0).map_err(|err| err.to_string())?;
-        let ts: String = row.get(1).map_err(|err| err.to_string())?;
-        let source: String = row.get(2).map_err(|err| err.to_string())?;
-        let modality: String = row.get(3).map_err(|err| err.to_string())?;
-        let payload_json: String = row.get(4).map_err(|err| err.to_string())?;
-        let tags_json: String = row.get(5).map_err(|err| err.to_string())?;
-
-        let payload = serde_json::from_str::<Value>(&payload_json).unwrap_or(Value::Null);
-        let tags = serde_json::from_str::<Vec<String>>(&tags_json).unwrap_or_default();
-
-        out.push(json!({
-            "event_id": event_id,
-            "ts": ts,
-            "source": source,
-            "modality": modality,
-            "tags": tags,
-            "payload": payload,
-        }));
-    }
-
-    Ok(out)
 }
 
 fn filter_events(events: Vec<Value>, include_debug_events: bool) -> Vec<Value> {

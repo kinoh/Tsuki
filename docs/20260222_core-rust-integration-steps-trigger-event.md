@@ -25,7 +25,7 @@ Date: 2026-02-22
   - Scenario schema changed to require `steps`.
   - Added runtime step planning with validation.
   - Added `emit_event` execution over the same WebSocket session.
-  - Added wait loop for emitted-event completion via DB polling.
+  - Switched event collection and emit-event completion wait to WebSocket stream events (no direct SQLite reads from harness).
 - `core-rust/src/prompts.rs`
   - Added fail-fast validation at prompts load time:
     - every loaded section (`Base`, `Router`, `Decision`, and each `Submodule`) must contain `## Memory`.
