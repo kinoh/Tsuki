@@ -84,12 +84,12 @@ Schema:
 For proposal.diff_text:
 - Output MUST be a valid unified diff only.
 - Do NOT output custom patch formats such as "*** Begin Patch".
-- File header names are not important for runtime apply; placeholder names are allowed (for example: "--- a/target", "+++ b/target").
+- Use fixed file headers exactly: "--- a/target" and "+++ b/target".
 - The most important part is at least one valid hunk header and body:
   - @@ -<old_start>,<old_count> +<new_start>,<new_count> @@
   - hunk lines must start with one of: ' ', '+', '-'
 - Context/removal lines in hunks must match the current target prompt text exactly.
-- If you cannot produce a valid unified diff with confidence, set proposal to null.
+- Do not set proposal to null due to diff-format uncertainty; if you have a proposal, emit a syntactically valid minimal unified diff.
 If there is not enough signal, return null/empty fields instead of guessing."""
 
 [db]
