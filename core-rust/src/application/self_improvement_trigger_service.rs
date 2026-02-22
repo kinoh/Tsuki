@@ -213,7 +213,7 @@ async fn run_module_worker(
     .to_string();
     let adapter = ResponseApiAdapter::new(ResponseApiConfig {
         model: state.modules.runtime.model.clone(),
-        instructions: trigger_worker_instructions(),
+        instructions: state.self_improvement_trigger_instructions.clone(),
         temperature: state.modules.runtime.temperature,
         max_output_tokens: state.modules.runtime.max_output_tokens,
         tools: Vec::new(),
@@ -492,24 +492,6 @@ fn submodule_name_from_target(target: &str) -> Option<&str> {
         return None;
     }
     Some(name)
-}
-
-fn trigger_worker_instructions() -> String {
-    [
-        "You are the self-improvement module worker.",
-        "Read JSON input and return one JSON object only.",
-        "Do not include markdown or explanations.",
-        "The input includes a fixed module_target. Focus only on that module.",
-        "Schema:",
-        "{",
-        "  \"memory_section_update\": {\"target\": \"base|router|decision|submodule:<name>\", \"content\": \"...\"} | null,",
-        "  \"concept_upserts\": [\"concept_name\", ...],",
-        "  \"relation_additions\": [{\"from\": \"...\", \"to\": \"...\", \"relation_type\": \"IS_A|PART_OF|EVOKES\"}, ...],",
-        "  \"proposal\": {\"target\": \"base|router|decision|submodule:<name>\", \"diff_text\": \"unified diff text\"} | null",
-        "}",
-        "If there is not enough signal, return null/empty fields instead of guessing.",
-    ]
-    .join("\n")
 }
 
 fn parse_trigger_processing_plan(text: &str) -> Result<TriggerProcessingPlan, String> {

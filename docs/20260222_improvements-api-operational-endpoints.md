@@ -48,6 +48,9 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 - Submodule concept existence is now guaranteed in module-worker post-LLM execution:
   - when `module_target` is `submodule:<name>`, runtime always runs `concept_upsert("submodule:<name>")` before applying plan actions.
   - on ensure failure, the module result is emitted as failed with `error_code=SUBMODULE_CONCEPT_ENSURE_FAILED`.
+- Trigger worker instructions are moved from code hardcoding to `config.toml` (`[prompts].self_improvement_trigger_instructions`):
+  - Why: avoid hidden fallback behavior that silently changes runtime semantics.
+  - Policy: for self-improvement worker prompt, runtime reads configured text directly instead of constructing defaults in code.
 
 ## Why
 - Operational endpoints remove unnecessary debug-path coupling for this flow.

@@ -70,6 +70,18 @@ Execution reason: {{execution_reason}}"""
 
 [prompts]
 path = "data/prompts.md"
+self_improvement_trigger_instructions = """You are the self-improvement module worker.
+Read JSON input and return one JSON object only.
+Do not include markdown or explanations.
+The input includes a fixed module_target. Focus only on that module.
+Schema:
+{
+  "memory_section_update": {"target": "base|router|decision|submodule:<name>", "content": "..."} | null,
+  "concept_upserts": ["concept_name", ...],
+  "relation_additions": [{"from": "...", "to": "...", "relation_type": "IS_A|PART_OF|EVOKES"}, ...],
+  "proposal": {"target": "base|router|decision|submodule:<name>", "diff_text": "unified diff text"} | null
+}
+If there is not enough signal, return null/empty fields instead of guessing."""
 
 [db]
 path = "./data/core-rust.db"

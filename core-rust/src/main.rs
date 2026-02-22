@@ -53,6 +53,7 @@ pub(crate) struct AppState {
     pub(crate) input: InputConfig,
     pub(crate) prompts: Arc<RwLock<PromptOverrides>>,
     pub(crate) prompts_path: PathBuf,
+    pub(crate) self_improvement_trigger_instructions: String,
     pub(crate) router_model: String,
     pub(crate) router_instructions: String,
     pub(crate) decision_instructions: String,
@@ -272,6 +273,10 @@ async fn main() {
         input: config.input.clone(),
         prompts,
         prompts_path,
+        self_improvement_trigger_instructions: config
+            .prompts
+            .self_improvement_trigger_instructions
+            .clone(),
         router_model: config
             .llm
             .router_model

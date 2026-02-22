@@ -8,7 +8,6 @@ pub struct Config {
     #[serde(default)]
     pub router: RouterConfig,
     pub input: InputConfig,
-    #[serde(default)]
     pub prompts: PromptsConfig,
     pub db: DbConfig,
     pub modules: Vec<ModuleConfig>,
@@ -88,14 +87,7 @@ pub struct InputConfig {
 pub struct PromptsConfig {
     #[serde(default = "default_prompts_path")]
     pub path: String,
-}
-
-impl Default for PromptsConfig {
-    fn default() -> Self {
-        Self {
-            path: default_prompts_path(),
-        }
-    }
+    pub self_improvement_trigger_instructions: String,
 }
 
 fn default_prompts_path() -> String {
