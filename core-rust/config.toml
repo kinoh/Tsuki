@@ -81,6 +81,15 @@ Schema:
   "relation_additions": [{"from": "...", "to": "...", "relation_type": "is-a|part-of|evokes"}, ...],
   "proposal": {"target": "base|router|decision|submodule:<name>", "diff_text": "unified diff text"} | null
 }
+For proposal.diff_text:
+- Output MUST be a valid unified diff only.
+- Do NOT output custom patch formats such as "*** Begin Patch".
+- File header names are not important for runtime apply; placeholder names are allowed (for example: "--- a/target", "+++ b/target").
+- The most important part is at least one valid hunk header and body:
+  - @@ -<old_start>,<old_count> +<new_start>,<new_count> @@
+  - hunk lines must start with one of: ' ', '+', '-'
+- Context/removal lines in hunks must match the current target prompt text exactly.
+- If you cannot produce a valid unified diff with confidence, set proposal to null.
 If there is not enough signal, return null/empty fields instead of guessing."""
 
 [db]

@@ -32,6 +32,10 @@ Date: 2026-02-22
   - Added unit tests for section detection/validation.
 - `core-rust/config.toml`
   - Updated self-improvement relation schema wording to `is-a|part-of|evokes` to match runtime parser expectations.
+  - Updated self-improvement proposal guidance:
+    - prioritize valid unified diff hunk structure over file header names.
+    - require exact context/removal line matching against current target prompt text.
+    - explicitly forbid custom patch formats and allow `proposal: null` when a valid diff cannot be guaranteed.
 - `core-rust/data/prompts.md`
   - Added explicit `## Memory` sections for loaded `Base` and `Decision` prompt bodies.
 - `core-rust/tests/integration/README.md`
