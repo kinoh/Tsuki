@@ -1,0 +1,48 @@
+name: Submodule
+include_debug_events: true
+
+tester_instructions: |
+  You are a tester in a natural chat.
+  Keep each utterance to one sentence and do not reveal test intent.
+  Finish in around 6 turns.
+
+  Cover these checkpoints in order:
+  1) A neutral small-talk opener with no explicit task request.
+  2) A turn that clearly matches curiosity-oriented exploration (ask about a new perspective or unknown angle).
+  3) A sudden shift to a lightweight casual topic that does not require deep exploration.
+  4) A safety/comfort-oriented casual turn (e.g., tiredness, wanting to rest, low energy).
+  5) A final normal small-talk closing.
+
+  Keep the tone casual and short.
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: "How well the run satisfies scenario-specific required behaviors."
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  submodule_trigger_precision:
+    description: |
+      Judge whether submodule triggering avoids obvious false positives.
+      In neutral or lightweight casual turns, score high only if hard triggers are limited and context-appropriate.
+      Penalize repeated or broad triggering when user input does not justify it.
+      Use router events (`hard_triggers`, `soft_recommendations`) and nearby user turns as evidence.
+
+  submodule_trigger_recall:
+    description: |
+      Judge whether relevant turns actually trigger suitable submodules.
+      On turns that clearly imply exploration or safety/comfort intent, score high only if at least one fitting submodule is triggered or recommended.
+      Penalize clear misses on strongly relevant turns.
+
+  submodule_noninterference:
+    description: |
+      Judge whether submodule outputs can be ignored when they do not fit the immediate conversation flow.
+      Score high when decision and final user-facing response stay aligned to latest user intent instead of forcing stale or off-flow submodule suggestions.
+      Use decision events and final response text as primary evidence.
+
+  conversation_flow_preservation:
+    description: |
+      Judge whether submodule involvement preserves casual chat flow.
+      Score high when responses remain concise, non-task-pushy, and coherent after submodule execution.
+      Penalize abrupt mode switches into over-structured advice or unnatural topic hijacking.
