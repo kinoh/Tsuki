@@ -19,7 +19,6 @@ pub(crate) async fn trigger_improvement(
     let reason = payload
         .reason
         .unwrap_or_else(|| "manual trigger".to_string());
-    let feedback_refs = payload.feedback_refs.unwrap_or_default();
 
     let trigger_event = build_event(
         "system",
@@ -27,7 +26,6 @@ pub(crate) async fn trigger_improvement(
         json!({
             "target": target,
             "reason": reason,
-            "feedback_refs": feedback_refs,
             "created_at": now_iso8601(),
         }),
         vec!["self_improvement.triggered".to_string()],

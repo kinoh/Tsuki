@@ -42,14 +42,7 @@ pub(crate) fn start_trigger_consumer(state: AppState) {
 
             let target = payload_str_or(event.payload.get("target"), "all");
             let reason = payload_str_or(event.payload.get("reason"), "manual trigger");
-            let feedback_refs = payload_string_array(event.payload.get("feedback_refs"));
-            spawn_trigger_worker(
-                state.clone(),
-                event.event_id.clone(),
-                target,
-                reason,
-                feedback_refs,
-            );
+            spawn_trigger_worker(state.clone(), event.event_id.clone(), target, reason);
         }
     });
 }
@@ -110,7 +103,6 @@ pub(crate) fn spawn_trigger_worker(
     trigger_event_id: String,
     target: String,
     reason: String,
-    feedback_refs: Vec<String>,
 ) {
     let semaphore = trigger_worker_semaphore();
     let permit = match semaphore.try_acquire_owned() {
@@ -142,7 +134,6 @@ pub(crate) fn spawn_trigger_worker(
             trigger_event_id.as_str(),
             target.as_str(),
             reason.as_str(),
-            &feedback_refs,
         )
         .await;
     });
@@ -153,7 +144,6 @@ async fn run_trigger_orchestrator(
     trigger_event_id: &str,
     trigger_target: &str,
     reason: &str,
-    feedback_refs: &[String],
 ) {
     let module_targets = match resolve_trigger_targets(state, trigger_target).await {
         Ok(value) => value,
@@ -182,7 +172,6 @@ async fn run_trigger_orchestrator(
             trigger_event_id,
             module_target.as_str(),
             reason,
-            feedback_refs,
         )
         .await;
         emit_module_processed_event(state, trigger_event_id, &result).await;
@@ -238,7 +227,6 @@ async fn run_module_worker(
     trigger_event_id: &str,
     module_target: &str,
     reason: &str,
-    feedback_refs: &[String],
 ) -> ModuleProcessResult {
     let recent_event_history =
         format_event_history(state, state.limits.submodule_history, None, None).await;
@@ -246,7 +234,6 @@ async fn run_module_worker(
         "trigger_event_id": trigger_event_id,
         "module_target": module_target,
         "reason": reason,
-        "feedback_refs": feedback_refs,
         "recent_event_history": recent_event_history,
     })
     .to_string();
@@ -572,21 +559,6 @@ fn payload_str_or(value: Option<&Value>, fallback: &str) -> String {
         .filter(|item| !item.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| fallback.to_string())
-}
-
-fn payload_string_array(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|item| !item.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
 }
 
 async fn emit_trigger_debug_raw(

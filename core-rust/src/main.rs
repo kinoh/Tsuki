@@ -173,8 +173,6 @@ pub(crate) struct DebugImproveTriggerRequest {
     pub(crate) target: Option<String>,
     #[serde(default)]
     pub(crate) reason: Option<String>,
-    #[serde(default)]
-    pub(crate) feedback_refs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
