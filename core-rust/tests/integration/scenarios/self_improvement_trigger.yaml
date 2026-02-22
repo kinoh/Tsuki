@@ -32,8 +32,11 @@ metrics_definition:
   dialog_naturalness:
     description: "How natural and coherent the dialogue flow feels end-to-end."
 
-  self_improvement_event_observability:
+  self_improvement_effectiveness:
     description: |
-      Judge whether the self-improvement trigger and processed events are clearly observable
-      in the event stream with coherent timing relative to the scenario steps.
-
+      Judge whether self-improvement causes actual state changes, not only observable events.
+      Prioritize evidence from debug/primary events in this order:
+      1) `self_improvement.module_processed` with `memory_updated=true`
+      2) `self_improvement.trigger_processed` with non-empty `proposal_ids`
+      3) `self_improvement.module_processed` with `concept_graph_updated=true` (supporting only)
+      If only concept graph updates are present without memory/proposal changes, cap the score at medium.
