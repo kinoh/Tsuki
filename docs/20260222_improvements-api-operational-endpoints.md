@@ -38,6 +38,12 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 - `proposal_created` is intentionally not introduced.
 - Proposal creation is derived from the presence of `proposal_id` in `self_improvement.trigger_processed`.
 
+## Implementation Follow-up (2026-02-22)
+- Trigger runtime execution was extracted from `improve_service` into
+  `core-rust/src/application/self_improvement_trigger_service.rs`.
+- `improve_service` now keeps API/approval concerns and delegates trigger execution startup to the trigger worker module.
+- Shared prompt-target/prompt-edit helpers remain in `improve_service` and are exposed as `pub(crate)` to avoid duplicated prompt mutation rules.
+
 ## Why
 - Operational endpoints remove unnecessary debug-path coupling for this flow.
 - Reusing event IDs avoids redundant identifier management and keeps traceability direct.
