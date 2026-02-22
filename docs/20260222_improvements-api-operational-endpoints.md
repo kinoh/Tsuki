@@ -51,6 +51,9 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 - Trigger worker instructions are moved from code hardcoding to `config.toml` (`[prompts].self_improvement_trigger_instructions`):
   - Why: avoid hidden fallback behavior that silently changes runtime semantics.
   - Policy: for self-improvement worker prompt, runtime reads configured text directly instead of constructing defaults in code.
+- Self-improvement worker input now includes `recent_event_history` in the same text format used by normal module execution (`ts | role | message`):
+  - Why: scheduled automatic runs should rely on runtime event history (including user reactions) as first-class signal, not only manual `feedback_refs`.
+  - `feedback_refs` remains optional supplemental hints.
 
 ## Why
 - Operational endpoints remove unnecessary debug-path coupling for this flow.

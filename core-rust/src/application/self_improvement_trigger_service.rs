@@ -9,6 +9,7 @@ use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::write_prompts;
 use crate::{AppState, DebugImproveProposalRequest};
+use crate::application::history_service::format_event_history;
 
 use super::improve_service::{
     ensure_active_submodule_exists, propose_improvement, replace_markdown_section_body,
@@ -204,11 +205,14 @@ async fn run_module_worker(
     reason: &str,
     feedback_refs: &[String],
 ) -> ModuleProcessResult {
+    let recent_event_history =
+        format_event_history(state, state.limits.submodule_history, None, None).await;
     let input = json!({
         "trigger_event_id": trigger_event_id,
         "module_target": module_target,
         "reason": reason,
         "feedback_refs": feedback_refs,
+        "recent_event_history": recent_event_history,
     })
     .to_string();
     let adapter = ResponseApiAdapter::new(ResponseApiConfig {
