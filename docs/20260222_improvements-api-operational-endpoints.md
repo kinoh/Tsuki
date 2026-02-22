@@ -45,6 +45,9 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
   `core-rust/src/application/self_improvement_trigger_service.rs`.
 - `improve_service` now keeps API/approval concerns and delegates trigger execution startup to the trigger worker module.
 - Shared prompt-target/prompt-edit helpers remain in `improve_service` and are exposed as `pub(crate)` to avoid duplicated prompt mutation rules.
+- Submodule concept existence is now guaranteed in module-worker post-LLM execution:
+  - when `module_target` is `submodule:<name>`, runtime always runs `concept_upsert("submodule:<name>")` before applying plan actions.
+  - on ensure failure, the module result is emitted as failed with `error_code=SUBMODULE_CONCEPT_ENSURE_FAILED`.
 
 ## Why
 - Operational endpoints remove unnecessary debug-path coupling for this flow.

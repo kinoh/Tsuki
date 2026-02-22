@@ -63,6 +63,7 @@ struct ModuleProcessResult {
     status: &'static str,
     memory_updated: bool,
     concept_graph_updated: bool,
+    concept_ensured: Option<bool>,
     proposal_id: Option<String>,
     error_code: Option<&'static str>,
     error_detail: Option<String>,
@@ -233,6 +234,7 @@ async fn run_module_worker(
                 status: "failed",
                 memory_updated: false,
                 concept_graph_updated: false,
+                concept_ensured: None,
                 proposal_id: None,
                 error_code: Some("TRIGGER_LLM_CALL_FAILED"),
                 error_detail: Some(err.to_string()),
@@ -250,6 +252,7 @@ async fn run_module_worker(
                 status: "failed",
                 memory_updated: false,
                 concept_graph_updated: false,
+                concept_ensured: None,
                 proposal_id: None,
                 error_code: Some("TRIGGER_PLAN_PARSE_FAILED"),
                 error_detail: Some(err),
@@ -259,8 +262,41 @@ async fn run_module_worker(
 
     let mut memory_updated = false;
     let mut concept_graph_updated = false;
+    let mut concept_ensured = None::<bool>;
     let mut proposal_id = None::<String>;
     let mut issues = Vec::<TriggerWorkerIssue>::new();
+
+    if let Some(name) = submodule_name_from_target(module_target) {
+        let concept_name = format!("submodule:{}", name);
+        match state
+            .activation_concept_graph
+            .concept_upsert(concept_name)
+            .await
+        {
+            Ok(value) => {
+                let created = value
+                    .get("created")
+                    .and_then(|item| item.as_bool())
+                    .unwrap_or(false);
+                concept_ensured = Some(true);
+                if created {
+                    concept_graph_updated = true;
+                }
+            }
+            Err(err) => {
+                return ModuleProcessResult {
+                    module_target: module_target.to_string(),
+                    status: "failed",
+                    memory_updated: false,
+                    concept_graph_updated: false,
+                    concept_ensured: Some(false),
+                    proposal_id: None,
+                    error_code: Some("SUBMODULE_CONCEPT_ENSURE_FAILED"),
+                    error_detail: Some(err),
+                };
+            }
+        }
+    }
 
     if let Some(memory_plan) = plan.memory_section_update {
         match apply_memory_section_update(state, module_target, &memory_plan).await {
@@ -371,6 +407,7 @@ async fn run_module_worker(
         status,
         memory_updated,
         concept_graph_updated,
+        concept_ensured,
         proposal_id,
         error_code,
         error_detail,
@@ -444,6 +481,17 @@ fn decide_trigger_status_from_module_results(results: &[ModuleProcessResult]) ->
         return "failed";
     }
     "partial"
+}
+
+fn submodule_name_from_target(target: &str) -> Option<&str> {
+    let value = target.trim();
+    let prefix = "submodule:";
+    let body = value.strip_prefix(prefix)?;
+    let name = body.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name)
 }
 
 fn trigger_worker_instructions() -> String {
@@ -536,6 +584,9 @@ async fn emit_module_processed_event(
         "concept_graph_updated": result.concept_graph_updated,
         "processed_at": now_iso8601(),
     });
+    if let Some(value) = result.concept_ensured {
+        payload["concept_ensured"] = json!(value);
+    }
     if let Some(value) = &result.proposal_id {
         payload["proposal_id"] = json!(value);
     }
@@ -636,7 +687,9 @@ async fn apply_memory_section_update(
 
 #[cfg(test)]
 mod tests {
-    use super::{decide_trigger_processed_status, parse_trigger_processing_plan};
+    use super::{
+        decide_trigger_processed_status, parse_trigger_processing_plan, submodule_name_from_target,
+    };
 
     fn normalize_trigger_target_for_prompt(target: &str) -> String {
         let trimmed = target.trim();
@@ -710,5 +763,19 @@ mod tests {
             decide_trigger_processed_status(false, false, false, false),
             "failed"
         );
+    }
+
+    #[test]
+    fn submodule_name_from_target_parses_expected_format() {
+        assert_eq!(
+            submodule_name_from_target("submodule:curiosity"),
+            Some("curiosity")
+        );
+        assert_eq!(
+            submodule_name_from_target("submodule:  self_preservation "),
+            Some("self_preservation")
+        );
+        assert_eq!(submodule_name_from_target("router"), None);
+        assert_eq!(submodule_name_from_target("submodule:"), None);
     }
 }
