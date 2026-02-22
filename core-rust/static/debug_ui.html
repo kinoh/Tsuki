@@ -1374,7 +1374,7 @@
           target: (improveTarget.value || "").trim() || "manual",
           reason: (improveReason.value || "").trim(),
         };
-        const res = await fetch("/improvements/trigger", {
+        const res = await fetch("/triggers", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -1406,7 +1406,7 @@
           requires_approval: true,
           created_by: "debug_ui",
         };
-        const res = await fetch("/improvements/proposal", {
+        const res = await fetch("/proposals", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -1445,7 +1445,7 @@
           reviewed_by: "debug_ui",
           review_reason: (improveReason.value || "").trim(),
         };
-        const res = await fetch("/improvements/review", {
+        const res = await fetch("/reviews", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),

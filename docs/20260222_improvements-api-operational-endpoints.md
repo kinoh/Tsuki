@@ -5,10 +5,10 @@ The self-improvement flow had only debug endpoints and an older payload contract
 The latest prompt-diff schema requires auditable proposal/review/apply events and stable proposal identifiers.
 
 ## Decision
-- Move self-improvement HTTP routes from debug paths to operational paths:
-  - `POST /improvements/trigger`
-  - `POST /improvements/proposal`
-  - `POST /improvements/review`
+- Move self-improvement HTTP routes to domain-neutral ingress paths:
+  - `POST /triggers`
+  - `POST /proposals`
+  - `POST /reviews`
 - Use `proposal_id = proposal event_id` (no additional identifier layer).
 - Enforce one review per proposal (`proposal_id`) in runtime.
 - Emit event families aligned to the latest contract intent:
@@ -21,17 +21,18 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 - Optional debug observability (for example `debug,llm.raw`) can be emitted separately and must not be treated as contract events.
 
 ### Module responsibilities
-- `improve_service` (`/improvements/trigger`): emits `self_improvement.triggered` only.
-- Trigger orchestrator (LLM/tool execution path):
+- `trigger_ingress_api` (`/triggers`): emits `self_improvement.triggered` only.
+- `improve_service` (trigger consumer and LLM/tool execution path):
+  - consumes `self_improvement.triggered` from the in-process event stream.
   - emits `self_improvement.module_processed` once per resolved module target.
-  - emits `self_improvement.trigger_processed` once as the aggregate result.
+  - emits `self_improvement.trigger_processed` once as the aggregate result (debug-only tag attached to keep it out of prompt history).
   - `self_improvement.trigger_processed` payload includes:
     - `status`: `success|partial|failed`
     - `memory_updated`: boolean
     - `concept_graph_updated`: boolean
     - `proposal_ids`: optional array (`proposal` was generated when present)
     - `error_code`, `error_detail`: required on `failed`, optional on `partial`
-- `improve_service` proposal/review/apply path keeps one essential event per action:
+- `improve_approval_service` keeps one essential event per action:
   - `self_improvement.proposed`
   - `self_improvement.reviewed`
   - `self_improvement.applied`
@@ -41,10 +42,9 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 - Proposal creation is derived from the presence of `proposal_ids` in `self_improvement.trigger_processed`.
 
 ## Implementation Follow-up (2026-02-22)
-- Trigger runtime execution was extracted from `improve_service` into
-  `core-rust/src/application/self_improvement_trigger_service.rs`.
-- `improve_service` now keeps API/approval concerns and delegates trigger execution startup to the trigger worker module.
-- Shared prompt-target/prompt-edit helpers remain in `improve_service` and are exposed as `pub(crate)` to avoid duplicated prompt mutation rules.
+- Trigger runtime execution now lives in `core-rust/src/application/improve_service.rs` and starts from an event consumer (`start_trigger_consumer`).
+- `trigger_ingress_api` is responsible only for writing `self_improvement.triggered`; it does not start execution directly.
+- Proposal/review/apply logic and prompt-diff mutation rules live in `core-rust/src/application/improve_approval_service.rs`.
 - Submodule concept existence is now guaranteed in module-worker post-LLM execution:
   - when `module_target` is `submodule:<name>`, runtime always runs `concept_upsert("submodule:<name>")` before applying plan actions.
   - on ensure failure, the module result is emitted as failed with `error_code=SUBMODULE_CONCEPT_ENSURE_FAILED`.

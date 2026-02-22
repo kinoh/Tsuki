@@ -1,731 +1,829 @@
-use axum::http::StatusCode;
+use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::{Arc, OnceLock};
+use tokio::sync::{broadcast::error::RecvError, Semaphore};
 
 use crate::clock::now_iso8601;
 use crate::event::build_event;
+use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
 use crate::module_registry::ModuleRegistryReader;
-use crate::prompts::{write_prompts, PromptOverrides};
-use crate::{
-    AppState, DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
-    DebugImproveTriggerRequest,
+use crate::prompts::write_prompts;
+use crate::{AppState, DebugImproveProposalRequest};
+use crate::application::history_service::format_event_history;
+
+use super::improve_approval_service::{
+    ensure_active_submodule_exists, propose_improvement, replace_markdown_section_body,
+    resolve_target_prompt_text, PromptTarget,
 };
 
-const MAX_REVIEW_SCAN_EVENTS: usize = 5000;
-#[derive(Debug, Clone)]
-pub(crate) enum PromptTarget {
-    Base,
-    Router,
-    Decision,
-    Submodule(String),
+const TRIGGER_WORKER_SOURCE: &str = "self_improvement";
+const TRIGGER_WORKER_MAX_CONCURRENCY: usize = 1;
+
+pub(crate) fn start_trigger_consumer(state: AppState) {
+    tokio::spawn(async move {
+        let mut rx = state.tx.subscribe();
+        loop {
+            let event = match rx.recv().await {
+                Ok(value) => value,
+                Err(RecvError::Lagged(skipped)) => {
+                    println!("TRIGGER_CONSUMER_LAGGED skipped={}", skipped);
+                    continue;
+                }
+                Err(RecvError::Closed) => break,
+            };
+            if !event
+                .meta
+                .tags
+                .iter()
+                .any(|tag| tag == "self_improvement.triggered")
+            {
+                continue;
+            }
+
+            let target = payload_str_or(event.payload.get("target"), "all");
+            let reason = payload_str_or(event.payload.get("reason"), "manual trigger");
+            let feedback_refs = payload_string_array(event.payload.get("feedback_refs"));
+            spawn_trigger_worker(
+                state.clone(),
+                event.event_id.clone(),
+                target,
+                reason,
+                feedback_refs,
+            );
+        }
+    });
 }
 
-impl PromptTarget {
-    pub(crate) fn parse(raw: &str) -> Option<Self> {
-        let value = raw.trim();
-        if value.eq_ignore_ascii_case("base") {
-            return Some(Self::Base);
+#[derive(Debug, Deserialize)]
+struct TriggerProcessingPlan {
+    #[serde(default)]
+    memory_section_update: Option<MemorySectionUpdatePlan>,
+    #[serde(default)]
+    concept_upserts: Vec<String>,
+    #[serde(default)]
+    relation_additions: Vec<RelationAdditionPlan>,
+    #[serde(default)]
+    proposal: Option<TriggerProposalPlan>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemorySectionUpdatePlan {
+    #[serde(default)]
+    target: Option<String>,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RelationAdditionPlan {
+    from: String,
+    to: String,
+    relation_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TriggerProposalPlan {
+    #[serde(default)]
+    target: Option<String>,
+    diff_text: String,
+}
+
+#[derive(Debug)]
+struct TriggerWorkerIssue {
+    code: &'static str,
+    detail: String,
+}
+
+#[derive(Debug)]
+struct ModuleProcessResult {
+    module_target: String,
+    status: &'static str,
+    memory_updated: bool,
+    concept_graph_updated: bool,
+    concept_ensured: Option<bool>,
+    proposal_id: Option<String>,
+    error_code: Option<&'static str>,
+    error_detail: Option<String>,
+}
+
+pub(crate) fn spawn_trigger_worker(
+    state: AppState,
+    trigger_event_id: String,
+    target: String,
+    reason: String,
+    feedback_refs: Vec<String>,
+) {
+    let semaphore = trigger_worker_semaphore();
+    let permit = match semaphore.try_acquire_owned() {
+        Ok(value) => value,
+        Err(_) => {
+            tokio::spawn(async move {
+                emit_trigger_processed_event(
+                    &state,
+                    trigger_event_id.as_str(),
+                    target.as_str(),
+                    &[],
+                    &[],
+                    false,
+                    false,
+                    "failed",
+                    Some("TRIGGER_QUEUE_BUSY"),
+                    Some("trigger worker concurrency limit reached"),
+                )
+                .await;
+            });
+            return;
         }
-        if value.eq_ignore_ascii_case("router") {
-            return Some(Self::Router);
+    };
+
+    tokio::spawn(async move {
+        let _permit = permit;
+        run_trigger_orchestrator(
+            &state,
+            trigger_event_id.as_str(),
+            target.as_str(),
+            reason.as_str(),
+            &feedback_refs,
+        )
+        .await;
+    });
+}
+
+async fn run_trigger_orchestrator(
+    state: &AppState,
+    trigger_event_id: &str,
+    trigger_target: &str,
+    reason: &str,
+    feedback_refs: &[String],
+) {
+    let module_targets = match resolve_trigger_targets(state, trigger_target).await {
+        Ok(value) => value,
+        Err(err) => {
+            emit_trigger_processed_event(
+                state,
+                trigger_event_id,
+                trigger_target,
+                &[],
+                &[],
+                false,
+                false,
+                "failed",
+                Some("TRIGGER_TARGET_RESOLVE_FAILED"),
+                Some(err.as_str()),
+            )
+            .await;
+            return;
         }
-        if value.eq_ignore_ascii_case("decision") {
-            return Some(Self::Decision);
+    };
+
+    let mut results = Vec::<ModuleProcessResult>::new();
+    for module_target in &module_targets {
+        let result = run_module_worker(
+            state,
+            trigger_event_id,
+            module_target.as_str(),
+            reason,
+            feedback_refs,
+        )
+        .await;
+        emit_module_processed_event(state, trigger_event_id, &result).await;
+        results.push(result);
+    }
+
+    let proposal_ids = results
+        .iter()
+        .filter_map(|item| item.proposal_id.clone())
+        .collect::<Vec<_>>();
+    let any_memory_updated = results.iter().any(|item| item.memory_updated);
+    let any_concept_updated = results.iter().any(|item| item.concept_graph_updated);
+    let status = decide_trigger_status_from_module_results(&results);
+
+    let first_error = results.iter().find(|item| item.error_code.is_some());
+    let error_code = first_error.and_then(|item| item.error_code);
+    let error_detail = if matches!(status, "failed" | "partial") {
+        let merged = results
+            .iter()
+            .filter_map(|item| {
+                item.error_code
+                    .zip(item.error_detail.as_ref())
+                    .map(|(code, detail)| format!("{}:{}:{}", item.module_target, code, detail))
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        if merged.is_empty() {
+            None
+        } else {
+            Some(merged)
         }
-        let prefix = "submodule:";
-        if let Some(head) = value.get(..prefix.len()) {
-            if head.eq_ignore_ascii_case(prefix) {
-                let name = value.get(prefix.len()..).unwrap_or("").trim();
-                if !name.is_empty() {
-                    return Some(Self::Submodule(name.to_string()));
+    } else {
+        None
+    };
+
+    emit_trigger_processed_event(
+        state,
+        trigger_event_id,
+        trigger_target,
+        &module_targets,
+        &proposal_ids,
+        any_memory_updated,
+        any_concept_updated,
+        status,
+        error_code,
+        error_detail.as_deref(),
+    )
+    .await;
+}
+
+async fn run_module_worker(
+    state: &AppState,
+    trigger_event_id: &str,
+    module_target: &str,
+    reason: &str,
+    feedback_refs: &[String],
+) -> ModuleProcessResult {
+    let recent_event_history =
+        format_event_history(state, state.limits.submodule_history, None, None).await;
+    let input = json!({
+        "trigger_event_id": trigger_event_id,
+        "module_target": module_target,
+        "reason": reason,
+        "feedback_refs": feedback_refs,
+        "recent_event_history": recent_event_history,
+    })
+    .to_string();
+    let adapter = ResponseApiAdapter::new(ResponseApiConfig {
+        model: state.modules.runtime.model.clone(),
+        instructions: state.self_improvement_trigger_instructions.clone(),
+        temperature: state.modules.runtime.temperature,
+        max_output_tokens: state.modules.runtime.max_output_tokens,
+        tools: Vec::new(),
+        tool_handler: None,
+        max_tool_rounds: 0,
+    });
+
+    let response = match adapter
+        .respond(LlmRequest {
+            input: input.clone(),
+        })
+        .await
+    {
+        Ok(value) => value,
+        Err(err) => {
+            return ModuleProcessResult {
+                module_target: module_target.to_string(),
+                status: "failed",
+                memory_updated: false,
+                concept_graph_updated: false,
+                concept_ensured: None,
+                proposal_id: None,
+                error_code: Some("TRIGGER_LLM_CALL_FAILED"),
+                error_detail: Some(err.to_string()),
+            };
+        }
+    };
+
+    emit_trigger_debug_raw(state, trigger_event_id, module_target, &input, &response).await;
+
+    let plan = match parse_trigger_processing_plan(response.text.as_str()) {
+        Ok(value) => value,
+        Err(err) => {
+            return ModuleProcessResult {
+                module_target: module_target.to_string(),
+                status: "failed",
+                memory_updated: false,
+                concept_graph_updated: false,
+                concept_ensured: None,
+                proposal_id: None,
+                error_code: Some("TRIGGER_PLAN_PARSE_FAILED"),
+                error_detail: Some(err),
+            };
+        }
+    };
+
+    let mut memory_updated = false;
+    let mut concept_graph_updated = false;
+    let mut concept_ensured = None::<bool>;
+    let mut proposal_id = None::<String>;
+    let mut issues = Vec::<TriggerWorkerIssue>::new();
+
+    if let Some(name) = submodule_name_from_target(module_target) {
+        let concept_name = format!("submodule:{}", name);
+        match state
+            .activation_concept_graph
+            .concept_upsert(concept_name)
+            .await
+        {
+            Ok(value) => {
+                let created = value
+                    .get("created")
+                    .and_then(|item| item.as_bool())
+                    .unwrap_or(false);
+                concept_ensured = Some(true);
+                if created {
+                    concept_graph_updated = true;
                 }
             }
+            Err(err) => {
+                return ModuleProcessResult {
+                    module_target: module_target.to_string(),
+                    status: "failed",
+                    memory_updated: false,
+                    concept_graph_updated: false,
+                    concept_ensured: Some(false),
+                    proposal_id: None,
+                    error_code: Some("SUBMODULE_CONCEPT_ENSURE_FAILED"),
+                    error_detail: Some(err),
+                };
+            }
         }
+    }
+
+    if let Some(memory_plan) = plan.memory_section_update {
+        match apply_memory_section_update(state, module_target, &memory_plan).await {
+            Ok(updated) => {
+                memory_updated = updated;
+            }
+            Err(err) => issues.push(TriggerWorkerIssue {
+                code: "MEMORY_UPDATE_FAILED",
+                detail: err,
+            }),
+        }
+    }
+
+    for concept in plan.concept_upserts {
+        let name = concept.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match state
+            .activation_concept_graph
+            .concept_upsert(name.to_string())
+            .await
+        {
+            Ok(_) => {
+                concept_graph_updated = true;
+            }
+            Err(err) => issues.push(TriggerWorkerIssue {
+                code: "CONCEPT_UPSERT_FAILED",
+                detail: err,
+            }),
+        }
+    }
+
+    for relation in plan.relation_additions {
+        if relation.from.trim().is_empty()
+            || relation.to.trim().is_empty()
+            || relation.relation_type.trim().is_empty()
+        {
+            continue;
+        }
+        match state
+            .activation_concept_graph
+            .relation_add(relation.from, relation.to, relation.relation_type)
+            .await
+        {
+            Ok(_) => {
+                concept_graph_updated = true;
+            }
+            Err(err) => issues.push(TriggerWorkerIssue {
+                code: "RELATION_ADD_FAILED",
+                detail: err,
+            }),
+        }
+    }
+
+    if let Some(proposal) = plan.proposal {
+        let proposal_target = proposal
+            .target
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| PromptTarget::parse(value).is_some())
+            .map(str::to_string)
+            .unwrap_or_else(|| module_target.to_string());
+        match propose_improvement(
+            state,
+            DebugImproveProposalRequest {
+                target: proposal_target,
+                job_id: format!("trigger:{}:{}", trigger_event_id, module_target),
+                diff_text: proposal.diff_text,
+                requires_approval: Some(true),
+                created_by: Some(TRIGGER_WORKER_SOURCE.to_string()),
+            },
+        )
+        .await
+        {
+            Ok(result) => {
+                proposal_id = result.proposal_id;
+            }
+            Err((_, err)) => issues.push(TriggerWorkerIssue {
+                code: "PROPOSAL_CREATE_FAILED",
+                detail: err,
+            }),
+        }
+    }
+
+    let status = decide_trigger_processed_status(
+        issues.is_empty(),
+        memory_updated,
+        concept_graph_updated,
+        proposal_id.is_some(),
+    );
+    let first_issue = issues.first();
+    let error_code = first_issue.map(|item| item.code);
+    let error_detail = if issues.is_empty() {
         None
-    }
-}
-
-pub(crate) async fn trigger_improvement(
-    state: &AppState,
-    payload: DebugImproveTriggerRequest,
-) -> Result<DebugImproveResponse, (StatusCode, String)> {
-    let target = payload
-        .target
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("all")
-        .to_string();
-    let reason = payload
-        .reason
-        .unwrap_or_else(|| "manual trigger".to_string());
-    let feedback_refs = payload.feedback_refs.unwrap_or_default();
-    let trigger_event = build_event(
-        "system",
-        "text",
-        json!({
-            "target": target,
-            "reason": reason,
-            "feedback_refs": feedback_refs,
-            "created_at": now_iso8601(),
-        }),
-        vec!["self_improvement.triggered".to_string()],
-    );
-    let trigger_event_id = trigger_event.event_id.clone();
-    crate::record_event(state, trigger_event).await;
-
-    crate::application::self_improvement_trigger_service::spawn_trigger_worker(
-        state.clone(),
-        trigger_event_id,
-        target,
-        reason,
-        feedback_refs,
-    );
-
-    Ok(DebugImproveResponse {
-        proposal_id: None,
-        review_event_id: None,
-        apply_event_id: None,
-        applied: false,
-    })
-}
-
-pub(crate) async fn propose_improvement(
-    state: &AppState,
-    payload: DebugImproveProposalRequest,
-) -> Result<DebugImproveResponse, (StatusCode, String)> {
-    let target_raw = payload.target.trim();
-    if PromptTarget::parse(target_raw).is_none() {
-        return Err((StatusCode::BAD_REQUEST, "invalid target".to_string()));
-    }
-
-    let job_id = payload.job_id.trim();
-    if job_id.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "job_id is required".to_string()));
-    }
-
-    let diff_text = payload.diff_text.as_str();
-    if diff_text.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "diff_text is required".to_string()));
-    }
-
-    if matches!(payload.requires_approval, Some(false)) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "requires_approval must be true".to_string(),
-        ));
-    }
-
-    validate_unified_diff(diff_text).map_err(|err| (StatusCode::BAD_REQUEST, err))?;
-
-    let created_by = payload
-        .created_by
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("manual")
-        .to_string();
-    let created_at = now_iso8601();
-    let mut proposal_event = build_event(
-        "system",
-        "text",
-        json!({
-            "proposal_id": "",
-            "job_id": job_id,
-            "target": target_raw,
-            "diff_text": diff_text,
-            "requires_approval": true,
-            "created_by": created_by,
-            "created_at": created_at,
-        }),
-        vec!["self_improvement.proposed".to_string()],
-    );
-
-    let proposal_id = proposal_event.event_id.clone();
-    proposal_event.payload["proposal_id"] = json!(proposal_id);
-
-    crate::record_event(state, proposal_event).await;
-
-    Ok(DebugImproveResponse {
-        proposal_id: Some(proposal_id),
-        review_event_id: None,
-        apply_event_id: None,
-        applied: false,
-    })
-}
-
-pub(crate) async fn review_improvement(
-    state: &AppState,
-    payload: DebugImproveReviewRequest,
-) -> Result<DebugImproveResponse, (StatusCode, String)> {
-    let proposal_id = payload.proposal_id.trim();
-    if proposal_id.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "proposal_id is required".to_string(),
-        ));
-    }
-
-    let job_id = payload.job_id.trim();
-    if job_id.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "job_id is required".to_string()));
-    }
-
-    let target_raw = payload.target.trim();
-    let target = PromptTarget::parse(target_raw)
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid target".to_string()))?;
-
-    if proposal_has_review(state, proposal_id)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?
-    {
-        return Err((
-            StatusCode::CONFLICT,
-            "review already exists for proposal_id".to_string(),
-        ));
-    }
-
-    let proposal_event = state
-        .event_store
-        .get_by_id(proposal_id)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                "proposal event not found".to_string(),
-            )
-        })?;
-    if !proposal_event
-        .meta
-        .tags
-        .iter()
-        .any(|tag| tag == "self_improvement.proposed")
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "event is not self_improvement.proposed".to_string(),
-        ));
-    }
-
-    let proposal_job_id = payload_str(&proposal_event.payload, "job_id").ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            "proposal job_id is missing".to_string(),
+    } else {
+        Some(
+            issues
+                .iter()
+                .map(|issue| format!("{}: {}", issue.code, issue.detail))
+                .collect::<Vec<_>>()
+                .join(" | "),
         )
-    })?;
-    if proposal_job_id != job_id {
-        return Err((StatusCode::BAD_REQUEST, "job_id mismatch".to_string()));
-    }
+    };
 
-    let proposal_target = payload_str(&proposal_event.payload, "target").ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            "proposal target is missing".to_string(),
-        )
-    })?;
-    if !proposal_target.eq_ignore_ascii_case(target_raw) {
-        return Err((StatusCode::BAD_REQUEST, "target mismatch".to_string()));
-    }
-
-    let decision = normalize_decision(payload.decision.as_str()).ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            "decision must be approved or rejected".to_string(),
-        )
-    })?;
-
-    let reviewed_by = payload
-        .reviewed_by
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("manual")
-        .to_string();
-    let review_reason = payload
-        .review_reason
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("none")
-        .to_string();
-    let reviewed_at = now_iso8601();
-    let review_event = build_event(
-        "system",
-        "text",
-        json!({
-            "proposal_id": proposal_id,
-            "job_id": job_id,
-            "target": target_raw,
-            "decision": decision,
-            "reviewed_by": reviewed_by,
-            "review_reason": review_reason,
-            "reviewed_at": reviewed_at,
-        }),
-        vec!["self_improvement.reviewed".to_string()],
-    );
-    let review_event_id = review_event.event_id.clone();
-    crate::record_event(state, review_event).await;
-
-    if decision != "approved" {
-        return Ok(DebugImproveResponse {
-            proposal_id: Some(proposal_id.to_string()),
-            review_event_id: Some(review_event_id),
-            apply_event_id: None,
-            applied: false,
-        });
-    }
-
-    let applied_at = now_iso8601();
-    let applied_by = "runtime";
-    match apply_prompt_diff(state, &target, &proposal_event)
-        .await
-        .map(|_| payload_str(&proposal_event.payload, "diff_text").unwrap_or_default())
-    {
-        Ok(applied_diff_text) => {
-            let apply_event = build_event(
-                "system",
-                "text",
-                json!({
-                    "proposal_id": proposal_id,
-                    "job_id": job_id,
-                    "target": target_raw,
-                    "status": "success",
-                    "applied_by": applied_by,
-                    "applied_at": applied_at,
-                    "applied_diff_text": applied_diff_text,
-                }),
-                vec!["self_improvement.applied".to_string()],
-            );
-            let apply_event_id = apply_event.event_id.clone();
-            crate::record_event(state, apply_event).await;
-            Ok(DebugImproveResponse {
-                proposal_id: Some(proposal_id.to_string()),
-                review_event_id: Some(review_event_id),
-                apply_event_id: Some(apply_event_id),
-                applied: true,
-            })
-        }
-        Err(err) => {
-            let apply_event = build_event(
-                "system",
-                "text",
-                json!({
-                    "proposal_id": proposal_id,
-                    "job_id": job_id,
-                    "target": target_raw,
-                    "status": "failed",
-                    "applied_by": applied_by,
-                    "applied_at": applied_at,
-                    "error_code": "APPLY_DIFF_FAILED",
-                    "error_detail": err,
-                }),
-                vec!["self_improvement.applied".to_string()],
-            );
-            let apply_event_id = apply_event.event_id.clone();
-            crate::record_event(state, apply_event).await;
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("apply failed (event_id={})", apply_event_id),
-            ))
-        }
+    ModuleProcessResult {
+        module_target: module_target.to_string(),
+        status,
+        memory_updated,
+        concept_graph_updated,
+        concept_ensured,
+        proposal_id,
+        error_code,
+        error_detail,
     }
 }
 
-fn normalize_decision(value: &str) -> Option<&'static str> {
-    if value.eq_ignore_ascii_case("approved") || value.eq_ignore_ascii_case("approval") {
-        return Some("approved");
-    }
-    if value.eq_ignore_ascii_case("rejected") || value.eq_ignore_ascii_case("rejection") {
-        return Some("rejected");
-    }
-    None
+fn trigger_worker_semaphore() -> Arc<Semaphore> {
+    static TRIGGER_WORKER_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    TRIGGER_WORKER_SEMAPHORE
+        .get_or_init(|| Arc::new(Semaphore::new(TRIGGER_WORKER_MAX_CONCURRENCY)))
+        .clone()
 }
 
-async fn proposal_has_review(state: &AppState, proposal_id: &str) -> Result<bool, String> {
-    let events = state
-        .event_store
-        .latest(MAX_REVIEW_SCAN_EVENTS)
-        .await
-        .map_err(|err| err.to_string())?;
-    Ok(events.into_iter().any(|event| {
-        event
-            .meta
-            .tags
-            .iter()
-            .any(|tag| tag == "self_improvement.reviewed")
-            && payload_str(&event.payload, "proposal_id")
-                .map(|id| id == proposal_id)
-                .unwrap_or(false)
-    }))
-}
-
-async fn apply_prompt_diff(
+async fn resolve_trigger_targets(
     state: &AppState,
-    target: &PromptTarget,
-    proposal_event: &crate::event::Event,
-) -> Result<(), String> {
-    let diff_text = payload_str(&proposal_event.payload, "diff_text")
-        .ok_or_else(|| "proposal diff_text is required".to_string())?;
-
-    let mut overrides = state.prompts.read().await.clone();
-    let current_target_prompt = resolve_target_prompt_text(state, &overrides, target).await?;
-    let next_target_prompt =
-        apply_unified_diff(current_target_prompt.as_str(), diff_text.as_str())?;
-
-    match target {
-        PromptTarget::Base => {
-            overrides.base = Some(next_target_prompt);
-        }
-        PromptTarget::Router => {
-            overrides.router = Some(next_target_prompt);
-        }
-        PromptTarget::Decision => {
-            overrides.decision = Some(next_target_prompt);
-        }
-        PromptTarget::Submodule(name) => {
-            ensure_active_submodule_exists(state, name).await?;
-            overrides
-                .submodules
-                .insert(name.clone(), next_target_prompt);
-        }
+    trigger_target: &str,
+) -> Result<Vec<String>, String> {
+    let target = trigger_target.trim();
+    if target.is_empty() || target.eq_ignore_ascii_case("all") {
+        return resolve_all_targets(state).await;
     }
 
-    write_prompts(&state.prompts_path, &overrides)?;
-    *state.prompts.write().await = overrides;
-    Ok(())
+    if target.eq_ignore_ascii_case("submodules") {
+        let modules = state
+            .modules
+            .registry
+            .list_active()
+            .await
+            .map_err(|err| err.to_string())?;
+        return Ok(modules
+            .into_iter()
+            .map(|module| format!("submodule:{}", module.name))
+            .collect::<Vec<_>>());
+    }
+
+    if PromptTarget::parse(target).is_some() {
+        return Ok(vec![target.to_string()]);
+    }
+
+    Err(format!("invalid trigger target: {}", target))
 }
 
-pub(crate) async fn ensure_active_submodule_exists(
-    state: &AppState,
-    name: &str,
-) -> Result<(), String> {
+async fn resolve_all_targets(state: &AppState) -> Result<Vec<String>, String> {
     let modules = state
         .modules
         .registry
         .list_active()
         .await
         .map_err(|err| err.to_string())?;
-    if modules.iter().any(|module| module.name == name) {
-        return Ok(());
+    let mut targets = vec![
+        "base".to_string(),
+        "router".to_string(),
+        "decision".to_string(),
+    ];
+    for module in modules {
+        targets.push(format!("submodule:{}", module.name));
     }
-    Err(format!("submodule not found: {}", name))
+    Ok(targets)
 }
 
-pub(crate) async fn resolve_target_prompt_text(
-    state: &AppState,
-    overrides: &PromptOverrides,
-    target: &PromptTarget,
-) -> Result<String, String> {
-    match target {
-        PromptTarget::Base => Ok(overrides
-            .base
-            .clone()
-            .unwrap_or_else(|| state.modules.runtime.base_instructions.clone())),
-        PromptTarget::Router => Ok(overrides
-            .router
-            .clone()
-            .unwrap_or_else(|| state.router_instructions.clone())),
-        PromptTarget::Decision => Ok(overrides
-            .decision
-            .clone()
-            .unwrap_or_else(|| state.decision_instructions.clone())),
-        PromptTarget::Submodule(name) => {
-            if let Some(text) = overrides.submodules.get(name) {
-                return Ok(text.clone());
-            }
-            let module = state
-                .modules
-                .registry
-                .list_active()
-                .await
-                .map_err(|err| err.to_string())?
-                .into_iter()
-                .find(|item| item.name == *name)
-                .ok_or_else(|| format!("submodule not found: {}", name))?;
-            Ok(module.instructions)
-        }
+fn decide_trigger_status_from_module_results(results: &[ModuleProcessResult]) -> &'static str {
+    if results.is_empty() {
+        return "failed";
     }
-}
-
-pub(crate) fn payload_str(payload: &Value, key: &str) -> Option<String> {
-    payload
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string())
-}
-
-pub(crate) fn replace_markdown_section_body(
-    source: &str,
-    section_name: &str,
-    body: &str,
-) -> Result<String, String> {
-    let (start, end) = find_markdown_section_body_range(source, section_name)
-        .ok_or_else(|| format!("section not found: {}", section_name))?;
-    let mut replacement = body.trim_end_matches('\n').to_string();
-    replacement.push('\n');
-    let mut output = String::with_capacity(source.len() + replacement.len());
-    output.push_str(&source[..start]);
-    output.push_str(&replacement);
-    output.push_str(&source[end..]);
-    Ok(output)
-}
-
-fn find_markdown_section_body_range(source: &str, section_name: &str) -> Option<(usize, usize)> {
-    #[derive(Clone, Copy)]
-    struct Heading {
-        level: usize,
-        line_start: usize,
-        body_start: usize,
+    let all_success = results.iter().all(|item| item.status == "success");
+    if all_success {
+        return "success";
     }
-
-    let mut headings: Vec<(Heading, String)> = Vec::new();
-    let mut offset = 0usize;
-    for line in source.split_inclusive('\n') {
-        let line_start = offset;
-        offset += line.len();
-        let content = line.trim_end_matches('\n').trim_end_matches('\r');
-        let hash_count = content.chars().take_while(|ch| *ch == '#').count();
-        if hash_count == 0 {
-            continue;
-        }
-        if content.chars().nth(hash_count) != Some(' ') {
-            continue;
-        }
-        let title = content[hash_count + 1..].trim().to_string();
-        headings.push((
-            Heading {
-                level: hash_count,
-                line_start,
-                body_start: offset,
-            },
-            title,
-        ));
+    let all_failed = results.iter().all(|item| item.status == "failed");
+    if all_failed {
+        return "failed";
     }
-    for (index, (heading, title)) in headings.iter().enumerate() {
-        if title != section_name {
-            continue;
-        }
-        let mut end = source.len();
-        for (next, _) in headings.iter().skip(index + 1) {
-            if next.level <= heading.level {
-                end = next.line_start;
-                break;
-            }
-        }
-        return Some((heading.body_start, end));
-    }
-    None
+    "partial"
 }
 
-#[derive(Debug)]
-struct UnifiedDiffHunk {
-    old_start: usize,
-    old_count: usize,
-    new_count: usize,
-    lines: Vec<UnifiedDiffLine>,
-}
-
-#[derive(Debug)]
-enum UnifiedDiffLine {
-    Context(String),
-    Add(String),
-    Remove(String),
-}
-
-fn validate_unified_diff(diff_text: &str) -> Result<(), String> {
-    parse_unified_diff(diff_text).map(|_| ())
-}
-
-fn apply_unified_diff(source: &str, diff_text: &str) -> Result<String, String> {
-    let hunks = parse_unified_diff(diff_text)?;
-
-    let source_has_trailing_newline = source.ends_with('\n');
-    let source_core = source.strip_suffix('\n').unwrap_or(source);
-    let source_lines = if source_core.is_empty() {
-        Vec::<String>::new()
-    } else {
-        source_core
-            .split('\n')
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
-
-    let mut output = Vec::<String>::new();
-    let mut source_cursor = 0usize;
-
-    for hunk in hunks {
-        let old_start_index = hunk.old_start.saturating_sub(1);
-        if old_start_index < source_cursor {
-            return Err("invalid diff: overlapping hunks".to_string());
-        }
-        if old_start_index > source_lines.len() {
-            return Err("invalid diff: hunk start out of range".to_string());
-        }
-
-        output.extend(source_lines[source_cursor..old_start_index].iter().cloned());
-        source_cursor = old_start_index;
-
-        let mut old_consumed = 0usize;
-        let mut new_produced = 0usize;
-
-        for line in hunk.lines {
-            match line {
-                UnifiedDiffLine::Context(text) => {
-                    let current = source_lines
-                        .get(source_cursor)
-                        .ok_or_else(|| "invalid diff: context out of range".to_string())?;
-                    if current != &text {
-                        return Err("invalid diff: context line mismatch".to_string());
-                    }
-                    output.push(text);
-                    source_cursor += 1;
-                    old_consumed += 1;
-                    new_produced += 1;
-                }
-                UnifiedDiffLine::Remove(text) => {
-                    let current = source_lines
-                        .get(source_cursor)
-                        .ok_or_else(|| "invalid diff: removal out of range".to_string())?;
-                    if current != &text {
-                        return Err("invalid diff: removed line mismatch".to_string());
-                    }
-                    source_cursor += 1;
-                    old_consumed += 1;
-                }
-                UnifiedDiffLine::Add(text) => {
-                    output.push(text);
-                    new_produced += 1;
-                }
-            }
-        }
-
-        if old_consumed != hunk.old_count {
-            return Err("invalid diff: old line count mismatch".to_string());
-        }
-        if new_produced != hunk.new_count {
-            return Err("invalid diff: new line count mismatch".to_string());
-        }
+fn submodule_name_from_target(target: &str) -> Option<&str> {
+    let value = target.trim();
+    let prefix = "submodule:";
+    let body = value.strip_prefix(prefix)?;
+    let name = body.trim();
+    if name.is_empty() {
+        return None;
     }
-
-    output.extend(source_lines[source_cursor..].iter().cloned());
-
-    let mut result = output.join("\n");
-    if source_has_trailing_newline {
-        result.push('\n');
-    }
-    Ok(result)
+    Some(name)
 }
 
-fn parse_unified_diff(diff_text: &str) -> Result<Vec<UnifiedDiffHunk>, String> {
-    let mut hunks = Vec::<UnifiedDiffHunk>::new();
-    let mut current_hunk: Option<UnifiedDiffHunk> = None;
-
-    for line in diff_text.lines() {
-        if line.starts_with("@@") {
-            if let Some(hunk) = current_hunk.take() {
-                hunks.push(hunk);
-            }
-            current_hunk = Some(parse_unified_hunk_header(line)?);
-            continue;
-        }
-
-        if current_hunk.is_none() {
-            if line.starts_with("--- ")
-                || line.starts_with("+++ ")
-                || line.starts_with("diff ")
-                || line.starts_with("index ")
-            {
-                continue;
-            }
-            if line.trim().is_empty() {
-                continue;
-            }
-            return Err("invalid diff: missing hunk header".to_string());
-        }
-
-        if line == "\\ No newline at end of file" {
-            continue;
-        }
-
-        let Some(hunk) = current_hunk.as_mut() else {
-            return Err("invalid diff: missing hunk".to_string());
-        };
-
-        let mut chars = line.chars();
-        let op = chars
-            .next()
-            .ok_or_else(|| "invalid diff: empty hunk line".to_string())?;
-        let text = chars.collect::<String>();
-
-        match op {
-            ' ' => hunk.lines.push(UnifiedDiffLine::Context(text)),
-            '+' => hunk.lines.push(UnifiedDiffLine::Add(text)),
-            '-' => hunk.lines.push(UnifiedDiffLine::Remove(text)),
-            _ => {
-                return Err("invalid diff: unsupported hunk line prefix".to_string());
-            }
-        }
+fn parse_trigger_processing_plan(text: &str) -> Result<TriggerProcessingPlan, String> {
+    if let Ok(value) = serde_json::from_str::<TriggerProcessingPlan>(text) {
+        return Ok(value);
     }
-
-    if let Some(hunk) = current_hunk.take() {
-        hunks.push(hunk);
-    }
-
-    if hunks.is_empty() {
-        return Err("invalid diff: no hunks".to_string());
-    }
-
-    Ok(hunks)
+    let start = text
+        .find('{')
+        .ok_or_else(|| "trigger plan is not a JSON object".to_string())?;
+    let end = text
+        .rfind('}')
+        .ok_or_else(|| "trigger plan is not a JSON object".to_string())?;
+    let candidate = text
+        .get(start..=end)
+        .ok_or_else(|| "failed to slice trigger plan JSON".to_string())?;
+    serde_json::from_str::<TriggerProcessingPlan>(candidate)
+        .map_err(|err| format!("invalid trigger plan JSON: {}", err))
 }
 
-fn parse_unified_hunk_header(line: &str) -> Result<UnifiedDiffHunk, String> {
-    let Some(inner_start) = line.strip_prefix("@@") else {
-        return Err("invalid diff: malformed hunk header".to_string());
-    };
-    let Some((ranges, _)) = inner_start.split_once("@@") else {
-        return Err("invalid diff: malformed hunk header".to_string());
-    };
-
-    let mut parts = ranges.split_whitespace();
-    let old_range = parts
-        .next()
-        .ok_or_else(|| "invalid diff: missing old range".to_string())?;
-    let new_range = parts
-        .next()
-        .ok_or_else(|| "invalid diff: missing new range".to_string())?;
-
-    let (old_start, old_count) = parse_hunk_range(old_range, '-')?;
-    let (_new_start, new_count) = parse_hunk_range(new_range, '+')?;
-
-    Ok(UnifiedDiffHunk {
-        old_start,
-        old_count,
-        new_count,
-        lines: Vec::new(),
-    })
+fn decide_trigger_processed_status(
+    no_issue: bool,
+    memory_updated: bool,
+    concept_graph_updated: bool,
+    proposal_created: bool,
+) -> &'static str {
+    if no_issue {
+        return "success";
+    }
+    if memory_updated || concept_graph_updated || proposal_created {
+        return "partial";
+    }
+    "failed"
 }
 
-fn parse_hunk_range(range: &str, expected_prefix: char) -> Result<(usize, usize), String> {
-    let Some(raw) = range.strip_prefix(expected_prefix) else {
-        return Err("invalid diff: malformed hunk range".to_string());
-    };
+fn payload_str_or(value: Option<&Value>, fallback: &str) -> String {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback.to_string())
+}
 
-    let (start_raw, count_raw) = match raw.split_once(',') {
-        Some((start, count)) => (start, Some(count)),
-        None => (raw, None),
-    };
-
-    let start = start_raw
-        .parse::<usize>()
-        .map_err(|_| "invalid diff: invalid range start".to_string())?;
-    let count = count_raw
-        .map(|value| {
-            value
-                .parse::<usize>()
-                .map_err(|_| "invalid diff: invalid range count".to_string())
+fn payload_string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
         })
-        .transpose()?
-        .unwrap_or(1);
+        .unwrap_or_default()
+}
 
-    Ok((start, count))
+async fn emit_trigger_debug_raw(
+    state: &AppState,
+    trigger_event_id: &str,
+    module_target: &str,
+    input: &str,
+    response: &crate::llm::LlmResponse,
+) {
+    let event = build_event(
+        TRIGGER_WORKER_SOURCE,
+        "text",
+        json!({
+            "trigger_event_id": trigger_event_id,
+            "module_target": module_target,
+            "input": input,
+            "output_text": response.text,
+            "raw": response.raw,
+            "tool_calls": response.tool_calls,
+        }),
+        vec![
+            "debug".to_string(),
+            "llm.raw".to_string(),
+            "module:self_improvement_trigger".to_string(),
+        ],
+    );
+    crate::record_event(state, event).await;
+}
+
+async fn emit_module_processed_event(
+    state: &AppState,
+    trigger_event_id: &str,
+    result: &ModuleProcessResult,
+) {
+    let mut payload = json!({
+        "trigger_event_id": trigger_event_id,
+        "module_target": result.module_target,
+        "status": result.status,
+        "memory_updated": result.memory_updated,
+        "concept_graph_updated": result.concept_graph_updated,
+        "processed_at": now_iso8601(),
+    });
+    if let Some(value) = result.concept_ensured {
+        payload["concept_ensured"] = json!(value);
+    }
+    if let Some(value) = &result.proposal_id {
+        payload["proposal_id"] = json!(value);
+    }
+    if let Some(value) = result.error_code {
+        payload["error_code"] = json!(value);
+    }
+    if let Some(value) = &result.error_detail {
+        payload["error_detail"] = json!(value);
+    }
+    let event = build_event(
+        TRIGGER_WORKER_SOURCE,
+        "text",
+        payload,
+        vec!["self_improvement.module_processed".to_string()],
+    );
+    crate::record_event(state, event).await;
+}
+
+async fn emit_trigger_processed_event(
+    state: &AppState,
+    trigger_event_id: &str,
+    trigger_target: &str,
+    resolved_targets: &[String],
+    proposal_ids: &[String],
+    memory_updated: bool,
+    concept_graph_updated: bool,
+    status: &str,
+    error_code: Option<&str>,
+    error_detail: Option<&str>,
+) {
+    let mut payload = json!({
+        "trigger_event_id": trigger_event_id,
+        "target": trigger_target,
+        "resolved_targets": resolved_targets,
+        "proposal_ids": proposal_ids,
+        "status": status,
+        "memory_updated": memory_updated,
+        "concept_graph_updated": concept_graph_updated,
+        "processed_at": now_iso8601(),
+    });
+    if let Some(value) = error_code {
+        payload["error_code"] = json!(value);
+    }
+    if let Some(value) = error_detail {
+        payload["error_detail"] = json!(value);
+    }
+    let event = build_event(
+        TRIGGER_WORKER_SOURCE,
+        "text",
+        payload,
+        vec![
+            "self_improvement.trigger_processed".to_string(),
+            "debug".to_string(),
+        ],
+    );
+    crate::record_event(state, event).await;
+}
+
+async fn apply_memory_section_update(
+    state: &AppState,
+    fallback_target: &str,
+    memory_plan: &MemorySectionUpdatePlan,
+) -> Result<bool, String> {
+    let content = memory_plan.content.trim();
+    if content.is_empty() {
+        return Ok(false);
+    }
+
+    let target_raw = memory_plan
+        .target
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_target);
+    let target = PromptTarget::parse(target_raw).unwrap_or(PromptTarget::Base);
+
+    let mut overrides = state.prompts.read().await.clone();
+    let current = resolve_target_prompt_text(state, &overrides, &target).await?;
+    let next = replace_markdown_section_body(current.as_str(), "Memory", content)?;
+
+    match &target {
+        PromptTarget::Base => {
+            overrides.base = Some(next);
+        }
+        PromptTarget::Router => {
+            overrides.router = Some(next);
+        }
+        PromptTarget::Decision => {
+            overrides.decision = Some(next);
+        }
+        PromptTarget::Submodule(name) => {
+            ensure_active_submodule_exists(state, name).await?;
+            overrides.submodules.insert(name.clone(), next);
+        }
+    }
+
+    write_prompts(&state.prompts_path, &overrides)?;
+    *state.prompts.write().await = overrides;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        decide_trigger_processed_status, parse_trigger_processing_plan, submodule_name_from_target,
+    };
+
+    fn normalize_trigger_target_for_prompt(target: &str) -> String {
+        let trimmed = target.trim();
+        if trimmed.eq_ignore_ascii_case("base")
+            || trimmed.eq_ignore_ascii_case("router")
+            || trimmed.eq_ignore_ascii_case("decision")
+            || trimmed.to_lowercase().starts_with("submodule:")
+        {
+            return trimmed.to_string();
+        }
+        "base".to_string()
+    }
+
+    #[test]
+    fn parse_trigger_plan_accepts_plain_json() {
+        let raw = r#"{
+            "memory_section_update": {"target":"base","content":"updated"},
+            "concept_upserts": ["submodule:curiosity"],
+            "relation_additions": [{"from":"submodule:curiosity","to":"旅行","relation_type":"EVOKES"}],
+            "proposal": {"target":"router","diff_text":"@@ -1 +1 @@\n-old\n+new"}
+        }"#;
+        let plan = parse_trigger_processing_plan(raw).expect("must parse");
+        assert!(plan.memory_section_update.is_some());
+        assert_eq!(plan.concept_upserts.len(), 1);
+        assert_eq!(plan.relation_additions.len(), 1);
+        assert!(plan.proposal.is_some());
+    }
+
+    #[test]
+    fn parse_trigger_plan_accepts_wrapped_json() {
+        let raw =
+            "noise before\n{\"concept_upserts\":[\"a\"],\"relation_additions\":[]}\nnoise after";
+        let plan = parse_trigger_processing_plan(raw).expect("must parse");
+        assert_eq!(plan.concept_upserts, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn parse_trigger_plan_rejects_invalid_json() {
+        let raw = "no json object here";
+        assert!(parse_trigger_processing_plan(raw).is_err());
+    }
+
+    #[test]
+    fn normalize_trigger_target_falls_back_to_base() {
+        assert_eq!(
+            normalize_trigger_target_for_prompt("unknown-target"),
+            "base"
+        );
+        assert_eq!(normalize_trigger_target_for_prompt("router"), "router");
+    }
+
+    #[test]
+    fn decide_trigger_status_success_partial_failed() {
+        assert_eq!(
+            decide_trigger_processed_status(true, false, false, false),
+            "success"
+        );
+        assert_eq!(
+            decide_trigger_processed_status(false, true, false, false),
+            "partial"
+        );
+        assert_eq!(
+            decide_trigger_processed_status(false, false, true, false),
+            "partial"
+        );
+        assert_eq!(
+            decide_trigger_processed_status(false, false, false, true),
+            "partial"
+        );
+        assert_eq!(
+            decide_trigger_processed_status(false, false, false, false),
+            "failed"
+        );
+    }
+
+    #[test]
+    fn submodule_name_from_target_parses_expected_format() {
+        assert_eq!(
+            submodule_name_from_target("submodule:curiosity"),
+            Some("curiosity")
+        );
+        assert_eq!(
+            submodule_name_from_target("submodule:  self_preservation "),
+            Some("self_preservation")
+        );
+        assert_eq!(submodule_name_from_target("router"), None);
+        assert_eq!(submodule_name_from_target("submodule:"), None);
+    }
 }

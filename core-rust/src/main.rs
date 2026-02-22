@@ -285,6 +285,7 @@ async fn main() {
         router_instructions: config.llm.router_instructions.clone(),
         decision_instructions: config.llm.decision_instructions.clone(),
     };
+    crate::application::improve_service::start_trigger_consumer(state.clone());
 
     let app = Router::new()
         .route("/", get(ws_handler))
@@ -326,9 +327,9 @@ async fn main() {
             get(debug_get_prompts).post(debug_update_prompts),
         )
         .route("/debug/modules/{name}/run", post(debug_run_module))
-        .route("/improvements/trigger", post(improve_trigger))
-        .route("/improvements/proposal", post(improve_proposal))
-        .route("/improvements/review", post(improve_review))
+        .route("/triggers", post(improve_trigger))
+        .route("/proposals", post(improve_proposal))
+        .route("/reviews", post(improve_review))
         .route("/debug/events/stream", get(debug_events_stream))
         .route("/debug/events", get(debug_events))
         .with_state(state);
@@ -860,7 +861,8 @@ async fn improve_trigger(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveTriggerRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    let result = crate::application::improve_service::trigger_improvement(&state, payload).await?;
+    let result = crate::application::trigger_ingress_api::trigger_improvement(&state, payload)
+        .await?;
     Ok(Json(result))
 }
 
@@ -868,7 +870,8 @@ async fn improve_proposal(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveProposalRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    let result = crate::application::improve_service::propose_improvement(&state, payload).await?;
+    let result =
+        crate::application::improve_approval_service::propose_improvement(&state, payload).await?;
     Ok(Json(result))
 }
 
@@ -876,7 +879,8 @@ async fn improve_review(
     State(state): State<AppState>,
     Json(payload): Json<DebugImproveReviewRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    let result = crate::application::improve_service::review_improvement(&state, payload).await?;
+    let result =
+        crate::application::improve_approval_service::review_improvement(&state, payload).await?;
     Ok(Json(result))
 }
 
