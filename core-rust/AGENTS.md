@@ -94,6 +94,20 @@ It captures stable implementation rules and clearly marks active WIP areas.
 #### Transport layer (`main.rs` routes/ws handlers)
 - Keep handlers thin (validation + delegation + response mapping).
 - Keep business rules in application services, not in transport handlers.
+- Keep API endpoints as ingress contracts; orchestration belongs to domain/application services.
+- Keep ingress contracts minimal; avoid carrying manual-only hint fields in operational trigger contracts.
+- WebSocket control input must be explicit and allowlisted by `type` (e.g., `trigger`); do not allow arbitrary event injection payloads.
+
+### Event definition discipline
+- Event-definition requirements must be made explicit in design docs.
+- When adding or changing events, document at least:
+  - owner module
+  - target domain boundary (who consumes it and why)
+  - producer and expected consumers
+  - whether it is primary runtime context input or debug-only observability
+- If these points cannot be stated clearly, do not add the event.
+- Only events that are necessary for model reasoning should be included in LLM input history.
+- Aggregate/operational events that do not improve reasoning should be debug-only and excluded from prompt history.
 
 ## Runtime invariants
 - Submodule execution in normal flow is demand-driven, not unconditional.
@@ -138,6 +152,7 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - If documents conflict, prefer the newest explicit clarification doc and record the reconciliation.
 - If implementation strictly follows an existing design decision without adding interpretation or policy change, do not add a new decision doc.
 - Add/update docs only when introducing, changing, or clarifying decisions (including conflict resolution).
+- Responsibility-boundary changes and event/API contract changes require same-day docs updates.
 - For `core-rust` design/implementation docs, include a short `Compatibility Impact` statement:
   - default expectation: `breaking-by-default (no compatibility layer)`.
   - if compatibility is introduced, the document must justify why replacement/removal was not acceptable.

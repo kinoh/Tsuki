@@ -34,6 +34,19 @@ Guidance for coding agents working on Tsuki.
 - WebSocket: see `api-specs/asyncapi.yaml` (AsyncAPI spec).
 - Admin UI: AdminJS at `/admin`, authenticated via `WEB_AUTH_TOKEN`.
 
+## Architecture Principles
+- Always prioritize responsibility separation.
+- Never introduce an event unless both of the following are explicit:
+  - the domain the event is provided to
+  - the module that owns responsibility for producing and maintaining it
+- API contracts and event contracts are different by nature:
+  - APIs are one-to-one contracts with clients
+  - events are inter-module contracts for domain communication
+  - do not force API naming or shape to mirror event naming mechanically
+- Keep external input contracts minimal:
+  - do not add optional/manual hint fields unless they are required by the operational model
+- Any change to responsibility boundaries, event contracts, or API contracts must be reflected in docs on the same day.
+
 ## MCP Topology
 - Universal MCP
   - `rss-mcp-lite` (npm) for shared RSS; data: `${DATA_DIR}/rss_feeds.db`, `${DATA_DIR}/rss_feeds.opml`.
