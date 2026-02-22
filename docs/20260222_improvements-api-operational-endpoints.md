@@ -22,12 +22,14 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 
 ### Module responsibilities
 - `improve_service` (`/improvements/trigger`): emits `self_improvement.triggered` only.
-- Trigger worker (LLM/tool execution path): emits `self_improvement.trigger_processed` only.
+- Trigger orchestrator (LLM/tool execution path):
+  - emits `self_improvement.module_processed` once per resolved module target.
+  - emits `self_improvement.trigger_processed` once as the aggregate result.
   - `self_improvement.trigger_processed` payload includes:
     - `status`: `success|partial|failed`
     - `memory_updated`: boolean
     - `concept_graph_updated`: boolean
-    - `proposal_id`: optional (`proposal` was generated when present)
+    - `proposal_ids`: optional array (`proposal` was generated when present)
     - `error_code`, `error_detail`: required on `failed`, optional on `partial`
 - `improve_service` proposal/review/apply path keeps one essential event per action:
   - `self_improvement.proposed`
@@ -36,7 +38,7 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 
 ### Simplification
 - `proposal_created` is intentionally not introduced.
-- Proposal creation is derived from the presence of `proposal_id` in `self_improvement.trigger_processed`.
+- Proposal creation is derived from the presence of `proposal_ids` in `self_improvement.trigger_processed`.
 
 ## Implementation Follow-up (2026-02-22)
 - Trigger runtime execution was extracted from `improve_service` into

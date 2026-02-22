@@ -53,7 +53,7 @@ pub(crate) async fn trigger_improvement(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("manual")
+        .unwrap_or("all")
         .to_string();
     let reason = payload
         .reason

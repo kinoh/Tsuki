@@ -6,6 +6,7 @@ use tokio::sync::Semaphore;
 use crate::clock::now_iso8601;
 use crate::event::build_event;
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
+use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::write_prompts;
 use crate::{AppState, DebugImproveProposalRequest};
 
@@ -56,6 +57,17 @@ struct TriggerWorkerIssue {
     detail: String,
 }
 
+#[derive(Debug)]
+struct ModuleProcessResult {
+    module_target: String,
+    status: &'static str,
+    memory_updated: bool,
+    concept_graph_updated: bool,
+    proposal_id: Option<String>,
+    error_code: Option<&'static str>,
+    error_detail: Option<String>,
+}
+
 pub(crate) fn spawn_trigger_worker(
     state: AppState,
     trigger_event_id: String,
@@ -72,9 +84,10 @@ pub(crate) fn spawn_trigger_worker(
                     &state,
                     trigger_event_id.as_str(),
                     target.as_str(),
+                    &[],
+                    &[],
                     false,
                     false,
-                    None,
                     "failed",
                     Some("TRIGGER_QUEUE_BUSY"),
                     Some("trigger worker concurrency limit reached"),
@@ -84,9 +97,10 @@ pub(crate) fn spawn_trigger_worker(
             return;
         }
     };
+
     tokio::spawn(async move {
         let _permit = permit;
-        run_trigger_worker(
+        run_trigger_orchestrator(
             &state,
             trigger_event_id.as_str(),
             target.as_str(),
@@ -97,23 +111,101 @@ pub(crate) fn spawn_trigger_worker(
     });
 }
 
-fn trigger_worker_semaphore() -> Arc<Semaphore> {
-    static TRIGGER_WORKER_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
-    TRIGGER_WORKER_SEMAPHORE
-        .get_or_init(|| Arc::new(Semaphore::new(TRIGGER_WORKER_MAX_CONCURRENCY)))
-        .clone()
-}
-
-async fn run_trigger_worker(
+async fn run_trigger_orchestrator(
     state: &AppState,
     trigger_event_id: &str,
-    target: &str,
+    trigger_target: &str,
     reason: &str,
     feedback_refs: &[String],
 ) {
+    let module_targets = match resolve_trigger_targets(state, trigger_target).await {
+        Ok(value) => value,
+        Err(err) => {
+            emit_trigger_processed_event(
+                state,
+                trigger_event_id,
+                trigger_target,
+                &[],
+                &[],
+                false,
+                false,
+                "failed",
+                Some("TRIGGER_TARGET_RESOLVE_FAILED"),
+                Some(err.as_str()),
+            )
+            .await;
+            return;
+        }
+    };
+
+    let mut results = Vec::<ModuleProcessResult>::new();
+    for module_target in &module_targets {
+        let result = run_module_worker(
+            state,
+            trigger_event_id,
+            module_target.as_str(),
+            reason,
+            feedback_refs,
+        )
+        .await;
+        emit_module_processed_event(state, trigger_event_id, &result).await;
+        results.push(result);
+    }
+
+    let proposal_ids = results
+        .iter()
+        .filter_map(|item| item.proposal_id.clone())
+        .collect::<Vec<_>>();
+    let any_memory_updated = results.iter().any(|item| item.memory_updated);
+    let any_concept_updated = results.iter().any(|item| item.concept_graph_updated);
+    let status = decide_trigger_status_from_module_results(&results);
+
+    let first_error = results.iter().find(|item| item.error_code.is_some());
+    let error_code = first_error.and_then(|item| item.error_code);
+    let error_detail = if matches!(status, "failed" | "partial") {
+        let merged = results
+            .iter()
+            .filter_map(|item| {
+                item.error_code
+                    .zip(item.error_detail.as_ref())
+                    .map(|(code, detail)| format!("{}:{}:{}", item.module_target, code, detail))
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        if merged.is_empty() {
+            None
+        } else {
+            Some(merged)
+        }
+    } else {
+        None
+    };
+
+    emit_trigger_processed_event(
+        state,
+        trigger_event_id,
+        trigger_target,
+        &module_targets,
+        &proposal_ids,
+        any_memory_updated,
+        any_concept_updated,
+        status,
+        error_code,
+        error_detail.as_deref(),
+    )
+    .await;
+}
+
+async fn run_module_worker(
+    state: &AppState,
+    trigger_event_id: &str,
+    module_target: &str,
+    reason: &str,
+    feedback_refs: &[String],
+) -> ModuleProcessResult {
     let input = json!({
         "trigger_event_id": trigger_event_id,
-        "target": target,
+        "module_target": module_target,
         "reason": reason,
         "feedback_refs": feedback_refs,
     })
@@ -136,40 +228,32 @@ async fn run_trigger_worker(
     {
         Ok(value) => value,
         Err(err) => {
-            emit_trigger_processed_event(
-                state,
-                trigger_event_id,
-                target,
-                false,
-                false,
-                None,
-                "failed",
-                Some("TRIGGER_LLM_CALL_FAILED"),
-                Some(err.to_string().as_str()),
-            )
-            .await;
-            return;
+            return ModuleProcessResult {
+                module_target: module_target.to_string(),
+                status: "failed",
+                memory_updated: false,
+                concept_graph_updated: false,
+                proposal_id: None,
+                error_code: Some("TRIGGER_LLM_CALL_FAILED"),
+                error_detail: Some(err.to_string()),
+            };
         }
     };
 
-    emit_trigger_debug_raw(state, trigger_event_id, &input, &response).await;
+    emit_trigger_debug_raw(state, trigger_event_id, module_target, &input, &response).await;
 
     let plan = match parse_trigger_processing_plan(response.text.as_str()) {
         Ok(value) => value,
         Err(err) => {
-            emit_trigger_processed_event(
-                state,
-                trigger_event_id,
-                target,
-                false,
-                false,
-                None,
-                "failed",
-                Some("TRIGGER_PLAN_PARSE_FAILED"),
-                Some(err.as_str()),
-            )
-            .await;
-            return;
+            return ModuleProcessResult {
+                module_target: module_target.to_string(),
+                status: "failed",
+                memory_updated: false,
+                concept_graph_updated: false,
+                proposal_id: None,
+                error_code: Some("TRIGGER_PLAN_PARSE_FAILED"),
+                error_detail: Some(err),
+            };
         }
     };
 
@@ -179,7 +263,7 @@ async fn run_trigger_worker(
     let mut issues = Vec::<TriggerWorkerIssue>::new();
 
     if let Some(memory_plan) = plan.memory_section_update {
-        match apply_memory_section_update(state, target, &memory_plan).await {
+        match apply_memory_section_update(state, module_target, &memory_plan).await {
             Ok(updated) => {
                 memory_updated = updated;
             }
@@ -239,12 +323,12 @@ async fn run_trigger_worker(
             .map(str::trim)
             .filter(|value| PromptTarget::parse(value).is_some())
             .map(str::to_string)
-            .unwrap_or_else(|| normalize_trigger_target_for_prompt(target));
+            .unwrap_or_else(|| module_target.to_string());
         match propose_improvement(
             state,
             DebugImproveProposalRequest {
                 target: proposal_target,
-                job_id: format!("trigger:{}", trigger_event_id),
+                job_id: format!("trigger:{}:{}", trigger_event_id, module_target),
                 diff_text: proposal.diff_text,
                 requires_approval: Some(true),
                 created_by: Some(TRIGGER_WORKER_SOURCE.to_string()),
@@ -282,40 +366,92 @@ async fn run_trigger_worker(
         )
     };
 
-    emit_trigger_processed_event(
-        state,
-        trigger_event_id,
-        target,
+    ModuleProcessResult {
+        module_target: module_target.to_string(),
+        status,
         memory_updated,
         concept_graph_updated,
-        proposal_id.as_deref(),
-        status,
+        proposal_id,
         error_code,
-        error_detail.as_deref(),
-    )
-    .await;
+        error_detail,
+    }
 }
 
-fn decide_trigger_processed_status(
-    no_issue: bool,
-    memory_updated: bool,
-    concept_graph_updated: bool,
-    proposal_created: bool,
-) -> &'static str {
-    if no_issue {
+fn trigger_worker_semaphore() -> Arc<Semaphore> {
+    static TRIGGER_WORKER_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    TRIGGER_WORKER_SEMAPHORE
+        .get_or_init(|| Arc::new(Semaphore::new(TRIGGER_WORKER_MAX_CONCURRENCY)))
+        .clone()
+}
+
+async fn resolve_trigger_targets(
+    state: &AppState,
+    trigger_target: &str,
+) -> Result<Vec<String>, String> {
+    let target = trigger_target.trim();
+    if target.is_empty() || target.eq_ignore_ascii_case("all") {
+        return resolve_all_targets(state).await;
+    }
+
+    if target.eq_ignore_ascii_case("submodules") {
+        let modules = state
+            .modules
+            .registry
+            .list_active()
+            .await
+            .map_err(|err| err.to_string())?;
+        return Ok(modules
+            .into_iter()
+            .map(|module| format!("submodule:{}", module.name))
+            .collect::<Vec<_>>());
+    }
+
+    if PromptTarget::parse(target).is_some() {
+        return Ok(vec![target.to_string()]);
+    }
+
+    Err(format!("invalid trigger target: {}", target))
+}
+
+async fn resolve_all_targets(state: &AppState) -> Result<Vec<String>, String> {
+    let modules = state
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| err.to_string())?;
+    let mut targets = vec![
+        "base".to_string(),
+        "router".to_string(),
+        "decision".to_string(),
+    ];
+    for module in modules {
+        targets.push(format!("submodule:{}", module.name));
+    }
+    Ok(targets)
+}
+
+fn decide_trigger_status_from_module_results(results: &[ModuleProcessResult]) -> &'static str {
+    if results.is_empty() {
+        return "failed";
+    }
+    let all_success = results.iter().all(|item| item.status == "success");
+    if all_success {
         return "success";
     }
-    if memory_updated || concept_graph_updated || proposal_created {
-        return "partial";
+    let all_failed = results.iter().all(|item| item.status == "failed");
+    if all_failed {
+        return "failed";
     }
-    "failed"
+    "partial"
 }
 
 fn trigger_worker_instructions() -> String {
     [
-        "You are the self-improvement trigger worker.",
+        "You are the self-improvement module worker.",
         "Read JSON input and return one JSON object only.",
         "Do not include markdown or explanations.",
+        "The input includes a fixed module_target. Focus only on that module.",
         "Schema:",
         "{",
         "  \"memory_section_update\": {\"target\": \"base|router|decision|submodule:<name>\", \"content\": \"...\"} | null,",
@@ -345,17 +481,25 @@ fn parse_trigger_processing_plan(text: &str) -> Result<TriggerProcessingPlan, St
         .map_err(|err| format!("invalid trigger plan JSON: {}", err))
 }
 
-fn normalize_trigger_target_for_prompt(target: &str) -> String {
-    let trimmed = target.trim();
-    if PromptTarget::parse(trimmed).is_some() {
-        return trimmed.to_string();
+fn decide_trigger_processed_status(
+    no_issue: bool,
+    memory_updated: bool,
+    concept_graph_updated: bool,
+    proposal_created: bool,
+) -> &'static str {
+    if no_issue {
+        return "success";
     }
-    "base".to_string()
+    if memory_updated || concept_graph_updated || proposal_created {
+        return "partial";
+    }
+    "failed"
 }
 
 async fn emit_trigger_debug_raw(
     state: &AppState,
     trigger_event_id: &str,
+    module_target: &str,
     input: &str,
     response: &crate::llm::LlmResponse,
 ) {
@@ -364,6 +508,7 @@ async fn emit_trigger_debug_raw(
         "text",
         json!({
             "trigger_event_id": trigger_event_id,
+            "module_target": module_target,
             "input": input,
             "output_text": response.text,
             "raw": response.raw,
@@ -378,28 +523,59 @@ async fn emit_trigger_debug_raw(
     crate::record_event(state, event).await;
 }
 
+async fn emit_module_processed_event(
+    state: &AppState,
+    trigger_event_id: &str,
+    result: &ModuleProcessResult,
+) {
+    let mut payload = json!({
+        "trigger_event_id": trigger_event_id,
+        "module_target": result.module_target,
+        "status": result.status,
+        "memory_updated": result.memory_updated,
+        "concept_graph_updated": result.concept_graph_updated,
+        "processed_at": now_iso8601(),
+    });
+    if let Some(value) = &result.proposal_id {
+        payload["proposal_id"] = json!(value);
+    }
+    if let Some(value) = result.error_code {
+        payload["error_code"] = json!(value);
+    }
+    if let Some(value) = &result.error_detail {
+        payload["error_detail"] = json!(value);
+    }
+    let event = build_event(
+        TRIGGER_WORKER_SOURCE,
+        "text",
+        payload,
+        vec!["self_improvement.module_processed".to_string()],
+    );
+    crate::record_event(state, event).await;
+}
+
 async fn emit_trigger_processed_event(
     state: &AppState,
     trigger_event_id: &str,
-    target: &str,
+    trigger_target: &str,
+    resolved_targets: &[String],
+    proposal_ids: &[String],
     memory_updated: bool,
     concept_graph_updated: bool,
-    proposal_id: Option<&str>,
     status: &str,
     error_code: Option<&str>,
     error_detail: Option<&str>,
 ) {
     let mut payload = json!({
         "trigger_event_id": trigger_event_id,
-        "target": target,
+        "target": trigger_target,
+        "resolved_targets": resolved_targets,
+        "proposal_ids": proposal_ids,
         "status": status,
         "memory_updated": memory_updated,
         "concept_graph_updated": concept_graph_updated,
         "processed_at": now_iso8601(),
     });
-    if let Some(value) = proposal_id {
-        payload["proposal_id"] = json!(value);
-    }
     if let Some(value) = error_code {
         payload["error_code"] = json!(value);
     }
@@ -460,10 +636,19 @@ async fn apply_memory_section_update(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        decide_trigger_processed_status, normalize_trigger_target_for_prompt,
-        parse_trigger_processing_plan,
-    };
+    use super::{decide_trigger_processed_status, parse_trigger_processing_plan};
+
+    fn normalize_trigger_target_for_prompt(target: &str) -> String {
+        let trimmed = target.trim();
+        if trimmed.eq_ignore_ascii_case("base")
+            || trimmed.eq_ignore_ascii_case("router")
+            || trimmed.eq_ignore_ascii_case("decision")
+            || trimmed.to_lowercase().starts_with("submodule:")
+        {
+            return trimmed.to_string();
+        }
+        "base".to_string()
+    }
 
     #[test]
     fn parse_trigger_plan_accepts_plain_json() {
