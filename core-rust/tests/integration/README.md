@@ -4,7 +4,7 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 
 ## Layout
 - `config/`: runner-level configuration (`tester` and `judge` model/prompt settings)
-- `scenarios/`: scenario definitions (`tester_instructions` or `steps`, `metrics_definition`)
+- `scenarios/`: scenario definitions (`steps`, `metrics_definition`)
 - `prompts/`: prompt templates for tester and judge roles
 - `logs/`: execution logs
 - `results/`: machine-readable run results
@@ -35,8 +35,6 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 - Additional metrics are scenario-specific and defined in each scenario.
 
 ## Scenario steps
-- Legacy mode remains supported:
-  - top-level `tester_instructions` drives one conversation phase.
 - Step mode can define a sequence of conversation and fixed event emission:
   - `steps[].kind: conversation`
   - `steps[].tester_instructions` (required)

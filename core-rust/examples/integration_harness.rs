@@ -80,8 +80,6 @@ struct Scenario {
     #[serde(default)]
     include_debug_events: bool,
     #[serde(default)]
-    tester_instructions: String,
-    #[serde(default)]
     steps: Vec<ScenarioStep>,
     metrics_definition: HashMap<String, MetricDefinition>,
 }
@@ -530,12 +528,7 @@ fn load_assets(args: &Args, identity: &age::x25519::Identity) -> Result<TestAsse
 
 fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
     if scenario.steps.is_empty() {
-        if scenario.tester_instructions.trim().is_empty() {
-            return Err(
-                "scenario requires non-empty tester_instructions when steps is omitted".to_string(),
-            );
-        }
-        return Ok(());
+        return Err("scenario requires non-empty steps".to_string());
     }
 
     for (index, step) in scenario.steps.iter().enumerate() {
@@ -1170,15 +1163,6 @@ fn build_runtime_scenario_steps(
         return Err("execution.max_turns must be >= 1".to_string());
     }
 
-    if scenario.steps.is_empty() {
-        return Ok(vec![RuntimeScenarioStep::Conversation(
-            ConversationRuntimeStep {
-                tester_instructions: scenario.tester_instructions.clone(),
-                max_turns: default_conversation_max_turns,
-            },
-        )]);
-    }
-
     let mut out = Vec::with_capacity(scenario.steps.len());
     for (index, step) in scenario.steps.iter().enumerate() {
         match step {
@@ -1781,15 +1765,7 @@ async fn judge_run(
 }
 
 fn scenario_instructions_for_judge(scenario: &Scenario) -> String {
-    if scenario.steps.is_empty() {
-        return scenario.tester_instructions.clone();
-    }
-
     let mut lines = Vec::<String>::new();
-    if !scenario.tester_instructions.trim().is_empty() {
-        lines.push("Legacy tester_instructions:".to_string());
-        lines.push(scenario.tester_instructions.trim().to_string());
-    }
     lines.push("Scenario steps:".to_string());
     for (index, step) in scenario.steps.iter().enumerate() {
         match step {

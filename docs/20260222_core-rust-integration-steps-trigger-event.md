@@ -12,9 +12,8 @@ Date: 2026-02-22
 - Add two step kinds:
   - `conversation`: multi-turn tester-driven dialogue with its own `tester_instructions` and optional `max_turns`.
   - `emit_event`: fixed runtime event emission (currently only `event.type: trigger`), followed by explicit wait for completion tags.
-- Keep backward compatibility:
-  - If `steps` is omitted, the harness uses legacy top-level `tester_instructions` as one conversation phase.
 - Keep conversation completion token fixed to `__TEST_DONE__` (not configurable).
+- Require `steps` for all scenarios (legacy top-level `tester_instructions` is not supported).
 
 ## Why
 - Deterministic event injection is necessary to reliably verify self-improvement flow in integration tests.
@@ -23,8 +22,8 @@ Date: 2026-02-22
 
 ## Implementation Notes
 - `core-rust/examples/integration_harness.rs`
-  - Scenario schema extended with optional `steps`.
-  - Added runtime step planning with validation and legacy fallback.
+  - Scenario schema changed to require `steps`.
+  - Added runtime step planning with validation.
   - Added `emit_event` execution over the same WebSocket session.
   - Added wait loop for emitted-event completion via DB polling.
 - `core-rust/tests/integration/README.md`
@@ -37,5 +36,5 @@ Date: 2026-02-22
   - Migrated existing scenarios to `steps` format using `conversation` phases.
 
 ## Compatibility Impact
-- breaking-by-default (no compatibility layer): No.
-- Effective behavior remains backward compatible for existing scenarios without `steps`.
+- breaking-by-default (no compatibility layer): Yes.
+- Scenario files must define `steps`; top-level `tester_instructions` is no longer accepted.
