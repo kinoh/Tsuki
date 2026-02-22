@@ -1,19 +1,22 @@
 name: Submodule
 include_debug_events: true
 
-tester_instructions: |
-  You are a tester in a natural chat.
-  Keep each utterance to one sentence and do not reveal test intent.
-  Finish in around 6 turns.
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a tester in a natural chat.
+      Keep each utterance to one sentence and do not reveal test intent.
+      Finish in around 6 turns.
 
-  Cover these checkpoints in order:
-  1) A neutral small-talk opener with no explicit task request.
-  2) A turn that clearly matches curiosity-oriented exploration (ask about a new perspective or unknown angle).
-  3) A sudden shift to a lightweight casual topic that does not require deep exploration.
-  4) A safety/comfort-oriented casual turn (e.g., tiredness, wanting to rest, low energy).
-  5) A final normal small-talk closing.
+      Cover these checkpoints in order:
+      1) A neutral small-talk opener with no explicit task request.
+      2) A turn that clearly matches curiosity-oriented exploration (ask about a new perspective or unknown angle).
+      3) A sudden shift to a lightweight casual topic that does not require deep exploration.
+      4) A safety/comfort-oriented casual turn (e.g., tiredness, wanting to rest, low energy).
+      5) A final normal small-talk closing.
 
-  Keep the tone casual and short.
+      Keep the tone casual and short.
+    max_turns: 6
 
 metrics_definition:
   scenario_requirement_fit:

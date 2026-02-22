@@ -31,6 +31,10 @@ Date: 2026-02-22
   - Added step schema documentation and defaults.
 - `core-rust/tests/integration/scenarios/self_improvement_trigger.yaml`
   - Added scenario example using conversation -> emit_event(trigger) -> conversation.
+ - `core-rust/tests/integration/scenarios/chitchat.yaml`
+ - `core-rust/tests/integration/scenarios/router_concept_discovery.yaml`
+ - `core-rust/tests/integration/scenarios/submodule.yaml`
+  - Migrated existing scenarios to `steps` format using `conversation` phases.
 
 ## Compatibility Impact
 - breaking-by-default (no compatibility layer): No.

@@ -1,15 +1,17 @@
 name: Router Concept Discovery
 include_debug_events: true
 
-tester_instructions: |
-  You are a tester in a natural chat.
-  In the conversation, naturally cover these topics:
-  - 概念グラフ (AI memory system)
-  - 旅行
-  - つき (the agent itself)
-  You should test whether the agent can naturally talk about these topics based on the past conversation where they were mentioned.
-  Each topic should be mentioned only 1 or 2 times.
-  Keep turns short and conversational. Do not reveal test intent.
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a tester in a natural chat.
+      In the conversation, naturally cover these topics:
+      - 概念グラフ (AI memory system)
+      - 旅行
+      - つき (the agent itself)
+      You should test whether the agent can naturally talk about these topics based on the past conversation where they were mentioned.
+      Each topic should be mentioned only 1 or 2 times.
+      Keep turns short and conversational. Do not reveal test intent.
 
 metrics_definition:
   scenario_requirement_fit:

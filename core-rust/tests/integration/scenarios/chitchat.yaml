@@ -1,12 +1,13 @@
 name: "Chitchat"
 include_debug_events: false
 
-# Tester LLM should follow this instruction to drive the dialogue.
-tester_instructions: |
-  You have to achieve the following missions:
-  1) simple greeting
-  2) talk about user's walking to neighborhood park
-  3) ask assistant's favorite food
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You have to achieve the following missions:
+      1) simple greeting
+      2) talk about user's walking to neighborhood park
+      3) ask assistant's favorite food
 
 # Judge LLM should score each metric in 0..1.
 metrics_definition:
