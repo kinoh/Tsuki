@@ -12,6 +12,9 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 ## Environment separation
 - Integration tests use isolated Memgraph services defined in `compose.test.yaml`.
 - Test Memgraph endpoint is `bolt://localhost:7697`.
+- Runner config `[core]` must define:
+  - `memgraph_uri`
+  - `memgraph_backup_path`
 - Setup command:
   - `task -t core-rust/Taskfile.yaml integration/prepare`
 - Run command:
@@ -21,6 +24,7 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 
 ## Principles
 - Memgraph restore uses latest snapshot through `integration/memgraph/restore/latest`.
+- Integration harness restores the snapshot specified by `runner.toml` `core.memgraph_backup_path` before core startup.
 - Tester and judge configuration are file-based (not environment-variable based).
 - Runtime requires `OPENAI_API_KEY`.
 - Scenario text supports secret placeholders:

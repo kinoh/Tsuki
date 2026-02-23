@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::str::FromStr;
 use time::{format_description, OffsetDateTime};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, timeout, Duration, Instant};
@@ -47,7 +48,6 @@ struct RunnerConfig {
     tester: RoleConfig,
     judge: RoleConfig,
     execution: ExecutionConfig,
-    #[serde(default)]
     core: CoreConfig,
 }
 
@@ -66,10 +66,12 @@ struct ExecutionConfig {
     transient_retry: usize,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct CoreConfig {
     #[serde(default)]
     prompts_file: Option<String>,
+    memgraph_uri: String,
+    memgraph_backup_path: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -164,6 +166,8 @@ struct IntegrationResult {
     generated_at: String,
     db_path: String,
     ws_url: String,
+    memgraph_uri: String,
+    memgraph_backup_path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -172,6 +176,8 @@ struct RuntimeContext {
     db_path: PathBuf,
     ws_url: String,
     auth_token: String,
+    memgraph_uri: String,
+    memgraph_backup_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -250,6 +256,7 @@ async fn run() -> Result<(), String> {
     let assets = load_assets(&args, &secret_identity)?;
 
     let runtime = prepare_runtime(&assets.core)?;
+    restore_memgraph_snapshot(&runtime).await?;
     let mut core = start_core(&runtime).await?;
     wait_for_ws(&runtime.ws_url, &mut core).await?;
 
@@ -664,12 +671,32 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
     let auth_token =
         std::env::var("WEB_AUTH_TOKEN").unwrap_or_else(|_| DEFAULT_AUTH_TOKEN.to_string());
     let ws_url = format!("ws://127.0.0.1:{}/", port);
+    let memgraph_uri = core.memgraph_uri.trim().to_string();
+    if memgraph_uri.is_empty() {
+        return Err("core.memgraph_uri must not be empty".to_string());
+    }
+    let memgraph_backup_path =
+        resolve_to_manifest_path(PathBuf::from(core.memgraph_backup_path.as_str()));
+    if !memgraph_backup_path.exists() {
+        return Err(format!(
+            "core.memgraph_backup_path not found: {}",
+            memgraph_backup_path.display()
+        ));
+    }
+    if !memgraph_backup_path.is_file() {
+        return Err(format!(
+            "core.memgraph_backup_path must be a file: {}",
+            memgraph_backup_path.display()
+        ));
+    }
 
     Ok(RuntimeContext {
         temp_dir,
         db_path,
         ws_url,
         auth_token,
+        memgraph_uri,
+        memgraph_backup_path,
     })
 }
 
@@ -695,11 +722,142 @@ async fn start_core(runtime: &RuntimeContext) -> Result<Child, String> {
         ])
         .current_dir(&runtime.temp_dir)
         .env("WEB_AUTH_TOKEN", runtime.auth_token.as_str())
-        .env("MEMGRAPH_URI", "bolt://localhost:7697")
+        .env("MEMGRAPH_URI", runtime.memgraph_uri.as_str())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|err| format!("failed to spawn core-rust: {}", err))
+}
+
+async fn restore_memgraph_snapshot(runtime: &RuntimeContext) -> Result<(), String> {
+    let compose_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("compose.test.yaml");
+    if !compose_file.exists() {
+        return Err(format!(
+            "compose.test.yaml not found: {}",
+            compose_file.display()
+        ));
+    }
+    let backup_name = runtime
+        .memgraph_backup_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            format!(
+                "invalid memgraph backup file name: {}",
+                runtime.memgraph_backup_path.display()
+            )
+        })?
+        .to_string();
+    let backup_target = format!("memgraph-test:/data/snapshots/{}", backup_name);
+    run_docker_compose(&compose_file, &["up", "-d", "memgraph-test"]).await?;
+    run_docker_compose(
+        &compose_file,
+        &[
+            "exec",
+            "-u",
+            "root",
+            "memgraph-test",
+            "mkdir",
+            "-p",
+            "/data/snapshots",
+        ],
+    )
+    .await?;
+    run_docker_compose(
+        &compose_file,
+        &[
+            "cp",
+            runtime.memgraph_backup_path.to_string_lossy().as_ref(),
+            backup_target.as_str(),
+        ],
+    )
+    .await?;
+    run_docker_compose(
+        &compose_file,
+        &[
+            "exec",
+            "-u",
+            "root",
+            "memgraph-test",
+            "chown",
+            "memgraph:memgraph",
+            format!("/data/snapshots/{}", backup_name).as_str(),
+        ],
+    )
+    .await?;
+    run_mgconsole_query(
+        &compose_file,
+        format!("RECOVER SNAPSHOT '/data/snapshots/{}' FORCE;", backup_name).as_str(),
+    )
+    .await?;
+    for _ in 0..60 {
+        if run_mgconsole_query(&compose_file, "RETURN 1;")
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(1_000)).await;
+    }
+    Err("memgraph-test did not become ready after snapshot restore".to_string())
+}
+
+async fn run_docker_compose(compose_file: &Path, args: &[&str]) -> Result<(), String> {
+    let mut command = Command::new("docker");
+    command.arg("compose");
+    command.arg("-f");
+    command.arg(compose_file);
+    for arg in args {
+        command.arg(arg);
+    }
+    let output = command
+        .output()
+        .await
+        .map_err(|err| format!("failed to run docker compose {:?}: {}", args, err))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "docker compose {:?} failed (status={}): {}",
+        args,
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
+}
+
+async fn run_mgconsole_query(compose_file: &Path, query: &str) -> Result<(), String> {
+    let mut command = Command::new("docker");
+    command
+        .arg("compose")
+        .arg("-f")
+        .arg(compose_file)
+        .args(["exec", "-T", "memgraph-test", "mgconsole"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|err| format!("failed to spawn mgconsole: {}", err))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(format!("{}\n", query).as_bytes())
+            .await
+            .map_err(|err| format!("failed to write mgconsole stdin: {}", err))?;
+    }
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|err| format!("failed to wait mgconsole: {}", err))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "mgconsole query failed (status={}): {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
 }
 
 fn sanitize_cargo_env(command: &mut Command) {
@@ -936,6 +1094,8 @@ async fn execute_runs(
             .unwrap_or_else(|_| "".to_string()),
         db_path: runtime.db_path.to_string_lossy().to_string(),
         ws_url: runtime.ws_url.clone(),
+        memgraph_uri: runtime.memgraph_uri.clone(),
+        memgraph_backup_path: runtime.memgraph_backup_path.to_string_lossy().to_string(),
     })
 }
 

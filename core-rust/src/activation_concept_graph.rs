@@ -21,10 +21,8 @@ pub(crate) trait ConceptGraphActivationReader: Send + Sync {
         keywords: &[String],
         limit: usize,
     ) -> Result<Vec<String>, String>;
-    async fn concept_activation(
-        &self,
-        concepts: &[String],
-    ) -> Result<HashMap<String, f64>, String>;
+    async fn concept_activation(&self, concepts: &[String])
+        -> Result<HashMap<String, f64>, String>;
 }
 
 #[async_trait]
