@@ -215,7 +215,13 @@ async fn main() {
     let db = Db::connect(&config.db).await.expect("failed to init db");
     let event_store = Arc::new(EventStore::new(db.clone()));
     let prompts_path = PathBuf::from(config.prompts.path.as_str());
-    let prompt_overrides = load_prompts(&prompts_path).unwrap_or_default();
+    let prompt_overrides = load_prompts(&prompts_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to load prompts '{}': {}",
+            prompts_path.display(),
+            err
+        )
+    });
     let prompts = Arc::new(RwLock::new(prompt_overrides));
     let emit_event_store = event_store.clone();
     let emit_tx = tx.clone();
