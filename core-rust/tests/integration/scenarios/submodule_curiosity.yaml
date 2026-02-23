@@ -1,0 +1,56 @@
+name: Submodule Curiosity (ConceptGraph/Wakuwaku/Memory)
+include_debug_events: true
+
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a tester in a natural Japanese chat.
+      Keep each utterance to exactly one sentence.
+      Do not reveal test intent.
+      Finish in around 6 turns.
+
+      Required concept anchors:
+      - You MUST explicitly use these Japanese words at least once in the run:
+        1) 概念グラフ
+        2) ワクワク
+        3) 記憶
+
+      Turn plan (strict order):
+      1) Neutral small-talk opener without technical words.
+      2) Curiosity turn that includes "ワクワク" and asks for a new angle/perspective.
+      3) Curiosity+tech turn that includes "概念グラフ".
+      4) Curiosity+memory turn that includes "記憶".
+      5) Lightweight follow-up question that keeps exploration tone.
+      6) Casual closing.
+
+      Negative constraints:
+      - Avoid safety/rest keywords like: 疲れ, 休む, おやすみ, 不安, 危険.
+      - Avoid privacy/security keywords like: プライバシー, 偽サイト, HTTPS.
+    max_turns: 6
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: |
+      How well the run satisfies scenario-specific required constraints.
+      Score this metric using only:
+      1) Required anchor-word coverage in user turns:
+         - 概念グラフ
+         - ワクワク
+         - 記憶
+      2) Negative-constraint compliance:
+         - no safety/rest drift (e.g., 疲れ, 休む, おやすみ, 不安, 危険)
+         - no privacy/security drift (e.g., プライバシー, 偽サイト, HTTPS)
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  submodule_trigger_precision:
+    description: |
+      Judge whether submodule triggering avoids obvious false positives.
+      In neutral turns, score high only if hard triggers are limited and context-appropriate.
+      Penalize broad triggering unrelated to curiosity/exploration.
+
+  submodule_trigger_recall:
+    description: |
+      Judge whether relevant curiosity turns actually trigger suitable submodules.
+      On turns 2-5, score high only if at least one fitting hard_trigger or soft_recommendation appears.
