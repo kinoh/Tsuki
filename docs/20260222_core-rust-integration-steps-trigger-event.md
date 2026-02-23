@@ -49,6 +49,9 @@ Date: 2026-02-22
     - baseline metrics (`scenario_requirement_fit`, `dialog_naturalness`) remain non-excludable.
 - `core-rust/tests/integration/scenarios/self_improvement_trigger.yaml`
   - Added scenario example using conversation -> emit_event(trigger) -> conversation.
+  - Added `si_pipeline_health` metric (pass-target) focused on deterministic progress signal:
+    - at least one `self_improvement.module_processed` with `concept_graph_updated=true`.
+    - explicit binary rubric (`1.0` when condition is met, else `0.0`) to reduce judge drift.
   - Marked `self_improvement_effectiveness` as `exclude_from_pass: true` to avoid over-strict fail on non-deterministic apply.
 - `core-rust/examples/integration_harness.rs`
   - Added `MetricDefinition.exclude_from_pass` (default false).

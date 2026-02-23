@@ -37,6 +37,14 @@ metrics_definition:
   dialog_naturalness:
     description: "How natural and coherent the dialogue flow feels end-to-end."
 
+  si_pipeline_health:
+    description: |
+      Judge only whether the self-improvement pipeline reached a concrete graph-update step.
+      Binary rule:
+      - If at least one `self_improvement.module_processed` event has `concept_graph_updated=true`, score 1.0.
+      - If none exists, score 0.0.
+      Do not mix in dialogue quality, recommendation correctness, or memory/proposal outcomes for this metric.
+
   self_improvement_effectiveness:
     exclude_from_pass: true
     description: |
