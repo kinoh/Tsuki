@@ -13,6 +13,9 @@ use crate::prompts::PromptOverrides;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const ROUTER_RECALL_MAX_HOP: u32 = 2;
+const HARD_INHIBITION_STEP: f64 = 0.12;
+const HARD_INHIBITION_MAX: f64 = 0.36;
+const HARD_STREAK_RECOVERY: u32 = 1;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct HardTriggerResult {
@@ -25,6 +28,8 @@ pub(crate) struct RouterOutput {
     pub(crate) activation_query_terms: Vec<String>,
     pub(crate) active_concepts_from_concept_graph: String,
     pub(crate) module_scores: BTreeMap<String, f64>,
+    pub(crate) hard_inhibition_penalties: BTreeMap<String, f64>,
+    pub(crate) hard_effective_scores: BTreeMap<String, f64>,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
     pub(crate) hard_trigger_results: Vec<HardTriggerResult>,
@@ -101,7 +106,11 @@ where
         .iter()
         .map(|(name, score)| (name.clone(), *score))
         .collect::<BTreeMap<_, _>>();
-    let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
+    let streaks = read_hard_streaks(state, &active_module_names).await;
+    let (hard_scores, hard_inhibition_penalties, hard_effective_scores) =
+        apply_hard_inhibition(&scores, &streaks);
+    let hard_triggers =
+        select_modules_by_threshold(&hard_scores, state.router.hard_trigger_threshold);
     let soft_recommendations =
         select_modules_by_threshold(&scores, state.router.recommendation_threshold);
     let activation_snapshot = ActivationSnapshot {
@@ -115,11 +124,14 @@ where
         &execute_submodule,
     )
     .await;
+    update_hard_streaks(state, &active_module_names, &hard_triggers).await;
 
     let router_output = RouterOutput {
         activation_query_terms,
         active_concepts_from_concept_graph: resolution.active_concepts_from_concept_graph,
         module_scores,
+        hard_inhibition_penalties,
+        hard_effective_scores,
         hard_triggers,
         soft_recommendations,
         hard_trigger_results,
@@ -276,6 +288,62 @@ fn select_modules_by_threshold(scores: &[(String, f64)], threshold: f32) -> Vec<
         .filter(|(_, score)| *score >= threshold)
         .map(|(name, _)| name.clone())
         .collect()
+}
+
+async fn read_hard_streaks(
+    state: &AppState,
+    active_module_names: &[String],
+) -> HashMap<String, u32> {
+    let guard = state.submodule_hard_streaks.read().await;
+    active_module_names
+        .iter()
+        .filter_map(|name| guard.get(name).copied().map(|value| (name.clone(), value)))
+        .collect::<HashMap<_, _>>()
+}
+
+fn apply_hard_inhibition(
+    scores: &[(String, f64)],
+    streaks: &HashMap<String, u32>,
+) -> (Vec<(String, f64)>, BTreeMap<String, f64>, BTreeMap<String, f64>) {
+    let mut inhibited = Vec::<(String, f64)>::with_capacity(scores.len());
+    let mut penalties = BTreeMap::<String, f64>::new();
+    let mut effective = BTreeMap::<String, f64>::new();
+    for (name, score) in scores {
+        let streak = streaks.get(name.as_str()).copied().unwrap_or(0);
+        let penalty = ((streak as f64) * HARD_INHIBITION_STEP).min(HARD_INHIBITION_MAX);
+        let adjusted = (score - penalty).clamp(0.0, 1.0);
+        inhibited.push((name.clone(), adjusted));
+        penalties.insert(name.clone(), penalty);
+        effective.insert(name.clone(), adjusted);
+    }
+    inhibited.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    (inhibited, penalties, effective)
+}
+
+async fn update_hard_streaks(
+    state: &AppState,
+    active_module_names: &[String],
+    hard_triggers: &[String],
+) {
+    let hard_set = hard_triggers.iter().cloned().collect::<HashSet<_>>();
+    let mut guard = state.submodule_hard_streaks.write().await;
+    for name in active_module_names {
+        let current = guard.get(name.as_str()).copied().unwrap_or(0);
+        let next = if hard_set.contains(name.as_str()) {
+            current.saturating_add(1)
+        } else {
+            current.saturating_sub(HARD_STREAK_RECOVERY)
+        };
+        if next == 0 {
+            guard.remove(name.as_str());
+        } else {
+            guard.insert(name.clone(), next);
+        }
+    }
 }
 
 fn collect_submodule_activation_sources(selected_seeds: &[String]) -> Vec<String> {
