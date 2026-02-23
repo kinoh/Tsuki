@@ -9,7 +9,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -a && source .env && set +a && bacon run-long"
+        "set -a && source .env && set +a && bacon run-long -- --bin tsuki-core-rust"
       ],
       "options": { "cwd": "${workspaceFolder}/core-rust" },
       "isBackground": true,
