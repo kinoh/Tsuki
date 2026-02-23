@@ -17,7 +17,7 @@ The script:
 3. Asks the model to select relevant concepts per submodule.
 4. In `--apply` mode:
 - ensures `submodule:<name>` concept exists (`concept_upsert`),
-- adds relations from `submodule:<name>` to selected concepts (`relation_add`).
+- adds relations from selected concepts to `submodule:<name>` (`relation_add`).
 5. Defaults to dry-run unless `--apply` is explicitly set.
 
 ## Why
@@ -34,3 +34,5 @@ The script:
 ## Notes
 - Relation type is configurable (`evokes|is-a|part-of`), default is `evokes`.
 - The script intentionally filters out `submodule:*` candidates from concept input.
+- Trigger-oriented direction is `concept -> submodule`. This keeps semantics aligned with
+  "front concepts activate submodules".

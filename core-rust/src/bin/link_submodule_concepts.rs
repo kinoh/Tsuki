@@ -162,8 +162,8 @@ async fn run() -> Result<(), String> {
             for concept in &item.selected {
                 let result = store
                     .relation_add(
-                        submodule_concept.clone(),
                         concept.clone(),
+                        submodule_concept.clone(),
                         cli.relation_type.clone(),
                     )
                     .await;

@@ -85,6 +85,16 @@ where
         &resolution.active_concepts_from_concept_graph,
     )
     .await;
+    let activation_sources = collect_submodule_activation_sources(&resolution.selected_seeds);
+    if !activation_sources.is_empty() {
+        if let Err(err) = state
+            .activation_concept_graph
+            .activate_related_submodules(activation_sources)
+            .await
+        {
+            emit_router_debug_error(state, "activate_related_submodules", &err).await;
+        }
+    }
 
     let scores = compute_module_scores_from_concept_activation(&active_module_names, state).await;
     let module_scores = scores
@@ -266,6 +276,21 @@ fn select_modules_by_threshold(scores: &[(String, f64)], threshold: f32) -> Vec<
         .filter(|(_, score)| *score >= threshold)
         .map(|(name, _)| name.clone())
         .collect()
+}
+
+fn collect_submodule_activation_sources(selected_seeds: &[String]) -> Vec<String> {
+    let mut out = Vec::<String>::new();
+    let mut seen = HashSet::<String>::new();
+    for seed in selected_seeds {
+        let trimmed = seed.trim();
+        if trimmed.is_empty() || trimmed.starts_with("submodule:") {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
 }
 
 fn build_router_config(

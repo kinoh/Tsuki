@@ -52,6 +52,10 @@ pub(crate) trait ConceptGraphDebugReader: Send + Sync {
 pub(crate) trait ConceptGraphOps: Send + Sync {
     async fn concept_upsert(&self, concept: String) -> Result<Value, String>;
     async fn update_affect(&self, target: String, valence_delta: f64) -> Result<Value, String>;
+    async fn activate_related_submodules(
+        &self,
+        concepts: Vec<String>,
+    ) -> Result<HashMap<String, f64>, String>;
     async fn episode_add(&self, summary: String, concepts: Vec<String>) -> Result<Value, String>;
     async fn relation_add(
         &self,
@@ -743,6 +747,72 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
             "arousal": arousal,
             "accessed_at": updated.accessed_at,
         }))
+    }
+
+    async fn activate_related_submodules(
+        &self,
+        concepts: Vec<String>,
+    ) -> Result<HashMap<String, f64>, String> {
+        let now = self.now_ms();
+        let mut unique = Vec::<String>::new();
+        let mut seen = HashSet::<String>::new();
+        for raw in concepts {
+            let Some(name) = Self::normalize_non_empty(raw.as_str()) else {
+                continue;
+            };
+            if seen.insert(name.clone()) {
+                unique.push(name);
+            }
+        }
+        if unique.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut cache = HashMap::<String, ConceptState>::new();
+        let mut accumulated = HashMap::<String, f64>::new();
+        for concept in unique {
+            let Some(source_state) = self
+                .get_concept_state_cached(&mut cache, concept.as_str(), now)
+                .await?
+            else {
+                continue;
+            };
+            let source_arousal =
+                self.arousal(source_state.arousal_level, source_state.accessed_at, now);
+            if source_arousal <= 0.0 {
+                continue;
+            }
+            let relations = self.fetch_relations(concept.as_str()).await?;
+            for edge in relations {
+                if edge.from == edge.to {
+                    continue;
+                }
+                let forward = edge.from == concept;
+                let target = if forward {
+                    edge.to.clone()
+                } else {
+                    edge.from.clone()
+                };
+                if !target.starts_with("submodule:") {
+                    continue;
+                }
+                let direction_penalty = if forward { 1.0 } else { REVERSE_PENALTY };
+                let next_level = (source_arousal * edge.weight * direction_penalty).clamp(0.0, 1.0);
+                if next_level <= 0.0 {
+                    continue;
+                }
+                let entry = accumulated.entry(target).or_insert(0.0);
+                *entry = (*entry + next_level).clamp(0.0, 1.0);
+            }
+        }
+        for (target, level) in &accumulated {
+            self.maybe_update_arousal(&mut cache, target.as_str(), *level, now)
+                .await?;
+        }
+        for value in accumulated.values_mut() {
+            *value = Self::round_score(*value);
+        }
+        Ok(accumulated)
     }
 
     async fn episode_add(&self, summary: String, concepts: Vec<String>) -> Result<Value, String> {
