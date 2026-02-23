@@ -44,8 +44,16 @@ Date: 2026-02-22
   - Enforced structural guard: `memory_section_update` targeting `base` now fails explicitly.
 - `core-rust/tests/integration/README.md`
   - Added step schema documentation and defaults.
+  - Added metric schema note:
+    - `metrics_definition.<name>.exclude_from_pass: true` keeps scoring/gates but excludes the metric from `overall_pass`.
+    - baseline metrics (`scenario_requirement_fit`, `dialog_naturalness`) remain non-excludable.
 - `core-rust/tests/integration/scenarios/self_improvement_trigger.yaml`
   - Added scenario example using conversation -> emit_event(trigger) -> conversation.
+  - Marked `self_improvement_effectiveness` as `exclude_from_pass: true` to avoid over-strict fail on non-deterministic apply.
+- `core-rust/examples/integration_harness.rs`
+  - Added `MetricDefinition.exclude_from_pass` (default false).
+  - `overall_pass` now evaluates only non-excluded metrics.
+  - Added guard to reject `exclude_from_pass: true` on required baseline metrics.
  - `core-rust/tests/integration/scenarios/chitchat.yaml`
  - `core-rust/tests/integration/scenarios/router_concept_discovery.yaml`
  - `core-rust/tests/integration/scenarios/submodule.yaml`

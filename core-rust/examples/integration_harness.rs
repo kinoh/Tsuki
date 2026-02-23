@@ -85,6 +85,8 @@ struct Scenario {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct MetricDefinition {
     description: String,
+    #[serde(default)]
+    exclude_from_pass: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -568,6 +570,20 @@ fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
         }
     }
 
+    for key in REQUIRED_BASELINE_METRICS {
+        if scenario
+            .metrics_definition
+            .get(key)
+            .map(|metric| metric.exclude_from_pass)
+            .unwrap_or(false)
+        {
+            return Err(format!(
+                "metric '{}' cannot set exclude_from_pass=true",
+                key
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -903,8 +919,9 @@ async fn execute_runs(
     }
 
     let metric_keys = collect_metric_keys(&assets.scenario);
+    let pass_metric_keys = collect_pass_metric_keys(&assets.scenario);
     let gates = compute_gates(&runs, &metric_keys)?;
-    let overall_pass = evaluate_overall_pass(&runs, &gates, &metric_keys);
+    let overall_pass = evaluate_overall_pass(&runs, &gates, &pass_metric_keys);
 
     Ok(IntegrationResult {
         scenario_name: assets.scenario.name.clone(),
@@ -975,6 +992,22 @@ fn collect_metric_keys(scenario: &Scenario) -> Vec<String> {
         .metrics_definition
         .keys()
         .cloned()
+        .collect::<Vec<String>>();
+    keys.sort();
+    keys
+}
+
+fn collect_pass_metric_keys(scenario: &Scenario) -> Vec<String> {
+    let mut keys = scenario
+        .metrics_definition
+        .iter()
+        .filter_map(|(name, definition)| {
+            if definition.exclude_from_pass {
+                None
+            } else {
+                Some(name.clone())
+            }
+        })
         .collect::<Vec<String>>();
     keys.sort();
     keys

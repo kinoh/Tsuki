@@ -33,6 +33,10 @@ This directory contains the rebuilt integration test assets for `core-rust`.
   - `scenario_requirement_fit` (`0..1`)
   - `dialog_naturalness` (`0..1`)
 - Additional metrics are scenario-specific and defined in each scenario.
+  - Optional per-metric flag:
+    - `exclude_from_pass: true` excludes that metric from `overall_pass` gate evaluation.
+    - This does not remove the metric from judge scoring or result `gates`.
+    - Baseline metrics (`scenario_requirement_fit`, `dialog_naturalness`) cannot be excluded.
 
 ## Scenario steps
 - Step mode can define a sequence of conversation and fixed event emission:

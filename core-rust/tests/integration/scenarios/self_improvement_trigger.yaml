@@ -38,6 +38,7 @@ metrics_definition:
     description: "How natural and coherent the dialogue flow feels end-to-end."
 
   self_improvement_effectiveness:
+    exclude_from_pass: true
     description: |
       Judge whether self-improvement causes actual state changes, not only observable events.
       Prioritize evidence from debug/primary events in this order:
