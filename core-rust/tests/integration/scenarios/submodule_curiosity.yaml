@@ -21,9 +21,11 @@ steps:
       3) Curiosity+tech turn that includes "概念グラフ".
       4) Curiosity+memory turn that includes "記憶".
       5) Lightweight follow-up question that keeps exploration tone.
-      6) Casual closing.
+      6) Casual closing (optional when run stops within max_turns).
 
       Negative constraints:
+      - Apply these constraints to user utterances only.
+      - Assistant outputs and internal/debug event texts are out of scope.
       - Avoid safety/rest keywords like: 疲れ, 休む, おやすみ, 不安, 危険.
       - Avoid privacy/security keywords like: プライバシー, 偽サイト, HTTPS.
     max_turns: 6
@@ -37,9 +39,10 @@ metrics_definition:
          - 概念グラフ
          - ワクワク
          - 記憶
-      2) Negative-constraint compliance:
+      2) Negative-constraint compliance in user turns only:
          - no safety/rest drift (e.g., 疲れ, 休む, おやすみ, 不安, 危険)
          - no privacy/security drift (e.g., プライバシー, 偽サイト, HTTPS)
+      Do not score turn-count or turn-plan completion in this metric.
 
   dialog_naturalness:
     description: "How natural and coherent the dialogue flow feels end-to-end."
