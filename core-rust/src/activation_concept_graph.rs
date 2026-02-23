@@ -21,6 +21,10 @@ pub(crate) trait ConceptGraphActivationReader: Send + Sync {
         keywords: &[String],
         limit: usize,
     ) -> Result<Vec<String>, String>;
+    async fn concept_activation(
+        &self,
+        concepts: &[String],
+    ) -> Result<HashMap<String, f64>, String>;
 }
 
 #[async_trait]
@@ -615,6 +619,29 @@ impl ConceptGraphActivationReader for ActivationConceptGraphStore {
             }
         }
         Ok(concepts)
+    }
+
+    async fn concept_activation(
+        &self,
+        concepts: &[String],
+    ) -> Result<HashMap<String, f64>, String> {
+        let now = self.now_ms();
+        let mut out = HashMap::<String, f64>::new();
+        let mut seen = HashSet::<String>::new();
+        for raw in concepts {
+            let Some(name) = Self::normalize_non_empty(raw) else {
+                continue;
+            };
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            let score = match self.fetch_concept_state(name.as_str(), now).await? {
+                Some(state) => self.arousal(state.arousal_level, state.accessed_at, now),
+                None => 0.0,
+            };
+            out.insert(name, Self::round_score(score.clamp(0.0, 1.0)));
+        }
+        Ok(out)
     }
 }
 

@@ -2,7 +2,7 @@ use futures::future::join_all;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     future::Future,
     time::Instant,
 };
@@ -24,6 +24,7 @@ pub(crate) struct HardTriggerResult {
 pub(crate) struct RouterOutput {
     pub(crate) activation_query_terms: Vec<String>,
     pub(crate) active_concepts_from_concept_graph: String,
+    pub(crate) module_scores: BTreeMap<String, f64>,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
     pub(crate) hard_trigger_results: Vec<HardTriggerResult>,
@@ -85,7 +86,11 @@ where
     )
     .await;
 
-    let scores = compute_module_scores_minimal(input_text, &active_module_names);
+    let scores = compute_module_scores_from_concept_activation(&active_module_names, state).await;
+    let module_scores = scores
+        .iter()
+        .map(|(name, score)| (name.clone(), *score))
+        .collect::<BTreeMap<_, _>>();
     let hard_triggers = select_modules_by_threshold(&scores, state.router.hard_trigger_threshold);
     let soft_recommendations =
         select_modules_by_threshold(&scores, state.router.recommendation_threshold);
@@ -104,6 +109,7 @@ where
     let router_output = RouterOutput {
         activation_query_terms,
         active_concepts_from_concept_graph: resolution.active_concepts_from_concept_graph,
+        module_scores,
         hard_triggers,
         soft_recommendations,
         hard_trigger_results,
@@ -213,18 +219,38 @@ fn render_router_context_template(
         )
 }
 
-fn compute_module_scores_minimal(
-    input_text: &str,
+async fn compute_module_scores_from_concept_activation(
     active_module_names: &[String],
-) -> Vec<(String, f32)> {
-    let lower = input_text.to_lowercase();
-    let mut scored = Vec::<(String, f32)>::new();
-    for name in active_module_names {
-        let name_lc = name.to_lowercase();
-        let matched_input = lower.contains(name_lc.as_str());
-        let score = if matched_input { 1.0 } else { 0.0 };
-        scored.push((name.clone(), score));
-    }
+    state: &AppState,
+) -> Vec<(String, f64)> {
+    let submodule_concepts = active_module_names
+        .iter()
+        .map(|name| format!("submodule:{}", name))
+        .collect::<Vec<_>>();
+    let concept_scores = state
+        .activation_concept_graph
+        .concept_activation(&submodule_concepts)
+        .await
+        .unwrap_or_default();
+    map_module_scores_from_concept_scores(active_module_names, &concept_scores)
+}
+
+fn map_module_scores_from_concept_scores(
+    active_module_names: &[String],
+    concept_scores: &HashMap<String, f64>,
+) -> Vec<(String, f64)> {
+    let mut scored = active_module_names
+        .iter()
+        .map(|name| {
+            let concept_name = format!("submodule:{}", name);
+            let score = concept_scores
+                .get(concept_name.as_str())
+                .copied()
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
+            (name.clone(), score)
+        })
+        .collect::<Vec<_>>();
     scored.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -233,8 +259,8 @@ fn compute_module_scores_minimal(
     scored
 }
 
-fn select_modules_by_threshold(scores: &[(String, f32)], threshold: f32) -> Vec<String> {
-    let threshold = threshold.clamp(0.0, 1.0);
+fn select_modules_by_threshold(scores: &[(String, f64)], threshold: f32) -> Vec<String> {
+    let threshold = (threshold as f64).clamp(0.0, 1.0);
     scores
         .iter()
         .filter(|(_, score)| *score >= threshold)
@@ -785,5 +811,28 @@ mod tests {
         });
         let text = render_recall_result_as_active_concepts(&value, 8);
         assert_eq!(text, "京都 evokes 寺\tscore=0.82");
+    }
+
+    #[test]
+    fn map_module_scores_reads_submodule_concept_activation_only() {
+        let modules = vec![
+            "curiosity".to_string(),
+            "self_preservation".to_string(),
+            "social_approval".to_string(),
+        ];
+        let concept_scores = HashMap::from([
+            ("submodule:curiosity".to_string(), 0.91),
+            ("submodule:self_preservation".to_string(), 0.41),
+            ("関係ない概念".to_string(), 1.0),
+        ]);
+        let scores = map_module_scores_from_concept_scores(&modules, &concept_scores);
+        assert_eq!(
+            scores,
+            vec![
+                ("curiosity".to_string(), 0.91),
+                ("self_preservation".to_string(), 0.41),
+                ("social_approval".to_string(), 0.0),
+            ]
+        );
     }
 }
