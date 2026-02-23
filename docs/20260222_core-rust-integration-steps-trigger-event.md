@@ -28,20 +28,20 @@ Date: 2026-02-22
   - Switched event collection and emit-event completion wait to WebSocket stream events (no direct SQLite reads from harness).
 - `core-rust/src/prompts.rs`
   - Added fail-fast validation at prompts load time:
-    - loaded sections for `Router`, `Decision`, and each `Submodule` must contain `## Memory`.
-    - `Base` is excluded from Memory-section requirement because it is shared/common behavior, not memory-owner scope.
+    - loaded `Decision` section must contain `## Memory`.
+    - `Base`, `Router`, and `Submodule` are excluded from Memory-section requirement because they are not memory-owner scope.
   - Added unit tests for section detection/validation.
 - `core-rust/config.toml`
   - Updated self-improvement relation schema wording to `is-a|part-of|evokes` to match runtime parser expectations.
   - Updated self-improvement memory schema wording:
-    - `memory_section_update.target` allows `router|decision|submodule:<name>` only (no `base`).
+    - `memory_section_update.target` allows `decision` only.
   - Updated self-improvement proposal guidance:
     - use fixed file headers (`--- a/target`, `+++ b/target`) for stable, short output.
     - require exact context/removal line matching against current target prompt text.
     - explicitly forbid custom patch formats.
     - require emitting a syntactically valid minimal unified diff when there is a proposal (do not null out proposal only due to format uncertainty).
 - `core-rust/src/application/improve_service.rs`
-  - Enforced structural guard: `memory_section_update` targeting `base` now fails explicitly.
+  - Enforced structural guard: `memory_section_update` targeting anything except `decision` now fails explicitly.
 - `core-rust/tests/integration/README.md`
   - Added step schema documentation and defaults.
   - Added metric schema note:
@@ -65,5 +65,5 @@ Date: 2026-02-22
 ## Compatibility Impact
 - breaking-by-default (no compatibility layer): Yes.
 - Scenario files must define `steps`; top-level `tester_instructions` is no longer accepted.
-- Prompt override files now fail to load if loaded `Router` / `Decision` / `Submodule` sections are missing `## Memory`.
-- Self-improvement memory updates to `base` are now rejected by runtime guard.
+- Prompt override files now fail to load only when loaded `Decision` section is missing `## Memory`.
+- Self-improvement memory updates are now rejected unless `target=decision`.

@@ -124,19 +124,9 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
 
 fn validate_memory_sections(prompts: &PromptOverrides) -> Result<(), String> {
     let mut missing = Vec::<String>::new();
-    if let Some(router) = prompts.router.as_deref() {
-        if !has_markdown_h2_section(router, "Memory") {
-            missing.push("Router".to_string());
-        }
-    }
     if let Some(decision) = prompts.decision.as_deref() {
         if !has_markdown_h2_section(decision, "Memory") {
             missing.push("Decision".to_string());
-        }
-    }
-    for (name, body) in &prompts.submodules {
-        if !has_markdown_h2_section(body, "Memory") {
-            missing.push(format!("Submodule:{}", name));
         }
     }
     if missing.is_empty() {
@@ -174,12 +164,26 @@ mod tests {
     fn validates_memory_sections_for_loaded_overrides() {
         let prompts = PromptOverrides {
             base: Some("base without memory section".to_string()),
-            router: Some("## Memory\nrouter".to_string()),
+            router: Some("router without memory section".to_string()),
             decision: Some("## Memory\ndecision".to_string()),
-            submodules: [("curiosity".to_string(), "## Memory\ns".to_string())]
+            submodules: [("curiosity".to_string(), "submodule without memory section".to_string())]
                 .into_iter()
                 .collect(),
         };
         assert!(validate_memory_sections(&prompts).is_ok());
+    }
+
+    #[test]
+    fn rejects_loaded_overrides_without_decision_memory_section() {
+        let prompts = PromptOverrides {
+            base: Some("base without memory section".to_string()),
+            router: Some("router without memory section".to_string()),
+            decision: Some("decision without memory section".to_string()),
+            submodules: [("curiosity".to_string(), "submodule without memory section".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        let err = validate_memory_sections(&prompts).expect_err("must reject");
+        assert!(err.contains("Decision"));
     }
 }
