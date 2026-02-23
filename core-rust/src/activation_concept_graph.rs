@@ -938,8 +938,11 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
                         visited.insert(target.clone(), next_hop);
                         queue.push_back((target.clone(), next_hop));
                     }
-                    self.maybe_update_arousal(&mut cache, target.as_str(), hop_decay, now)
-                        .await?;
+                    // Keep submodule trigger nodes from self-sustaining activation across turns.
+                    if !target.starts_with("submodule:") {
+                        self.maybe_update_arousal(&mut cache, target.as_str(), hop_decay, now)
+                            .await?;
+                    }
                 }
             }
             let episodes = self.fetch_episodes(concept.as_str()).await?;
