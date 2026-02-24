@@ -56,6 +56,7 @@ pub(crate) trait ConceptGraphOps: Send + Sync {
         &self,
         concepts: Vec<String>,
     ) -> Result<HashMap<String, f64>, String>;
+    async fn dampen_concept_arousal(&self, concept: String, ratio: f64) -> Result<Value, String>;
     async fn episode_add(&self, summary: String, concepts: Vec<String>) -> Result<Value, String>;
     async fn relation_add(
         &self,
@@ -813,6 +814,33 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
             *value = Self::round_score(*value);
         }
         Ok(accumulated)
+    }
+
+    async fn dampen_concept_arousal(&self, concept: String, ratio: f64) -> Result<Value, String> {
+        let concept = Self::normalize_non_empty(concept.as_str())
+            .ok_or_else(|| "Error: concept: empty".to_string())?;
+        let now = self.now_ms();
+        let ratio = ratio.clamp(0.0, 1.0);
+        let Some(current) = self.fetch_concept_state(concept.as_str(), now).await? else {
+            return Ok(json!({
+                "concept_id": concept,
+                "updated": false,
+                "reason": "not_found",
+            }));
+        };
+        let current_arousal = self.arousal(current.arousal_level, current.accessed_at, now);
+        let next_arousal = (current_arousal * (1.0 - ratio)).clamp(0.0, 1.0);
+        let updated = self
+            .update_concept_state(concept.as_str(), current.valence, Some(next_arousal), Some(now))
+            .await?;
+        Ok(json!({
+            "concept_id": concept,
+            "updated": true,
+            "ratio": ratio,
+            "previous_arousal": Self::round_score(current_arousal),
+            "next_arousal": Self::round_score(self.arousal(updated.arousal_level, updated.accessed_at, now)),
+            "accessed_at": updated.accessed_at,
+        }))
     }
 
     async fn episode_add(&self, summary: String, concepts: Vec<String>) -> Result<Value, String> {

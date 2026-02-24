@@ -57,7 +57,7 @@ pub(crate) struct AppState {
     pub(crate) router_model: String,
     pub(crate) router_instructions: String,
     pub(crate) decision_instructions: String,
-    pub(crate) submodule_hard_streaks: Arc<RwLock<std::collections::HashMap<String, u32>>>,
+    pub(crate) submodule_saturation_levels: Arc<RwLock<std::collections::HashMap<String, f64>>>,
 }
 
 #[derive(Clone)]
@@ -289,7 +289,7 @@ async fn main() {
             .unwrap_or_else(|| config.llm.model.clone()),
         router_instructions: config.llm.router_instructions.clone(),
         decision_instructions: config.llm.decision_instructions.clone(),
-        submodule_hard_streaks: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
     };
     crate::application::improve_service::start_trigger_consumer(state.clone());
 

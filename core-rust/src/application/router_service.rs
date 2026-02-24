@@ -13,9 +13,10 @@ use crate::prompts::PromptOverrides;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const ROUTER_RECALL_MAX_HOP: u32 = 2;
-const HARD_INHIBITION_STEP: f64 = 0.12;
-const HARD_INHIBITION_MAX: f64 = 0.36;
-const HARD_STREAK_RECOVERY: u32 = 1;
+const SATURATION_STEP: f64 = 0.12;
+const SATURATION_MAX: f64 = 0.48;
+const SATURATION_RECOVERY: f64 = 0.08;
+const POST_HARD_DAMPEN_RATIO: f64 = 0.22;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct HardTriggerResult {
@@ -28,7 +29,7 @@ pub(crate) struct RouterOutput {
     pub(crate) activation_query_terms: Vec<String>,
     pub(crate) active_concepts_from_concept_graph: String,
     pub(crate) module_scores: BTreeMap<String, f64>,
-    pub(crate) hard_inhibition_penalties: BTreeMap<String, f64>,
+    pub(crate) saturation_penalties: BTreeMap<String, f64>,
     pub(crate) hard_effective_scores: BTreeMap<String, f64>,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
@@ -106,9 +107,9 @@ where
         .iter()
         .map(|(name, score)| (name.clone(), *score))
         .collect::<BTreeMap<_, _>>();
-    let streaks = read_hard_streaks(state, &active_module_names).await;
-    let (hard_scores, hard_inhibition_penalties, hard_effective_scores) =
-        apply_hard_inhibition(&scores, &streaks);
+    let saturation_levels = read_saturation_levels(state, &active_module_names).await;
+    let (hard_scores, saturation_penalties, hard_effective_scores) =
+        apply_saturation_penalty(&scores, &saturation_levels);
     let hard_triggers =
         select_modules_by_threshold(&hard_scores, state.router.hard_trigger_threshold);
     let soft_recommendations =
@@ -124,13 +125,14 @@ where
         &execute_submodule,
     )
     .await;
-    update_hard_streaks(state, &active_module_names, &hard_triggers).await;
+    update_saturation_levels(state, &active_module_names, &hard_triggers).await;
+    dampen_hard_triggered_submodule_arousal(state, &hard_triggers).await;
 
     let router_output = RouterOutput {
         activation_query_terms,
         active_concepts_from_concept_graph: resolution.active_concepts_from_concept_graph,
         module_scores,
-        hard_inhibition_penalties,
+        saturation_penalties,
         hard_effective_scores,
         hard_triggers,
         soft_recommendations,
@@ -290,27 +292,35 @@ fn select_modules_by_threshold(scores: &[(String, f64)], threshold: f32) -> Vec<
         .collect()
 }
 
-async fn read_hard_streaks(
+async fn read_saturation_levels(
     state: &AppState,
     active_module_names: &[String],
-) -> HashMap<String, u32> {
-    let guard = state.submodule_hard_streaks.read().await;
+) -> HashMap<String, f64> {
+    let guard = state.submodule_saturation_levels.read().await;
     active_module_names
         .iter()
-        .filter_map(|name| guard.get(name).copied().map(|value| (name.clone(), value)))
+        .filter_map(|name| {
+            guard
+                .get(name)
+                .copied()
+                .map(|value| (name.clone(), value.clamp(0.0, SATURATION_MAX)))
+        })
         .collect::<HashMap<_, _>>()
 }
 
-fn apply_hard_inhibition(
+fn apply_saturation_penalty(
     scores: &[(String, f64)],
-    streaks: &HashMap<String, u32>,
+    saturation_levels: &HashMap<String, f64>,
 ) -> (Vec<(String, f64)>, BTreeMap<String, f64>, BTreeMap<String, f64>) {
     let mut inhibited = Vec::<(String, f64)>::with_capacity(scores.len());
     let mut penalties = BTreeMap::<String, f64>::new();
     let mut effective = BTreeMap::<String, f64>::new();
     for (name, score) in scores {
-        let streak = streaks.get(name.as_str()).copied().unwrap_or(0);
-        let penalty = ((streak as f64) * HARD_INHIBITION_STEP).min(HARD_INHIBITION_MAX);
+        let penalty = saturation_levels
+            .get(name.as_str())
+            .copied()
+            .unwrap_or(0.0)
+            .clamp(0.0, SATURATION_MAX);
         let adjusted = (score - penalty).clamp(0.0, 1.0);
         inhibited.push((name.clone(), adjusted));
         penalties.insert(name.clone(), penalty);
@@ -324,24 +334,41 @@ fn apply_hard_inhibition(
     (inhibited, penalties, effective)
 }
 
-async fn update_hard_streaks(
+async fn update_saturation_levels(
     state: &AppState,
     active_module_names: &[String],
     hard_triggers: &[String],
 ) {
     let hard_set = hard_triggers.iter().cloned().collect::<HashSet<_>>();
-    let mut guard = state.submodule_hard_streaks.write().await;
+    let mut guard = state.submodule_saturation_levels.write().await;
     for name in active_module_names {
-        let current = guard.get(name.as_str()).copied().unwrap_or(0);
+        let current = guard
+            .get(name.as_str())
+            .copied()
+            .unwrap_or(0.0)
+            .clamp(0.0, SATURATION_MAX);
         let next = if hard_set.contains(name.as_str()) {
-            current.saturating_add(1)
+            (current + SATURATION_STEP).min(SATURATION_MAX)
         } else {
-            current.saturating_sub(HARD_STREAK_RECOVERY)
+            (current - SATURATION_RECOVERY).max(0.0)
         };
-        if next == 0 {
+        if next <= 0.0 {
             guard.remove(name.as_str());
         } else {
             guard.insert(name.clone(), next);
+        }
+    }
+}
+
+async fn dampen_hard_triggered_submodule_arousal(state: &AppState, hard_triggers: &[String]) {
+    for module_name in hard_triggers {
+        let concept = format!("submodule:{}", module_name);
+        if let Err(err) = state
+            .activation_concept_graph
+            .dampen_concept_arousal(concept, POST_HARD_DAMPEN_RATIO)
+            .await
+        {
+            emit_router_debug_error(state, "dampen_concept_arousal", &err).await;
         }
     }
 }
