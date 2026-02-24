@@ -22,6 +22,10 @@ The user explicitly required that there be no secondary relevance judgement afte
   - seeds must be relevant to latest user utterance
   - seeds must be worth activating now
   - if none exists, return `none`
+- Unified router prompt shape under config template ownership:
+  - `router_preprocessing` and `seed_selection_rules` sections are now injected through
+    `input.router_context_template` instead of hardcoded string concatenation in code.
+  - `seed_selection_rules` text itself is defined in config template (not in Rust source).
 
 ## Effect
 Seed activation now depends only on router-selected seeds, with no additional downstream relevance gate.

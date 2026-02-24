@@ -232,11 +232,15 @@ fn render_router_context_template(
     template: &str,
     latest_user_input: &str,
     active_submodules: &str,
+    query_terms: &str,
+    candidate_concepts: &str,
     router_query_terms_max: usize,
 ) -> String {
     template
         .replace("{{latest_user_input}}", latest_user_input)
         .replace("{{active_submodules}}", active_submodules)
+        .replace("{{query_terms}}", query_terms)
+        .replace("{{candidate_concepts}}", candidate_concepts)
         .replace(
             "{{router_query_terms_max}}",
             &router_query_terms_max.to_string(),
@@ -514,20 +518,15 @@ async fn resolve_active_concepts_from_concept_graph(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let base_context = render_router_context_template(
+    let query_term_lines = render_list_for_prompt(&preprocess.query_terms);
+    let candidate_lines = render_list_for_prompt(&preprocess.candidate_concepts);
+    let context = render_router_context_template(
         &state.input.router_context_template,
         input_text,
         &module_lines,
+        &query_term_lines,
+        &candidate_lines,
         state.router.query_terms_max.max(1),
-    );
-    let query_term_lines = render_list_for_prompt(&preprocess.query_terms);
-    let candidate_lines = render_list_for_prompt(&preprocess.candidate_concepts);
-    let context = format!(
-        "{}\n\nrouter_preprocessing:\nquery_terms:\n{}\ncandidate_concepts:\n{}\n\nseed_selection_rules:\n- return recall seed concepts only\n- one seed per line\n- no explanations\n- select only concepts/episodes clearly relevant to the latest user utterance\n- select only concepts/episodes that should be activated now for this turn\n- avoid generic always-on concepts unless directly grounded in the utterance\n- if none satisfies the rules, return none\n- max {} lines",
-        base_context,
-        query_term_lines,
-        candidate_lines,
-        concept_limit
     );
     let base_instructions = overrides
         .base

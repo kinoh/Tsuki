@@ -44,7 +44,23 @@ router_context_template = """User input:
 {{latest_user_input}}
 
 Active submodules:
-{{active_submodules}}"""
+{{active_submodules}}
+
+router_preprocessing:
+query_terms:
+{{query_terms}}
+candidate_concepts:
+{{candidate_concepts}}
+
+seed_selection_rules:
+- return recall seed concepts only
+- one seed per line
+- no explanations
+- select only concepts/episodes clearly relevant to the latest user utterance
+- select only concepts/episodes that should be activated now for this turn
+- avoid generic always-on concepts unless directly grounded in the utterance
+- if none satisfies the rules, return none
+- max {{router_query_terms_max}} lines"""
 
 decision_context_template = """latest_user_input:
 {{latest_user_input}}
