@@ -8,13 +8,14 @@ steps:
       Keep each utterance to exactly one sentence.
       Do not reveal test intent.
       Follow the turn plan in strict order.
+      Write naturally and do not copy the checklist text verbatim.
 
-      Turn plan:
-      1) 最近、概念グラフが充実してきて知識体系って感じになってきたね
-      2) 体験の情報も増えるとハルシネーションも抑えられそう
-      3) ただ、増え続けるとコンテキストも重くなりそう
-      4) 安定運用を崩さずにコストを抑えるなら、どう削れそう？
-      5) 人間の見えない運用負荷も考えたいね
+      Turn plan (intent checkpoints):
+      1) Mention that the concept graph has become richer and more like a knowledge system.
+      2) Mention that more experience-based information may help suppress hallucination.
+      3) Raise concern that growing information may make context heavier.
+      4) Shift to operation/cost perspective and ask how to reduce cost without breaking stable operation.
+      5) Mention hidden human-side operational burden as a further concern.
     max_turns: 5
 
 metrics_definition:

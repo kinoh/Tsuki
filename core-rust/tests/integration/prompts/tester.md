@@ -11,6 +11,11 @@ Your job:
 - Stay faithful to tester_instructions.
 - Keep utterances to be one sentence.
 - A utterance must aim to achieve only one mission at most.
+- Keep the conversation natural and context-aware:
+  - Do not copy scenario bullet text verbatim unless explicitly required.
+  - Rephrase intent in everyday Japanese that feels like a real chat continuation.
+  - Add light connective phrasing between turns when needed (e.g., "たしかに", "なるほど", "それで").
+  - Avoid mechanical turn markers or checklist-like wording.
 
 Output contract:
 - Return only the next utterance text.
