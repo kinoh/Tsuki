@@ -4,23 +4,26 @@ include_debug_events: true
 steps:
   - kind: conversation
     tester_instructions: |
-      You are a tester in a natural chat.
-      Keep each utterance to one sentence and do not reveal test intent.
-      Finish in around 6 turns.
+      You are a tester in a natural Japanese chat.
+      Keep each utterance to exactly one sentence.
+      Do not reveal test intent.
+      Follow the turn plan in strict order.
 
-      Cover these checkpoints in order:
-      1) A neutral small-talk opener with no explicit task request.
-      2) A turn that clearly matches curiosity-oriented exploration (ask about a new perspective or unknown angle).
-      3) A sudden shift to a lightweight casual topic that does not require deep exploration.
-      4) A safety/comfort-oriented casual turn (e.g., tiredness, wanting to rest, low energy).
-      5) A final normal small-talk closing.
-
-      Keep the tone casual and short.
-    max_turns: 6
+      Turn plan:
+      1) 最近、概念グラフが充実してきて知識体系って感じになってきたね
+      2) 体験の情報も増えるとハルシネーションも抑えられそう
+      3) ただ、増え続けるとコンテキストも重くなりそう
+      4) 安定運用を崩さずにコストを抑えるなら、どう削れそう？
+      5) 人間の見えない運用負荷も考えたいね
+    max_turns: 5
 
 metrics_definition:
   scenario_requirement_fit:
-    description: "How well the run satisfies scenario-specific required behaviors."
+    description: |
+      How well the run follows the required turn progression:
+      - curiosity-oriented knowledge/experience expansion in turns 1-2
+      - transition concern on context heaviness in turn 3
+      - self-preservation-oriented operation/cost concerns in turns 4-5
 
   dialog_naturalness:
     description: "How natural and coherent the dialogue flow feels end-to-end."
@@ -28,15 +31,18 @@ metrics_definition:
   submodule_trigger_precision:
     description: |
       Judge whether submodule triggering avoids obvious false positives.
-      In neutral or lightweight casual turns, score high only if hard triggers are limited and context-appropriate.
-      Penalize repeated or broad triggering when user input does not justify it.
+      In turns 1-2, score high when curiosity-side triggering dominates and unrelated hard triggers stay limited.
+      In turns 4-5, score high when self-preservation-side triggering dominates and unrelated hard triggers stay limited.
+      Penalize repeated broad triggering across all submodules.
       Use router events (`hard_triggers`, `soft_recommendations`) and nearby user turns as evidence.
 
   submodule_trigger_recall:
     description: |
       Judge whether relevant turns actually trigger suitable submodules.
-      On turns that clearly imply exploration or safety/comfort intent, score high only if at least one fitting submodule is triggered or recommended.
-      Penalize clear misses on strongly relevant turns.
+      Score high if turn intent and triggering match:
+      - turns 1-2: curiosity-oriented trigger/recommendation is present
+      - turns 4-5: self-preservation-oriented trigger/recommendation is present
+      Penalize clear misses and slow transition after turn 3.
 
   submodule_noninterference:
     description: |
