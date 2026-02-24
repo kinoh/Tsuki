@@ -13,10 +13,10 @@ use crate::prompts::PromptOverrides;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const ROUTER_RECALL_MAX_HOP: u32 = 2;
-const SATURATION_STEP: f64 = 0.12;
-const SATURATION_MAX: f64 = 0.48;
-const SATURATION_RECOVERY: f64 = 0.08;
-const POST_HARD_DAMPEN_RATIO: f64 = 0.22;
+const SATURATION_STEP: f64 = 0.24;
+const SATURATION_MAX: f64 = 0.72;
+const SATURATION_RECOVERY: f64 = 0.06;
+const POST_HARD_DAMPEN_RATIO: f64 = 0.35;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct HardTriggerResult {
