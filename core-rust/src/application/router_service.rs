@@ -523,7 +523,7 @@ async fn resolve_active_concepts_from_concept_graph(
     let query_term_lines = render_list_for_prompt(&preprocess.query_terms);
     let candidate_lines = render_list_for_prompt(&preprocess.candidate_concepts);
     let context = format!(
-        "{}\n\nrouter_preprocessing:\nquery_terms:\n{}\ncandidate_concepts:\n{}\n\nseed_selection_rules:\n- return recall seed concepts only\n- one seed per line\n- no explanations\n- select only concepts/episodes clearly relevant to the latest user utterance\n- select only concepts/episodes that should be activated now for this turn\n- avoid generic always-on concepts unless directly grounded in the utterance\n- max {} lines",
+        "{}\n\nrouter_preprocessing:\nquery_terms:\n{}\ncandidate_concepts:\n{}\n\nseed_selection_rules:\n- return recall seed concepts only\n- one seed per line\n- no explanations\n- select only concepts/episodes clearly relevant to the latest user utterance\n- select only concepts/episodes that should be activated now for this turn\n- avoid generic always-on concepts unless directly grounded in the utterance\n- if none satisfies the rules, return none\n- max {} lines",
         base_context,
         query_term_lines,
         candidate_lines,

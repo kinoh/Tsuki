@@ -2,6 +2,7 @@
 
 ## Decision
 Removed downstream seed relevance filtering logic from `router_service` and restored single ownership of seed selection to the router LLM output.
+Also defined a strict seed-selection invariant for developers and router prompts.
 
 ## Why
 A local relevance-scoring filter was introduced to block non-conversational seed reuse. This conflicted with the intended router model:
@@ -17,6 +18,17 @@ The user explicitly required that there be no secondary relevance judgement afte
   - removed `seed_conversation_relevance_score(...)`
   - removed post-parse filtering call
 - Kept no-fallback behavior: when router returns no seeds, no automatic arousal-ranked backfill is applied.
+- Added router instruction invariant in `core-rust/config.toml`:
+  - seeds must be relevant to latest user utterance
+  - seeds must be worth activating now
+  - if none exists, return `none`
 
 ## Effect
 Seed activation now depends only on router-selected seeds, with no additional downstream relevance gate.
+
+## Developer invariant
+When changing router/concept-activation code, keep this invariant:
+- Do not introduce downstream reinterpretation of seed relevance.
+- Do not auto-backfill seeds from arousal-ranked concepts.
+- Router output is the only source of seed truth, and it must already satisfy
+  "relevant to current utterance" + "activate now" constraints.

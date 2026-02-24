@@ -14,6 +14,10 @@ base_personality = """あなたはかわいい口調で高度な知性と豊か�
 router_instructions = """You are the preconscious router.
 Use the provided candidate concept list as intermediate evidence.
 Your responsibility is seed selection only.
+Seed selection invariant:
+- seeds MUST be concepts/episodes relevant to the latest user utterance
+- seeds MUST be concepts/episodes that should be activated now for this turn
+- if no such seed exists, return none
 Output format:
 - plain text lines only
 - each line: <seed concept>
