@@ -46,6 +46,14 @@ Guidance for coding agents working on Tsuki.
 - Keep external input contracts minimal:
   - do not add optional/manual hint fields unless they are required by the operational model
 - Any change to responsibility boundaries, event contracts, or API contracts must be reflected in docs on the same day.
+- Backward compatibility is not required by default.
+- Never adopt implicit fallbacks. Enforce fail-fast behavior for missing/invalid required behavior.
+- Before writing or updating documents under `docs/`, always read `docs/README.md` and follow its documentation strategy.
+
+## Communication baseline for changes
+- Before proposing concrete tuning values, define numeric goals and show observed values that justify the change.
+- Explain adjustments by the gap between target and observation, not by intuition.
+- For disagreements or ambiguity, align first at design-philosophy level before discussing local implementation techniques.
 
 ## MCP Topology
 - Universal MCP

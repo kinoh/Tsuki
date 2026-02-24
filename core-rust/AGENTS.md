@@ -68,6 +68,9 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - Router performs concept-graph query in-process.
 - Router owns hard/soft trigger policy.
 - Router executes hard-triggered submodules before Decision.
+- Router LLM is the only component that selects recall seeds.
+- Downstream modules must not re-score, re-rank, or re-interpret seed relevance.
+- Router prioritizes latency far above stability/certainty-oriented retries in normal flow.
 
 #### Application orchestration (`pipeline_service` and related application layer)
 - Invokes Router and consumes Router output.
@@ -127,6 +130,7 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - Secrets belong to environment variables.
 - Missing required config should fail fast.
 - Thresholds and context-template wording should be tuned by config, not code rewrites.
+- Do not hardcode prompt text in Rust source; prompt/context wording must be owned by config or prompt files.
 
 ## WIP areas
 
