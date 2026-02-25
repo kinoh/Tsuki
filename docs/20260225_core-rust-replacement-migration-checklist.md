@@ -41,8 +41,8 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [ ] Update API references (`README`, specs, ops docs) to event-centric history.
 
 ### 2. WebSocket Contract Alignment
-- [ ] Reconcile current `core-rust` WebSocket payload shape with `api-specs/asyncapi.yaml`.
-- [ ] Ensure outbound message contract is explicit for clients consuming event stream.
+- [x] Reconcile current `core-rust` WebSocket payload shape with `api-specs/asyncapi.yaml`.
+- [x] Ensure outbound message contract is explicit for clients consuming event stream.
 - [ ] Add tests for auth handshake and message ingest (`message`, `sensory`).
 
 ### 3. Legacy History Import (Mastra -> Event Store)

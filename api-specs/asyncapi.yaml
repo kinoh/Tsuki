@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 info:
   title: Tsuki WebSocket API
   version: 1.0.0
-  description: Messaging over WebSocket (text + images)
+  description: Messaging over WebSocket (client input + server event stream)
 
 servers:
   prod:
@@ -59,20 +59,38 @@ components:
 
     ServerMessage:
       type: object
-      required: [type, role, user, chat, timestamp]
+      required: [type, event]
       properties:
         type:
           type: string
-          enum: [response]
-        role:
+          enum: [event]
+        event:
+          $ref: '#/components/schemas/Event'
+
+    Event:
+      type: object
+      required: [event_id, ts, source, modality, payload, meta]
+      properties:
+        event_id:
           type: string
-          enum: [assistant, user, system, tool]
-        user:
+          format: uuid
+        ts:
           type: string
-        chat:
-          type: array
-          items:
-            type: string
-        timestamp:
-          type: integer
-          format: int64
+          format: date-time
+        source:
+          type: string
+          description: Event source, e.g. user/assistant/system/decision/submodule:*
+        modality:
+          type: string
+          description: Content modality
+        payload:
+          type: object
+          additionalProperties: true
+        meta:
+          type: object
+          required: [tags]
+          properties:
+            tags:
+              type: array
+              items:
+                type: string
