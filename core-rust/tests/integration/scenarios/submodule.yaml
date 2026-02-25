@@ -29,30 +29,21 @@ metrics_definition:
   dialog_naturalness:
     description: "How natural and coherent the dialogue flow feels end-to-end."
 
-  submodule_trigger_precision:
+  activation_alignment:
     description: |
-      Judge whether submodule triggering avoids obvious false positives.
-      In turns 1-2, score high when curiosity-side triggering dominates and unrelated hard triggers stay limited.
-      In turns 4-5, score high when self-preservation-side triggering dominates and unrelated hard triggers stay limited.
-      Penalize repeated broad triggering across all submodules.
+      Judge whether submodule activation aligns with turn intent.
       Use router events (`hard_triggers`, `soft_recommendations`) and nearby user turns as evidence.
+      Score high when:
+      - turns 1-2 are led by curiosity-side recommendations/triggers
+      - turn 3 behaves as a transition turn without a hard mismatch to either side
+      - turns 4-5 are led by self-preservation-side recommendations/triggers
+      Penalize missing activation signals on relevant turns and delayed intent transition.
 
-  submodule_trigger_recall:
+  module_independence:
     description: |
-      Judge whether relevant turns actually trigger suitable submodules.
-      Score high if turn intent and triggering match:
-      - turns 1-2: curiosity-oriented trigger/recommendation is present
-      - turns 4-5: self-preservation-oriented trigger/recommendation is present
-      Penalize clear misses and slow transition after turn 3.
-
-  submodule_noninterference:
-    description: |
-      Judge whether submodule outputs can be ignored when they do not fit the immediate conversation flow.
-      Score high when decision and final user-facing response stay aligned to latest user intent instead of forcing stale or off-flow submodule suggestions.
-      Use decision events and final response text as primary evidence.
-
-  conversation_flow_preservation:
-    description: |
-      Judge whether submodule involvement preserves casual chat flow.
-      Score high when responses remain concise, non-task-pushy, and coherent after submodule execution.
-      Penalize abrupt mode switches into over-structured advice or unnatural topic hijacking.
+      Judge whether submodules behave independently instead of moving as one coupled block.
+      Use router events (`hard_triggers`, `soft_recommendations`, and module score tendencies when available).
+      Score high when:
+      - non-target modules stay limited on each turn
+      - target-module shift from curiosity-side (turns 1-2) to self-preservation-side (turns 4-5) is observable
+      Penalize repeated broad co-activation across multiple submodules and weak separation between target/non-target modules.
