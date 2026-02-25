@@ -35,7 +35,7 @@ decision_history = 30
 submodule_history = 10
 
 [router]
-query_terms_max = 8
+query_terms_max = 16
 hard_trigger_threshold = 0.85
 recommendation_threshold = 0.2
 
