@@ -46,11 +46,11 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [ ] Add tests for auth handshake and message ingest (`message`, `sensory`).
 
 ### 3. Legacy History Import (Mastra -> Event Store)
-- [ ] Add a migration tool to read historical messages from Mastra/libSQL sources.
-- [ ] Map each legacy message to one `Event` row with source/modality/tags policy.
-- [ ] Exclude tool/reasoning internals from imported dataset.
-- [ ] Preserve original message timestamp as `event.ts`.
-- [ ] Add import report output (processed/imported/dropped/failed counts).
+- [x] Add a migration tool to read historical messages from Mastra/libSQL sources.
+- [x] Map each legacy message to one `Event` row with source/modality/tags policy.
+- [x] Exclude tool/reasoning internals from imported dataset.
+- [x] Preserve original message timestamp as `event.ts`.
+- [x] Add import report output (processed/imported/dropped/failed counts).
 
 ### 4. Data Semantics and Read Model
 - [ ] Define canonical event tagging for imported messages (for example: `imported_legacy`, `user_input`, `assistant_output`).
