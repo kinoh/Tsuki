@@ -21,4 +21,4 @@ transient_retry = 0
 # Optional: override config.toml [prompts].path during integration runs.
 prompts_file = "data/prompts.md"
 memgraph_uri = "bolt://localhost:7697"
-memgraph_backup_path = "../backup/memgraph/20260208141053297029_timestamp_47613"
+memgraph_backup_path = "../backup/memgraph/max10_20260223163144024180_timestamp_49472"
