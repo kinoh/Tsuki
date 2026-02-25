@@ -23,4 +23,13 @@ impl EventStore {
     pub async fn get_by_id(&self, event_id: &str) -> DbResult<Option<Event>> {
         self.db.get_event_by_id(event_id).await
     }
+
+    pub async fn list(
+        &self,
+        limit: usize,
+        before_ts: Option<&str>,
+        desc: bool,
+    ) -> DbResult<Vec<Event>> {
+        self.db.load_events(limit, before_ts, desc).await
+    }
 }

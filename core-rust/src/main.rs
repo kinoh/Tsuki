@@ -16,7 +16,7 @@ use axum::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
         Path, Query, State,
     },
-    http::{header::CONTENT_TYPE, StatusCode},
+    http::{header::CONTENT_TYPE, HeaderMap, StatusCode},
     response::{
         sse::{Event as SseEvent, KeepAlive, Sse},
         Html, IntoResponse,
@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
+use time::OffsetDateTime;
 
 use crate::activation_concept_graph::{ActivationConceptGraphStore, ConceptGraphStore};
 use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig};
@@ -135,6 +136,18 @@ struct DebugEventsQuery {
 #[derive(Debug, Serialize)]
 struct DebugEventsResponse {
     events: Vec<Event>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EventsQuery {
+    limit: Option<usize>,
+    before_ts: Option<String>,
+    order: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EventsResponse {
+    items: Vec<Event>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,6 +308,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(ws_handler))
+        .route("/events", get(events))
         .route("/debug/styles/{name}", get(debug_style))
         .route("/debug/ui", get(debug_ui))
         .route("/debug/monitor", get(debug_monitor_ui))
@@ -605,6 +619,44 @@ async fn debug_events(
     }
 
     Ok(Json(DebugEventsResponse { events }))
+}
+
+async fn events(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<EventsQuery>,
+) -> Result<Json<EventsResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
+
+    let limit = query.limit.unwrap_or(50);
+    if limit == 0 || limit > 500 {
+        return Err((StatusCode::BAD_REQUEST, "invalid limit".to_string()));
+    }
+
+    if let Some(before_ts) = query.before_ts.as_deref() {
+        validate_iso8601(before_ts)
+            .map_err(|message| (StatusCode::BAD_REQUEST, message.to_string()))?;
+    }
+
+    let desc = match query
+        .order
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None => true,
+        Some(value) if value.eq_ignore_ascii_case("desc") => true,
+        Some(value) if value.eq_ignore_ascii_case("asc") => false,
+        Some(_) => return Err((StatusCode::BAD_REQUEST, "invalid order".to_string())),
+    };
+
+    let items = state
+        .event_store
+        .list(limit, query.before_ts.as_deref(), desc)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
+    Ok(Json(EventsResponse { items }))
 }
 
 async fn debug_events_stream(
@@ -965,6 +1017,38 @@ fn verify_auth(message: &str, expected_token: &str) -> bool {
     let user = parts.next().unwrap_or("");
     let token = parts.next().unwrap_or("");
     !user.is_empty() && token == expected_token
+}
+
+fn verify_http_auth(headers: &HeaderMap, expected_token: &str) -> Result<(), (StatusCode, String)> {
+    let auth = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "authorization header required".to_string()))?;
+
+    let mut parts = auth.splitn(2, ':');
+    let user = parts.next().unwrap_or("");
+    let token = parts.next().unwrap_or("");
+
+    if user.is_empty() || token.is_empty() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "invalid authorization format".to_string(),
+        ));
+    }
+
+    if token != expected_token {
+        return Err((StatusCode::UNAUTHORIZED, "invalid token".to_string()));
+    }
+
+    Ok(())
+}
+
+fn validate_iso8601(value: &str) -> Result<(), &'static str> {
+    OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+        .map(|_| ())
+        .map_err(|_| "invalid before_ts")
 }
 
 async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (StatusCode, String)> {

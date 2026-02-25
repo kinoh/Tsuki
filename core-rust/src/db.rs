@@ -142,6 +142,80 @@ impl Db {
         Ok(events)
     }
 
+    pub async fn load_events(
+        &self,
+        limit: usize,
+        before_ts: Option<&str>,
+        desc: bool,
+    ) -> DbResult<Vec<Event>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.conn.lock().await;
+        let mut rows = match (before_ts, desc) {
+            (Some(ts), true) => {
+                conn.query(
+                    "SELECT event_id, ts, source, modality, payload_json, tags_json FROM events \
+                     WHERE ts < ? \
+                     ORDER BY ts DESC, event_id DESC \
+                     LIMIT ?",
+                    params![ts, limit as i64],
+                )
+                .await?
+            }
+            (Some(ts), false) => {
+                conn.query(
+                    "SELECT event_id, ts, source, modality, payload_json, tags_json FROM events \
+                     WHERE ts < ? \
+                     ORDER BY ts ASC, event_id ASC \
+                     LIMIT ?",
+                    params![ts, limit as i64],
+                )
+                .await?
+            }
+            (None, true) => {
+                conn.query(
+                    "SELECT event_id, ts, source, modality, payload_json, tags_json FROM events \
+                     ORDER BY ts DESC, event_id DESC \
+                     LIMIT ?",
+                    params![limit as i64],
+                )
+                .await?
+            }
+            (None, false) => {
+                conn.query(
+                    "SELECT event_id, ts, source, modality, payload_json, tags_json FROM events \
+                     ORDER BY ts ASC, event_id ASC \
+                     LIMIT ?",
+                    params![limit as i64],
+                )
+                .await?
+            }
+        };
+
+        let mut events = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let event_id: String = row.get(0)?;
+            let ts: String = row.get(1)?;
+            let source: String = row.get(2)?;
+            let modality: String = row.get(3)?;
+            let payload_json: String = row.get(4)?;
+            let tags_json: String = row.get(5)?;
+            let payload: Value = serde_json::from_str(&payload_json)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_json)?;
+            events.push(Event {
+                event_id,
+                ts,
+                source,
+                modality,
+                payload,
+                meta: crate::event::EventMeta { tags },
+            });
+        }
+        Ok(events)
+    }
+
     pub async fn get_event_by_id(&self, event_id: &str) -> DbResult<Option<Event>> {
         let conn = self.conn.lock().await;
         let mut rows = conn
