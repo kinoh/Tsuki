@@ -43,7 +43,7 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 ### 2. WebSocket Contract Alignment
 - [x] Reconcile current `core-rust` WebSocket payload shape with `api-specs/asyncapi.yaml`.
 - [x] Ensure outbound message contract is explicit for clients consuming event stream.
-- [ ] Add tests for auth handshake and message ingest (`message`, `sensory`).
+- [x] Add tests for auth handshake and message ingest (`message`, `sensory`).
 
 ### 3. Legacy History Import (Mastra -> Event Store)
 - [x] Add a migration tool to read historical messages from Mastra/libSQL sources.

@@ -1123,3 +1123,23 @@ fn log_event(event: &Event) {
         event.ts, event.source, event.modality, tags, payload_text
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::verify_auth;
+
+    #[test]
+    fn verify_auth_accepts_valid_user_and_token() {
+        assert!(verify_auth("tester:test-token", "test-token"));
+    }
+
+    #[test]
+    fn verify_auth_rejects_invalid_token() {
+        assert!(!verify_auth("tester:bad-token", "test-token"));
+    }
+
+    #[test]
+    fn verify_auth_rejects_missing_user() {
+        assert!(!verify_auth(":test-token", "test-token"));
+    }
+}

@@ -40,6 +40,12 @@ struct InputMessage {
     reason: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParsedIngress {
+    Trigger { target: String, reason: String },
+    Input { kind: String, text: String },
+}
+
 pub(crate) async fn run_debug_module(
     state: &AppState,
     name: String,
@@ -148,20 +154,57 @@ pub(crate) async fn run_debug_module(
 }
 
 pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Result<String, ()> {
-    let parsed: Result<InputMessage, _> = serde_json::from_str(raw);
-    let input = match parsed {
-        Ok(message) => message,
-        Err(_) => {
+    let ingress = match parse_input_message(raw) {
+        Ok(value) => value,
+        Err(message) => {
             let event = build_event(
                 "system",
                 "text",
-                json!({ "text": "invalid input payload" }),
+                json!({ "text": message }),
                 vec!["error".to_string()],
             );
             record_event(state, event).await;
             return Err(());
         }
     };
+
+    match ingress {
+        ParsedIngress::Trigger { target, reason } => {
+        let trigger_event = build_event(
+            "system",
+            "text",
+            json!({
+                "target": target,
+                "reason": reason,
+                "created_at": now_iso8601(),
+            }),
+            vec!["self_improvement.triggered".to_string()],
+        );
+        record_event(state, trigger_event).await;
+        return Err(());
+        }
+        ParsedIngress::Input { kind, text } => {
+            let input_event = build_event(
+                "user",
+                "text",
+                json!({ "text": text }),
+                vec!["input".to_string(), format!("type:{}", kind)],
+            );
+            record_event(state, input_event.clone()).await;
+
+            Ok(input_event
+                .payload
+                .get("text")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string())
+        }
+    }
+}
+
+fn parse_input_message(raw: &str) -> Result<ParsedIngress, &'static str> {
+    let input: InputMessage = serde_json::from_str(raw).map_err(|_| "invalid input payload")?;
 
     let kind = if input.kind.trim().is_empty() {
         "message".to_string()
@@ -184,46 +227,17 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
             .filter(|value| !value.is_empty())
             .unwrap_or("websocket trigger")
             .to_string();
-        let trigger_event = build_event(
-            "system",
-            "text",
-            json!({
-                "target": target,
-                "reason": reason,
-                "created_at": now_iso8601(),
-            }),
-            vec!["self_improvement.triggered".to_string()],
-        );
-        record_event(state, trigger_event).await;
-        return Err(());
+        return Ok(ParsedIngress::Trigger { target, reason });
     }
 
     if kind != "message" && kind != "sensory" {
-        let event = build_event(
-            "system",
-            "text",
-            json!({ "text": "invalid input type" }),
-            vec!["error".to_string()],
-        );
-        record_event(state, event).await;
-        return Err(());
+        return Err("invalid input type");
     }
 
-    let input_event = build_event(
-        "user",
-        "text",
-        json!({ "text": input.text }),
-        vec!["input".to_string(), format!("type:{}", kind)],
-    );
-    record_event(state, input_event.clone()).await;
-
-    Ok(input_event
-        .payload
-        .get("text")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string())
+    Ok(ParsedIngress::Input {
+        kind,
+        text: input.text,
+    })
 }
 
 async fn maybe_append_debug_input_event(
@@ -286,4 +300,45 @@ fn should_append_debug_input_for_reuse_open(
         return previous_input != input_text;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_input_message, ParsedIngress};
+
+    #[test]
+    fn parse_input_accepts_default_message_kind() {
+        let parsed = parse_input_message(r#"{"text":"hello"}"#).expect("must parse");
+        assert_eq!(
+            parsed,
+            ParsedIngress::Input {
+                kind: "message".to_string(),
+                text: "hello".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_input_accepts_sensory_kind() {
+        let parsed = parse_input_message(r#"{"type":"sensory","text":"rain"}"#).expect("must parse");
+        assert_eq!(
+            parsed,
+            ParsedIngress::Input {
+                kind: "sensory".to_string(),
+                text: "rain".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_input_rejects_unknown_kind() {
+        let err = parse_input_message(r#"{"type":"unknown","text":"x"}"#).expect_err("must fail");
+        assert_eq!(err, "invalid input type");
+    }
+
+    #[test]
+    fn parse_input_rejects_invalid_json() {
+        let err = parse_input_message("not-json").expect_err("must fail");
+        assert_eq!(err, "invalid input payload");
+    }
 }
