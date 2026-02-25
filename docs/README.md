@@ -42,6 +42,10 @@ Add a new document when:
 - Completing a feature branch with notable design trade-offs
 - Introducing new patterns or conventions
 
+Do **not** add a new document when:
+- Implementation only follows an already-agreed design without adding/changing decisions
+- The change can be sufficiently explained by commit messages and code review context
+
 **Document format:**
 ```markdown
 # Feature Name
@@ -81,6 +85,7 @@ Use the following rules to keep documents complete and reviewable.
 - Ensure every normative claim can be traced to either:
   - an implemented code path, or
   - a clearly marked planned change.
+- Avoid "implementation fact logs" as design docs; implementation history belongs in git/commit logs unless a design decision changed.
 - For `core-rust`, treat compatibility as breaking-by-default:
   - do not add compatibility layers, dual paths, migration flags, or fallback behavior unless explicitly justified.
   - add a short `Compatibility Impact` line in design docs to make this decision visible during review.
