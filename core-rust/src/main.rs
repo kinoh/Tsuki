@@ -7,6 +7,7 @@ mod event;
 mod event_store;
 mod llm;
 mod module_registry;
+mod notification;
 mod prompts;
 mod state;
 mod tools;
@@ -37,6 +38,7 @@ use crate::db::{Db, RuntimeConfigRecord};
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::module_registry::{ModuleDefinition, ModuleRegistry, ModuleRegistryReader};
+use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
 use crate::state::{DbStateStore, StateStore};
 use crate::tools::{concept_graph_tools, state_tools, StateToolHandler};
@@ -47,6 +49,7 @@ pub(crate) struct AppState {
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) tx: broadcast::Sender<Event>,
     pub(crate) auth_token: String,
+    pub(crate) fcm_sender: Option<FcmNotificationSender>,
     pub(crate) state_store: Arc<dyn StateStore>,
     pub(crate) activation_concept_graph: Arc<dyn ConceptGraphStore>,
     pub(crate) modules: Modules,
@@ -303,6 +306,7 @@ async fn main() {
         event_store,
         tx,
         auth_token,
+        fcm_sender: FcmNotificationSender::from_env().ok(),
         state_store,
         activation_concept_graph,
         modules,
@@ -764,7 +768,7 @@ async fn notification_test(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<NotificationResult>, (StatusCode, String)> {
-    let _ = parse_http_auth_user(&headers, &state.auth_token)?;
+    let user = parse_http_auth_user(&headers, &state.auth_token)?;
     let config = state
         .db
         .get_runtime_config()
@@ -776,6 +780,23 @@ async fn notification_test(
             "notifications are disabled".to_string(),
         ));
     }
+
+    let sender = state.fcm_sender.clone().ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "notification sender is not configured".to_string(),
+        )
+    })?;
+    let tokens = state
+        .db
+        .list_notification_tokens(&user)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    sender
+        .send_to_tokens(&tokens, "Test Notification", "This is a test notification.")
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+
     Ok(Json(NotificationResult { ok: true }))
 }
 
