@@ -10,8 +10,11 @@ struct ImportStats {
     imported: u64,
     dropped_unknown_role: u64,
     dropped_non_text: u64,
+    dropped_by_substring: u64,
     failed: u64,
 }
+
+const EXCLUDE_SUBSTRINGS: &[&str] = &["\"modality\":\"None\"", "Received scheduler notification"];
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -89,6 +92,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             continue;
         };
 
+        if let Some(matched) = should_drop_by_substring(&text) {
+            eprintln!("IMPORT_DROP_BY_SUBSTRING role={} ts={} matched={}", role, created_at, matched);
+            stats.dropped_by_substring += 1;
+            continue;
+        }
+
         let payload_json = serde_json::to_string(&json!({ "text": text }))?;
         let tags_json = serde_json::to_string(&vec!["imported_legacy", role_tag])?;
         let event_id = Uuid::new_v4().to_string();
@@ -117,11 +126,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     target.execute("COMMIT", params![]).await?;
 
     println!(
-        "IMPORT_RESULT processed={} imported={} dropped_unknown_role={} dropped_non_text={} failed={}",
+        "IMPORT_RESULT processed={} imported={} dropped_unknown_role={} dropped_non_text={} dropped_by_substring={} failed={}",
         stats.processed,
         stats.imported,
         stats.dropped_unknown_role,
         stats.dropped_non_text,
+        stats.dropped_by_substring,
         stats.failed
     );
 
@@ -186,6 +196,14 @@ fn normalize_text(raw: &str) -> String {
     }
 
     trimmed.to_string()
+}
+
+fn should_drop_by_substring(text: &str) -> Option<&'static str> {
+    let lowered = text.to_ascii_lowercase();
+    EXCLUDE_SUBSTRINGS.iter().copied().find(|candidate| {
+        let candidate_lower = candidate.to_ascii_lowercase();
+        lowered.contains(candidate_lower.as_str())
+    })
 }
 
 async fn ensure_target_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
