@@ -11,7 +11,7 @@ The GUI chat screen was still coupled to legacy message/thread semantics:
 - History fetch used `GET /messages` with `n` and `before`.
 - WebSocket receive path expected legacy chat message payloads.
 - Client state model stored thread/message-oriented fields (`timestamp`-only pagination assumptions).
-- The page still made a `GET /metadata` request that is not part of the core-rust surface.
+- The page expected core-compatible metadata fields, but migration work needed to keep this aligned with core-rust contracts.
 
 This prevented fulfilling the migration goal that `/events` is the only history retrieval API in active clients.
 
@@ -22,7 +22,7 @@ The GUI route (`gui/src/routes/+page.svelte`) was updated to consume the event s
 - Replace incremental fetch with `before_ts` pagination.
 - Parse WebSocket payload as `{ type: "event", event: Event }`.
 - Convert runtime events into UI message items through a dedicated mapping layer.
-- Remove `/metadata` fetch from connect flow.
+- Keep `/metadata` probe in connect flow once core-rust exposes the endpoint.
 
 ## Design Decisions
 1. Event-first state model in GUI
@@ -54,7 +54,7 @@ The GUI route (`gui/src/routes/+page.svelte`) was updated to consume the event s
   - `upsertRealtimeMessage`
 - Replaced `/messages` fetch paths with `/events` paths.
 - Replaced numeric `before` pagination with ISO8601 `before_ts`.
-- Removed metadata probe request from `connect()`.
+- Updated metadata probe handling to parse the core-rust metadata payload.
 
 ## Future Considerations
 - Add explicit filtering rules if UI should hide internal event categories (for example debug/decision-only events).

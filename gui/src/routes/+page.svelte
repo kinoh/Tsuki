@@ -28,6 +28,15 @@
   };
   type RuntimeEventEnvelope = { type: string; event: RuntimeEvent };
   type EventsResponse = { items: RuntimeEvent[] };
+  type MetadataApiVersions = { asyncapi?: string; openapi?: string };
+  type MetadataResponse = {
+    git_hash?: string;
+    openai_model: string;
+    mcp_tools: string[];
+    api_versions: MetadataApiVersions;
+    router_model: string;
+    active_modules: string[];
+  };
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let messages: Message[] = $state([]);
@@ -156,6 +165,27 @@
       .catch(error => {
         errorToast = error.toString();
         log("error", "http", "Failed to load events.", error);
+      });
+
+    log("debug", "http", "Server metadata request.", { endpoint: config.endpoint });
+    fetch(`http${secure()}://${config.endpoint}/metadata`, {
+      headers: {
+        "Authorization": `${config.user}:${config.token}`,
+      }
+    })
+      .then(response => {
+        if (response.status === 401 || response.status === 403) {
+          log("error", "http", "Unauthorized when loading server metadata.", { status: response.status });
+        }
+        return response.json();
+      })
+      .then(data => {
+        const payload = data as MetadataResponse;
+        log("debug", "http", "Server metadata payload received.", payload);
+        log("info", "http", "Server metadata received.", payload);
+      })
+      .catch(error => {
+        log("error", "http", "Failed to load server metadata.", error);
       });
 
     connection = new WebSocket(`ws${secure()}://${config.endpoint}/ws`);
