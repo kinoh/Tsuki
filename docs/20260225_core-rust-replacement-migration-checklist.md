@@ -37,8 +37,8 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 ### 1. API Surface Consolidation
 - [x] Define and document `/events` query contract (minimal: `limit`, `before_ts`, `order`).
 - [x] Implement production-grade `/events` endpoint in `core-rust` (not debug-only path).
-- [ ] Remove `threads/messages/tts` routes from production-facing API map.
-- [ ] Update API references (`README`, specs, ops docs) to event-centric history.
+- [x] Keep `core` legacy routes as-is for now (route removal is out of scope in this migration phase).
+- [x] Update active protocol reference needed for this phase (`api-specs/asyncapi.yaml`) to event-stream contract.
 
 ### 2. WebSocket Contract Alignment
 - [x] Reconcile current `core-rust` WebSocket payload shape with `api-specs/asyncapi.yaml`.
