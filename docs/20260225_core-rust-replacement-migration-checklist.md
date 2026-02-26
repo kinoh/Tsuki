@@ -9,6 +9,7 @@ It reflects the currently agreed scope:
 - Use `/events` as the history retrieval interface.
 - Implement runtime configuration API (`/config`) required by clients.
 - Implement notification capability required by clients.
+- Keep sensory acquisition/polling out of scope for this migration phase.
 - Migrate legacy conversation history into event rows.
 - Drop tool/reasoning intermediate artifacts during migration.
 - Preserve original message timestamps when importing legacy history.
@@ -39,7 +40,7 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 ### 1. API Surface Consolidation
 - [x] Define and document `/events` query contract (minimal: `limit`, `before_ts`, `order`).
 - [x] Implement production-grade `/events` endpoint in `core-rust` (not debug-only path).
-- [ ] Implement `/config` API (`GET`/`PUT`) with auth and persistent runtime config storage.
+- [ ] Implement `/config` API (`GET`/`PUT`) with auth and persistent runtime config storage (`enableSensory` remains accepted for compatibility; sensory acquisition itself is out of scope).
 - [ ] Implement notification APIs required by current clients (`/notification/token`, `/notification/tokens`, `/notification/_test`) or define and apply replacement contract.
 - [x] Keep `core` legacy routes as-is for now (route removal is out of scope in this migration phase).
 - [x] Update active protocol reference needed for this phase (`api-specs/asyncapi.yaml`) to event-stream contract.
