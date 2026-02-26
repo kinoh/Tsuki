@@ -7,6 +7,8 @@ It reflects the currently agreed scope:
 - Do not provide TTS as an API for now.
 - Remove thread-based history APIs/concepts.
 - Use `/events` as the history retrieval interface.
+- Implement runtime configuration API (`/config`) required by clients.
+- Implement notification capability required by clients.
 - Migrate legacy conversation history into event rows.
 - Drop tool/reasoning intermediate artifacts during migration.
 - Preserve original message timestamps when importing legacy history.
@@ -37,6 +39,8 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 ### 1. API Surface Consolidation
 - [x] Define and document `/events` query contract (minimal: `limit`, `before_ts`, `order`).
 - [x] Implement production-grade `/events` endpoint in `core-rust` (not debug-only path).
+- [ ] Implement `/config` API (`GET`/`PUT`) with auth and persistent runtime config storage.
+- [ ] Implement notification APIs required by current clients (`/notification/token`, `/notification/tokens`, `/notification/_test`) or define and apply replacement contract.
 - [x] Keep `core` legacy routes as-is for now (route removal is out of scope in this migration phase).
 - [x] Update active protocol reference needed for this phase (`api-specs/asyncapi.yaml`) to event-stream contract.
 
@@ -70,11 +74,14 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [ ] Update healthcheck to validate `core-rust`-owned readiness.
 - [ ] Update Taskfile runtime/deploy commands if service names or startup flows change.
 - [ ] Validate required env/config mapping for `core-rust` in production.
+- [ ] Validate runtime config persistence and notification behavior after restart.
 
 ### 6. Client and Consumer Updates
 - [ ] Update GUI/API consumers to use `/events` instead of thread/message APIs.
 - [ ] Remove thread-dependent assumptions from client state model.
 - [ ] Verify timeline/history views from event stream only.
+- [ ] Verify Config UI round-trip against `/config` on `core-rust`.
+- [ ] Verify notification registration flow against `core-rust` notification API.
 
 ### 7. Verification and Cutover
 - [ ] Add end-to-end checks: WebSocket message flow + `/events` retrieval.
