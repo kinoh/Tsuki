@@ -1298,33 +1298,21 @@ fn get_git_hash() -> Option<String> {
 
 fn load_api_versions() -> ApiVersions {
     ApiVersions {
-        asyncapi: read_spec_info_version(&[
-            "../api-specs/asyncapi.yaml",
-            "api-specs/asyncapi.yaml",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../api-specs/asyncapi.yaml"),
-        ]),
-        openapi: read_spec_info_version(&[
-            "../api-specs/openapi.yaml",
-            "api-specs/openapi.yaml",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../api-specs/openapi.yaml"),
-        ]),
+        asyncapi: read_spec_info_version(include_str!("../../api-specs/asyncapi.yaml")),
+        openapi: read_spec_info_version(include_str!("../../api-specs/openapi.yaml")),
     }
 }
 
-fn read_spec_info_version(paths: &[&str]) -> Option<String> {
-    for path in paths {
-        let Ok(raw) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let Ok(doc) = serde_yaml::from_str::<SpecInfoDoc>(&raw) else {
-            continue;
-        };
-        let version = doc.info.version.trim();
-        if !version.is_empty() {
-            return Some(version.to_string());
-        }
+fn read_spec_info_version(raw: &str) -> Option<String> {
+    let Ok(doc) = serde_yaml::from_str::<SpecInfoDoc>(raw) else {
+        return None;
+    };
+    let version = doc.info.version.trim();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version.to_string())
     }
-    None
 }
 
 #[derive(Debug, Deserialize)]
