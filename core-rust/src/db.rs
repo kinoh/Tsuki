@@ -102,6 +102,16 @@ impl Db {
             params![],
         )
         .await?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS notification_tokens (\
+        user_id TEXT NOT NULL,\
+        token TEXT NOT NULL,\
+        created_at TEXT NOT NULL,\
+        PRIMARY KEY (user_id, token)\
+      )",
+            params![],
+        )
+        .await?;
         let now = now_iso8601();
         conn.execute(
             "INSERT OR IGNORE INTO runtime_config (id, enable_notification, enable_sensory, updated_at) \
@@ -435,5 +445,43 @@ impl Db {
             enable_sensory,
             updated_at,
         })
+    }
+
+    pub async fn add_notification_token(&self, user_id: &str, token: &str) -> DbResult<()> {
+        let created_at = now_iso8601();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO notification_tokens (user_id, token, created_at) VALUES (?, ?, ?) \
+             ON CONFLICT(user_id, token) DO NOTHING",
+            params![user_id, token, created_at],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn remove_notification_token(&self, user_id: &str, token: &str) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM notification_tokens WHERE user_id = ? AND token = ?",
+            params![user_id, token],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_notification_tokens(&self, user_id: &str) -> DbResult<Vec<String>> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT token FROM notification_tokens WHERE user_id = ? ORDER BY created_at DESC",
+                params![user_id],
+            )
+            .await?;
+        let mut tokens = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let token: String = row.get(0)?;
+            tokens.push(token);
+        }
+        Ok(tokens)
     }
 }

@@ -21,7 +21,7 @@ use axum::{
         sse::{Event as SseEvent, KeepAlive, Sse},
         Html, IntoResponse,
     },
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use futures::{SinkExt, StreamExt};
@@ -157,6 +157,16 @@ struct RuntimeConfigPayload {
     enable_notification: bool,
     #[serde(rename = "enableSensory")]
     enable_sensory: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct NotificationTokensResponse {
+    tokens: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct NotificationResult {
+    ok: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -320,6 +330,12 @@ async fn main() {
         .route("/", get(ws_handler))
         .route("/events", get(events))
         .route("/config", get(config_get).put(config_put))
+        .route(
+            "/notification/token",
+            put(notification_token_put).delete(notification_token_delete),
+        )
+        .route("/notification/tokens", get(notification_tokens_get))
+        .route("/notification/_test", post(notification_test))
         .route("/debug/styles/{name}", get(debug_style))
         .route("/debug/ui", get(debug_ui))
         .route("/debug/monitor", get(debug_monitor_ui))
@@ -699,6 +715,70 @@ async fn config_put(
     Ok(Json(runtime_config_payload(config)))
 }
 
+async fn notification_token_put(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<Json<NotificationResult>, (StatusCode, String)> {
+    let user = parse_http_auth_user(&headers, &state.auth_token)?;
+    let token = parse_notification_token_payload(&payload)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "missing token parameter".to_string()))?;
+    state
+        .db
+        .add_notification_token(&user, &token)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(NotificationResult { ok: true }))
+}
+
+async fn notification_token_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<Json<NotificationResult>, (StatusCode, String)> {
+    let user = parse_http_auth_user(&headers, &state.auth_token)?;
+    let token = parse_notification_token_payload(&payload)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "missing token parameter".to_string()))?;
+    state
+        .db
+        .remove_notification_token(&user, &token)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(NotificationResult { ok: true }))
+}
+
+async fn notification_tokens_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<NotificationTokensResponse>, (StatusCode, String)> {
+    let user = parse_http_auth_user(&headers, &state.auth_token)?;
+    let tokens = state
+        .db
+        .list_notification_tokens(&user)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(NotificationTokensResponse { tokens }))
+}
+
+async fn notification_test(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<NotificationResult>, (StatusCode, String)> {
+    let _ = parse_http_auth_user(&headers, &state.auth_token)?;
+    let config = state
+        .db
+        .get_runtime_config()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    if !config.enable_notification {
+        return Err((
+            StatusCode::CONFLICT,
+            "notifications are disabled".to_string(),
+        ));
+    }
+    Ok(Json(NotificationResult { ok: true }))
+}
+
 async fn debug_events_stream(
     State(state): State<AppState>,
 ) -> Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>> {
@@ -1060,6 +1140,14 @@ fn verify_auth(message: &str, expected_token: &str) -> bool {
 }
 
 fn verify_http_auth(headers: &HeaderMap, expected_token: &str) -> Result<(), (StatusCode, String)> {
+    let _ = parse_http_auth_user(headers, expected_token)?;
+    Ok(())
+}
+
+fn parse_http_auth_user(
+    headers: &HeaderMap,
+    expected_token: &str,
+) -> Result<String, (StatusCode, String)> {
     let auth = headers
         .get("authorization")
         .and_then(|value| value.to_str().ok())
@@ -1068,8 +1156,8 @@ fn verify_http_auth(headers: &HeaderMap, expected_token: &str) -> Result<(), (St
         .ok_or_else(|| (StatusCode::UNAUTHORIZED, "authorization header required".to_string()))?;
 
     let mut parts = auth.splitn(2, ':');
-    let user = parts.next().unwrap_or("");
-    let token = parts.next().unwrap_or("");
+    let user = parts.next().unwrap_or("").trim();
+    let token = parts.next().unwrap_or("").trim();
 
     if user.is_empty() || token.is_empty() {
         return Err((
@@ -1082,7 +1170,7 @@ fn verify_http_auth(headers: &HeaderMap, expected_token: &str) -> Result<(), (St
         return Err((StatusCode::UNAUTHORIZED, "invalid token".to_string()));
     }
 
-    Ok(())
+    Ok(user.to_string())
 }
 
 fn validate_iso8601(value: &str) -> Result<(), &'static str> {
@@ -1104,6 +1192,15 @@ fn parse_runtime_config_payload(payload: &Value) -> Option<(bool, bool)> {
     let enable_notification = object.get("enableNotification")?.as_bool()?;
     let enable_sensory = object.get("enableSensory")?.as_bool()?;
     Some((enable_notification, enable_sensory))
+}
+
+fn parse_notification_token_payload(payload: &Value) -> Option<String> {
+    let object = payload.as_object()?;
+    let token = object.get("token")?.as_str()?.trim();
+    if token.is_empty() {
+        return None;
+    }
+    Some(token.to_string())
 }
 
 async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (StatusCode, String)> {
