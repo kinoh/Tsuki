@@ -188,7 +188,7 @@
         log("error", "http", "Failed to load server metadata.", error);
       });
 
-    connection = new WebSocket(`ws${secure()}://${config.endpoint}/ws`);
+    connection = new WebSocket(`ws${secure()}://${config.endpoint}`);
 
     connection.onopen = function(event) {
       inputPlaceholder = "";

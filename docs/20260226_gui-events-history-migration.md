@@ -12,6 +12,7 @@ The GUI chat screen was still coupled to legacy message/thread semantics:
 - WebSocket receive path expected legacy chat message payloads.
 - Client state model stored thread/message-oriented fields (`timestamp`-only pagination assumptions).
 - The page expected core-compatible metadata fields, but migration work needed to keep this aligned with core-rust contracts.
+- WebSocket path mismatch caused handshake failures (`/ws` in GUI vs `/` in current core-rust router).
 
 This prevented fulfilling the migration goal that `/events` is the only history retrieval API in active clients.
 
@@ -55,6 +56,7 @@ The GUI route (`gui/src/routes/+page.svelte`) was updated to consume the event s
 - Replaced `/messages` fetch paths with `/events` paths.
 - Replaced numeric `before` pagination with ISO8601 `before_ts`.
 - Updated metadata probe handling to parse the core-rust metadata payload.
+- Aligned GUI WebSocket URL to the current core-rust route (`/`), fixing handshake 404.
 
 ## Future Considerations
 - Add explicit filtering rules if UI should hide internal event categories (for example debug/decision-only events).
