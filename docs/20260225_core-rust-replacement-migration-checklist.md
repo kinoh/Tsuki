@@ -44,6 +44,7 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [x] Implement notification APIs required by current clients (`/notification/token`, `/notification/tokens`, `/notification/_test`) including actual notification delivery.
 - [x] Keep `core` legacy routes as-is for now (route removal is out of scope in this migration phase).
 - [x] Update active protocol reference needed for this phase (`api-specs/asyncapi.yaml`) to event-stream contract.
+- [x] Implement `/metadata` with core-compatible fields plus `router_model`, `active_modules`, and API spec versions from `api-specs/asyncapi.yaml` + `api-specs/openapi.yaml`.
 
 ### 2. WebSocket Contract Alignment
 - [x] Reconcile current `core-rust` WebSocket payload shape with `api-specs/asyncapi.yaml`.

@@ -28,7 +28,7 @@ use axum::{
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr, path::PathBuf, process::Command, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 use time::OffsetDateTime;
 
@@ -56,6 +56,7 @@ pub(crate) struct AppState {
     pub(crate) limits: LimitsConfig,
     pub(crate) router: RouterConfig,
     pub(crate) input: InputConfig,
+    pub(crate) api_versions: ApiVersions,
     pub(crate) prompts: Arc<RwLock<PromptOverrides>>,
     pub(crate) prompts_path: PathBuf,
     pub(crate) self_improvement_trigger_instructions: String,
@@ -160,6 +161,28 @@ struct RuntimeConfigPayload {
     enable_notification: bool,
     #[serde(rename = "enableSensory")]
     enable_sensory: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ApiVersions {
+    asyncapi: Option<String>,
+    openapi: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MetadataApiVersions {
+    asyncapi: Option<String>,
+    openapi: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MetadataResponse {
+    git_hash: Option<String>,
+    openai_model: String,
+    mcp_tools: Vec<String>,
+    api_versions: MetadataApiVersions,
+    router_model: String,
+    active_modules: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -313,6 +336,7 @@ async fn main() {
         limits: config.limits.clone(),
         router: config.router.clone(),
         input: config.input.clone(),
+        api_versions: load_api_versions(),
         prompts,
         prompts_path,
         self_improvement_trigger_instructions: config
@@ -333,6 +357,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(ws_handler))
         .route("/events", get(events))
+        .route("/metadata", get(metadata_get))
         .route("/config", get(config_get).put(config_put))
         .route(
             "/notification/token",
@@ -701,6 +726,34 @@ async fn config_get(
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(Json(runtime_config_payload(config)))
+}
+
+async fn metadata_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<MetadataResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
+    let active_modules = state
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+        .into_iter()
+        .map(|module| module.name)
+        .collect::<Vec<_>>();
+
+    Ok(Json(MetadataResponse {
+        git_hash: get_git_hash(),
+        openai_model: state.modules.runtime.model.clone(),
+        mcp_tools: Vec::new(),
+        api_versions: MetadataApiVersions {
+            asyncapi: state.api_versions.asyncapi.clone(),
+            openapi: state.api_versions.openapi.clone(),
+        },
+        router_model: state.router_model.clone(),
+        active_modules,
+    }))
 }
 
 async fn config_put(
@@ -1222,6 +1275,66 @@ fn parse_notification_token_payload(payload: &Value) -> Option<String> {
         return None;
     }
     Some(token.to_string())
+}
+
+fn get_git_hash() -> Option<String> {
+    if let Ok(value) = std::env::var("GIT_HASH") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    let output = Command::new("git").args(["rev-parse", "HEAD"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn load_api_versions() -> ApiVersions {
+    ApiVersions {
+        asyncapi: read_spec_info_version(&[
+            "../api-specs/asyncapi.yaml",
+            "api-specs/asyncapi.yaml",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../api-specs/asyncapi.yaml"),
+        ]),
+        openapi: read_spec_info_version(&[
+            "../api-specs/openapi.yaml",
+            "api-specs/openapi.yaml",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../api-specs/openapi.yaml"),
+        ]),
+    }
+}
+
+fn read_spec_info_version(paths: &[&str]) -> Option<String> {
+    for path in paths {
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(doc) = serde_yaml::from_str::<SpecInfoDoc>(&raw) else {
+            continue;
+        };
+        let version = doc.info.version.trim();
+        if !version.is_empty() {
+            return Some(version.to_string());
+        }
+    }
+    None
+}
+
+#[derive(Debug, Deserialize)]
+struct SpecInfoDoc {
+    info: SpecInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpecInfo {
+    version: String,
 }
 
 async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (StatusCode, String)> {
