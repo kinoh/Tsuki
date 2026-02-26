@@ -33,7 +33,7 @@ use time::OffsetDateTime;
 
 use crate::activation_concept_graph::{ActivationConceptGraphStore, ConceptGraphStore};
 use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig};
-use crate::db::Db;
+use crate::db::{Db, RuntimeConfigRecord};
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::module_registry::{ModuleDefinition, ModuleRegistry, ModuleRegistryReader};
@@ -43,6 +43,7 @@ use crate::tools::{concept_graph_tools, state_tools, StateToolHandler};
 
 #[derive(Clone)]
 pub(crate) struct AppState {
+    pub(crate) db: Arc<Db>,
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) tx: broadcast::Sender<Event>,
     pub(crate) auth_token: String,
@@ -148,6 +149,14 @@ struct EventsQuery {
 #[derive(Debug, Serialize)]
 struct EventsResponse {
     items: Vec<Event>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeConfigPayload {
+    #[serde(rename = "enableNotification")]
+    enable_notification: bool,
+    #[serde(rename = "enableSensory")]
+    enable_sensory: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -280,6 +289,7 @@ async fn main() {
     );
 
     let state = AppState {
+        db: db.clone(),
         event_store,
         tx,
         auth_token,
@@ -309,6 +319,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(ws_handler))
         .route("/events", get(events))
+        .route("/config", get(config_get).put(config_put))
         .route("/debug/styles/{name}", get(debug_style))
         .route("/debug/ui", get(debug_ui))
         .route("/debug/monitor", get(debug_monitor_ui))
@@ -657,6 +668,35 @@ async fn events(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
 
     Ok(Json(EventsResponse { items }))
+}
+
+async fn config_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<RuntimeConfigPayload>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
+    let config = state
+        .db
+        .get_runtime_config()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(runtime_config_payload(config)))
+}
+
+async fn config_put(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<Json<RuntimeConfigPayload>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
+    let (enable_notification, enable_sensory) = parse_runtime_config_payload(&payload)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid payload".to_string()))?;
+    let config = state
+        .db
+        .set_runtime_config(enable_notification, enable_sensory)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(runtime_config_payload(config)))
 }
 
 async fn debug_events_stream(
@@ -1049,6 +1089,21 @@ fn validate_iso8601(value: &str) -> Result<(), &'static str> {
     OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
         .map(|_| ())
         .map_err(|_| "invalid before_ts")
+}
+
+fn runtime_config_payload(config: RuntimeConfigRecord) -> RuntimeConfigPayload {
+    let _ = config.updated_at;
+    RuntimeConfigPayload {
+        enable_notification: config.enable_notification,
+        enable_sensory: config.enable_sensory,
+    }
+}
+
+fn parse_runtime_config_payload(payload: &Value) -> Option<(bool, bool)> {
+    let object = payload.as_object()?;
+    let enable_notification = object.get("enableNotification")?.as_bool()?;
+    let enable_sensory = object.get("enableSensory")?.as_bool()?;
+    Some((enable_notification, enable_sensory))
 }
 
 async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (StatusCode, String)> {

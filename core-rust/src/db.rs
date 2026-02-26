@@ -10,6 +10,13 @@ use tokio::sync::Mutex;
 
 pub type DbResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
+#[derive(Debug, Clone)]
+pub struct RuntimeConfigRecord {
+    pub enable_notification: bool,
+    pub enable_sensory: bool,
+    pub updated_at: String,
+}
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -83,6 +90,23 @@ impl Db {
         updated_at TEXT NOT NULL\
       )",
             params![],
+        )
+        .await?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS runtime_config (\
+        id INTEGER PRIMARY KEY CHECK (id = 1),\
+        enable_notification INTEGER NOT NULL,\
+        enable_sensory INTEGER NOT NULL,\
+        updated_at TEXT NOT NULL\
+      )",
+            params![],
+        )
+        .await?;
+        let now = now_iso8601();
+        conn.execute(
+            "INSERT OR IGNORE INTO runtime_config (id, enable_notification, enable_sensory, updated_at) \
+             VALUES (1, 1, 1, ?)",
+            params![now],
         )
         .await?;
         Ok(())
@@ -359,5 +383,57 @@ impl Db {
             results.push((name, instructions, enabled != 0));
         }
         Ok(results)
+    }
+
+    pub async fn get_runtime_config(&self) -> DbResult<RuntimeConfigRecord> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT enable_notification, enable_sensory, updated_at \
+                 FROM runtime_config WHERE id = 1 LIMIT 1",
+                params![],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            let enable_notification: i64 = row.get(0)?;
+            let enable_sensory: i64 = row.get(1)?;
+            let updated_at: String = row.get(2)?;
+            return Ok(RuntimeConfigRecord {
+                enable_notification: enable_notification != 0,
+                enable_sensory: enable_sensory != 0,
+                updated_at,
+            });
+        }
+
+        Err("runtime config row not found".into())
+    }
+
+    pub async fn set_runtime_config(
+        &self,
+        enable_notification: bool,
+        enable_sensory: bool,
+    ) -> DbResult<RuntimeConfigRecord> {
+        let updated_at = now_iso8601();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO runtime_config (id, enable_notification, enable_sensory, updated_at) \
+             VALUES (1, ?, ?, ?) \
+             ON CONFLICT(id) DO UPDATE SET \
+               enable_notification = excluded.enable_notification, \
+               enable_sensory = excluded.enable_sensory, \
+               updated_at = excluded.updated_at",
+            params![
+                if enable_notification { 1 } else { 0 },
+                if enable_sensory { 1 } else { 0 },
+                updated_at.clone()
+            ],
+        )
+        .await?;
+        Ok(RuntimeConfigRecord {
+            enable_notification,
+            enable_sensory,
+            updated_at,
+        })
     }
 }
