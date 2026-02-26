@@ -78,8 +78,8 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [ ] Validate runtime config persistence and notification behavior after restart.
 
 ### 6. Client and Consumer Updates
-- [ ] Update GUI/API consumers to use `/events` instead of thread/message APIs.
-- [ ] Remove thread-dependent assumptions from client state model.
+- [x] Update GUI/API consumers to use `/events` instead of thread/message APIs.
+- [x] Remove thread-dependent assumptions from client state model.
 - [ ] Verify timeline/history views from event stream only.
 - [ ] Verify Config UI round-trip against `/config` on `core-rust`.
 - [ ] Verify notification registration flow against `core-rust` notification API.

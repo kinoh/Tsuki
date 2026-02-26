@@ -5,8 +5,8 @@
     onResume,
     onPause,
   } from "tauri-plugin-app-events-api";
-  import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-  import { subscribeToTopic, getFCMToken, onPushNotificationOpened, getLatestNotificationData } from "@tauri-plugin-fcm-api";
+  import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+  import { getFCMToken } from "@tauri-plugin-fcm-api";
   import { onMount } from 'svelte';
 
   import Config from './Config.svelte';
@@ -17,7 +17,17 @@
   type UserChat = { modality: string, user: string, content: string };
   type AssistantChat = { modality: string, content: string, feeling: number, activity: number };
   type ChatItem = string | UserChat | AssistantChat;
-  type Message = { role: string; user: string; chat: ChatItem[]; timestamp: number };
+  type Message = { id: string; role: "user" | "assistant" | "system"; user: string; chat: ChatItem[]; timestamp: number; ts: string; localOnly?: boolean };
+  type RuntimeEvent = {
+    event_id: string;
+    ts: string;
+    source: string;
+    modality: string;
+    payload: { [key: string]: unknown };
+    meta: { tags?: string[] };
+  };
+  type RuntimeEventEnvelope = { type: string; event: RuntimeEvent };
+  type EventsResponse = { items: RuntimeEvent[] };
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let messages: Message[] = $state([]);
@@ -35,57 +45,117 @@
     return ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
   }
 
-  function convertMessage(m: Message): Message {
-    m.chat = m.chat.map(c => {
-      if (typeof c === "string" && c.startsWith("{")) {
-        return JSON.parse(c);
+  function parseChatItem(text: string): ChatItem {
+    if (!text.startsWith("{")) {
+      return text;
+    }
+    try {
+      const parsed = JSON.parse(text) as Partial<UserChat & AssistantChat>;
+      if (parsed && typeof parsed.content === "string") {
+        return parsed as ChatItem;
       }
-      return c;
-    });
-    return m;
+    } catch {
+      // Keep raw text when it is not a chat JSON fragment.
+    }
+    return text;
+  }
+
+  function resolveMessageRole(event: RuntimeEvent): "user" | "assistant" | "system" {
+    const tags = event.meta?.tags ?? [];
+    if (event.source === "user" || tags.includes("user_input")) {
+      return "user";
+    }
+    if (event.source === "system" || tags.includes("system_output")) {
+      return "system";
+    }
+    return "assistant";
+  }
+
+  function convertEvent(event: RuntimeEvent): Message | null {
+    const text = typeof event.payload?.text === "string" ? event.payload.text.trim() : "";
+    if (text.length === 0) {
+      return null;
+    }
+
+    const parsedTs = Date.parse(event.ts);
+    return {
+      id: event.event_id,
+      role: resolveMessageRole(event),
+      user: event.source,
+      chat: [parseChatItem(text)],
+      timestamp: Number.isFinite(parsedTs) ? parsedTs / 1000 : Date.now() / 1000,
+      ts: event.ts,
+    };
+  }
+
+  function parseRuntimeEvent(data: string): RuntimeEvent | null {
+    try {
+      const parsed = JSON.parse(data) as Partial<RuntimeEventEnvelope & RuntimeEvent>;
+      if (parsed.type === "event" && parsed.event && typeof parsed.event.event_id === "string") {
+        return parsed.event;
+      }
+      if (typeof parsed.event_id === "string" && typeof parsed.ts === "string") {
+        return parsed as RuntimeEvent;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function firstChatText(message: Message): string {
+    const first = message.chat[0];
+    if (typeof first === "string") {
+      return first;
+    }
+    return first.content;
+  }
+
+  function upsertRealtimeMessage(next: Message) {
+    if (messages.some(item => !item.localOnly && item.id === next.id)) {
+      return;
+    }
+
+    if (next.role === "user") {
+      const text = firstChatText(next);
+      const pendingIndex = messages.findIndex(item =>
+        item.localOnly === true &&
+        item.role === "user" &&
+        firstChatText(item) === text
+      );
+      if (pendingIndex >= 0) {
+        messages[pendingIndex] = next;
+        return;
+      }
+    }
+
+    messages.unshift(next);
   }
 
   function connect() {
     log("info", "ws", "Connect requested.");
-    log("debug", "http", "Messages request.", { endpoint: config.endpoint, limit: 20 });
-    fetch(`http${secure()}://${config.endpoint}/messages?n=20`, {
+    log("debug", "http", "Events request.", { endpoint: config.endpoint, limit: 20, order: "desc" });
+    fetch(`http${secure()}://${config.endpoint}/events?limit=20&order=desc`, {
       headers: {
         "Authorization": `${config.user}:${config.token}`,
       }
     })
       .then(response => {
         if (response.status === 401 || response.status === 403) {
-          log("error", "http", "Unauthorized when loading messages.", { status: response.status });
+          log("error", "http", "Unauthorized when loading events.", { status: response.status });
         }
         return response.json();
       })
       .then(data => {
-        log("debug", "http", "Messages payload received.", data);
-        messages = data.messages.toReversed().map(convertMessage);
+        const payload = data as EventsResponse;
+        log("debug", "http", "Events payload received.", payload);
+        messages = payload.items
+          .map(convertEvent)
+          .filter((item): item is Message => item !== null);
       })
       .catch(error => {
         errorToast = error.toString();
-        log("error", "http", "Failed to load messages.", error);
-      });
-
-    log("debug", "http", "Server metadata request.", { endpoint: config.endpoint });
-    fetch(`http${secure()}://${config.endpoint}/metadata`, {
-      headers: {
-        "Authorization": `${config.user}:${config.token}`,
-      }
-    })
-      .then(response => {
-        if (response.status === 401 || response.status === 403) {
-          log("error", "http", "Unauthorized when loading server metadata.", { status: response.status });
-        }
-        return response.json();
-      })
-      .then(json => {
-        log("debug", "http", "Server metadata payload received.", json);
-        log("info", "http", "Server metadata received.", json);
-      })
-      .catch(error => {
-        log("error", "http", "Failed to load server metadata.", error);
+        log("error", "http", "Failed to load events.", error);
       });
 
     connection = new WebSocket(`ws${secure()}://${config.endpoint}/ws`);
@@ -112,33 +182,43 @@
       log("error", "ws", "Connection error.", event);
     }
     connection.onmessage = function(event) {
-      let message = JSON.parse(event.data) as Message;
-      log("debug", "ws", "Message received.", message);
-      if (message.user !== config.user) {
-        messages.unshift(convertMessage(message));
+      const runtimeEvent = parseRuntimeEvent(event.data);
+      if (runtimeEvent === null) {
+        log("warn", "ws", "Ignored non-event payload.", event.data);
+        return;
+      }
+      log("debug", "ws", "Event received.", runtimeEvent);
+      const message = convertEvent(runtimeEvent);
+      if (message !== null) {
+        upsertRealtimeMessage(message);
       }
     };
   }
 
   function loadMore() {
-    if (loadingMore) return;
+    if (loadingMore || messages.length === 0) return;
 
     loadingMore = true;
 
     let lastMessage = messages[messages.length - 1];
-    fetch(`http${secure()}://${config.endpoint}/messages?n=20&before=${lastMessage.timestamp}`, {
+    const beforeTs = encodeURIComponent(lastMessage.ts);
+    fetch(`http${secure()}://${config.endpoint}/events?limit=20&order=desc&before_ts=${beforeTs}`, {
       headers: {
         "Authorization": `${config.user}:${config.token}`,
       }
     })
       .then(response => response.json())
       .then(data => {
-        let more = data.messages.toReversed().map(convertMessage);
+        const payload = data as EventsResponse;
+        const more = payload.items
+          .map(convertEvent)
+          .filter((item): item is Message => item !== null)
+          .filter(item => !messages.some(existing => !existing.localOnly && existing.id === item.id));
         messages.push(...more);
       })
       .catch(error => {
         errorToast = error.toString();
-        log("error", "http", "Failed to load more messages.", error);
+        log("error", "http", "Failed to load more events.", error);
       })
       .finally(() => {
         loadingMore = false;
@@ -147,23 +227,27 @@
 
   function handleSubmit(event: Event) {
     event.preventDefault();
-    if (inputText.length == 0) {
+    const messageText = inputText.trim();
+    if (messageText.length === 0) {
       return;
     }
     if (connection !== null) {
       const payload = JSON.stringify({
         type: "message",
-        text: inputText,
+        text: messageText,
       });
       messages.unshift({
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         role: "user",
         user: config.user,
-        chat: [inputText],
+        chat: [messageText],
         timestamp: Date.now() / 1000,
+        ts: new Date().toISOString(),
+        localOnly: true,
       });
       try {
         connection.send(payload);
-        log("debug", "ws", "Message payload sent.", { content: inputText });
+        log("debug", "ws", "Message payload sent.", { content: messageText });
       } catch (error) {
         log("error", "ws", "Failed to send message over WebSocket.", error);
       }
