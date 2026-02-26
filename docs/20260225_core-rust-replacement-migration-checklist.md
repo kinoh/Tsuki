@@ -53,8 +53,15 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [x] Add import report output (processed/imported/dropped/failed counts).
 
 ### 4. Data Semantics and Read Model
-- [ ] Define canonical event tagging for imported messages (for example: `imported_legacy`, `user_input`, `assistant_output`).
-- [ ] Confirm ordering semantics for mixed live/imported events.
+- [x] Define canonical event tagging for imported messages:
+  - all imported rows: `imported_legacy`
+  - imported user rows: `user_input`
+  - imported assistant rows: `assistant_output`
+  - imported system rows: `system_output`
+- [x] Confirm ordering semantics for mixed live/imported events:
+  - query order is controlled by `order=asc|desc` (`desc` default)
+  - DB-level sort key is `(ts, event_id)` for deterministic ordering on identical timestamps
+  - pagination for this phase is `before_ts + limit` (no cursor)
 - [x] Confirm `/events` default sort behavior (`desc` by default; `asc|desc` selectable).
 - [x] Confirm `/events` pagination policy for this phase (no cursor; `before_ts + limit` only).
 
