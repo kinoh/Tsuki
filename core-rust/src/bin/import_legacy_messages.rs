@@ -142,7 +142,7 @@ fn print_help() {
 fn map_role(role: &str) -> Option<(&'static str, &'static str)> {
     match role {
         "user" => Some(("user", "user_input")),
-        "assistant" => Some(("assistant", "assistant_output")),
+        "assistant" => Some(("assistant", "response")),
         "system" => Some(("system", "system_output")),
         _ => None,
     }

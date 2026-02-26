@@ -15,7 +15,7 @@ It reflects the currently agreed scope:
 - Preserve original message timestamps when importing legacy history.
 - Do not introduce cursor pagination in this phase.
 - Do not store `legacy_message_id` / `legacy_thread_id` in migrated event payloads.
-- Event DB is rebuilt from zero for this migration, so import idempotency and import rollback mechanisms are out of scope.
+- Event DB is rebuilt from zero for this branch, so import idempotency and import rollback mechanisms are out of scope.
 
 Compatibility Impact: breaking-by-default (no compatibility layer)
 
@@ -62,7 +62,7 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [x] Define canonical event tagging for imported messages:
   - all imported rows: `imported_legacy`
   - imported user rows: `user_input`
-  - imported assistant rows: `assistant_output`
+  - imported assistant rows: `response`
   - imported system rows: `system_output`
 - [x] Confirm ordering semantics for mixed live/imported events:
   - query order is controlled by `order=asc|desc` (`desc` default)

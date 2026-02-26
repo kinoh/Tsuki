@@ -179,7 +179,7 @@ fn event_role(event: &Event) -> String {
     if event.source == "user" {
         return "user".to_string();
     }
-    if tags.iter().any(|tag| tag == "action") && tags.iter().any(|tag| tag == "response") {
+    if tags.iter().any(|tag| tag == "response") {
         return "assistant".to_string();
     }
     if tags.iter().any(|tag| tag == "decision") {

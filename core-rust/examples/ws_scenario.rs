@@ -333,16 +333,12 @@ fn is_reply_event(message: &Value) -> bool {
         Some(value) => value,
         None => return false,
     };
-    let mut has_action = false;
     let mut has_response = false;
     for tag in tags.iter().filter_map(|value| value.as_str()) {
-        if tag == "action" {
-            has_action = true;
-        }
         if tag == "response" {
             has_response = true;
         }
-        if has_action && has_response {
+        if has_response {
             return true;
         }
     }

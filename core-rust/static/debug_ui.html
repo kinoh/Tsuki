@@ -962,7 +962,7 @@
 
       function isReplyEvent(event) {
         const tags = getEventTags(event);
-        return tags.includes("action") && tags.includes("response");
+        return tags.includes("response");
       }
 
       function isDebugEvent(event) {

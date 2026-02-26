@@ -120,10 +120,10 @@ impl ToolHandler for StateToolHandler {
                 let args: EmitUserReplyArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
                 let event = build_event(
-                    "system",
+                    "assistant",
                     "text",
-                    json!({ "text": args.text, "target": "user" }),
-                    vec!["action".to_string(), "response".to_string()],
+                    json!({ "text": args.text }),
+                    vec!["response".to_string()],
                 );
                 (self.emit_event)(event);
                 Ok("{\"ok\":true}".to_string())

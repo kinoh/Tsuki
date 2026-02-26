@@ -54,13 +54,13 @@ Source mapping:
 Tagging baseline:
 - all imported rows: `imported_legacy`
 - user rows: `user_input`
-- assistant rows: `assistant_output`
+- assistant rows: `response`
 - system rows: `system_output`
 
 ## Import Execution Policy
 - Target event database is created from zero for cutover.
-- Import is executed as a one-time full migration.
-- Idempotency and rollback mechanics are out of scope for this phase.
+- Import is executed as a one-time full rebuild.
+- Since this branch is not deployed yet, compatibility/idempotency/rollback handling is out of scope.
 - Migration success is judged by completion + sampling verification.
 
 Minimum verification:
@@ -88,4 +88,3 @@ Clients and operational tooling must migrate to event-centric reads.
 3. Remove thread/message/tts routes from active production contract.
 4. Update GUI and operational references to `/events`.
 5. Run cutover verification and switch runtime entry to `core-rust`.
-

@@ -1772,8 +1772,7 @@ fn extract_event_summary(message: &Value) -> Option<EventSummary> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let is_reply =
-        tags.iter().any(|tag| tag == "action") && tags.iter().any(|tag| tag == "response");
+    let is_reply = tags.iter().any(|tag| tag == "response");
     Some(EventSummary {
         event_id: event
             .get("event_id")
@@ -1914,16 +1913,12 @@ fn is_reply_event(message: &Value) -> bool {
         None => return false,
     };
 
-    let mut has_action = false;
     let mut has_response = false;
     for tag in tags.iter().filter_map(Value::as_str) {
-        if tag == "action" {
-            has_action = true;
-        }
         if tag == "response" {
             has_response = true;
         }
-        if has_action && has_response {
+        if has_response {
             return true;
         }
     }
