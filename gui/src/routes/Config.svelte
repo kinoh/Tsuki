@@ -2,9 +2,11 @@
 
   import { fetch } from '@tauri-apps/plugin-http';
   import { onMount } from 'svelte';
+  import { loadClientConfig, saveClientConfig, type ClientConfig } from '../lib/clientConfig';
   import { log } from '../lib/logger';
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
+  let clientConfig: ClientConfig = $state(loadClientConfig());
   let runtimeConfig: { enableNotification: boolean, enableSensory: boolean } = $state({
     enableNotification: true,
     enableSensory: true,
@@ -22,6 +24,10 @@
 
   function hasAuthConfig(): boolean {
     return Boolean(config.endpoint && config.token && config.user);
+  }
+
+  function persistClientConfig() {
+    saveClientConfig(clientConfig);
   }
 
   function loadRuntimeConfig() {
@@ -108,6 +114,15 @@
   <div class="field">
     <label for="user">User name</label>
     <input id="user" type="value" bind:value={config.user} placeholder="Required" />
+  </div>
+  <div class="section">
+    <div class="field">
+      <label for="showInternalMessages">Internal messages</label>
+      <div class="inline-field">
+        <input id="showInternalMessages" type="checkbox" bind:checked={clientConfig.showInternalMessages} onchange={persistClientConfig} />
+        <span class="inline-label">Show</span>
+      </div>
+    </div>
   </div>
   <div class="section">
     <div class="field">

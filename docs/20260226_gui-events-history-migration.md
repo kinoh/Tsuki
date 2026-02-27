@@ -50,6 +50,12 @@ The GUI route (`gui/src/routes/+page.svelte`) was updated to consume the event s
   - `internal`: every other `source != "user"` event
 - User feedback incorporated: this rule was explicitly requested during migration validation.
 
+6. Client-side visibility toggle for internal messages
+- Why: internal events are useful for debugging but noisy for normal conversation.
+- Decision: add a client-only setting (`showInternalMessages`) stored in localStorage and exposed in Config UI.
+- Behavior: internal messages are always collected in memory; rendering is filtered by client setting only.
+- User feedback incorporated: this toggle requirement was explicitly requested after internal classification update.
+
 ## Implementation Details
 - Updated imports to remove unused notification symbols.
 - Added runtime event types:
@@ -66,6 +72,7 @@ The GUI route (`gui/src/routes/+page.svelte`) was updated to consume the event s
 - Updated metadata probe handling to parse the core-rust metadata payload.
 - Aligned GUI WebSocket URL to the current core-rust route (`/`), fixing handshake 404.
 - Updated role mapping so only `response`-tagged non-user events render as assistant messages; other non-user events render as internal messages.
+- Added Config UI toggle to show/hide internal messages without changing backend contracts.
 
 ## Future Considerations
 - Add explicit filtering rules if UI should hide internal event categories (for example debug/decision-only events).

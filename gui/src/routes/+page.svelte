@@ -12,6 +12,12 @@
   import Config from './Config.svelte';
   import Note from './Note.svelte';
   import Status from './Status.svelte';
+  import {
+    CLIENT_CONFIG_STORAGE_KEY,
+    CLIENT_CONFIG_UPDATED_EVENT,
+    loadClientConfig,
+    type ClientConfig,
+  } from '../lib/clientConfig';
   import { log } from '../lib/logger';
 
   type UserChat = { modality: string, user: string, content: string };
@@ -39,6 +45,7 @@
   };
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
+  let clientConfig: ClientConfig = $state(loadClientConfig());
   let messages: Message[] = $state([]);
   let inputText: string = $state("");
   let inputPlaceholder: string = $state("Connecting...");
@@ -52,6 +59,13 @@
 
   function secure(): "s" | "" {
     return ((config.endpoint && config.endpoint.match(/^localhost|^10\.0\.2\.2/)) ? "" : "s");
+  }
+
+  function shouldDisplayMessage(message: Message): boolean {
+    if (message.role !== "internal") {
+      return true;
+    }
+    return clientConfig.showInternalMessages;
   }
 
   function parseChatItem(text: string): ChatItem {
@@ -341,6 +355,20 @@
     handleSubmit(event);
   }
 
+  function handleClientConfigUpdated(event: Event) {
+    const customEvent = event as CustomEvent<ClientConfig>;
+    if (!customEvent.detail || typeof customEvent.detail.showInternalMessages !== "boolean") {
+      return;
+    }
+    clientConfig = customEvent.detail;
+  }
+
+  function handleClientConfigStorageChange(event: StorageEvent) {
+    if (event.key === CLIENT_CONFIG_STORAGE_KEY) {
+      clientConfig = loadClientConfig();
+    }
+  }
+
   function blink() {
     log("debug", "ui", "Blink timer started.");
 
@@ -378,6 +406,9 @@
     }
   });
   onMount(() => {
+    window.addEventListener(CLIENT_CONFIG_UPDATED_EVENT, handleClientConfigUpdated as EventListener);
+    window.addEventListener("storage", handleClientConfigStorageChange);
+
     let notificationSetup = async () => {
       let permissionGranted = await isPermissionGranted();
       if (!permissionGranted) {
@@ -424,6 +455,11 @@
       }
     };
     notificationSetup();
+
+    return () => {
+      window.removeEventListener(CLIENT_CONFIG_UPDATED_EVENT, handleClientConfigUpdated as EventListener);
+      window.removeEventListener("storage", handleClientConfigStorageChange);
+    };
   });
 
 </script>
@@ -470,19 +506,21 @@
         </button>
       {/if}
     	{#each messages as item}
-        <div class="message {item.role.toLowerCase()}-message">
-          {#each item.chat as chat}
-            {#if typeof chat === "string"}
-              {#if chat[0] === "["}
-                <div class="internal-message-content">{chat}</div>
+        {#if shouldDisplayMessage(item)}
+          <div class="message {item.role.toLowerCase()}-message">
+            {#each item.chat as chat}
+              {#if typeof chat === "string"}
+                {#if chat[0] === "["}
+                  <div class="internal-message-content">{chat}</div>
+                {:else}
+                  <div>{chat}</div>
+                {/if}
               {:else}
-                <div>{chat}</div>
+                <div>{chat.content}</div>
               {/if}
-            {:else}
-              <div>{chat.content}</div>
-            {/if}
-          {/each}
-        </div>
+            {/each}
+          </div>
+        {/if}
       {/each}
     </div>
     <button aria-label="Close menu" class={["overlay-mask", overlay === null ? "hidden" : "shown"]} onclick={e => overlay = null}>
