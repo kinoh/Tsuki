@@ -83,7 +83,7 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [x] Remove thread-dependent assumptions from client state model.
 - [x] Verify timeline/history views from event stream only.
 - [x] Verify Config UI round-trip against `/config` on `core-rust`.
-- [ ] Verify notification registration flow against `core-rust` notification API.
+- [x] Verify notification registration flow against `core-rust` notification API.
 
 ### 7. Verification and Cutover
 - [ ] Add end-to-end checks: WebSocket message flow + `/events` retrieval.
