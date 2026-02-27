@@ -81,8 +81,8 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 ### 6. Client and Consumer Updates
 - [x] Update GUI/API consumers to use `/events` instead of thread/message APIs.
 - [x] Remove thread-dependent assumptions from client state model.
-- [ ] Verify timeline/history views from event stream only.
-- [ ] Verify Config UI round-trip against `/config` on `core-rust`.
+- [x] Verify timeline/history views from event stream only.
+- [x] Verify Config UI round-trip against `/config` on `core-rust`.
 - [ ] Verify notification registration flow against `core-rust` notification API.
 
 ### 7. Verification and Cutover
