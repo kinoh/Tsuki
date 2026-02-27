@@ -324,12 +324,20 @@ async fn main() {
         emit_event,
     );
 
+    let fcm_sender = match FcmNotificationSender::from_env() {
+        Ok(sender) => Some(sender),
+        Err(err) => {
+            eprintln!("FCM_SENDER_INIT_ERROR error={}", err);
+            None
+        }
+    };
+
     let state = AppState {
         db: db.clone(),
         event_store,
         tx,
         auth_token,
-        fcm_sender: FcmNotificationSender::from_env().ok(),
+        fcm_sender,
         state_store,
         activation_concept_graph,
         modules,

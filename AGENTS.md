@@ -48,6 +48,8 @@ Guidance for coding agents working on Tsuki.
 - Any change to responsibility boundaries, event contracts, or API contracts must be reflected in docs on the same day.
 - Backward compatibility is not required by default.
 - Never adopt implicit fallbacks. Enforce fail-fast behavior for missing/invalid required behavior.
+- Never swallow errors; always emit explicit logs with the concrete cause.
+- Keep state simple; do not add state fields unless they are strictly necessary for domain behavior.
 - Migration/import tools must reuse the same event contract and normalization rules as runtime code; no ad-hoc mappings.
 - Before writing or updating documents under `docs/`, always read `docs/README.md` and follow its documentation strategy.
 
