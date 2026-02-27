@@ -17,7 +17,7 @@
   type UserChat = { modality: string, user: string, content: string };
   type AssistantChat = { modality: string, content: string, feeling: number, activity: number };
   type ChatItem = string | UserChat | AssistantChat;
-  type Message = { id: string; role: "user" | "assistant" | "system"; user: string; chat: ChatItem[]; timestamp: number; ts: string; localOnly?: boolean };
+  type Message = { id: string; role: "user" | "assistant" | "internal"; user: string; chat: ChatItem[]; timestamp: number; ts: string; localOnly?: boolean };
   type RuntimeEvent = {
     event_id: string;
     ts: string;
@@ -69,15 +69,15 @@
     return text;
   }
 
-  function resolveMessageRole(event: RuntimeEvent): "user" | "assistant" | "system" {
+  function resolveMessageRole(event: RuntimeEvent): "user" | "assistant" | "internal" {
     const tags = event.meta?.tags ?? [];
     if (event.source === "user" || tags.includes("user_input")) {
       return "user";
     }
-    if (event.source === "system" || tags.includes("system_output")) {
-      return "system";
+    if (event.source !== "user" && tags.includes("response")) {
+      return "assistant";
     }
-    return "assistant";
+    return "internal";
   }
 
   function convertEvent(event: RuntimeEvent): Message | null {
@@ -632,6 +632,13 @@
   background: RGBA(224, 217, 240, 0.9);
   margin: 0.4rem 1.5rem 0.4rem 0;
   /* box-shadow: 0 0 5px #334466; */
+}
+
+.internal-message {
+  background: RGBA(233, 233, 233, 0.9);
+  color: #444;
+  margin: 0.4rem 0.8rem;
+  font-size: 0.9rem;
 }
 
 .user-message {

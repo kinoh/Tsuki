@@ -42,6 +42,14 @@ The GUI route (`gui/src/routes/+page.svelte`) was updated to consume the event s
 - Why: some legacy/imported text may include JSON-like content.
 - Decision: attempt JSON parse only for `{...}` text and fall back to plain string when parsing fails.
 
+5. Assistant vs internal message classification
+- Why: UI should only treat explicit assistant responses as assistant bubbles; other non-user events are operational/internal outputs.
+- Decision: classify events as:
+  - `user`: `source == "user"` (or `user_input` tag)
+  - `assistant`: `source != "user"` and tags include `response`
+  - `internal`: every other `source != "user"` event
+- User feedback incorporated: this rule was explicitly requested during migration validation.
+
 ## Implementation Details
 - Updated imports to remove unused notification symbols.
 - Added runtime event types:
@@ -57,6 +65,7 @@ The GUI route (`gui/src/routes/+page.svelte`) was updated to consume the event s
 - Replaced numeric `before` pagination with ISO8601 `before_ts`.
 - Updated metadata probe handling to parse the core-rust metadata payload.
 - Aligned GUI WebSocket URL to the current core-rust route (`/`), fixing handshake 404.
+- Updated role mapping so only `response`-tagged non-user events render as assistant messages; other non-user events render as internal messages.
 
 ## Future Considerations
 - Add explicit filtering rules if UI should hide internal event categories (for example debug/decision-only events).
