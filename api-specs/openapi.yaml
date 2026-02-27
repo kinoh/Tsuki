@@ -1,76 +1,362 @@
 openapi: 3.0.3
 info:
-  title: Tsuki Core HTTP API
-  version: 1.0.0
-  description: Core HTTP endpoints for Tsuki.
+  title: Tsuki Core-Rust HTTP API
+  version: 1.1.0
+  description: |
+    HTTP contract for the current core-rust phase.
+    TTS endpoints are out of scope in this phase.
 
 servers:
   - url: http://localhost:2953
 
+tags:
+  - name: History
+  - name: Runtime
+  - name: Notification
+  - name: Improvement
+
 paths:
+  /events:
+    get:
+      tags: [History]
+      summary: List runtime events
+      operationId: listEvents
+      security:
+        - UserTokenAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+          description: Max number of events.
+        - name: before_ts
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Return events strictly older than this timestamp.
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: Sort order by `(ts, event_id)`.
+      responses:
+        '200':
+          description: Event list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventsResponse'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
+  /metadata:
+    get:
+      tags: [Runtime]
+      summary: Get runtime metadata
+      operationId: getMetadata
+      security:
+        - UserTokenAuth: []
+      responses:
+        '200':
+          description: Runtime metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetadataResponse'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
   /config:
     get:
+      tags: [Runtime]
       summary: Get runtime configuration
       operationId: getConfig
+      security:
+        - UserTokenAuth: []
       responses:
         '200':
-          description: Current runtime config
+          description: Current runtime config.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Config'
+                $ref: '#/components/schemas/RuntimeConfig'
+        '401':
+          $ref: '#/components/responses/ErrorText'
         '500':
-          description: Internal server error
+          $ref: '#/components/responses/ErrorText'
     put:
+      tags: [Runtime]
       summary: Update runtime configuration
       operationId: updateConfig
+      security:
+        - UserTokenAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Config'
+              $ref: '#/components/schemas/RuntimeConfig'
       responses:
         '200':
-          description: Updated runtime config
+          description: Updated runtime config.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Config'
+                $ref: '#/components/schemas/RuntimeConfig'
         '400':
-          description: Invalid payload
+          $ref: '#/components/responses/ErrorText'
+        '401':
+          $ref: '#/components/responses/ErrorText'
         '500':
-          description: Internal server error
-  /tts:
-    post:
-      summary: Synthesize speech with VoiceVox
-      operationId: synthesizeTts
+          $ref: '#/components/responses/ErrorText'
+
+  /notification/token:
+    put:
+      tags: [Notification]
+      summary: Register notification token for current user
+      operationId: putNotificationToken
+      security:
+        - UserTokenAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TTSRequest'
+              $ref: '#/components/schemas/NotificationTokenRequest'
       responses:
         '200':
-          description: Synthesized WAV audio
+          description: Token upserted.
           content:
-            audio/wav:
+            application/json:
               schema:
-                type: string
-                format: binary
+                $ref: '#/components/schemas/NotificationResult'
         '400':
-          description: Invalid payload
-        '502':
-          description: VoiceVox error
-        '504':
-          description: VoiceVox timeout
+          $ref: '#/components/responses/ErrorText'
+        '401':
+          $ref: '#/components/responses/ErrorText'
         '500':
-          description: Internal server error
+          $ref: '#/components/responses/ErrorText'
+    delete:
+      tags: [Notification]
+      summary: Remove notification token for current user
+      operationId: deleteNotificationToken
+      security:
+        - UserTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationTokenRequest'
+      responses:
+        '200':
+          description: Token removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResult'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
+  /notification/tokens:
+    get:
+      tags: [Notification]
+      summary: List notification tokens for current user
+      operationId: listNotificationTokens
+      security:
+        - UserTokenAuth: []
+      responses:
+        '200':
+          description: Registered tokens.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTokensResponse'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
+  /notification/_test:
+    post:
+      tags: [Notification]
+      summary: Send test notification to current user tokens
+      operationId: sendNotificationTest
+      security:
+        - UserTokenAuth: []
+      responses:
+        '200':
+          description: Test notification accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResult'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '409':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
+  /triggers:
+    post:
+      tags: [Improvement]
+      summary: Trigger self-improvement workflow
+      operationId: triggerImprovement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImproveTriggerRequest'
+      responses:
+        '200':
+          description: Trigger event recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImproveResponse'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
+  /proposals:
+    post:
+      tags: [Improvement]
+      summary: Submit self-improvement proposal
+      operationId: proposeImprovement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImproveProposalRequest'
+      responses:
+        '200':
+          description: Proposal recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImproveResponse'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
+  /reviews:
+    post:
+      tags: [Improvement]
+      summary: Review and optionally apply proposal
+      operationId: reviewImprovement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImproveReviewRequest'
+      responses:
+        '200':
+          description: Review recorded (and maybe applied).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImproveResponse'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '404':
+          $ref: '#/components/responses/ErrorText'
+        '409':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
 
 components:
+  securitySchemes:
+    UserTokenAuth:
+      type: apiKey
+      in: header
+      name: authorization
+      description: |
+        Required header format is `<user>:<WEB_AUTH_TOKEN>`.
+        This is not Bearer format.
+
+  responses:
+    ErrorText:
+      description: Plain-text error response body.
+      content:
+        text/plain:
+          schema:
+            type: string
+
   schemas:
-    Config:
+    Event:
+      type: object
+      additionalProperties: false
+      required:
+        - event_id
+        - ts
+        - source
+        - modality
+        - payload
+        - meta
+      properties:
+        event_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        source:
+          type: string
+        modality:
+          type: string
+        payload:
+          type: object
+          description: Event-specific JSON payload.
+          additionalProperties: true
+        meta:
+          $ref: '#/components/schemas/EventMeta'
+
+    EventMeta:
+      type: object
+      additionalProperties: false
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items:
+            type: string
+
+    EventsResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+
+    RuntimeConfig:
       type: object
       additionalProperties: false
       required:
@@ -79,18 +365,153 @@ components:
       properties:
         enableNotification:
           type: boolean
-          default: true
-          description: Enable FCM notifications.
         enableSensory:
           type: boolean
-          default: true
-          description: Enable sensory polling and routing.
-    TTSRequest:
+
+    MetadataApiVersions:
       type: object
       additionalProperties: false
       required:
-        - message
+        - asyncapi
+        - openapi
       properties:
-        message:
+        asyncapi:
           type: string
-          description: Text to synthesize.
+          nullable: true
+        openapi:
+          type: string
+          nullable: true
+
+    MetadataResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - git_hash
+        - openai_model
+        - mcp_tools
+        - api_versions
+        - router_model
+        - active_modules
+      properties:
+        git_hash:
+          type: string
+          nullable: true
+        openai_model:
+          type: string
+        mcp_tools:
+          type: array
+          items:
+            type: string
+        api_versions:
+          $ref: '#/components/schemas/MetadataApiVersions'
+        router_model:
+          type: string
+        active_modules:
+          type: array
+          items:
+            type: string
+
+    NotificationTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 1
+
+    NotificationResult:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+
+    NotificationTokensResponse:
+      type: object
+      additionalProperties: false
+      required: [tokens]
+      properties:
+        tokens:
+          type: array
+          items:
+            type: string
+
+    ImproveTriggerRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        target:
+          type: string
+          description: Default is `all` when omitted/blank.
+        reason:
+          type: string
+          description: Default is `manual trigger` when omitted.
+
+    ImproveProposalRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - target
+        - job_id
+        - diff_text
+      properties:
+        target:
+          type: string
+          description: One of `base|router|decision|submodule:<name>`.
+        job_id:
+          type: string
+        diff_text:
+          type: string
+          description: Unified diff text.
+        requires_approval:
+          type: boolean
+          description: If provided, must be true.
+        created_by:
+          type: string
+
+    ImproveReviewRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - proposal_id
+        - job_id
+        - target
+        - decision
+      properties:
+        proposal_id:
+          type: string
+        job_id:
+          type: string
+        target:
+          type: string
+          description: Must match proposal target.
+        decision:
+          type: string
+          description: `approved` or `rejected`.
+        reviewed_by:
+          type: string
+        review_reason:
+          type: string
+
+    ImproveResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - proposal_id
+        - review_event_id
+        - apply_event_id
+        - applied
+      properties:
+        proposal_id:
+          type: string
+          nullable: true
+        review_event_id:
+          type: string
+          nullable: true
+        apply_event_id:
+          type: string
+          nullable: true
+        applied:
+          type: boolean
