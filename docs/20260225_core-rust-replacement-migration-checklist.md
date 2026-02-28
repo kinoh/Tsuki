@@ -95,7 +95,7 @@ Verification notes (2026-02-28):
 - [x] Verify notification registration flow against `core-rust` notification API.
 
 ### 7. Verification and Cutover
-- [ ] Add end-to-end checks: WebSocket message flow + `/events` retrieval.
+- [x] Add end-to-end checks: WebSocket message flow + `/events` retrieval.
 - [x] Run history-import validation on a representative backup dataset.
 - [ ] Execute cutover rehearsal in staging-like environment.
 - [ ] Perform production cutover and post-cutover smoke checks.
