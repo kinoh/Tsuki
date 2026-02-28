@@ -34,7 +34,51 @@
         padding: 12px;
       }
 
-      h1 { margin: 0 0 6px; font-size: 20px; }
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+      h1 { margin: 0; font-size: 20px; }
+      .title-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-nav {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-nav a {
+        color: var(--muted);
+        font-size: 12px;
+        text-decoration: none;
+        padding-bottom: 2px;
+        border-bottom: 1px solid transparent;
+      }
+      .top-nav a.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+      .logout-btn {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .logout-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
       h2 { margin: 0 0 8px; font-size: 15px; }
       .muted { color: var(--muted); font-size: 12px; }
 
@@ -123,7 +167,17 @@
   <body>
     <main class="page">
       <div class="card">
-        <h1>Concept Graph Debug</h1>
+        <div class="title-row">
+          <h1>Concept Graph Debug</h1>
+          <div class="title-right">
+            <nav class="top-nav" aria-label="Admin Pages">
+              <a href="/admin/events">Events</a>
+              <a href="/admin/prompts">Prompts</a>
+              <a href="/admin/concept-graph" class="active">Concept Graph</a>
+            </nav>
+            <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
+          </div>
+        </div>
         <div class="muted">Read-only monitor for graph health, entity exploration, and router query history.</div>
       </div>
 
@@ -195,6 +249,7 @@
         detailBody: document.getElementById("detailBody"),
         refreshTimelineBtn: document.getElementById("refreshTimelineBtn"),
         timeline: document.getElementById("timeline"),
+        topLogoutButton: document.getElementById("topLogoutButton"),
       };
 
       async function requestJson(path) {
@@ -485,6 +540,13 @@
       });
 
       els.refreshTimelineBtn.addEventListener("click", loadTimeline);
+      els.topLogoutButton.addEventListener("click", async () => {
+        try {
+          await fetch("/auth/logout", { method: "POST" });
+        } finally {
+          window.location.href = "/admin/login";
+        }
+      });
 
       async function init() {
         setMode(MODE_CONCEPT);

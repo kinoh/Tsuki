@@ -19,22 +19,64 @@
         min-height: 100vh;
       }
 
-      header {
-        padding: 20px 28px;
+      .title-row {
+        padding: 20px 28px 0;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        border-bottom: 1px solid var(--line);
+        gap: 12px;
+        flex-wrap: wrap;
       }
 
-      header h1 {
+      .title-row h1 {
         font-size: 20px;
         margin: 0;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
 
-      header .status {
+      .title-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .top-nav {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .top-nav a {
+        color: var(--muted);
+        font-size: 12px;
+        text-decoration: none;
+        padding-bottom: 2px;
+        border-bottom: 1px solid transparent;
+      }
+
+      .top-nav a.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+
+      .logout-btn {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+
+      .logout-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+
+      .title-row .status {
         font-size: 13px;
         color: var(--muted);
       }
@@ -382,13 +424,18 @@
     </style>
   </head>
   <body>
-    <header>
+    <div class="title-row">
       <h1>Core Rust Debug</h1>
-      <div class="button-row" style="margin: 0">
-        <a href="/admin/events" style="color: var(--muted); font-size: 12px">Open Monitor</a>
+      <div class="title-right">
+        <nav class="top-nav" aria-label="Admin Pages">
+          <a href="/admin/events">Events</a>
+          <a href="/admin/prompts" class="active">Prompts</a>
+          <a href="/admin/concept-graph">Concept Graph</a>
+        </nav>
+        <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
         <div class="status" id="status">Idle</div>
       </div>
-    </header>
+    </div>
 
     <div class="layout">
       <aside class="panel">
@@ -581,6 +628,7 @@
       const promptStatus = document.getElementById("promptStatus");
       const flowNodes = Array.from(document.querySelectorAll(".node"));
       const eventFilterSelect = document.getElementById("eventFilter");
+      const topLogoutButton = document.getElementById("topLogoutButton");
       const DEBUG_UI_STATE_KEY = "tsuki_core_rust_debug_ui_state_v1";
 
       const state = {
@@ -1575,6 +1623,13 @@
       autofillSubmoduleOutputsButton.addEventListener("click", autofillSubmoduleOutputsFromLogs);
       flowNodes.forEach((node) => {
         node.addEventListener("click", () => selectNode(node.dataset.node));
+      });
+      topLogoutButton.addEventListener("click", async () => {
+        try {
+          await fetch("/auth/logout", { method: "POST" });
+        } finally {
+          window.location.href = "/admin/login";
+        }
       });
 
       loadPersistedDebugState();

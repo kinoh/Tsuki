@@ -19,9 +19,53 @@
         margin: 0 auto;
         padding: 16px;
       }
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
       h1 {
-        margin: 0 0 10px;
+        margin: 0;
         font-size: 22px;
+      }
+      .title-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-nav {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-nav a {
+        color: var(--muted);
+        font-size: 12px;
+        text-decoration: none;
+        padding-bottom: 2px;
+        border-bottom: 1px solid transparent;
+      }
+      .top-nav a.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+      .logout-btn {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .logout-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
       }
       .panel {
         border: 1px solid var(--line);
@@ -144,7 +188,17 @@
   </head>
   <body>
     <div class="wrap">
-      <h1>Tsuki Monitoring Console</h1>
+      <div class="title-row">
+        <h1>Tsuki Monitoring Console</h1>
+        <div class="title-right">
+          <nav class="top-nav" aria-label="Admin Pages">
+            <a href="/admin/events" class="active">Events</a>
+            <a href="/admin/prompts">Prompts</a>
+            <a href="/admin/concept-graph">Concept Graph</a>
+          </nav>
+          <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
+        </div>
+      </div>
       <section class="panel">
         <div class="row">
           <input id="sourceFilter" placeholder="source" />
@@ -177,6 +231,7 @@
         maxItems: document.getElementById("maxItems"),
         timeline: document.getElementById("timeline"),
         detail: document.getElementById("detail"),
+        topLogoutButton: document.getElementById("topLogoutButton"),
       };
 
       function eventTags(event) {
@@ -356,6 +411,13 @@
           renderTimeline();
           renderDetail(state.selectedEventId);
         });
+      });
+      els.topLogoutButton.addEventListener("click", async () => {
+        try {
+          await fetch("/auth/logout", { method: "POST" });
+        } finally {
+          window.location.href = "/admin/login";
+        }
       });
 
       loadHistory();
