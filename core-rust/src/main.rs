@@ -15,12 +15,13 @@ mod tools;
 use axum::{
     extract::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
-        Path, Query, State,
+        Path, Query, Request, State,
     },
     http::{header::CONTENT_TYPE, HeaderMap, StatusCode},
+    middleware::Next,
     response::{
         sse::{Event as SseEvent, KeepAlive, Sse},
-        Html, IntoResponse,
+        Html, IntoResponse, Response,
     },
     routing::{get, post, put},
     Json, Router,
@@ -28,7 +29,14 @@ use axum::{
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{convert::Infallible, net::SocketAddr, path::PathBuf, process::Command, sync::Arc};
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    path::PathBuf,
+    process::Command,
+    sync::Arc,
+    time::Instant,
+};
 use tokio::sync::{broadcast, RwLock};
 use time::OffsetDateTime;
 
@@ -451,6 +459,7 @@ async fn main() {
         .route("/reviews", post(improve_review))
         .route("/debug/events/stream", get(debug_events_stream))
         .route("/debug/events", get(debug_events))
+        .layer(axum::middleware::from_fn(access_log_middleware))
         .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
@@ -541,6 +550,21 @@ fn required_prompt(raw: Option<&str>, section: &str, prompts_path: &std::path::P
                 section
             )
         })
+}
+
+async fn access_log_middleware(request: Request, next: Next) -> Response {
+    let method = request.method().to_string();
+    let path = request.uri().path().to_string();
+    let started = Instant::now();
+    let response = next.run(request).await;
+    println!(
+        "HTTP_ACCESS method={} path={} status={} elapsed_ms={}",
+        method,
+        path,
+        response.status().as_u16(),
+        started.elapsed().as_millis()
+    );
+    response
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
