@@ -75,6 +75,9 @@ Guidance for coding agents working on Tsuki.
 - Docker/Taskfile
   - `task up`, `task deploy-core`
   - `docker compose up --build --detach`
+- Production deployment policy
+  - Production rollout must go through CI/CD only; do not treat local `task`/`docker compose` execution as a production deployment path.
+  - Always follow repository workflows under `.github/` for build, release, deployment, and post-deploy verification.
 
 ## Config & Data
 - Core env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY`, `DATA_DIR` (default `./data`), `TZ`.

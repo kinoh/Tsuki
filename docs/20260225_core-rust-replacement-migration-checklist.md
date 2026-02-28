@@ -97,7 +97,7 @@ Verification notes (2026-02-28):
 ### 7. Verification and Cutover
 - [x] Add end-to-end checks: WebSocket message flow + `/events` retrieval.
 - [x] Run history-import validation on a representative backup dataset.
-- [ ] Execute cutover rehearsal in staging-like environment.
+- [x] Execute cutover rehearsal in local production-like environment (no staging environment exists).
 - [ ] Perform production cutover and post-cutover smoke checks.
 
 History-import validation notes (2026-02-28):
@@ -117,6 +117,14 @@ History-import validation notes (2026-02-28):
 - Substring exclusion validated on target payload text (`count=0`):
   - `"modality":"None"`
   - `Received scheduler notification`
+
+Local production-like rehearsal notes (2026-02-28):
+- Rehearsal baseline: compose runtime switched to `core-rust` as primary backend.
+- GUI message send/receive path validated in this branch.
+- Runtime persistence validated across restart:
+  - `/config` persistence
+  - `/notification/tokens` persistence
+- Startup fail-fast validated for missing `/data/prompts.md` (no fallback persona source).
 
 ## Acceptance Checklist (Definition of Done)
 - [ ] No production dependency remains on `threads` or `messages` APIs.
