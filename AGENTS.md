@@ -78,6 +78,13 @@ Guidance for coding agents working on Tsuki.
 - Production deployment policy
   - Production rollout must go through CI/CD only; do not treat local `task`/`docker compose` execution as a production deployment path.
   - Always follow repository workflows under `.github/` for build, release, deployment, and post-deploy verification.
+- Definition of Done (delivery path)
+  - A change is not done until its delivery path is also updated and verified.
+  - When introducing or changing required runtime env vars, update all relevant paths in the same change:
+    - runtime wiring (`compose.yaml`, container runtime env)
+    - CI/CD workflow env and secret mapping under `.github/workflows/`
+    - operator-facing docs for required secrets/env
+  - Before finishing, verify there is no missing propagation using code search (e.g., `rg`) across runtime config and workflow files.
 
 ## Config & Data
 - Core env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY`, `DATA_DIR` (default `./data`), `TZ`.
