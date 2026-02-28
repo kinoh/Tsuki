@@ -295,7 +295,7 @@
 
       async function loadHistory() {
         try {
-          const res = await fetch("/admin/events?limit=1200");
+          const res = await fetch("/admin/events/list?limit=1200");
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           const events = Array.isArray(data?.events) ? data.events : [];

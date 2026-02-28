@@ -446,9 +446,9 @@ async fn main() {
 
     let admin_router = Router::new()
         .route("/styles/{name}", get(debug_style))
-        .route("/ui", get(debug_ui))
-        .route("/monitor", get(debug_monitor_ui))
-        .route("/concept-graph/ui", get(debug_concept_graph_ui))
+        .route("/prompts", get(debug_ui))
+        .route("/events", get(debug_monitor_ui))
+        .route("/concept-graph", get(debug_concept_graph_ui))
         .route("/concept-graph/health", get(debug_concept_graph_health))
         .route("/concept-graph/stats", get(debug_concept_graph_stats))
         .route("/concept-graph/concepts", get(debug_concept_graph_concepts))
@@ -467,12 +467,12 @@ async fn main() {
         )
         .route("/concept-graph/queries", get(debug_concept_graph_queries))
         .route(
-            "/prompts",
+            "/prompts/data",
             get(debug_get_prompts).post(debug_update_prompts),
         )
         .route("/modules/{name}/run", post(debug_run_module))
         .route("/events/stream", get(debug_events_stream))
-        .route("/events", get(debug_events))
+        .route("/events/list", get(debug_events))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             admin_auth_middleware,

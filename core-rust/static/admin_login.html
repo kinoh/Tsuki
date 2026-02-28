@@ -134,7 +134,7 @@
         try {
           const res = await fetch("/auth/me");
           if (res.ok) {
-            window.location.href = "/admin/ui";
+            window.location.href = "/admin/events";
           }
         } catch (_) {}
       }
@@ -159,7 +159,7 @@
             return;
           }
           setStatus("Signed in. Redirecting...", "ok");
-          window.location.href = "/admin/ui";
+          window.location.href = "/admin/events";
         } catch (error) {
           setStatus(`Login error: ${error?.message || error}`, "error");
         } finally {

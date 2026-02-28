@@ -385,7 +385,7 @@
     <header>
       <h1>Core Rust Debug</h1>
       <div class="button-row" style="margin: 0">
-        <a href="/admin/monitor" style="color: var(--muted); font-size: 12px">Open Monitor</a>
+        <a href="/admin/events" style="color: var(--muted); font-size: 12px">Open Monitor</a>
         <div class="status" id="status">Idle</div>
       </div>
     </header>
@@ -759,7 +759,7 @@
 
       async function fetchPrompts() {
         setStatus("Loading prompts...");
-        const res = await fetch("/admin/prompts");
+        const res = await fetch("/admin/prompts/data");
         if (!res.ok) {
           setStatus("Failed to load prompts");
           return;
@@ -916,7 +916,7 @@
       }
 
       async function fetchWorklogs() {
-        const res = await fetch("/admin/events?limit=500");
+        const res = await fetch("/admin/events/list?limit=500");
         if (!res.ok) {
           worklogEl.innerHTML = '<div class="muted">Failed to load event log.</div>';
           return;
@@ -1057,7 +1057,7 @@
       async function updateRawFromEvent(event, moduleName) {
         rawTextEl.textContent = "(loading...)";
         setContextViewText("(loading...)");
-        const res = await fetch("/admin/events?tag=debug,llm.raw&limit=200");
+        const res = await fetch("/admin/events/list?tag=debug,llm.raw&limit=200");
         if (!res.ok) {
           rawTextEl.textContent = "(none)";
           setContextViewText("(none)");
@@ -1278,7 +1278,7 @@
           runStatus.textContent = "Select a runnable module.";
           return;
         }
-        const res = await fetch(`/admin/events?tag=debug,llm.raw&limit=20`);
+        const res = await fetch(`/admin/events/list?tag=debug,llm.raw&limit=20`);
         if (!res.ok) {
           runStatus.textContent = "Failed to load raw.";
           return;
@@ -1309,7 +1309,7 @@
           return;
         }
         autofillStatus.textContent = "Loading...";
-        const res = await fetch("/admin/events?tag=debug,llm.raw&limit=500");
+        const res = await fetch("/admin/events/list?tag=debug,llm.raw&limit=500");
         if (!res.ok) {
           autofillStatus.textContent = "Failed to load logs.";
           return;
@@ -1473,7 +1473,7 @@
           decision: state.decisionPrompt,
           submodules,
         };
-        const res = await fetch("/admin/prompts", {
+        const res = await fetch("/admin/prompts/data", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
