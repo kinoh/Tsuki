@@ -5,26 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tsuki Admin Login</title>
     <style>
-      * { box-sizing: border-box; }
+      :root {
+        --bg: #0f1115;
+        --surface: #171a21;
+        --surface-2: #1c2029;
+        --text: #e8ecf2;
+        --muted: #9aa4b2;
+        --accent: #ff4fa7;
+        --accent-2: #714af4;
+        --success: #83d19a;
+        --danger: #d46b6b;
+        --line: rgba(255, 255, 255, 0.08);
+        --line-strong: rgba(255, 255, 255, 0.18);
+        --radius: 10px;
+        --shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+        --page-bg: radial-gradient(circle at top left, #1c2029 0%, #0f1115 60%);
+      }
+      * {
+        box-sizing: border-box;
+      }
       body {
         margin: 0;
         min-height: 100vh;
         display: grid;
         place-items: center;
         font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
-        background:
-          radial-gradient(1200px 480px at 10% -10%, rgba(255, 112, 166, 0.14), transparent 60%),
-          radial-gradient(900px 360px at 100% 120%, rgba(113, 74, 244, 0.16), transparent 60%),
-          #0f1015;
-        color: #f4f7ff;
+        background: var(--page-bg);
+        color: var(--text);
       }
       .panel {
         width: min(92vw, 420px);
-        border-radius: 14px;
+        border-radius: var(--radius);
         padding: 24px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(22, 24, 32, 0.8);
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+        border: 1px solid var(--line);
+        background: var(--surface);
+        box-shadow: var(--shadow);
       }
       h1 {
         margin: 0 0 8px;
@@ -33,49 +48,52 @@
       }
       p {
         margin: 0 0 16px;
-        color: rgba(227, 233, 255, 0.72);
+        color: var(--muted);
         font-size: 14px;
       }
       label {
         display: block;
         margin-bottom: 6px;
         font-size: 13px;
-        color: rgba(227, 233, 255, 0.72);
+        color: var(--muted);
       }
       input {
         width: 100%;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid var(--line);
         border-radius: 10px;
         padding: 10px 12px;
-        background: rgba(16, 18, 24, 0.9);
-        color: #f4f7ff;
+        background: var(--surface-2);
+        color: var(--text);
         font: inherit;
       }
       input:focus {
         outline: none;
-        border-color: #ff4fa7;
-        box-shadow: 0 0 0 3px rgba(255, 79, 167, 0.18);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(255, 79, 167, 0.2);
       }
       button {
         width: 100%;
         margin-top: 14px;
-        border: 0;
+        border: 1px solid var(--line-strong);
         border-radius: 10px;
         padding: 10px 12px;
         font: inherit;
         font-weight: 600;
         cursor: pointer;
-        color: #11131a;
-        background: linear-gradient(135deg, #ff4fa7, #ffc66d);
+        color: var(--text);
+        background: linear-gradient(135deg, rgba(255, 79, 167, 0.2), rgba(113, 74, 244, 0.24));
+      }
+      button:hover {
+        border-color: var(--accent);
       }
       .status {
         min-height: 20px;
         margin-top: 10px;
         font-size: 13px;
-        color: rgba(227, 233, 255, 0.72);
+        color: var(--muted);
       }
-      .status.error { color: #ff8b8b; }
-      .status.ok { color: #7de7b8; }
+      .status.error { color: var(--danger); }
+      .status.ok { color: var(--success); }
     </style>
   </head>
   <body>
