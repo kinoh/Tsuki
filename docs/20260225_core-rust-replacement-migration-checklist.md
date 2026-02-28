@@ -74,9 +74,18 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 ### 5. Runtime and Deployment Switch
 - [x] Switch `compose.yaml` primary backend service to `core-rust`.
 - [x] Update healthcheck to validate `core-rust`-owned readiness.
-- [ ] Update Taskfile runtime/deploy commands if service names or startup flows change.
-- [ ] Validate required env/config mapping for `core-rust` in production.
-- [ ] Validate runtime config persistence and notification behavior after restart.
+- [x] Update Taskfile runtime/deploy commands if service names or startup flows change.
+- [x] Validate required env/config mapping for `core-rust` in production.
+- [x] Validate runtime config persistence and notification behavior after restart.
+
+Verification notes (2026-02-28):
+- Taskfile change was not required because runtime service name remains `core`.
+- Validated compose runtime env mapping for `core-rust`:
+  - required at startup: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `DATA_DIR`, `MEMGRAPH_URI`
+  - optional for notification delivery: `FCM_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_KEY`
+- Runtime persistence check passed after `core` restart:
+  - `/config` value persisted (`enableNotification=true`, `enableSensory=false`)
+  - `/notification/tokens` list persisted (`token-persist-check-1`)
 
 ### 6. Client and Consumer Updates
 - [x] Update GUI/API consumers to use `/events` instead of thread/message APIs.
