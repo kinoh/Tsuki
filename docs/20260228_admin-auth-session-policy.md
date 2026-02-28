@@ -3,7 +3,7 @@
 Date: 2026-02-28
 
 ## Overview
-Define a single authentication model for human-operated admin surfaces in `core-rust`, and separate it clearly from API and WebSocket authentication paths.
+Define a single authentication model for human-operated admin surfaces in `core-rust`.
 
 ## Problem Statement
 - Header-based auth is operationally poor for browser-driven admin pages.
@@ -13,14 +13,9 @@ Define a single authentication model for human-operated admin surfaces in `core-
 ## Solution
 - Rename human-facing operational routes from `/debug/*` to `/admin/*`.
 - Authenticate `/admin/*` with cookie sessions only.
-- Keep machine/API routes on header auth, and keep WebSocket auth handshake unchanged.
 
-## Auth Boundary Contract
+## Admin Route Contract
 - `/admin/*`: cookie session auth only.
-- API routes (`/events`, `/metadata`, `/config`, `/notification/*`, `/triggers`, `/proposals`, `/reviews`):
-  - `authorization: <user>:<WEB_AUTH_TOKEN>` required.
-- WebSocket (`/`):
-  - first message auth handshake (`<user>:<WEB_AUTH_TOKEN>`) remains required.
 
 ## Session Contract
 - Session cookie name: `tsuki_admin_session`.
@@ -41,7 +36,7 @@ Define a single authentication model for human-operated admin surfaces in `core-
 - `POST /auth/logout`
 - `GET /auth/me`
 
-These endpoints exist to manage `/admin/*` sessions and are not used for WebSocket auth.
+These endpoints exist to manage `/admin/*` sessions.
 
 ## Credential Source
 - Admin login password environment variable is `ADMIN_AUTH_PASSWORD`.
@@ -67,15 +62,10 @@ These endpoints exist to manage `/admin/*` sessions and are not used for WebSock
   - session IDs
   - raw tokens/passwords
 
-## Audit Identity Note
-- For token-auth API routes, `<user>:<WEB_AUTH_TOKEN>` uses client-declared `user`.
-- Audit identity for those API routes must be treated as untrusted label.
-- Trusted operator identity comes from validated admin session context (`/admin/*`).
-
 ## Naming Migration Note
 - `debug` naming is deprecated for human-operated surfaces.
 - New canonical term is `admin`.
 
 ## Compatibility Impact
-- Breaking-by-default: no compatibility layer is required for `/debug/*`.
-- Clients and tooling must move to `/admin/*`.
+- Breaking-by-default for admin surface naming: no compatibility layer is required for `/debug/*`.
+- Admin clients and tooling must move to `/admin/*`.
