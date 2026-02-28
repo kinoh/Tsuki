@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tsuki Admin Login</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+        background:
+          radial-gradient(1200px 480px at 10% -10%, rgba(255, 112, 166, 0.14), transparent 60%),
+          radial-gradient(900px 360px at 100% 120%, rgba(113, 74, 244, 0.16), transparent 60%),
+          #0f1015;
+        color: #f4f7ff;
+      }
+      .panel {
+        width: min(92vw, 420px);
+        border-radius: 14px;
+        padding: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(22, 24, 32, 0.8);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        letter-spacing: 0.02em;
+      }
+      p {
+        margin: 0 0 16px;
+        color: rgba(227, 233, 255, 0.72);
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: rgba(227, 233, 255, 0.72);
+      }
+      input {
+        width: 100%;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: rgba(16, 18, 24, 0.9);
+        color: #f4f7ff;
+        font: inherit;
+      }
+      input:focus {
+        outline: none;
+        border-color: #ff4fa7;
+        box-shadow: 0 0 0 3px rgba(255, 79, 167, 0.18);
+      }
+      button {
+        width: 100%;
+        margin-top: 14px;
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        color: #11131a;
+        background: linear-gradient(135deg, #ff4fa7, #ffc66d);
+      }
+      .status {
+        min-height: 20px;
+        margin-top: 10px;
+        font-size: 13px;
+        color: rgba(227, 233, 255, 0.72);
+      }
+      .status.error { color: #ff8b8b; }
+      .status.ok { color: #7de7b8; }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <h1>Admin Sign In</h1>
+      <p>Enter ADMIN_AUTH_PASSWORD to continue.</p>
+      <form id="loginForm">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required autocomplete="current-password" />
+        <button id="submit" type="submit">Sign In</button>
+      </form>
+      <div id="status" class="status"></div>
+    </main>
+    <script>
+      const form = document.getElementById("loginForm");
+      const passwordInput = document.getElementById("password");
+      const submitButton = document.getElementById("submit");
+      const statusEl = document.getElementById("status");
+
+      function setStatus(text, kind) {
+        statusEl.textContent = text || "";
+        statusEl.classList.remove("error", "ok");
+        if (kind) statusEl.classList.add(kind);
+      }
+
+      async function checkSession() {
+        try {
+          const res = await fetch("/auth/me");
+          if (res.ok) {
+            window.location.href = "/admin/ui";
+          }
+        } catch (_) {}
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const password = passwordInput.value.trim();
+        if (!password) {
+          setStatus("Password is required.", "error");
+          return;
+        }
+        submitButton.disabled = true;
+        setStatus("Signing in...");
+        try {
+          const res = await fetch("/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password }),
+          });
+          if (!res.ok) {
+            setStatus("Login failed. Check your password.", "error");
+            return;
+          }
+          setStatus("Signed in. Redirecting...", "ok");
+          window.location.href = "/admin/ui";
+        } catch (error) {
+          setStatus(`Login error: ${error?.message || error}`, "error");
+        } finally {
+          submitButton.disabled = false;
+        }
+      });
+
+      checkSession();
+      passwordInput.focus();
+    </script>
+  </body>
+</html>

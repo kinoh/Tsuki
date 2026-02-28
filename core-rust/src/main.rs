@@ -497,7 +497,7 @@ async fn main() {
         )
         .route("/notification/tokens", get(notification_tokens_get))
         .route("/notification/_test", post(notification_test))
-        .route("/auth/login", post(auth_login))
+        .route("/auth/login", get(auth_login_page).post(auth_login))
         .route("/triggers", post(improve_trigger))
         .route("/proposals", post(improve_proposal))
         .route("/reviews", post(improve_review))
@@ -785,6 +785,21 @@ async fn auth_login(
         [(SET_COOKIE, build_admin_session_cookie(&session_id))],
         Json(AuthLoginResponse { ok: true }),
     ))
+}
+
+async fn auth_login_page() -> Html<String> {
+    const EMBEDDED: &str = include_str!("../static/admin_login.html");
+    const LOGIN_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/admin_login.html");
+    match tokio::fs::read_to_string(LOGIN_UI_PATH).await {
+        Ok(html) => Html(html),
+        Err(err) => {
+            println!(
+                "ADMIN_LOGIN_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                LOGIN_UI_PATH, err
+            );
+            Html(EMBEDDED.to_string())
+        }
+    }
 }
 
 async fn auth_me() -> Json<AuthMeResponse> {
