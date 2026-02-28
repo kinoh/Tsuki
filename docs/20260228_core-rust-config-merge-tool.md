@@ -10,7 +10,7 @@ Replaced Dockerfile `sed`-based config mutation with an explicit TOML merge tool
 
 ## Solution
 - Added `core-rust/src/bin/merge_toml.rs`.
-- Added `core-rust/config.base.toml` and `core-rust/config.prod.toml`.
+- Reused `core-rust/config.toml` as the base and added `core-rust/config.prod.toml` as overlay.
 - Updated `docker/core-rust/Dockerfile` to:
   - build `merge_toml` and `tsuki-core-rust`
   - generate `/tmp/config.toml` via merge

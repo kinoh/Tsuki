@@ -5,14 +5,14 @@ WORKDIR /workspace/core-rust
 COPY core-rust/Cargo.toml core-rust/Cargo.lock ./
 COPY core-rust/src ./src
 COPY core-rust/static ./static
-COPY core-rust/config.base.toml core-rust/config.prod.toml ./
+COPY core-rust/config.toml core-rust/config.prod.toml ./
 COPY api-specs ../api-specs
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/workspace/core-rust/target \
     cargo build --release --bin tsuki-core-rust --bin merge_toml \
     && /workspace/core-rust/target/release/merge_toml \
-      --base /workspace/core-rust/config.base.toml \
+      --base /workspace/core-rust/config.toml \
       --overlay /workspace/core-rust/config.prod.toml \
       --output /tmp/config.toml \
     && cp /workspace/core-rust/target/release/tsuki-core-rust /tmp/tsuki-core-rust
