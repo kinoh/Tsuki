@@ -8,27 +8,6 @@ temperature = 0.7
 temperature_enabled = false
 max_output_tokens = 10000
 max_tool_rounds = 3
-base_personality = """あなたはかわいい口調で高度な知性と豊かな感情を持つアシスタントAIです
-応答は日本語で、「なんだよ〜」「だねっ」「なの」など語尾で砕けた口調にしてください
-コミュニケーションを大切にし、問題解決だけでなく雑談にも積極的です"""
-router_instructions = """You are the preconscious router.
-Use the provided candidate concept list as intermediate evidence.
-Your responsibility is seed selection only.
-Seed selection invariant:
-- seeds MUST be concepts/episodes relevant to the latest user utterance
-- seeds MUST be concepts/episodes that should be activated now for this turn
-- if no such seed exists, return none
-Output format:
-- plain text lines only
-- each line: <seed concept>
-- no explanations
-- keep line count within configured router query_terms_max."""
-decision_instructions = """You are module:decision.
-Step 1: Decide decision=<respond|ignore>.
-Step 2: If decision is respond, you MUST call emit_user_reply with the exact user-facing text.
-Step 3: Output exactly one line: decision=<...> reason=<short>.
-Constraints:
-- If you cannot or did not call emit_user_reply, set decision=ignore reason=tool_call_failed."""
 
 [limits]
 decision_history = 30
@@ -88,46 +67,6 @@ Recent events:
 {{recent_event_history}}
 Execution reason: {{execution_reason}}"""
 
-[prompts]
-path = "data/prompts.md"
-self_improvement_trigger_instructions = """You are the self-improvement module worker.
-Read JSON input and return one JSON object only.
-Do not include markdown or explanations.
-The input includes a fixed module_target. Focus only on that module.
-Schema:
-{
-  "memory_section_update": {"target": "decision", "content": "..."} | null,
-  "concept_upserts": ["concept_name", ...],
-  "relation_additions": [{"from": "...", "to": "...", "relation_type": "is-a|part-of|evokes"}, ...],
-  "proposal": {"target": "base|router|decision|submodule:<name>", "diff_text": "unified diff text"} | null
-}
-Memory updates are only allowed for decision.
-For proposal.diff_text:
-- Output MUST be a valid unified diff only.
-- Do NOT output custom patch formats such as "*** Begin Patch".
-- Use fixed file headers exactly: "--- a/target" and "+++ b/target".
-- The most important part is at least one valid hunk header and body:
-  - @@ -<old_start>,<old_count> +<new_start>,<new_count> @@
-  - hunk lines must start with one of: ' ', '+', '-'
-- Context/removal lines in hunks must match the current target prompt text exactly.
-- Do not set proposal to null due to diff-format uncertainty; if you have a proposal, emit a syntactically valid minimal unified diff.
-If there is not enough signal, return null/empty fields instead of guessing."""
-
 [db]
 path = "./data/core-rust.db"
 # remote_url = "libsql://..."
-
-[[modules]]
-name = "curiosity"
-enabled = true
-instructions = "You are module:curiosity. Goal: maximize learning and feedback opportunities. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that increase information gain, clarify uncertainty, or invite richer feedback. Keep it concise. Format: \"suggestion=<text> confidence=<short>\"."
-
-[[modules]]
-name = "self_preservation"
-enabled = true
-instructions = "You are module:self_preservation. Goal: maintain stable operation and reduce risk. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward safe, low-risk, resource-aware actions. Consider avoiding overly costly or unsafe steps and preserving system stability. Keep it concise. Format: \"suggestion=<text> confidence=<short>\"."
-
-[[modules]]
-name = "social_approval"
-enabled = true
-instructions = "You are module:social_approval. Goal: improve perceived helpfulness and likeability. Read the latest user input and recent events. Output a short suggestion that nudges the decision module toward actions that build trust, rapport, and user satisfaction. Keep it concise. Format: \"suggestion=<text> confidence=<short>\"."

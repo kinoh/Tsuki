@@ -22,11 +22,9 @@ RUN apt-get update \
 
 COPY --from=builder /tmp/tsuki-core-rust /usr/local/bin/tsuki-core-rust
 COPY core-rust/config.toml /app/config.toml
-COPY core-rust/data/prompts.md /app/default/prompts.md
 COPY core-rust/scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/container-entrypoint.sh \
-    && sed -i 's|path = "data/prompts.md"|path = "/data/prompts.md"|' /app/config.toml \
     && sed -i 's|path = "\\./data/core-rust.db"|path = "/data/core-rust.db"|' /app/config.toml
 
 ENV RUST_LOG=info

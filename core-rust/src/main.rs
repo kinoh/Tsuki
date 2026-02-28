@@ -37,11 +37,34 @@ use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig
 use crate::db::{Db, RuntimeConfigRecord};
 use crate::event::Event;
 use crate::event_store::EventStore;
-use crate::module_registry::{ModuleDefinition, ModuleRegistry, ModuleRegistryReader};
+use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
 use crate::state::{DbStateStore, StateStore};
 use crate::tools::{concept_graph_tools, state_tools, StateToolHandler};
+
+const DEFAULT_SELF_IMPROVEMENT_TRIGGER_INSTRUCTIONS: &str = r#"You are the self-improvement module worker.
+Read JSON input and return one JSON object only.
+Do not include markdown or explanations.
+The input includes a fixed module_target. Focus only on that module.
+Schema:
+{
+  "memory_section_update": {"target": "decision", "content": "..."} | null,
+  "concept_upserts": ["concept_name", ...],
+  "relation_additions": [{"from": "...", "to": "...", "relation_type": "is-a|part-of|evokes"}, ...],
+  "proposal": {"target": "base|router|decision|submodule:<name>", "diff_text": "unified diff text"} | null
+}
+Memory updates are only allowed for decision.
+For proposal.diff_text:
+- Output MUST be a valid unified diff only.
+- Do NOT output custom patch formats such as "*** Begin Patch".
+- Use fixed file headers exactly: "--- a/target" and "+++ b/target".
+- The most important part is at least one valid hunk header and body:
+  - @@ -<old_start>,<old_count> +<new_start>,<new_count> @@
+  - hunk lines must start with one of: ' ', '+', '-'
+- Context/removal lines in hunks must match the current target prompt text exactly.
+- Do not set proposal to null due to diff-format uncertainty; if you have a proposal, emit a syntactically valid minimal unified diff.
+If there is not enough signal, return null/empty fields instead of guessing."#;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -273,7 +296,7 @@ async fn main() {
     let (tx, _) = broadcast::channel(256);
     let db = Db::connect(&config.db).await.expect("failed to init db");
     let event_store = Arc::new(EventStore::new(db.clone()));
-    let prompts_path = PathBuf::from(config.prompts.path.as_str());
+    let prompts_path = prompts_path_from_env();
     let prompt_overrides = load_prompts(&prompts_path).unwrap_or_else(|err| {
         panic!(
             "failed to load prompts '{}': {}",
@@ -281,7 +304,22 @@ async fn main() {
             err
         )
     });
-    let prompts = Arc::new(RwLock::new(prompt_overrides));
+    let base_instructions = required_prompt(
+        prompt_overrides.base.as_deref(),
+        "Base",
+        prompts_path.as_path(),
+    );
+    let router_instructions = required_prompt(
+        prompt_overrides.router.as_deref(),
+        "Router",
+        prompts_path.as_path(),
+    );
+    let decision_instructions = required_prompt(
+        prompt_overrides.decision.as_deref(),
+        "Decision",
+        prompts_path.as_path(),
+    );
+    let prompts = Arc::new(RwLock::new(prompt_overrides.clone()));
     let emit_event_store = event_store.clone();
     let emit_tx = tx.clone();
     let emit_event = Arc::new(move |event: Event| {
@@ -311,16 +349,15 @@ async fn main() {
         .expect("failed to connect activation concept graph store"),
     );
     let module_registry = ModuleRegistry::new(db.clone());
-    let defaults = module_defaults_from_config(&config);
-    module_registry
-        .ensure_defaults(defaults)
+    sync_module_registry_from_prompts(&module_registry, &prompt_overrides)
         .await
-        .expect("failed to seed module registry");
+        .expect("failed to sync module registry from prompts.md");
     let modules = build_modules(
         state_store.clone(),
         activation_concept_graph.clone(),
         module_registry,
         &config,
+        base_instructions,
         emit_event,
     );
 
@@ -347,17 +384,15 @@ async fn main() {
         api_versions: load_api_versions(),
         prompts,
         prompts_path,
-        self_improvement_trigger_instructions: config
-            .prompts
-            .self_improvement_trigger_instructions
-            .clone(),
+        self_improvement_trigger_instructions:
+            DEFAULT_SELF_IMPROVEMENT_TRIGGER_INSTRUCTIONS.to_string(),
         router_model: config
             .llm
             .router_model
             .clone()
             .unwrap_or_else(|| config.llm.model.clone()),
-        router_instructions: config.llm.router_instructions.clone(),
-        decision_instructions: config.llm.decision_instructions.clone(),
+        router_instructions,
+        decision_instructions,
         submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
     };
     crate::application::improve_service::start_trigger_consumer(state.clone());
@@ -427,23 +462,12 @@ async fn main() {
     axum::serve(listener, app).await.expect("server error");
 }
 
-fn module_defaults_from_config(config: &Config) -> Vec<ModuleDefinition> {
-    config
-        .modules
-        .iter()
-        .map(|module| {
-            let mut def = ModuleDefinition::new(&module.name, &module.instructions);
-            def.enabled = module.enabled;
-            def
-        })
-        .collect()
-}
-
 fn build_modules(
     state_store: Arc<dyn StateStore>,
     concept_graph: Arc<dyn ConceptGraphStore>,
     registry: ModuleRegistry,
     config: &Config,
+    base_instructions: String,
     emit_event: Arc<dyn Fn(Event) + Send + Sync>,
 ) -> Modules {
     let model = config.llm.model.clone();
@@ -462,7 +486,7 @@ fn build_modules(
     ));
 
     let runtime = ModuleRuntime {
-        base_instructions: config.llm.base_personality.clone(),
+        base_instructions,
         model: model.clone(),
         temperature,
         max_output_tokens,
@@ -472,6 +496,51 @@ fn build_modules(
     };
 
     Modules { registry, runtime }
+}
+
+async fn sync_module_registry_from_prompts(
+    registry: &ModuleRegistry,
+    prompts: &PromptOverrides,
+) -> Result<(), String> {
+    let desired = prompts.submodules.clone();
+    let active = registry
+        .list_active()
+        .await
+        .map_err(|err| err.to_string())?;
+
+    for module in active {
+        if !desired.contains_key(module.name.as_str()) {
+            registry
+                .upsert(module.name.as_str(), module.instructions.as_str(), false)
+                .await
+                .map_err(|err| err.to_string())?;
+        }
+    }
+    for (name, instructions) in desired {
+        registry
+            .upsert(name.as_str(), instructions.as_str(), true)
+            .await
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn prompts_path_from_env() -> PathBuf {
+    let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string());
+    PathBuf::from(data_dir).join("prompts.md")
+}
+
+fn required_prompt(raw: Option<&str>, section: &str, prompts_path: &std::path::Path) -> String {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            panic!(
+                "prompts file '{}' requires non-empty '{}' section",
+                prompts_path.display(),
+                section
+            )
+        })
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {

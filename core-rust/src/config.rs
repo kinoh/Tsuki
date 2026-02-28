@@ -8,9 +8,7 @@ pub struct Config {
     #[serde(default)]
     pub router: RouterConfig,
     pub input: InputConfig,
-    pub prompts: PromptsConfig,
     pub db: DbConfig,
-    pub modules: Vec<ModuleConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -27,9 +25,6 @@ pub struct LlmConfig {
     pub temperature_enabled: bool,
     pub max_output_tokens: u32,
     pub max_tool_rounds: usize,
-    pub base_personality: String,
-    pub router_instructions: String,
-    pub decision_instructions: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -81,24 +76,6 @@ pub struct InputConfig {
     pub router_context_template: String,
     pub decision_context_template: String,
     pub submodule_context_template: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PromptsConfig {
-    #[serde(default = "default_prompts_path")]
-    pub path: String,
-    pub self_improvement_trigger_instructions: String,
-}
-
-fn default_prompts_path() -> String {
-    "data/prompts.md".to_string()
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ModuleConfig {
-    pub name: String,
-    pub instructions: String,
-    pub enabled: bool,
 }
 
 pub fn load_config(path: &str) -> Result<Config, String> {

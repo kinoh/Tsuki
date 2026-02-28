@@ -29,15 +29,6 @@ impl ModuleRegistry {
         Self { db }
     }
 
-    pub async fn ensure_defaults(&self, defaults: Vec<ModuleDefinition>) -> DbResult<()> {
-        for module in defaults {
-            self.db
-                .upsert_module(&module.name, &module.instructions, module.enabled)
-                .await?;
-        }
-        Ok(())
-    }
-
     pub async fn upsert(&self, name: &str, instructions: &str, enabled: bool) -> DbResult<()> {
         self.db.upsert_module(name, instructions, enabled).await
     }

@@ -10,19 +10,20 @@ pub struct PromptOverrides {
     pub submodules: HashMap<String, String>,
 }
 
-pub const DEFAULT_PROMPTS_PATH: &str = "data/prompts.md";
-
 pub fn load_prompts(path: &Path) -> Result<PromptOverrides, String> {
     if !path.exists() {
-        return Ok(PromptOverrides::default());
+        return Err(format!("prompts file not found: {}", path.display()));
     }
     let raw = fs::read_to_string(path).map_err(|err| format!("failed to read prompts: {}", err))?;
     let prompts = parse_prompts(&raw)?;
+    validate_required_core_sections(&prompts)?;
     validate_memory_sections(&prompts)?;
     Ok(prompts)
 }
 
 pub fn write_prompts(path: &Path, prompts: &PromptOverrides) -> Result<(), String> {
+    validate_required_core_sections(prompts)?;
+    validate_memory_sections(prompts)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("failed to create prompt dir: {}", err))?;
@@ -120,6 +121,45 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
     }
 
     Ok(overrides)
+}
+
+fn validate_required_core_sections(prompts: &PromptOverrides) -> Result<(), String> {
+    let mut missing = Vec::<String>::new();
+    if prompts
+        .base
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        missing.push("Base".to_string());
+    }
+    if prompts
+        .router
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        missing.push("Router".to_string());
+    }
+    if prompts
+        .decision
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        missing.push("Decision".to_string());
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    missing.sort();
+    Err(format!(
+        "prompts.md requires non-empty sections: {}",
+        missing.join(", ")
+    ))
 }
 
 fn validate_memory_sections(prompts: &PromptOverrides) -> Result<(), String> {
