@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Core Rust Debug UI</title>
-    <link rel="stylesheet" href="/debug/styles/ui-tokens.css" />
-    <link rel="stylesheet" href="/debug/styles/ui-base.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-base.css" />
     <style>
       * {
         box-sizing: border-box;
@@ -385,7 +385,7 @@
     <header>
       <h1>Core Rust Debug</h1>
       <div class="button-row" style="margin: 0">
-        <a href="/debug/monitor" style="color: var(--muted); font-size: 12px">Open Monitor</a>
+        <a href="/admin/monitor" style="color: var(--muted); font-size: 12px">Open Monitor</a>
         <div class="status" id="status">Idle</div>
       </div>
     </header>
@@ -759,7 +759,7 @@
 
       async function fetchPrompts() {
         setStatus("Loading prompts...");
-        const res = await fetch("/debug/prompts");
+        const res = await fetch("/admin/prompts");
         if (!res.ok) {
           setStatus("Failed to load prompts");
           return;
@@ -916,7 +916,7 @@
       }
 
       async function fetchWorklogs() {
-        const res = await fetch("/debug/events?limit=500");
+        const res = await fetch("/admin/events?limit=500");
         if (!res.ok) {
           worklogEl.innerHTML = '<div class="muted">Failed to load event log.</div>';
           return;
@@ -1057,7 +1057,7 @@
       async function updateRawFromEvent(event, moduleName) {
         rawTextEl.textContent = "(loading...)";
         setContextViewText("(loading...)");
-        const res = await fetch("/debug/events?tag=debug,llm.raw&limit=200");
+        const res = await fetch("/admin/events?tag=debug,llm.raw&limit=200");
         if (!res.ok) {
           rawTextEl.textContent = "(none)";
           setContextViewText("(none)");
@@ -1212,7 +1212,7 @@
         if (cutoffTs) {
           payload.history_cutoff_ts = cutoffTs;
         }
-        const res = await fetch(`/debug/modules/${encodeURIComponent(moduleName)}/run`, {
+        const res = await fetch(`/admin/modules/${encodeURIComponent(moduleName)}/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -1252,7 +1252,7 @@
           context_override: contextOverride,
           append_input_mode: state.appendInputMode,
         };
-        const res = await fetch(`/debug/modules/${encodeURIComponent(moduleName)}/run`, {
+        const res = await fetch(`/admin/modules/${encodeURIComponent(moduleName)}/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -1278,7 +1278,7 @@
           runStatus.textContent = "Select a runnable module.";
           return;
         }
-        const res = await fetch(`/debug/events?tag=debug,llm.raw&limit=20`);
+        const res = await fetch(`/admin/events?tag=debug,llm.raw&limit=20`);
         if (!res.ok) {
           runStatus.textContent = "Failed to load raw.";
           return;
@@ -1309,7 +1309,7 @@
           return;
         }
         autofillStatus.textContent = "Loading...";
-        const res = await fetch("/debug/events?tag=debug,llm.raw&limit=500");
+        const res = await fetch("/admin/events?tag=debug,llm.raw&limit=500");
         if (!res.ok) {
           autofillStatus.textContent = "Failed to load logs.";
           return;
@@ -1473,7 +1473,7 @@
           decision: state.decisionPrompt,
           submodules,
         };
-        const res = await fetch("/debug/prompts", {
+        const res = await fetch("/admin/prompts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),

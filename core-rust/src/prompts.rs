@@ -206,9 +206,12 @@ mod tests {
             base: Some("base without memory section".to_string()),
             router: Some("router without memory section".to_string()),
             decision: Some("## Memory\ndecision".to_string()),
-            submodules: [("curiosity".to_string(), "submodule without memory section".to_string())]
-                .into_iter()
-                .collect(),
+            submodules: [(
+                "curiosity".to_string(),
+                "submodule without memory section".to_string(),
+            )]
+            .into_iter()
+            .collect(),
         };
         assert!(validate_memory_sections(&prompts).is_ok());
     }
@@ -219,9 +222,12 @@ mod tests {
             base: Some("base without memory section".to_string()),
             router: Some("router without memory section".to_string()),
             decision: Some("decision without memory section".to_string()),
-            submodules: [("curiosity".to_string(), "submodule without memory section".to_string())]
-                .into_iter()
-                .collect(),
+            submodules: [(
+                "curiosity".to_string(),
+                "submodule without memory section".to_string(),
+            )]
+            .into_iter()
+            .collect(),
         };
         let err = validate_memory_sections(&prompts).expect_err("must reject");
         assert!(err.contains("Decision"));

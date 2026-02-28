@@ -831,7 +831,12 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         let current_arousal = self.arousal(current.arousal_level, current.accessed_at, now);
         let next_arousal = (current_arousal * (1.0 - ratio)).clamp(0.0, 1.0);
         let updated = self
-            .update_concept_state(concept.as_str(), current.valence, Some(next_arousal), Some(now))
+            .update_concept_state(
+                concept.as_str(),
+                current.valence,
+                Some(next_arousal),
+                Some(now),
+            )
             .await?;
         Ok(json!({
             "concept_id": concept,

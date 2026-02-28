@@ -315,7 +315,11 @@ async fn read_saturation_levels(
 fn apply_saturation_penalty(
     scores: &[(String, f64)],
     saturation_levels: &HashMap<String, f64>,
-) -> (Vec<(String, f64)>, BTreeMap<String, f64>, BTreeMap<String, f64>) {
+) -> (
+    Vec<(String, f64)>,
+    BTreeMap<String, f64>,
+    BTreeMap<String, f64>,
+) {
     let mut inhibited = Vec::<(String, f64)>::with_capacity(scores.len());
     let mut penalties = BTreeMap::<String, f64>::new();
     let mut effective = BTreeMap::<String, f64>::new();

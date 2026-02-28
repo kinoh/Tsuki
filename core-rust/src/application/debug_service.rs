@@ -170,18 +170,18 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
 
     match ingress {
         ParsedIngress::Trigger { target, reason } => {
-        let trigger_event = build_event(
-            "system",
-            "text",
-            json!({
-                "target": target,
-                "reason": reason,
-                "created_at": now_iso8601(),
-            }),
-            vec!["self_improvement.triggered".to_string()],
-        );
-        record_event(state, trigger_event).await;
-        return Err(());
+            let trigger_event = build_event(
+                "system",
+                "text",
+                json!({
+                    "target": target,
+                    "reason": reason,
+                    "created_at": now_iso8601(),
+                }),
+                vec!["self_improvement.triggered".to_string()],
+            );
+            record_event(state, trigger_event).await;
+            return Err(());
         }
         ParsedIngress::Input { kind, text } => {
             let input_event = build_event(
@@ -320,7 +320,8 @@ mod tests {
 
     #[test]
     fn parse_input_accepts_sensory_kind() {
-        let parsed = parse_input_message(r#"{"type":"sensory","text":"rain"}"#).expect("must parse");
+        let parsed =
+            parse_input_message(r#"{"type":"sensory","text":"rain"}"#).expect("must parse");
         assert_eq!(
             parsed,
             ParsedIngress::Input {

@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Concept Graph Debug</title>
-    <link rel="stylesheet" href="/debug/styles/ui-tokens.css" />
-    <link rel="stylesheet" href="/debug/styles/ui-base.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-base.css" />
     <style>
       * { box-sizing: border-box; }
       body {
@@ -228,9 +228,9 @@
             detailTitle: "Episode Detail",
             placeholder: "Search episode id or summary",
             searchPath: (q) => q
-              ? `/debug/concept-graph/episodes?q=${encodeURIComponent(q)}&limit=80`
-              : "/debug/concept-graph/episodes?limit=80",
-            detailPath: (name) => `/debug/concept-graph/episodes/${encodeURIComponent(name)}`,
+              ? `/admin/concept-graph/episodes?q=${encodeURIComponent(q)}&limit=80`
+              : "/admin/concept-graph/episodes?limit=80",
+            detailPath: (name) => `/admin/concept-graph/episodes/${encodeURIComponent(name)}`,
           };
         }
         if (mode === MODE_RELATION) {
@@ -239,8 +239,8 @@
             detailTitle: "Relation Detail",
             placeholder: "Search by from / type / to",
             searchPath: (q) => q
-              ? `/debug/concept-graph/relations?q=${encodeURIComponent(q)}&limit=120`
-              : "/debug/concept-graph/relations?limit=120",
+              ? `/admin/concept-graph/relations?q=${encodeURIComponent(q)}&limit=120`
+              : "/admin/concept-graph/relations?limit=120",
             detailPath: null,
           };
         }
@@ -249,9 +249,9 @@
           detailTitle: "Concept Detail",
           placeholder: "Search concept name",
           searchPath: (q) => q
-            ? `/debug/concept-graph/concepts?q=${encodeURIComponent(q)}&limit=80`
-            : "/debug/concept-graph/concepts?limit=80",
-          detailPath: (name) => `/debug/concept-graph/concepts/${encodeURIComponent(name)}`,
+            ? `/admin/concept-graph/concepts?q=${encodeURIComponent(q)}&limit=80`
+            : "/admin/concept-graph/concepts?limit=80",
+          detailPath: (name) => `/admin/concept-graph/concepts/${encodeURIComponent(name)}`,
         };
       }
 
@@ -270,7 +270,7 @@
 
       async function loadHealth() {
         try {
-          const health = await requestJson("/debug/concept-graph/health");
+          const health = await requestJson("/admin/concept-graph/health");
           const connected = !!health.connected;
           els.healthStatus.innerHTML = connected
             ? '<span class="status-ok">Connected</span>'
@@ -285,7 +285,7 @@
 
       async function loadCounts() {
         try {
-          const stats = await requestJson("/debug/concept-graph/stats");
+          const stats = await requestJson("/admin/concept-graph/stats");
           els.conceptCount.textContent = String(stats.concept_count ?? "-");
           els.episodeCount.textContent = String(stats.episode_count ?? "-");
           els.relationCount.textContent = String(stats.relation_count ?? "-");
@@ -440,7 +440,7 @@
 
       async function loadTimeline() {
         try {
-          const data = await requestJson("/debug/concept-graph/queries?limit=120");
+          const data = await requestJson("/admin/concept-graph/queries?limit=120");
           renderTimeline(data.items || []);
         } catch (error) {
           els.timeline.innerHTML = `<div class="timeline-item status-ng">Failed to load timeline: ${escapeHtml(error.message || error)}</div>`;

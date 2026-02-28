@@ -15,9 +15,12 @@ mod tools;
 use axum::{
     extract::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
-        Path, Query, Request, State,
+        Extension, Path, Query, Request, State,
     },
-    http::{header::CONTENT_TYPE, HeaderMap, StatusCode},
+    http::{
+        header::{CONTENT_TYPE, HOST, ORIGIN, REFERER, SET_COOKIE},
+        HeaderMap, Method, StatusCode,
+    },
     middleware::Next,
     response::{
         sse::{Event as SseEvent, KeepAlive, Sse},
@@ -30,17 +33,14 @@ use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    convert::Infallible,
-    net::SocketAddr,
-    path::PathBuf,
-    process::Command,
-    sync::Arc,
-    time::Instant,
+    convert::Infallible, net::SocketAddr, path::PathBuf, process::Command, sync::Arc, time::Instant,
 };
-use tokio::sync::{broadcast, RwLock};
 use time::OffsetDateTime;
+use tokio::sync::{broadcast, RwLock};
+use uuid::Uuid;
 
 use crate::activation_concept_graph::{ActivationConceptGraphStore, ConceptGraphStore};
+use crate::clock::now_iso8601;
 use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig};
 use crate::db::{Db, RuntimeConfigRecord};
 use crate::event::Event;
@@ -74,12 +74,23 @@ For proposal.diff_text:
 - Do not set proposal to null due to diff-format uncertainty; if you have a proposal, emit a syntactically valid minimal unified diff.
 If there is not enough signal, return null/empty fields instead of guessing."#;
 
+const ADMIN_SESSION_COOKIE_NAME: &str = "tsuki_admin_session";
+const ADMIN_SESSION_ABSOLUTE_TTL_SECS: i64 = 2_592_000;
+const ADMIN_SESSION_IDLE_TIMEOUT_SECS: i64 = 86_400;
+
+#[derive(Clone, Debug)]
+struct AdminSessionContext {
+    session_id: String,
+}
+
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) db: Arc<Db>,
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) tx: broadcast::Sender<Event>,
     pub(crate) auth_token: String,
+    pub(crate) admin_auth_password: String,
+    pub(crate) admin_password_fingerprint: String,
     pub(crate) fcm_sender: Option<FcmNotificationSender>,
     pub(crate) state_store: Arc<dyn StateStore>,
     pub(crate) activation_concept_graph: Arc<dyn ConceptGraphStore>,
@@ -155,6 +166,26 @@ struct PromptsPayload {
     router: String,
     decision: String,
     submodules: Vec<PromptModulePayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthLoginRequest {
+    password: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AuthLoginResponse {
+    ok: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct AuthMeResponse {
+    authenticated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct AuthLogoutResponse {
+    ok: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -301,8 +332,14 @@ async fn main() {
     let config = load_config("config.toml").expect("failed to load config");
     let port = config.server.port;
     let auth_token = std::env::var("WEB_AUTH_TOKEN").expect("WEB_AUTH_TOKEN is required");
+    let admin_auth_password =
+        std::env::var("ADMIN_AUTH_PASSWORD").expect("ADMIN_AUTH_PASSWORD is required");
+    let admin_password_fingerprint = admin_password_fingerprint(&admin_auth_password);
     let (tx, _) = broadcast::channel(256);
     let db = Db::connect(&config.db).await.expect("failed to init db");
+    db.delete_admin_sessions_not_matching_fingerprint(&admin_password_fingerprint)
+        .await
+        .expect("failed to invalidate outdated admin sessions");
     let event_store = Arc::new(EventStore::new(db.clone()));
     let prompts_path = prompts_path_from_env();
     let prompt_overrides = load_prompts(&prompts_path).unwrap_or_else(|err| {
@@ -382,6 +419,8 @@ async fn main() {
         event_store,
         tx,
         auth_token,
+        admin_auth_password,
+        admin_password_fingerprint,
         fcm_sender,
         state_store,
         activation_concept_graph,
@@ -392,8 +431,8 @@ async fn main() {
         api_versions: load_api_versions(),
         prompts,
         prompts_path,
-        self_improvement_trigger_instructions:
-            DEFAULT_SELF_IMPROVEMENT_TRIGGER_INSTRUCTIONS.to_string(),
+        self_improvement_trigger_instructions: DEFAULT_SELF_IMPROVEMENT_TRIGGER_INSTRUCTIONS
+            .to_string(),
         router_model: config
             .llm
             .router_model
@@ -404,6 +443,48 @@ async fn main() {
         submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
     };
     crate::application::improve_service::start_trigger_consumer(state.clone());
+
+    let admin_router = Router::new()
+        .route("/styles/{name}", get(debug_style))
+        .route("/ui", get(debug_ui))
+        .route("/monitor", get(debug_monitor_ui))
+        .route("/concept-graph/ui", get(debug_concept_graph_ui))
+        .route("/concept-graph/health", get(debug_concept_graph_health))
+        .route("/concept-graph/stats", get(debug_concept_graph_stats))
+        .route("/concept-graph/concepts", get(debug_concept_graph_concepts))
+        .route(
+            "/concept-graph/concepts/{name}",
+            get(debug_concept_graph_concept_detail),
+        )
+        .route("/concept-graph/episodes", get(debug_concept_graph_episodes))
+        .route(
+            "/concept-graph/episodes/{name}",
+            get(debug_concept_graph_episode_detail),
+        )
+        .route(
+            "/concept-graph/relations",
+            get(debug_concept_graph_relations),
+        )
+        .route("/concept-graph/queries", get(debug_concept_graph_queries))
+        .route(
+            "/prompts",
+            get(debug_get_prompts).post(debug_update_prompts),
+        )
+        .route("/modules/{name}/run", post(debug_run_module))
+        .route("/events/stream", get(debug_events_stream))
+        .route("/events", get(debug_events))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            admin_auth_middleware,
+        ));
+
+    let auth_router = Router::new()
+        .route("/me", get(auth_me))
+        .route("/logout", post(auth_logout))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            admin_auth_middleware,
+        ));
 
     let app = Router::new()
         .route("/", get(ws_handler))
@@ -416,49 +497,12 @@ async fn main() {
         )
         .route("/notification/tokens", get(notification_tokens_get))
         .route("/notification/_test", post(notification_test))
-        .route("/debug/styles/{name}", get(debug_style))
-        .route("/debug/ui", get(debug_ui))
-        .route("/debug/monitor", get(debug_monitor_ui))
-        .route("/debug/concept-graph/ui", get(debug_concept_graph_ui))
-        .route(
-            "/debug/concept-graph/health",
-            get(debug_concept_graph_health),
-        )
-        .route("/debug/concept-graph/stats", get(debug_concept_graph_stats))
-        .route(
-            "/debug/concept-graph/concepts",
-            get(debug_concept_graph_concepts),
-        )
-        .route(
-            "/debug/concept-graph/concepts/{name}",
-            get(debug_concept_graph_concept_detail),
-        )
-        .route(
-            "/debug/concept-graph/episodes",
-            get(debug_concept_graph_episodes),
-        )
-        .route(
-            "/debug/concept-graph/episodes/{name}",
-            get(debug_concept_graph_episode_detail),
-        )
-        .route(
-            "/debug/concept-graph/relations",
-            get(debug_concept_graph_relations),
-        )
-        .route(
-            "/debug/concept-graph/queries",
-            get(debug_concept_graph_queries),
-        )
-        .route(
-            "/debug/prompts",
-            get(debug_get_prompts).post(debug_update_prompts),
-        )
-        .route("/debug/modules/{name}/run", post(debug_run_module))
+        .route("/auth/login", post(auth_login))
         .route("/triggers", post(improve_trigger))
         .route("/proposals", post(improve_proposal))
         .route("/reviews", post(improve_review))
-        .route("/debug/events/stream", get(debug_events_stream))
-        .route("/debug/events", get(debug_events))
+        .nest("/auth", auth_router)
+        .nest("/admin", admin_router)
         .layer(axum::middleware::from_fn(access_log_middleware))
         .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -714,21 +758,174 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     println!("WS_DISCONNECT");
 }
 
+async fn auth_login(
+    State(state): State<AppState>,
+    Json(payload): Json<AuthLoginRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    if payload.password != state.admin_auth_password {
+        println!("ADMIN_AUTH_LOGIN_FAILURE reason=invalid_password");
+        return Err((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()));
+    }
+
+    let session_id = Uuid::new_v4().to_string();
+    let now = now_iso8601();
+    state
+        .db
+        .create_admin_session(
+            &session_id,
+            now.as_str(),
+            now.as_str(),
+            &state.admin_password_fingerprint,
+        )
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
+    println!("ADMIN_AUTH_LOGIN_SUCCESS");
+    Ok((
+        [(SET_COOKIE, build_admin_session_cookie(&session_id))],
+        Json(AuthLoginResponse { ok: true }),
+    ))
+}
+
+async fn auth_me() -> Json<AuthMeResponse> {
+    Json(AuthMeResponse {
+        authenticated: true,
+    })
+}
+
+async fn auth_logout(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSessionContext>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    state
+        .db
+        .delete_admin_session(&session.session_id)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    println!("ADMIN_AUTH_LOGOUT");
+    Ok((
+        [(SET_COOKIE, build_admin_session_clear_cookie())],
+        Json(AuthLogoutResponse { ok: true }),
+    ))
+}
+
+async fn admin_auth_middleware(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, String)> {
+    if method_requires_csrf(request.method()) {
+        validate_admin_csrf(&request)?;
+    }
+    let session_id = extract_cookie_value(request.headers(), ADMIN_SESSION_COOKIE_NAME)
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "admin session required".to_string(),
+            )
+        })?;
+    let session = state
+        .db
+        .get_admin_session(&session_id)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "invalid admin session".to_string(),
+            )
+        })?;
+    let now = OffsetDateTime::now_utc();
+
+    if session.password_fingerprint != state.admin_password_fingerprint {
+        state
+            .db
+            .delete_admin_session(&session.session_id)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        println!("ADMIN_AUTH_SESSION_CLEANUP reason=password_changed");
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "invalid admin session".to_string(),
+        ));
+    }
+
+    let created_at = match parse_rfc3339_to_utc(session.created_at.as_str()) {
+        Ok(value) => value,
+        Err(_) => {
+            state
+                .db
+                .delete_admin_session(&session.session_id)
+                .await
+                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+            println!("ADMIN_AUTH_SESSION_CLEANUP reason=invalid_created_at");
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "invalid admin session".to_string(),
+            ));
+        }
+    };
+    let last_seen_at = match parse_rfc3339_to_utc(session.last_seen_at.as_str()) {
+        Ok(value) => value,
+        Err(_) => {
+            state
+                .db
+                .delete_admin_session(&session.session_id)
+                .await
+                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+            println!("ADMIN_AUTH_SESSION_CLEANUP reason=invalid_last_seen_at");
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "invalid admin session".to_string(),
+            ));
+        }
+    };
+    let expired_absolute =
+        now.unix_timestamp() - created_at.unix_timestamp() > ADMIN_SESSION_ABSOLUTE_TTL_SECS;
+    let expired_idle =
+        now.unix_timestamp() - last_seen_at.unix_timestamp() > ADMIN_SESSION_IDLE_TIMEOUT_SECS;
+    if expired_absolute || expired_idle {
+        state
+            .db
+            .delete_admin_session(&session.session_id)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        println!(
+            "ADMIN_AUTH_SESSION_CLEANUP reason={}",
+            if expired_absolute {
+                "absolute_ttl_expired"
+            } else {
+                "idle_timeout_expired"
+            }
+        );
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "admin session expired".to_string(),
+        ));
+    }
+
+    state
+        .db
+        .update_admin_session_last_seen(&session.session_id, now_iso8601().as_str())
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    request.extensions_mut().insert(AdminSessionContext {
+        session_id: session.session_id.clone(),
+    });
+    Ok(next.run(request).await)
+}
+
 async fn debug_get_prompts(
     State(state): State<AppState>,
-    headers: HeaderMap,
 ) -> Result<Json<PromptsPayload>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let prompts = build_effective_prompts(&state).await?;
     Ok(Json(prompts))
 }
 
 async fn debug_update_prompts(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(payload): Json<PromptsPayload>,
 ) -> Result<Json<PromptsPayload>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let mut submodules = std::collections::HashMap::new();
     for module in &payload.submodules {
         submodules.insert(module.name.clone(), module.instructions.clone());
@@ -777,10 +974,8 @@ async fn debug_update_prompts(
 async fn debug_run_module(
     Path(name): Path<String>,
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(payload): Json<DebugRunRequest>,
 ) -> Result<Json<DebugRunResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let result =
         crate::application::pipeline_service::run_debug_module(&state, name, payload).await?;
     Ok(Json(result))
@@ -788,10 +983,8 @@ async fn debug_run_module(
 
 async fn debug_events(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Query(query): Query<DebugEventsQuery>,
 ) -> Result<Json<DebugEventsResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let around_mode = query
         .around_event_id
         .as_deref()
@@ -947,8 +1140,12 @@ async fn notification_token_put(
     Json(payload): Json<Value>,
 ) -> Result<Json<NotificationResult>, (StatusCode, String)> {
     let user = parse_http_auth_user(&headers, &state.auth_token)?;
-    let token = parse_notification_token_payload(&payload)
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "missing token parameter".to_string()))?;
+    let token = parse_notification_token_payload(&payload).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "missing token parameter".to_string(),
+        )
+    })?;
     state
         .db
         .add_notification_token(&user, &token)
@@ -963,8 +1160,12 @@ async fn notification_token_delete(
     Json(payload): Json<Value>,
 ) -> Result<Json<NotificationResult>, (StatusCode, String)> {
     let user = parse_http_auth_user(&headers, &state.auth_token)?;
-    let token = parse_notification_token_payload(&payload)
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "missing token parameter".to_string()))?;
+    let token = parse_notification_token_payload(&payload).ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "missing token parameter".to_string(),
+        )
+    })?;
     state
         .db
         .remove_notification_token(&user, &token)
@@ -1024,9 +1225,7 @@ async fn notification_test(
 
 async fn debug_events_stream(
     State(state): State<AppState>,
-    headers: HeaderMap,
 ) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let rx = state.tx.subscribe();
     let stream = futures::stream::unfold(rx, |mut rx| async move {
         loop {
@@ -1052,9 +1251,7 @@ async fn debug_events_stream(
 
 async fn debug_concept_graph_health(
     State(state): State<AppState>,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let value = state
         .activation_concept_graph
         .debug_health()
@@ -1065,9 +1262,7 @@ async fn debug_concept_graph_health(
 
 async fn debug_concept_graph_stats(
     State(state): State<AppState>,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let value = state
         .activation_concept_graph
         .debug_counts()
@@ -1078,10 +1273,8 @@ async fn debug_concept_graph_stats(
 
 async fn debug_concept_graph_concepts(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let items = state
         .activation_concept_graph
         .debug_concept_search(query.q, query.limit.unwrap_or(50))
@@ -1093,9 +1286,7 @@ async fn debug_concept_graph_concepts(
 async fn debug_concept_graph_concept_detail(
     Path(name): Path<String>,
     State(state): State<AppState>,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let value = state
         .activation_concept_graph
         .debug_concept_detail(name)
@@ -1109,10 +1300,8 @@ async fn debug_concept_graph_concept_detail(
 
 async fn debug_concept_graph_episodes(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let items = state
         .activation_concept_graph
         .debug_episode_search(query.q, query.limit.unwrap_or(50))
@@ -1124,9 +1313,7 @@ async fn debug_concept_graph_episodes(
 async fn debug_concept_graph_episode_detail(
     Path(name): Path<String>,
     State(state): State<AppState>,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let value = state
         .activation_concept_graph
         .debug_episode_detail(name)
@@ -1140,10 +1327,8 @@ async fn debug_concept_graph_episode_detail(
 
 async fn debug_concept_graph_relations(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let items = state
         .activation_concept_graph
         .debug_relation_search(query.q, query.limit.unwrap_or(80))
@@ -1154,10 +1339,8 @@ async fn debug_concept_graph_relations(
 
 async fn debug_concept_graph_queries(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Query(query): Query<DebugConceptGraphQueriesQuery>,
 ) -> Result<Json<DebugConceptGraphQueriesResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let limit = query.limit.unwrap_or(100).max(1).min(500);
     let fetch_limit = (limit * 5).min(2000);
     let events = state
@@ -1329,11 +1512,7 @@ async fn improve_review(
     Ok(Json(result))
 }
 
-async fn debug_ui(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Html<String>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+async fn debug_ui(State(_state): State<AppState>) -> Result<Html<String>, (StatusCode, String)> {
     const EMBEDDED: &str = include_str!("../static/debug_ui.html");
     const DEBUG_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/debug_ui.html");
     match tokio::fs::read_to_string(DEBUG_UI_PATH).await {
@@ -1349,10 +1528,8 @@ async fn debug_ui(
 }
 
 async fn debug_monitor_ui(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    State(_state): State<AppState>,
 ) -> Result<Html<String>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     const EMBEDDED: &str = include_str!("../static/monitor_ui.html");
     const MONITOR_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/monitor_ui.html");
     match tokio::fs::read_to_string(MONITOR_UI_PATH).await {
@@ -1369,10 +1546,8 @@ async fn debug_monitor_ui(
 
 async fn debug_style(
     Path(name): Path<String>,
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    State(_state): State<AppState>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     let (disk_path, embedded) = match name.as_str() {
         "ui-tokens.css" => (
             concat!(env!("CARGO_MANIFEST_DIR"), "/static/styles/ui-tokens.css"),
@@ -1398,10 +1573,8 @@ async fn debug_style(
 }
 
 async fn debug_concept_graph_ui(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    State(_state): State<AppState>,
 ) -> Result<Html<String>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
     const EMBEDDED: &str = include_str!("../static/concept_graph_ui.html");
     const UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/concept_graph_ui.html");
     match tokio::fs::read_to_string(UI_PATH).await {
@@ -1414,6 +1587,103 @@ async fn debug_concept_graph_ui(
             Ok(Html(EMBEDDED.to_string()))
         }
     }
+}
+
+fn admin_password_fingerprint(password: &str) -> String {
+    let mut hash: u64 = 1469598103934665603;
+    for byte in password.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("{:016x}", hash)
+}
+
+fn build_admin_session_cookie(session_id: &str) -> String {
+    format!(
+        "{}={}; Max-Age={}; Path=/; Secure; HttpOnly; SameSite=Strict",
+        ADMIN_SESSION_COOKIE_NAME, session_id, ADMIN_SESSION_ABSOLUTE_TTL_SECS
+    )
+}
+
+fn build_admin_session_clear_cookie() -> String {
+    format!(
+        "{}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict",
+        ADMIN_SESSION_COOKIE_NAME
+    )
+}
+
+fn method_requires_csrf(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    )
+}
+
+fn validate_admin_csrf(request: &Request) -> Result<(), (StatusCode, String)> {
+    let expected_origin = expected_request_origin(request.headers())?;
+    if let Some(origin) = request
+        .headers()
+        .get(ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if origin == expected_origin {
+            return Ok(());
+        }
+        return Err((StatusCode::FORBIDDEN, "csrf validation failed".to_string()));
+    }
+
+    if let Some(referer) = request
+        .headers()
+        .get(REFERER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if referer == expected_origin || referer.starts_with(&(expected_origin + "/")) {
+            return Ok(());
+        }
+    }
+    Err((StatusCode::FORBIDDEN, "csrf validation failed".to_string()))
+}
+
+fn expected_request_origin(headers: &HeaderMap) -> Result<String, (StatusCode, String)> {
+    let host = headers
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| (StatusCode::FORBIDDEN, "missing host header".to_string()))?;
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("http");
+    Ok(format!("{}://{}", proto, host))
+}
+
+fn extract_cookie_value(headers: &HeaderMap, cookie_name: &str) -> Option<String> {
+    let raw = headers.get("cookie")?.to_str().ok()?;
+    for part in raw.split(';') {
+        let mut tokens = part.trim().splitn(2, '=');
+        let name = tokens.next()?.trim();
+        let value = tokens.next()?.trim();
+        if name == cookie_name && !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn parse_rfc3339_to_utc(value: &str) -> Result<OffsetDateTime, (StatusCode, String)> {
+    OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            "invalid admin session".to_string(),
+        )
+    })
 }
 
 fn verify_auth(message: &str, expected_token: &str) -> bool {
@@ -1437,7 +1707,12 @@ fn parse_http_auth_user(
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "authorization header required".to_string()))?;
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "authorization header required".to_string(),
+            )
+        })?;
 
     let mut parts = auth.splitn(2, ':');
     let user = parts.next().unwrap_or("").trim();
@@ -1494,7 +1769,10 @@ fn get_git_hash() -> Option<String> {
             return Some(trimmed.to_string());
         }
     }
-    let output = Command::new("git").args(["rev-parse", "HEAD"]).output().ok()?;
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

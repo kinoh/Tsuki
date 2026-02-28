@@ -95,7 +95,10 @@ impl FcmNotificationSender {
             .await
             .map_err(|err| format!("failed to read oauth response: {}", err))?;
         if !status.is_success() {
-            return Err(format!("oauth token request failed status={} body={}", status, text));
+            return Err(format!(
+                "oauth token request failed status={} body={}",
+                status, text
+            ));
         }
         let parsed: TokenResponse = serde_json::from_str(&text)
             .map_err(|err| format!("failed to parse oauth response: {}", err))?;

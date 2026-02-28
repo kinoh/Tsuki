@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tsuki Monitor</title>
-    <link rel="stylesheet" href="/debug/styles/ui-tokens.css" />
-    <link rel="stylesheet" href="/debug/styles/ui-base.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-base.css" />
     <style>
       * { box-sizing: border-box; }
       body {
@@ -295,7 +295,7 @@
 
       async function loadHistory() {
         try {
-          const res = await fetch("/debug/events?limit=1200");
+          const res = await fetch("/admin/events?limit=1200");
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           const events = Array.isArray(data?.events) ? data.events : [];
@@ -316,7 +316,7 @@
 
       function connectStream() {
         if (state.eventSource) return;
-        const es = new EventSource("/debug/events/stream");
+        const es = new EventSource("/admin/events/stream");
         state.eventSource = es;
 
         es.onopen = () => {

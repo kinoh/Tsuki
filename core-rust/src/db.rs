@@ -17,6 +17,14 @@ pub struct RuntimeConfigRecord {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AdminSessionRecord {
+    pub session_id: String,
+    pub created_at: String,
+    pub last_seen_at: String,
+    pub password_fingerprint: String,
+}
+
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -109,6 +117,21 @@ impl Db {
         created_at TEXT NOT NULL,\
         PRIMARY KEY (user_id, token)\
       )",
+            params![],
+        )
+        .await?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS admin_sessions (\
+        session_id TEXT PRIMARY KEY,\
+        created_at TEXT NOT NULL,\
+        last_seen_at TEXT NOT NULL,\
+        password_fingerprint TEXT NOT NULL\
+      )",
+            params![],
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_sessions_last_seen ON admin_sessions(last_seen_at)",
             params![],
         )
         .await?;
@@ -483,5 +506,86 @@ impl Db {
             tokens.push(token);
         }
         Ok(tokens)
+    }
+
+    pub async fn create_admin_session(
+        &self,
+        session_id: &str,
+        created_at: &str,
+        last_seen_at: &str,
+        password_fingerprint: &str,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO admin_sessions (session_id, created_at, last_seen_at, password_fingerprint) \
+             VALUES (?, ?, ?, ?)",
+            params![session_id, created_at, last_seen_at, password_fingerprint],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_admin_session(
+        &self,
+        session_id: &str,
+    ) -> DbResult<Option<AdminSessionRecord>> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT session_id, created_at, last_seen_at, password_fingerprint \
+                 FROM admin_sessions WHERE session_id = ? LIMIT 1",
+                params![session_id],
+            )
+            .await?;
+        if let Some(row) = rows.next().await? {
+            let session_id: String = row.get(0)?;
+            let created_at: String = row.get(1)?;
+            let last_seen_at: String = row.get(2)?;
+            let password_fingerprint: String = row.get(3)?;
+            return Ok(Some(AdminSessionRecord {
+                session_id,
+                created_at,
+                last_seen_at,
+                password_fingerprint,
+            }));
+        }
+        Ok(None)
+    }
+
+    pub async fn update_admin_session_last_seen(
+        &self,
+        session_id: &str,
+        last_seen_at: &str,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE admin_sessions SET last_seen_at = ? WHERE session_id = ?",
+            params![last_seen_at, session_id],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_admin_session(&self, session_id: &str) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM admin_sessions WHERE session_id = ?",
+            params![session_id],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_admin_sessions_not_matching_fingerprint(
+        &self,
+        password_fingerprint: &str,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM admin_sessions WHERE password_fingerprint != ?",
+            params![password_fingerprint],
+        )
+        .await?;
+        Ok(())
     }
 }

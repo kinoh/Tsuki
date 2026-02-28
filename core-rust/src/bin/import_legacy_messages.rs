@@ -93,7 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         };
 
         if let Some(matched) = should_drop_by_substring(&text) {
-            eprintln!("IMPORT_DROP_BY_SUBSTRING role={} ts={} matched={}", role, created_at, matched);
+            eprintln!(
+                "IMPORT_DROP_BY_SUBSTRING role={} ts={} matched={}",
+                role, created_at, matched
+            );
             stats.dropped_by_substring += 1;
             continue;
         }
@@ -112,10 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .await
         {
-            eprintln!(
-                "IMPORT_ERROR role={} ts={} error={}",
-                role, created_at, err
-            );
+            eprintln!("IMPORT_ERROR role={} ts={} error={}", role, created_at, err);
             stats.failed += 1;
             continue;
         }
@@ -206,7 +206,9 @@ fn should_drop_by_substring(text: &str) -> Option<&'static str> {
     })
 }
 
-async fn ensure_target_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn ensure_target_schema(
+    conn: &Connection,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS events (\
         event_id TEXT PRIMARY KEY,\
