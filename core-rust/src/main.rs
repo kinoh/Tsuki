@@ -554,17 +554,77 @@ fn required_prompt(raw: Option<&str>, section: &str, prompts_path: &std::path::P
 
 async fn access_log_middleware(request: Request, next: Next) -> Response {
     let method = request.method().to_string();
-    let path = request.uri().path().to_string();
+    let path = request
+        .uri()
+        .path_and_query()
+        .map(|value| value.as_str().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
+    let remote_ip = extract_remote_ip(request.headers());
+    let user_agent = request
+        .headers()
+        .get("user-agent")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("-")
+        .to_string();
+    let req_bytes = content_length_from_headers(request.headers());
+    let ts = OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "-".to_string());
     let started = Instant::now();
     let response = next.run(request).await;
+    let res_bytes = content_length_from_headers(response.headers());
     println!(
-        "HTTP_ACCESS method={} path={} status={} elapsed_ms={}",
+        "HTTP_ACCESS ts={} remote_ip={} method={} path={} status={} req_bytes={} res_bytes={} ua=\"{}\" elapsed_ms={}",
+        ts,
+        remote_ip,
         method,
         path,
         response.status().as_u16(),
+        req_bytes
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        res_bytes
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        sanitize_log_field(&user_agent),
         started.elapsed().as_millis()
     );
     response
+}
+
+fn extract_remote_ip(headers: &HeaderMap) -> String {
+    if let Some(value) = headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+    {
+        if let Some(first) = value
+            .split(',')
+            .map(str::trim)
+            .find(|part| !part.is_empty())
+            .map(str::to_string)
+        {
+            return first;
+        }
+    }
+    headers
+        .get("x-real-ip")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn content_length_from_headers(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn sanitize_log_field(raw: &str) -> String {
+    raw.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
