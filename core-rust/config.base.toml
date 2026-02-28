@@ -1,0 +1,72 @@
+[server]
+port = 2953
+
+[llm]
+model = "gpt-5.2"
+router_model = "gpt-5-nano"
+temperature = 0.7
+temperature_enabled = false
+max_output_tokens = 10000
+max_tool_rounds = 3
+
+[limits]
+decision_history = 30
+submodule_history = 10
+
+[router]
+query_terms_max = 16
+hard_trigger_threshold = 0.85
+recommendation_threshold = 0.2
+
+[input]
+router_context_template = """User input:
+{{latest_user_input}}
+
+Active submodules:
+{{active_submodules}}
+
+router_preprocessing:
+query_terms:
+{{query_terms}}
+candidate_concepts:
+{{candidate_concepts}}
+
+seed_selection_rules:
+- return recall seed concepts only
+- one seed per line
+- no explanations
+- select only concepts/episodes clearly relevant to the latest user utterance
+- select only concepts/episodes that should be activated now for this turn
+- avoid generic always-on concepts unless directly grounded in the utterance
+- if none satisfies the rules, return none
+- max {{router_query_terms_max}} lines"""
+
+decision_context_template = """latest_user_input:
+{{latest_user_input}}
+
+active_concepts_from_concept_graph:
+{{active_concepts_from_concept_graph}}
+
+outputs_from_immediately_executed_submodules:
+{{outputs_from_immediately_executed_submodules}}
+
+candidate_submodules_by_interest_match:
+{{candidate_submodules_by_interest_match}}
+
+recent_event_history:
+{{recent_event_history}}
+
+Return: decision=<respond|ignore> reason=<short>."""
+
+submodule_context_template = """Latest user input: {{latest_user_input}}
+Concept activation:
+{{active_concepts_from_concept_graph}}
+Submodule recommendations:
+{{candidate_submodules_by_interest_match}}
+Recent events:
+{{recent_event_history}}
+Execution reason: {{execution_reason}}"""
+
+[db]
+path = "./data/core-rust.db"
+# remote_url = "libsql://..."
