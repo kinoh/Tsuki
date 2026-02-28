@@ -96,9 +96,27 @@ Verification notes (2026-02-28):
 
 ### 7. Verification and Cutover
 - [ ] Add end-to-end checks: WebSocket message flow + `/events` retrieval.
-- [ ] Run history-import validation on a representative backup dataset.
+- [x] Run history-import validation on a representative backup dataset.
 - [ ] Execute cutover rehearsal in staging-like environment.
 - [ ] Perform production cutover and post-cutover smoke checks.
+
+History-import validation notes (2026-02-28):
+- Source backup: `backup/tsuki-backup-20260208231014.tar.gz` (`./mastra.db`).
+- Import result:
+  - `processed=1348`
+  - `imported=1166`
+  - `dropped_non_text=2`
+  - `dropped_by_substring=180`
+  - `failed=0`
+- Tag/source mapping validated:
+  - `["imported_legacy","response"]`: `584` (source=`assistant`)
+  - `["imported_legacy","user_input"]`: `582` (source=`user`)
+- Timestamp preservation validated:
+  - source `min/max(createdAt)` = `2025-07-24T14:06:53.077Z` / `2026-02-05T06:54:00.493Z`
+  - target `min/max(ts)` = `2025-07-24T14:06:53.077Z` / `2026-02-05T06:54:00.493Z`
+- Substring exclusion validated on target payload text (`count=0`):
+  - `"modality":"None"`
+  - `Received scheduler notification`
 
 ## Acceptance Checklist (Definition of Done)
 - [ ] No production dependency remains on `threads` or `messages` APIs.
