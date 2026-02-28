@@ -72,8 +72,8 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [x] Confirm `/events` pagination policy for this phase (no cursor; `before_ts + limit` only).
 
 ### 5. Runtime and Deployment Switch
-- [ ] Switch `compose.yaml` primary backend service to `core-rust`.
-- [ ] Update healthcheck to validate `core-rust`-owned readiness.
+- [x] Switch `compose.yaml` primary backend service to `core-rust`.
+- [x] Update healthcheck to validate `core-rust`-owned readiness.
 - [ ] Update Taskfile runtime/deploy commands if service names or startup flows change.
 - [ ] Validate required env/config mapping for `core-rust` in production.
 - [ ] Validate runtime config persistence and notification behavior after restart.
@@ -97,5 +97,5 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - [ ] Legacy conversation history is imported with original timestamps.
 - [ ] Imported dataset excludes tool/reasoning internals by design.
 - [ ] WebSocket chat loop works with agreed auth and payload contracts.
-- [ ] Compose/Taskfile operational path starts `core-rust` as primary backend.
+- [x] Compose/Taskfile operational path starts `core-rust` as primary backend.
 - [ ] Runbook/docs are updated for on-call and routine operations.

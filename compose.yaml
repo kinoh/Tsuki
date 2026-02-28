@@ -1,44 +1,31 @@
 name: tsuki
 
 services:
-  # TypeScript/Mastra-based backend (replacing Rust app)
+  # Rust-based backend (primary runtime)
   core:
     image: tsuki-core:${GIT_HASH}
     build:
       context: .
-      dockerfile: docker/core/Dockerfile
+      dockerfile: docker/core-rust/Dockerfile
       target: runtime
       args:
         GIT_HASH: ${GIT_HASH}
     environment:
-      NODE_ENV: production
       WEB_AUTH_TOKEN: ${WEB_AUTH_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      PROMPT_PRIVATE_KEY: ${PROMPT_PRIVATE_KEY}
       GCP_SERVICE_ACCOUNT_KEY: ${GCP_SERVICE_ACCOUNT_KEY}
       FCM_PROJECT_ID: ${FCM_PROJECT_ID}
-      DATA_DIR: /data
-      WEATHER_LOCATION_PATH: ${WEATHER_LOCATION_PATH}
-      PROMETHEUS_BASE_URL: ${PROMETHEUS_BASE_URL}
-      PROMETHEUS_BASIC_AUTH_USERNAME: ${PROMETHEUS_BASIC_AUTH_USERNAME}
-      PROMETHEUS_BASIC_AUTH_PASSWORD: ${PROMETHEUS_BASIC_AUTH_PASSWORD}
-      OPENAI_MODEL: gpt-5.2
-      AGENT_NAME: tsuki
-      PERMANENT_USERS: kino
-      ADMIN_JS_TMP_DIR: /tmp/.adminjs
+      MEMGRAPH_URI: bolt://memgraph:7687
+      GIT_HASH: ${GIT_HASH}
     volumes:
       - core-data:/data
-      - sandbox-data:/memory:ro
     ports:
       - "2953:2953"
     depends_on:
       - memgraph
-      - sandbox
-      - voicevox-engine
-      - ja-accent
     restart: always
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').request({port: 2953, path: '/'}, (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1)).end()"]
+      test: ["CMD-SHELL", "wget -qO- --header=\"authorization: health:${WEB_AUTH_TOKEN}\" http://127.0.0.1:2953/metadata >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
