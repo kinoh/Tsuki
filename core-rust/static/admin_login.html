@@ -27,29 +27,34 @@
       body {
         margin: 0;
         min-height: 100vh;
-        display: grid;
-        place-items: center;
         font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
         background: var(--page-bg);
         color: var(--text);
       }
-      .panel {
-        width: min(92vw, 420px);
-        border-radius: var(--radius);
+      .wrap {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
         padding: 24px;
+      }
+      .panel {
+        width: min(92vw, 480px);
+        border-radius: var(--radius);
+        padding: 22px;
         border: 1px solid var(--line);
         background: var(--surface);
         box-shadow: var(--shadow);
       }
-      h1 {
-        margin: 0 0 8px;
-        font-size: 22px;
-        letter-spacing: 0.02em;
+      .title {
+        margin: 0;
+        font-size: 20px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }
       p {
-        margin: 0 0 16px;
+        margin: 8px 0 18px;
         color: var(--muted);
-        font-size: 14px;
+        font-size: 13px;
       }
       label {
         display: block;
@@ -81,10 +86,14 @@
         font-weight: 600;
         cursor: pointer;
         color: var(--text);
-        background: linear-gradient(135deg, rgba(255, 79, 167, 0.2), rgba(113, 74, 244, 0.24));
+        background: var(--surface-2);
       }
       button:hover {
         border-color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.7;
+        cursor: default;
       }
       .status {
         min-height: 20px;
@@ -97,16 +106,18 @@
     </style>
   </head>
   <body>
-    <main class="panel">
-      <h1>Admin Sign In</h1>
-      <p>Enter ADMIN_AUTH_PASSWORD to continue.</p>
-      <form id="loginForm">
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" required autocomplete="current-password" />
-        <button id="submit" type="submit">Sign In</button>
-      </form>
-      <div id="status" class="status"></div>
-    </main>
+    <div class="wrap">
+      <main class="panel">
+        <h1 class="title">Tsuki Admin</h1>
+        <p>Enter ADMIN_AUTH_PASSWORD to continue.</p>
+        <form id="loginForm">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required autocomplete="current-password" />
+          <button id="submit" type="submit">Sign In</button>
+        </form>
+        <div id="status" class="status"></div>
+      </main>
+    </div>
     <script>
       const form = document.getElementById("loginForm");
       const passwordInput = document.getElementById("password");
