@@ -632,15 +632,19 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
 
 async fn debug_get_prompts(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<PromptsPayload>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let prompts = build_effective_prompts(&state).await?;
     Ok(Json(prompts))
 }
 
 async fn debug_update_prompts(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<PromptsPayload>,
 ) -> Result<Json<PromptsPayload>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let mut submodules = std::collections::HashMap::new();
     for module in &payload.submodules {
         submodules.insert(module.name.clone(), module.instructions.clone());
@@ -689,8 +693,10 @@ async fn debug_update_prompts(
 async fn debug_run_module(
     Path(name): Path<String>,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<DebugRunRequest>,
 ) -> Result<Json<DebugRunResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let result =
         crate::application::pipeline_service::run_debug_module(&state, name, payload).await?;
     Ok(Json(result))
@@ -698,8 +704,10 @@ async fn debug_run_module(
 
 async fn debug_events(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<DebugEventsQuery>,
 ) -> Result<Json<DebugEventsResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let around_mode = query
         .around_event_id
         .as_deref()
@@ -932,7 +940,9 @@ async fn notification_test(
 
 async fn debug_events_stream(
     State(state): State<AppState>,
-) -> Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>> {
+    headers: HeaderMap,
+) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let rx = state.tx.subscribe();
     let stream = futures::stream::unfold(rx, |mut rx| async move {
         loop {
@@ -953,12 +963,14 @@ async fn debug_events_stream(
             }
         }
     });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 async fn debug_concept_graph_health(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let value = state
         .activation_concept_graph
         .debug_health()
@@ -969,7 +981,9 @@ async fn debug_concept_graph_health(
 
 async fn debug_concept_graph_stats(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let value = state
         .activation_concept_graph
         .debug_counts()
@@ -980,8 +994,10 @@ async fn debug_concept_graph_stats(
 
 async fn debug_concept_graph_concepts(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let items = state
         .activation_concept_graph
         .debug_concept_search(query.q, query.limit.unwrap_or(50))
@@ -993,7 +1009,9 @@ async fn debug_concept_graph_concepts(
 async fn debug_concept_graph_concept_detail(
     Path(name): Path<String>,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let value = state
         .activation_concept_graph
         .debug_concept_detail(name)
@@ -1007,8 +1025,10 @@ async fn debug_concept_graph_concept_detail(
 
 async fn debug_concept_graph_episodes(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let items = state
         .activation_concept_graph
         .debug_episode_search(query.q, query.limit.unwrap_or(50))
@@ -1020,7 +1040,9 @@ async fn debug_concept_graph_episodes(
 async fn debug_concept_graph_episode_detail(
     Path(name): Path<String>,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let value = state
         .activation_concept_graph
         .debug_episode_detail(name)
@@ -1034,8 +1056,10 @@ async fn debug_concept_graph_episode_detail(
 
 async fn debug_concept_graph_relations(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let items = state
         .activation_concept_graph
         .debug_relation_search(query.q, query.limit.unwrap_or(80))
@@ -1046,8 +1070,10 @@ async fn debug_concept_graph_relations(
 
 async fn debug_concept_graph_queries(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<DebugConceptGraphQueriesQuery>,
 ) -> Result<Json<DebugConceptGraphQueriesResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let limit = query.limit.unwrap_or(100).max(1).min(500);
     let fetch_limit = (limit * 5).min(2000);
     let events = state
@@ -1188,8 +1214,10 @@ fn event_module_name(event: &Event) -> Option<&str> {
 
 async fn improve_trigger(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<DebugImproveTriggerRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let result =
         crate::application::trigger_ingress_api::trigger_improvement(&state, payload).await?;
     Ok(Json(result))
@@ -1197,8 +1225,10 @@ async fn improve_trigger(
 
 async fn improve_proposal(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<DebugImproveProposalRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let result =
         crate::application::improve_approval_service::propose_improvement(&state, payload).await?;
     Ok(Json(result))
@@ -1206,44 +1236,59 @@ async fn improve_proposal(
 
 async fn improve_review(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<DebugImproveReviewRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let result =
         crate::application::improve_approval_service::review_improvement(&state, payload).await?;
     Ok(Json(result))
 }
 
-async fn debug_ui() -> Html<String> {
+async fn debug_ui(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Html<String>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     const EMBEDDED: &str = include_str!("../static/debug_ui.html");
     const DEBUG_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/debug_ui.html");
     match tokio::fs::read_to_string(DEBUG_UI_PATH).await {
-        Ok(html) => Html(html),
+        Ok(html) => Ok(Html(html)),
         Err(err) => {
             println!(
                 "DEBUG_UI_READ_ERROR path={} error={} (falling back to embedded html)",
                 DEBUG_UI_PATH, err
             );
-            Html(EMBEDDED.to_string())
+            Ok(Html(EMBEDDED.to_string()))
         }
     }
 }
 
-async fn debug_monitor_ui() -> Html<String> {
+async fn debug_monitor_ui(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Html<String>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     const EMBEDDED: &str = include_str!("../static/monitor_ui.html");
     const MONITOR_UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/monitor_ui.html");
     match tokio::fs::read_to_string(MONITOR_UI_PATH).await {
-        Ok(html) => Html(html),
+        Ok(html) => Ok(Html(html)),
         Err(err) => {
             println!(
                 "MONITOR_UI_READ_ERROR path={} error={} (falling back to embedded html)",
                 MONITOR_UI_PATH, err
             );
-            Html(EMBEDDED.to_string())
+            Ok(Html(EMBEDDED.to_string()))
         }
     }
 }
 
-async fn debug_style(Path(name): Path<String>) -> Result<impl IntoResponse, (StatusCode, String)> {
+async fn debug_style(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     let (disk_path, embedded) = match name.as_str() {
         "ui-tokens.css" => (
             concat!(env!("CARGO_MANIFEST_DIR"), "/static/styles/ui-tokens.css"),
@@ -1268,17 +1313,21 @@ async fn debug_style(Path(name): Path<String>) -> Result<impl IntoResponse, (Sta
     Ok(([(CONTENT_TYPE, "text/css; charset=utf-8")], css))
 }
 
-async fn debug_concept_graph_ui() -> Html<String> {
+async fn debug_concept_graph_ui(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Html<String>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
     const EMBEDDED: &str = include_str!("../static/concept_graph_ui.html");
     const UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/concept_graph_ui.html");
     match tokio::fs::read_to_string(UI_PATH).await {
-        Ok(html) => Html(html),
+        Ok(html) => Ok(Html(html)),
         Err(err) => {
             println!(
                 "CONCEPT_GRAPH_UI_READ_ERROR path={} error={} (falling back to embedded html)",
                 UI_PATH, err
             );
-            Html(EMBEDDED.to_string())
+            Ok(Html(EMBEDDED.to_string()))
         }
     }
 }
