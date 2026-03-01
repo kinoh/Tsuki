@@ -357,7 +357,7 @@ fn schedule_upsert_schema() -> Value {
             {
               "type": "object",
               "properties": {
-                "kind": { "const": "once" },
+                "kind": { "type": "string", "const": "once" },
                 "at": { "type": "string" }
               },
               "required": ["kind", "at"],
@@ -366,7 +366,7 @@ fn schedule_upsert_schema() -> Value {
             {
               "type": "object",
               "properties": {
-                "kind": { "const": "daily" },
+                "kind": { "type": "string", "const": "daily" },
                 "at": { "type": "string" }
               },
               "required": ["kind", "at"],
@@ -375,7 +375,7 @@ fn schedule_upsert_schema() -> Value {
             {
               "type": "object",
               "properties": {
-                "kind": { "const": "weekly" },
+                "kind": { "type": "string", "const": "weekly" },
                 "weekdays": { "type": "array", "items": { "type": "integer" }, "minItems": 1 },
                 "at": { "type": "string" }
               },
@@ -385,7 +385,7 @@ fn schedule_upsert_schema() -> Value {
             {
               "type": "object",
               "properties": {
-                "kind": { "const": "monthly" },
+                "kind": { "type": "string", "const": "monthly" },
                 "day": { "type": "integer", "minimum": 1, "maximum": 31 },
                 "at": { "type": "string" }
               },
@@ -395,7 +395,7 @@ fn schedule_upsert_schema() -> Value {
             {
               "type": "object",
               "properties": {
-                "kind": { "const": "interval" },
+                "kind": { "type": "string", "const": "interval" },
                 "seconds": { "type": "integer", "minimum": 1 }
               },
               "required": ["kind", "seconds"],
@@ -407,7 +407,7 @@ fn schedule_upsert_schema() -> Value {
         "action": {
           "type": "object",
           "properties": {
-            "kind": { "const": "emit_event" },
+            "kind": { "type": "string", "const": "emit_event" },
             "event": { "type": "string" },
             "payload": { "type": "object" }
           },
