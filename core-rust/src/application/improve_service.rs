@@ -54,6 +54,8 @@ struct TriggerProcessingPlan {
     #[serde(default)]
     concept_upserts: Vec<String>,
     #[serde(default)]
+    episode_additions: Vec<EpisodeAdditionPlan>,
+    #[serde(default)]
     relation_additions: Vec<RelationAdditionPlan>,
     #[serde(default)]
     proposal: Option<TriggerProposalPlan>,
@@ -71,6 +73,13 @@ struct RelationAdditionPlan {
     from: String,
     to: String,
     relation_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EpisodeAdditionPlan {
+    summary: String,
+    #[serde(default)]
+    concepts: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -365,6 +374,32 @@ async fn run_module_worker(
             }
             Err(err) => issues.push(TriggerWorkerIssue {
                 code: "CONCEPT_UPSERT_FAILED",
+                detail: err,
+            }),
+        }
+    }
+
+    for episode in plan.episode_additions {
+        let summary = episode.summary.trim().to_string();
+        let concepts = episode
+            .concepts
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        if summary.is_empty() || concepts.is_empty() {
+            continue;
+        }
+        match state
+            .activation_concept_graph
+            .episode_add(summary, concepts)
+            .await
+        {
+            Ok(_) => {
+                concept_graph_updated = true;
+            }
+            Err(err) => issues.push(TriggerWorkerIssue {
+                code: "EPISODE_ADD_FAILED",
                 detail: err,
             }),
         }
@@ -756,12 +791,14 @@ mod tests {
         let raw = r#"{
             "memory_section_update": {"target":"decision","content":"updated"},
             "concept_upserts": ["submodule:curiosity"],
+            "episode_additions": [{"summary":"星の話をした","concepts":["宇宙","雑談"]}],
             "relation_additions": [{"from":"submodule:curiosity","to":"旅行","relation_type":"EVOKES"}],
             "proposal": {"target":"router","diff_text":"@@ -1 +1 @@\n-old\n+new"}
         }"#;
         let plan = parse_trigger_processing_plan(raw).expect("must parse");
         assert!(plan.memory_section_update.is_some());
         assert_eq!(plan.concept_upserts.len(), 1);
+        assert_eq!(plan.episode_additions.len(), 1);
         assert_eq!(plan.relation_additions.len(), 1);
         assert!(plan.proposal.is_some());
     }
