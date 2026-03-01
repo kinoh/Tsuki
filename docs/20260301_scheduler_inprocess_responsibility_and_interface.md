@@ -50,7 +50,8 @@ Google Calendar integration is explicitly out of scope in this phase.
   - Runtime defaulting: `target = "all"`, `reason = "scheduled"`.
   - Why: keep authoring friction low while preserving deterministic runtime behavior.
 - Tool wire contract uses strict-schema-compatible flat fields (`action.target`, `action.reason`) and runtime normalizes them into internal action payload.
-  - Why: OpenAI strict function schema rejects nested optional object patterns used for payload-level optional keys.
+  - `action.target` and `action.reason` are nullable in the wire schema and runtime treats `null` as omitted.
+  - Why: OpenAI strict function schema requires all declared object properties to be listed in `required`.
 
 ### 3. No external `owner` field
 - Tool/config inputs must not carry free-form `owner`.
@@ -115,7 +116,7 @@ Google Calendar integration is explicitly out of scope in this phase.
 }
 ```
 
-`action.target` and `action.reason` may be omitted for `emit_event`; runtime fills defaults (`target = "all"`, `reason = "scheduled"`), then normalizes to internal action payload.
+`action.target` and `action.reason` are nullable for `emit_event`; when `null`, runtime fills defaults (`target = "all"`, `reason = "scheduled"`), then normalizes to internal action payload.
 
 ### Planned config shape
 ```toml

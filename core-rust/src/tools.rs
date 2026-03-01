@@ -439,10 +439,10 @@ fn schedule_upsert_schema() -> Value {
           "properties": {
             "kind": { "type": "string", "const": "emit_event" },
             "event": { "type": "string" },
-            "target": { "type": "string" },
-            "reason": { "type": "string" }
+            "target": { "type": ["string", "null"] },
+            "reason": { "type": ["string", "null"] }
           },
-          "required": ["kind", "event"],
+          "required": ["kind", "event", "target", "reason"],
           "additionalProperties": false
         },
         "enabled": { "type": "boolean" }
