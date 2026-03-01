@@ -51,29 +51,6 @@ use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
 use crate::state::{DbStateStore, StateStore};
 use crate::tools::{concept_graph_tools, state_tools, StateToolHandler};
 
-const DEFAULT_SELF_IMPROVEMENT_TRIGGER_INSTRUCTIONS: &str = r#"You are the self-improvement module worker.
-Read JSON input and return one JSON object only.
-Do not include markdown or explanations.
-The input includes a fixed module_target. Focus only on that module.
-Schema:
-{
-  "memory_section_update": {"target": "decision", "content": "..."} | null,
-  "concept_upserts": ["concept_name", ...],
-  "relation_additions": [{"from": "...", "to": "...", "relation_type": "is-a|part-of|evokes"}, ...],
-  "proposal": {"target": "base|router|decision|submodule:<name>", "diff_text": "unified diff text"} | null
-}
-Memory updates are only allowed for decision.
-For proposal.diff_text:
-- Output MUST be a valid unified diff only.
-- Do NOT output custom patch formats such as "*** Begin Patch".
-- Use fixed file headers exactly: "--- a/target" and "+++ b/target".
-- The most important part is at least one valid hunk header and body:
-  - @@ -<old_start>,<old_count> +<new_start>,<new_count> @@
-  - hunk lines must start with one of: ' ', '+', '-'
-- Context/removal lines in hunks must match the current target prompt text exactly.
-- Do not set proposal to null due to diff-format uncertainty; if you have a proposal, emit a syntactically valid minimal unified diff.
-If there is not enough signal, return null/empty fields instead of guessing."#;
-
 const ADMIN_SESSION_COOKIE_NAME: &str = "tsuki_admin_session";
 const ADMIN_SESSION_ABSOLUTE_TTL_SECS: i64 = 2_592_000;
 const ADMIN_SESSION_IDLE_TIMEOUT_SECS: i64 = 86_400;
@@ -101,7 +78,6 @@ pub(crate) struct AppState {
     pub(crate) api_versions: ApiVersions,
     pub(crate) prompts: Arc<RwLock<PromptOverrides>>,
     pub(crate) prompts_path: PathBuf,
-    pub(crate) self_improvement_trigger_instructions: String,
     pub(crate) router_model: String,
     pub(crate) router_instructions: String,
     pub(crate) decision_instructions: String,
@@ -163,8 +139,11 @@ struct PromptModulePayload {
 #[derive(Debug, Deserialize, Serialize)]
 struct PromptsPayload {
     base: String,
-    router: String,
+    #[serde(default)]
+    router: Option<String>,
     decision: String,
+    #[serde(default)]
+    self_improvement_trigger: Option<String>,
     submodules: Vec<PromptModulePayload>,
 }
 
@@ -364,6 +343,11 @@ async fn main() {
         "Decision",
         prompts_path.as_path(),
     );
+    required_prompt(
+        prompt_overrides.self_improvement_trigger.as_deref(),
+        "Self Improvement Trigger",
+        prompts_path.as_path(),
+    );
     let prompts = Arc::new(RwLock::new(prompt_overrides.clone()));
     let emit_event_store = event_store.clone();
     let emit_tx = tx.clone();
@@ -431,8 +415,6 @@ async fn main() {
         api_versions: load_api_versions(),
         prompts,
         prompts_path,
-        self_improvement_trigger_instructions: DEFAULT_SELF_IMPROVEMENT_TRIGGER_INSTRUCTIONS
-            .to_string(),
         router_model: config
             .llm
             .router_model
@@ -975,10 +957,18 @@ async fn debug_update_prompts(
             .await
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     }
+    let current_overrides = state.prompts.read().await.clone();
     let overrides = PromptOverrides {
         base: Some(payload.base.clone()),
-        router: Some(payload.router.clone()),
+        router: payload
+            .router
+            .clone()
+            .or_else(|| current_overrides.router.clone()),
         decision: Some(payload.decision.clone()),
+        self_improvement_trigger: payload
+            .self_improvement_trigger
+            .clone()
+            .or_else(|| current_overrides.self_improvement_trigger.clone()),
         submodules,
     };
     write_prompts(&state.prompts_path, &overrides)
@@ -1843,6 +1833,10 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
         .router
         .clone()
         .unwrap_or_else(|| state.router_instructions.clone());
+    let self_improvement_trigger = overrides
+        .self_improvement_trigger
+        .clone()
+        .unwrap_or_default();
     let module_defs = state
         .modules
         .registry
@@ -1863,8 +1857,9 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
     }
     Ok(PromptsPayload {
         base,
-        router,
+        router: Some(router),
         decision,
+        self_improvement_trigger: Some(self_improvement_trigger),
         submodules,
     })
 }

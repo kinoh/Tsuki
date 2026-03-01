@@ -232,9 +232,30 @@ async fn run_module_worker(
         "recent_event_history": recent_event_history,
     })
     .to_string();
+    let self_improvement_trigger_instructions = state
+        .prompts
+        .read()
+        .await
+        .self_improvement_trigger
+        .clone()
+        .unwrap_or_default();
+    if self_improvement_trigger_instructions.trim().is_empty() {
+        return ModuleProcessResult {
+            module_target: module_target.to_string(),
+            status: "failed",
+            memory_updated: false,
+            concept_graph_updated: false,
+            concept_ensured: None,
+            proposal_id: None,
+            error_code: Some("TRIGGER_INSTRUCTIONS_MISSING"),
+            error_detail: Some(
+                "prompts.md missing non-empty `# Self Improvement Trigger`".to_string(),
+            ),
+        };
+    }
     let adapter = ResponseApiAdapter::new(ResponseApiConfig {
         model: state.modules.runtime.model.clone(),
-        instructions: state.self_improvement_trigger_instructions.clone(),
+        instructions: self_improvement_trigger_instructions,
         temperature: state.modules.runtime.temperature,
         max_output_tokens: state.modules.runtime.max_output_tokens,
         tools: Vec::new(),

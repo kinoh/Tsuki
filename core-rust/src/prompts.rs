@@ -7,6 +7,7 @@ pub struct PromptOverrides {
     pub base: Option<String>,
     pub router: Option<String>,
     pub decision: Option<String>,
+    pub self_improvement_trigger: Option<String>,
     pub submodules: HashMap<String, String>,
 }
 
@@ -41,6 +42,10 @@ pub fn write_prompts(path: &Path, prompts: &PromptOverrides) -> Result<(), Strin
     output.push_str("```text\n");
     output.push_str(prompts.decision.as_deref().unwrap_or(""));
     output.push_str("\n```\n\n");
+    output.push_str("# Self Improvement Trigger\n\n");
+    output.push_str("```text\n");
+    output.push_str(prompts.self_improvement_trigger.as_deref().unwrap_or(""));
+    output.push_str("\n```\n\n");
     output.push_str("# Submodules\n\n");
 
     let mut ordered = BTreeMap::new();
@@ -63,6 +68,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
         Base,
         Router,
         Decision,
+        SelfImprovementTrigger,
         Submodule(String),
     }
 
@@ -81,6 +87,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
                     "# Base" => Section::Base,
                     "# Router" => Section::Router,
                     "# Decision" => Section::Decision,
+                    "# Self Improvement Trigger" => Section::SelfImprovementTrigger,
                     "# Submodules" => {
                         in_submodules = true;
                         Section::None
@@ -107,6 +114,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
                 Section::Base => overrides.base = Some(text),
                 Section::Router => overrides.router = Some(text),
                 Section::Decision => overrides.decision = Some(text),
+                Section::SelfImprovementTrigger => overrides.self_improvement_trigger = Some(text),
                 Section::Submodule(name) => {
                     overrides.submodules.insert(name.clone(), text);
                 }
@@ -151,6 +159,15 @@ fn validate_required_core_sections(prompts: &PromptOverrides) -> Result<(), Stri
         .is_none()
     {
         missing.push("Decision".to_string());
+    }
+    if prompts
+        .self_improvement_trigger
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        missing.push("Self Improvement Trigger".to_string());
     }
     if missing.is_empty() {
         return Ok(());
@@ -206,6 +223,7 @@ mod tests {
             base: Some("base without memory section".to_string()),
             router: Some("router without memory section".to_string()),
             decision: Some("## Memory\ndecision".to_string()),
+            self_improvement_trigger: Some("trigger worker instructions".to_string()),
             submodules: [(
                 "curiosity".to_string(),
                 "submodule without memory section".to_string(),
@@ -222,6 +240,7 @@ mod tests {
             base: Some("base without memory section".to_string()),
             router: Some("router without memory section".to_string()),
             decision: Some("decision without memory section".to_string()),
+            self_improvement_trigger: Some("trigger worker instructions".to_string()),
             submodules: [(
                 "curiosity".to_string(),
                 "submodule without memory section".to_string(),

@@ -244,6 +244,10 @@ mod tests {
         merge_value(&mut base, &overlay, "").expect("merge should succeed");
         let rendered = toml::to_string_pretty(&base).expect("render should succeed");
         assert!(rendered.contains("tags = [\"x\"]"), "rendered={}", rendered);
-        assert!(rendered.contains("enabled = false"), "rendered={}", rendered);
+        assert!(
+            rendered.contains("enabled = false"),
+            "rendered={}",
+            rendered
+        );
     }
 }
