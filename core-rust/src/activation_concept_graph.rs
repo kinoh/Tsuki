@@ -371,6 +371,31 @@ fn tensor_view_to_f32_vec(view: &TensorView<'_>) -> Result<Vec<f32>, String> {
         .collect())
 }
 
+fn normalize_index_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn normalize_scalar_kind(value: &str) -> Result<&'static str, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "f16" => Ok("f16"),
+        "f32" => Ok("f32"),
+        other => Err(format!(
+            "invalid scalar kind '{}': expected f16 or f32",
+            other
+        )),
+    }
+}
+
 pub(crate) struct ActivationConceptGraphStore {
     graph: Arc<Graph>,
     arousal_tau_ms: f64,
@@ -529,21 +554,19 @@ impl ActivationConceptGraphStore {
         if has_index {
             return Ok(());
         }
+        let index_name = normalize_index_name(config.vector_index_name.as_str())
+            .ok_or_else(|| format!("invalid vector index name: {}", config.vector_index_name))?;
+        let scalar_kind = normalize_scalar_kind(config.vector_index_scalar_kind.as_str())?;
         let cypher = format!(
-            "CREATE VECTOR INDEX {} ON :Concept(embedding) WITH CONFIG {{\"dimension\": $dimension, \"capacity\": $capacity, \"metric\": \"cos\", \"resize_coefficient\": $resize_coefficient, \"scalar_kind\": $scalar_kind}};",
-            config.vector_index_name
+            "CREATE VECTOR INDEX {index_name} ON :Concept(embedding) WITH CONFIG {{\"dimension\": {dimension}, \"capacity\": {capacity}, \"metric\": \"cos\", \"resize_coefficient\": {resize_coefficient}, \"scalar_kind\": \"{scalar_kind}\"}};",
+            index_name = index_name,
+            dimension = dimension,
+            capacity = config.vector_index_capacity,
+            resize_coefficient = config.vector_index_resize_coefficient,
+            scalar_kind = scalar_kind,
         );
         let mut stream = graph
-            .execute(
-                query(cypher.as_str())
-                    .param("dimension", dimension as i64)
-                    .param("capacity", config.vector_index_capacity as i64)
-                    .param(
-                        "resize_coefficient",
-                        config.vector_index_resize_coefficient as i64,
-                    )
-                    .param("scalar_kind", config.vector_index_scalar_kind.clone()),
-            )
+            .execute(query(cypher.as_str()))
             .await
             .map_err(|err| format!("CREATE VECTOR INDEX failed: {}", err))?;
         let _ = stream.next().await;
