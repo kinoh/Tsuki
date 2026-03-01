@@ -31,19 +31,6 @@ cd core-rust
 WEB_AUTH_TOKEN=test-token WS_URL=ws://localhost:2953/ cargo run --example ws_client
 ```
 
-## Scenario tests
-Manual E2E runner and scenario client live under `tests/` and `examples/`.
-```
-cd core-rust
-cargo run --example test_runner -- tests/client/scenarios/example.yaml
-```
-
-Connect to an existing server:
-```
-cd core-rust
-cargo run --example test_runner -- --connect tests/client/scenarios/example.yaml
-```
-
 ## LLM-driven integration test assets
 - Integration-test assets are isolated under `tests/integration/`.
 - Use task orchestration from `core-rust/Taskfile.yaml`.
@@ -51,7 +38,7 @@ cargo run --example test_runner -- --connect tests/client/scenarios/example.yaml
 - Memgraph restore policy for integration setup uses latest snapshot (`integration/memgraph/restore/latest`).
 - Harness entrypoint: `cargo run --example integration_harness -- --help`.
 - Full run example:
-  - `task -t core-rust/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/example.yaml --run-count 1`
+  - `task -t core-rust/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/chitchat.yaml --run-count 1`
 
 First message is auth: `USER_NAME:WEB_AUTH_TOKEN`.
 After auth, send JSON like:
