@@ -49,8 +49,8 @@ This directory contains the rebuilt integration test assets for `core-rust`.
   - `steps[].max_turns` (optional, defaults to runner `execution.max_turns`)
   - `steps[].kind: emit_event`
   - `steps[].event.type: trigger` (currently only supported event type)
-  - `steps[].event.target` (optional, default `all`)
-  - `steps[].event.reason` (optional)
+  - `steps[].event.event` (required event tag name)
+  - `steps[].event.payload` (optional JSON object)
   - `steps[].wait_for.tags_any` (optional, defaults to self-improvement processed tags)
   - `steps[].wait_for.timeout_ms` (optional, default `15000`)
 - Conversation completion token is fixed to `__TEST_DONE__`.

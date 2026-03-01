@@ -268,11 +268,15 @@ struct DebugConceptGraphQueriesResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct DebugImproveTriggerRequest {
+pub(crate) struct DebugTriggerRequest {
+    pub(crate) event: String,
     #[serde(default)]
-    pub(crate) target: Option<String>,
-    #[serde(default)]
-    pub(crate) reason: Option<String>,
+    pub(crate) payload: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DebugTriggerResponse {
+    pub(crate) event_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1500,8 +1504,8 @@ fn event_module_name(event: &Event) -> Option<&str> {
 async fn improve_trigger(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<DebugImproveTriggerRequest>,
-) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
+    Json(payload): Json<DebugTriggerRequest>,
+) -> Result<Json<DebugTriggerResponse>, (StatusCode, String)> {
     verify_http_auth(&headers, &state.auth_token)?;
     let result =
         crate::application::trigger_ingress_api::trigger_improvement(&state, payload).await?;
@@ -1845,10 +1849,7 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
         .router
         .clone()
         .unwrap_or_else(|| state.router_instructions.clone());
-    let self_improvement = overrides
-        .self_improvement
-        .clone()
-        .unwrap_or_default();
+    let self_improvement = overrides.self_improvement.clone().unwrap_or_default();
     let module_defs = state
         .modules
         .registry

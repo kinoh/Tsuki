@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 
 use crate::application::execution_service::{
@@ -9,7 +9,6 @@ use crate::application::execution_service::{
 };
 use crate::application::history_service::{is_decision_event, is_user_input_event, latest_events};
 use crate::application::router_service::run_router;
-use crate::clock::now_iso8601;
 use crate::event::build_event;
 use crate::{record_event, AppState, DebugRunRequest, DebugRunResponse};
 
@@ -35,14 +34,14 @@ struct InputMessage {
     #[serde(default)]
     text: String,
     #[serde(default)]
-    target: Option<String>,
+    event: Option<String>,
     #[serde(default)]
-    reason: Option<String>,
+    payload: Option<Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum ParsedIngress {
-    Trigger { target: String, reason: String },
+    Trigger { event: String, payload: Value },
     Input { kind: String, text: String },
 }
 
@@ -169,17 +168,8 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
     };
 
     match ingress {
-        ParsedIngress::Trigger { target, reason } => {
-            let trigger_event = build_event(
-                "system",
-                "text",
-                json!({
-                    "target": target,
-                    "reason": reason,
-                    "created_at": now_iso8601(),
-                }),
-                vec!["self_improvement.triggered".to_string()],
-            );
+        ParsedIngress::Trigger { event, payload } => {
+            let trigger_event = build_event("system", "text", payload, vec![event]);
             record_event(state, trigger_event).await;
             return Err(());
         }
@@ -213,21 +203,22 @@ fn parse_input_message(raw: &str) -> Result<ParsedIngress, &'static str> {
     };
 
     if kind == "trigger" {
-        let target = input
-            .target
+        let event = input
+            .event
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or("all")
-            .to_string();
-        let reason = input
-            .reason
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("websocket trigger")
-            .to_string();
-        return Ok(ParsedIngress::Trigger { target, reason });
+            .map(str::to_string)
+            .unwrap_or_default();
+        if event.is_empty() {
+            return Err("trigger event is required");
+        }
+        return Ok(ParsedIngress::Trigger {
+            event,
+            payload: input
+                .payload
+                .unwrap_or_else(|| Value::Object(Default::default())),
+        });
     }
 
     if kind != "message" && kind != "sensory" {
@@ -305,6 +296,7 @@ fn should_append_debug_input_for_reuse_open(
 #[cfg(test)]
 mod tests {
     use super::{parse_input_message, ParsedIngress};
+    use serde_json::json;
 
     #[test]
     fn parse_input_accepts_default_message_kind() {
@@ -335,6 +327,28 @@ mod tests {
     fn parse_input_rejects_unknown_kind() {
         let err = parse_input_message(r#"{"type":"unknown","text":"x"}"#).expect_err("must fail");
         assert_eq!(err, "invalid input type");
+    }
+
+    #[test]
+    fn parse_input_accepts_trigger_event() {
+        let parsed = parse_input_message(
+            r#"{"type":"trigger","event":"self_improvement.run","payload":{"target":"router"}}"#,
+        )
+        .expect("must parse");
+        assert_eq!(
+            parsed,
+            ParsedIngress::Trigger {
+                event: "self_improvement.run".to_string(),
+                payload: json!({"target":"router"}),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_input_rejects_trigger_without_event() {
+        let err = parse_input_message(r#"{"type":"trigger","payload":{"target":"router"}}"#)
+            .expect_err("must fail");
+        assert_eq!(err, "trigger event is required");
     }
 
     #[test]

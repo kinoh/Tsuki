@@ -21,9 +21,9 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 - Optional debug observability (for example `debug,llm.raw`) can be emitted separately and must not be treated as contract events.
 
 ### Module responsibilities
-- `trigger_ingress_api` (`/triggers`): emits `self_improvement.triggered` only.
+- `trigger_ingress_api` (`/triggers`): emits the requested trigger event tag from ingress payload (`event` + `payload`).
 - `improve_service` (trigger consumer and LLM/tool execution path):
-  - consumes `self_improvement.triggered` from the in-process event stream.
+  - consumes `self_improvement.run` from the in-process event stream.
   - emits `self_improvement.module_processed` once per resolved module target.
   - emits `self_improvement.trigger_processed` once as the aggregate result (debug-only tag attached to keep it out of prompt history).
   - `self_improvement.trigger_processed` payload includes:
@@ -43,7 +43,7 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
 
 ## Implementation Follow-up (2026-02-22)
 - Trigger runtime execution now lives in `core-rust/src/application/improve_service.rs` and starts from an event consumer (`start_trigger_consumer`).
-- `trigger_ingress_api` is responsible only for writing `self_improvement.triggered`; it does not start execution directly.
+- `trigger_ingress_api` is responsible only for writing the requested trigger event; it does not start execution directly.
 - Proposal/review/apply logic and prompt-diff mutation rules live in `core-rust/src/application/improve_approval_service.rs`.
 - Submodule concept existence is now guaranteed in module-worker post-LLM execution:
   - when `module_target` is `submodule:<name>`, runtime always runs `concept_upsert("submodule:<name>")` before applying plan actions.
@@ -53,10 +53,10 @@ The latest prompt-diff schema requires auditable proposal/review/apply events an
   - Policy: for self-improvement worker prompt, runtime reads configured text directly instead of constructing defaults in code.
 - Self-improvement worker input now includes `recent_event_history` in the same text format used by normal module execution (`ts | role | message`):
   - Why: scheduled automatic runs should rely on runtime event history (including user reactions) as first-class signal.
-- Trigger request contract was simplified to `target` + `reason` only:
-  - Why: remove manual-hint semantics (`feedback_refs`) from the operational trigger surface.
-- WebSocket input now supports trigger ingress with `{"type":"trigger","target":"...","reason":"..."}`:
-  - Why: debug/integration flows can request the same trigger event path without introducing scenario-only action DSL.
+- Trigger ingress contract is `event` + `payload`:
+  - Why: keep operational ingress domain-neutral and let each domain own its event payload schema.
+- WebSocket input now supports trigger ingress with `{"type":"trigger","event":"...","payload":{...}}`:
+  - Why: debug/integration flows can request generic trigger events without binding ingress schema to self-improvement-only fields.
 
 ## Why
 - Operational endpoints remove unnecessary debug-path coupling for this flow.

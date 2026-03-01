@@ -110,10 +110,9 @@ enum ScenarioStep {
 struct EmitEventPayload {
     #[serde(rename = "type")]
     kind: String,
+    event: String,
     #[serde(default)]
-    target: Option<String>,
-    #[serde(default)]
-    reason: Option<String>,
+    payload: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -562,6 +561,12 @@ fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
                 if !event.kind.eq_ignore_ascii_case("trigger") {
                     return Err(format!(
                         "steps[{}] emit_event supports only event.type='trigger' currently",
+                        index
+                    ));
+                }
+                if event.event.trim().is_empty() {
+                    return Err(format!(
+                        "steps[{}] emit_event event.event is required",
                         index
                     ));
                 }
@@ -1351,6 +1356,7 @@ async fn run_emit_event_step(
     };
     wait_for_emit_event_completion_ws(
         ws_stream,
+        step.event.event.trim(),
         &step.wait_for_tags_any,
         timeout_ms,
         step_index,
@@ -1428,28 +1434,24 @@ fn emit_event_payload_json(event: &EmitEventPayload) -> Result<String, String> {
             event.kind
         ));
     }
-    let target = event
-        .target
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("all");
-    let reason = event
-        .reason
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("integration scenario trigger");
+    let event_name = event.event.trim();
+    if event_name.is_empty() {
+        return Err("emit_event event.event is required".to_string());
+    }
     Ok(json!({
         "type": "trigger",
-        "target": target,
-        "reason": reason,
+        "event": event_name,
+        "payload": event
+            .payload
+            .clone()
+            .unwrap_or_else(|| Value::Object(Default::default())),
     })
     .to_string())
 }
 
 async fn wait_for_emit_event_completion_ws(
     ws_stream: &mut WsStream,
+    emitted_event_tag: &str,
     tags_any: &[String],
     timeout_ms: u64,
     step_index: usize,
@@ -1487,9 +1489,7 @@ async fn wait_for_emit_event_completion_ws(
                 let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
                 maybe_record_runtime_event(&parsed, observed_event_ids, observed_events);
 
-                if trigger_event_id.is_none()
-                    && has_event_tag(&parsed, "self_improvement.triggered")
-                {
+                if trigger_event_id.is_none() && has_event_tag(&parsed, emitted_event_tag) {
                     trigger_event_id = extract_event_id(&parsed);
                 }
 
@@ -2033,18 +2033,11 @@ fn scenario_instructions_for_judge(scenario: &Scenario) -> String {
                 ));
             }
             ScenarioStep::EmitEvent { event, wait_for } => {
-                let target = event
-                    .target
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or("all");
-                let reason = event
-                    .reason
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or("integration scenario trigger");
+                let payload = event
+                    .payload
+                    .as_ref()
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "{}".to_string());
                 let timeout_ms = wait_for
                     .as_ref()
                     .and_then(|spec| spec.timeout_ms)
@@ -2055,11 +2048,11 @@ fn scenario_instructions_for_judge(scenario: &Scenario) -> String {
                     .filter(|text| !text.trim().is_empty())
                     .unwrap_or_else(|| DEFAULT_TRIGGER_WAIT_TAGS.join(","));
                 lines.push(format!(
-                    "{}. emit_event type={} target={} reason={} wait_for_tags_any={} wait_timeout_ms={}",
+                    "{}. emit_event type={} event={} payload={} wait_for_tags_any={} wait_timeout_ms={}",
                     index + 1,
                     event.kind,
-                    target,
-                    reason,
+                    event.event.trim(),
+                    payload,
                     tags_text,
                     timeout_ms
                 ));

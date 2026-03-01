@@ -35,7 +35,7 @@ pub(crate) fn start_trigger_consumer(state: AppState) {
                 .meta
                 .tags
                 .iter()
-                .any(|tag| tag == "self_improvement.triggered")
+                .any(|tag| tag == "self_improvement.run")
             {
                 continue;
             }

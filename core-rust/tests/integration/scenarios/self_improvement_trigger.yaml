@@ -16,8 +16,10 @@ steps:
   - kind: emit_event
     event:
       type: trigger
-      target: all
-      reason: integration scenario fixed trigger
+      event: self_improvement.run
+      payload:
+        target: all
+        reason: integration scenario fixed trigger
     wait_for:
       tags_any:
         - self_improvement.module_processed

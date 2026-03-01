@@ -562,6 +562,10 @@
 
         <div class="control-section" id="improveSection">
           <h2>Self-Improvement</h2>
+          <label for="improveTriggerEvent">Trigger Event</label>
+          <input id="improveTriggerEvent" value="self_improvement.run" />
+          <label for="improveTriggerPayload">Trigger Payload (JSON)</label>
+          <textarea id="improveTriggerPayload" placeholder='{"target":"all","reason":"manual trigger"}'></textarea>
           <label for="improveTarget">Target</label>
           <input id="improveTarget" placeholder="base | router | decision | submodule:curiosity" />
           <label for="improveSectionName">Job ID</label>
@@ -604,6 +608,8 @@
       const moduleEmptyEl = document.getElementById("moduleEmpty");
       const inputSection = document.getElementById("inputSection");
       const runButtons = document.getElementById("runButtons");
+      const improveTriggerEvent = document.getElementById("improveTriggerEvent");
+      const improveTriggerPayload = document.getElementById("improveTriggerPayload");
       const improveTarget = document.getElementById("improveTarget");
       const improveSectionName = document.getElementById("improveSectionName");
       const improveReason = document.getElementById("improveReason");
@@ -1418,9 +1424,24 @@
 
       async function improveTrigger() {
         improveStatus.textContent = "Triggering...";
+        const event = (improveTriggerEvent.value || "").trim();
+        if (!event) {
+          improveStatus.textContent = "Trigger event is required.";
+          return;
+        }
+        let triggerPayload = {};
+        const rawPayload = (improveTriggerPayload.value || "").trim();
+        if (rawPayload) {
+          try {
+            triggerPayload = JSON.parse(rawPayload);
+          } catch (err) {
+            improveStatus.textContent = "Trigger payload must be valid JSON.";
+            return;
+          }
+        }
         const payload = {
-          target: (improveTarget.value || "").trim() || "manual",
-          reason: (improveReason.value || "").trim(),
+          event,
+          payload: triggerPayload,
         };
         const res = await fetch("/triggers", {
           method: "POST",
