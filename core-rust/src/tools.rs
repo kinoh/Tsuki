@@ -181,6 +181,7 @@ impl ToolHandler for StateToolHandler {
             SCHEDULE_UPSERT_TOOL => {
                 let args: ScheduleUpsertArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+                let recurrence = normalize_recurrence(args.recurrence)?;
                 if args.action.kind != "emit_event" {
                     return Err(ToolError::new(format!(
                         "invalid action.kind: expected 'emit_event', got '{}'",
@@ -200,7 +201,7 @@ impl ToolHandler for StateToolHandler {
                 }
                 let input = ScheduleUpsertInput {
                     id: args.id,
-                    recurrence: args.recurrence,
+                    recurrence,
                     timezone: args.timezone,
                     action: crate::scheduler::ScheduleAction::EmitEvent {
                         event: args.action.event,
@@ -286,10 +287,23 @@ struct RecallQueryArgs {
 #[derive(Debug, Deserialize)]
 struct ScheduleUpsertArgs {
     id: String,
-    recurrence: crate::scheduler::ScheduleRecurrence,
+    recurrence: ScheduleToolRecurrenceArgs,
     timezone: String,
     action: ScheduleToolActionArgs,
     enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScheduleToolRecurrenceArgs {
+    kind: String,
+    #[serde(default)]
+    at: Option<String>,
+    #[serde(default)]
+    weekdays: Option<Vec<u8>>,
+    #[serde(default)]
+    day: Option<u8>,
+    #[serde(default)]
+    seconds: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -326,6 +340,62 @@ fn state_search_result(results: Vec<StateRecord>) -> Value {
 
 fn to_json_string<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "{\"error\":\"serialization\"}".to_string())
+}
+
+fn normalize_recurrence(
+    value: ScheduleToolRecurrenceArgs,
+) -> Result<crate::scheduler::ScheduleRecurrence, ToolError> {
+    let kind = value.kind.trim();
+    if kind.is_empty() {
+        return Err(ToolError::new("recurrence.kind is required"));
+    }
+
+    match kind {
+        "once" => Ok(crate::scheduler::ScheduleRecurrence::Once {
+            at: required_non_empty(value.at, "recurrence.at")?,
+        }),
+        "daily" => Ok(crate::scheduler::ScheduleRecurrence::Daily {
+            at: required_non_empty(value.at, "recurrence.at")?,
+        }),
+        "weekly" => {
+            let weekdays = value
+                .weekdays
+                .ok_or_else(|| ToolError::new("recurrence.weekdays is required for weekly"))?;
+            if weekdays.is_empty() {
+                return Err(ToolError::new(
+                    "recurrence.weekdays must not be empty for weekly",
+                ));
+            }
+            Ok(crate::scheduler::ScheduleRecurrence::Weekly {
+                weekdays,
+                at: required_non_empty(value.at, "recurrence.at")?,
+            })
+        }
+        "monthly" => Ok(crate::scheduler::ScheduleRecurrence::Monthly {
+            day: value
+                .day
+                .ok_or_else(|| ToolError::new("recurrence.day is required for monthly"))?,
+            at: required_non_empty(value.at, "recurrence.at")?,
+        }),
+        "interval" => Ok(crate::scheduler::ScheduleRecurrence::Interval {
+            seconds: value
+                .seconds
+                .ok_or_else(|| ToolError::new("recurrence.seconds is required for interval"))?,
+        }),
+        _ => Err(ToolError::new(format!(
+            "invalid recurrence.kind: expected one of once|daily|weekly|monthly|interval, got '{}'",
+            kind
+        ))),
+    }
+}
+
+fn required_non_empty(value: Option<String>, field_name: &str) -> Result<String, ToolError> {
+    let raw = value.ok_or_else(|| ToolError::new(format!("{} is required", field_name)))?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(ToolError::new(format!("{} must not be empty", field_name)));
+    }
+    Ok(trimmed.to_string())
 }
 
 fn state_set_schema() -> Value {
@@ -383,55 +453,15 @@ fn schedule_upsert_schema() -> Value {
         "id": { "type": "string" },
         "recurrence": {
           "type": "object",
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "kind": { "type": "string", "const": "once" },
-                "at": { "type": "string" }
-              },
-              "required": ["kind", "at"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": { "type": "string", "const": "daily" },
-                "at": { "type": "string" }
-              },
-              "required": ["kind", "at"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": { "type": "string", "const": "weekly" },
-                "weekdays": { "type": "array", "items": { "type": "integer" }, "minItems": 1 },
-                "at": { "type": "string" }
-              },
-              "required": ["kind", "weekdays", "at"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": { "type": "string", "const": "monthly" },
-                "day": { "type": "integer", "minimum": 1, "maximum": 31 },
-                "at": { "type": "string" }
-              },
-              "required": ["kind", "day", "at"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": { "type": "string", "const": "interval" },
-                "seconds": { "type": "integer", "minimum": 1 }
-              },
-              "required": ["kind", "seconds"],
-              "additionalProperties": false
-            }
-          ]
+          "properties": {
+            "kind": { "type": "string" },
+            "at": { "type": ["string", "null"] },
+            "weekdays": { "type": ["array", "null"], "items": { "type": "integer" } },
+            "day": { "type": ["integer", "null"] },
+            "seconds": { "type": ["integer", "null"] }
+          },
+          "required": ["kind", "at", "weekdays", "day", "seconds"],
+          "additionalProperties": false
         },
         "timezone": { "type": "string" },
         "action": {

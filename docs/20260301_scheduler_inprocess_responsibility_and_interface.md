@@ -52,6 +52,9 @@ Google Calendar integration is explicitly out of scope in this phase.
 - Tool wire contract uses strict-schema-compatible flat fields (`action.target`, `action.reason`) and runtime normalizes them into internal action payload.
   - `action.target` and `action.reason` are nullable in the wire schema and runtime treats `null` as omitted.
   - Why: OpenAI strict function schema requires all declared object properties to be listed in `required`.
+- Tool wire contract also uses strict-schema-compatible flat recurrence fields (`recurrence.kind`, `recurrence.at`, `recurrence.weekdays`, `recurrence.day`, `recurrence.seconds`).
+  - Non-applicable recurrence fields are represented as `null` in the wire schema and normalized by runtime based on `kind`.
+  - Why: OpenAI strict function schema does not permit `oneOf` for this tool definition path.
 
 ### 3. No external `owner` field
 - Tool/config inputs must not carry free-form `owner`.
@@ -103,7 +106,10 @@ Google Calendar integration is explicitly out of scope in this phase.
   "id": "daily_self_improvement",
   "recurrence": {
     "kind": "daily",
-    "at": "04:00:00"
+    "at": "04:00:00",
+    "weekdays": null,
+    "day": null,
+    "seconds": null
   },
   "timezone": "Asia/Tokyo",
   "action": {
