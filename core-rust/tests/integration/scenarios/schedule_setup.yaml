@@ -1,0 +1,47 @@
+name: Schedule Setup
+include_debug_events: true
+
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a natural Japanese chat user.
+      Keep each turn short and conversational.
+      Do not reveal test intent.
+
+      Missions:
+      1) Ask the assistant to set a safe recurring schedule for self-improvement:
+         - id: `schedule_setup_daily`
+         - recurrence: daily
+         - time: 04:00 (Asia/Tokyo)
+         - event: `self_improvement.run`
+         - payload: `{"target":"all","reason":"scheduled_daily"}`
+      2) Ask the assistant to show the current schedule list so you can confirm what was saved.
+      3) Ask the assistant to remove `schedule_setup_daily` as cleanup.
+    max_turns: 8
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: |
+      How well the run satisfies the scenario sequence:
+      - schedule setup request
+      - schedule list confirmation
+      - cleanup removal request
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  schedule_tool_log_coverage:
+    description: |
+      Using debug `llm.raw` event payload `tool_calls`, verify all expected scheduler tools are present:
+      - `schedule_upsert`
+      - `schedule_list`
+      - `schedule_remove`
+      Score high only when all three are observable in the event stream.
+
+  schedule_contract_alignment:
+    description: |
+      Verify scheduler tool-call arguments are contract-aligned:
+      - non-cron recurrence representation (daily with explicit time/timezone)
+      - action event is `self_improvement.run`
+      - payload carries `target=all` and `reason=scheduled_daily`
+      Penalize missing or malformed contract fields.
