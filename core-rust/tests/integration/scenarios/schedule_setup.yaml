@@ -14,7 +14,7 @@ steps:
          - recurrence: daily
          - time: 04:00 (Asia/Tokyo)
          - event: `self_improvement.run`
-         - payload: `{"target":"all","reason":"scheduled_daily"}`
+         - payload: optional (`target` and `reason` may be omitted)
       2) Ask the assistant to show the current schedule list so you can confirm what was saved.
       3) Ask the assistant to remove `schedule_setup_daily` as cleanup.
     max_turns: 8
@@ -43,5 +43,5 @@ metrics_definition:
       Verify scheduler tool-call arguments are contract-aligned:
       - non-cron recurrence representation (daily with explicit time/timezone)
       - action event is `self_improvement.run`
-      - payload carries `target=all` and `reason=scheduled_daily`
-      Penalize missing or malformed contract fields.
+      - payload may include `target` and `reason`; omission is acceptable and defaults are allowed
+      Penalize malformed contract fields.

@@ -54,7 +54,11 @@ pub enum ScheduleRecurrence {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScheduleAction {
-    EmitEvent { event: String, payload: Value },
+    EmitEvent {
+        event: String,
+        #[serde(default = "default_emit_event_payload")]
+        payload: Value,
+    },
 }
 
 #[derive(Clone)]
@@ -288,6 +292,13 @@ impl ScheduleAction {
         }
         Ok(())
     }
+}
+
+fn default_emit_event_payload() -> Value {
+    serde_json::json!({
+        "target": "all",
+        "reason": "scheduled"
+    })
 }
 
 fn now_utc() -> OffsetDateTime {

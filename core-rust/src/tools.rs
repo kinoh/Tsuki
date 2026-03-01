@@ -415,11 +415,10 @@ fn schedule_upsert_schema() -> Value {
                 "target": { "type": "string" },
                 "reason": { "type": "string" }
               },
-              "required": ["target", "reason"],
               "additionalProperties": false
             }
           },
-          "required": ["kind", "event", "payload"],
+          "required": ["kind", "event"],
           "additionalProperties": false
         },
         "enabled": { "type": "boolean" }

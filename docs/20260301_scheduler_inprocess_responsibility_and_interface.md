@@ -46,6 +46,9 @@ Google Calendar integration is explicitly out of scope in this phase.
   - `schedule_remove`
 - Do not expose `enable/disable` as separate tools.
   - Why: `enabled` is part of the `schedule_upsert` payload.
+- `schedule_upsert.action.payload` allows omitted `target` and `reason`.
+  - Runtime defaulting: `target = "all"`, `reason = "scheduled"`.
+  - Why: keep authoring friction low while preserving deterministic runtime behavior.
 
 ### 3. No external `owner` field
 - Tool/config inputs must not carry free-form `owner`.
@@ -111,6 +114,8 @@ Google Calendar integration is explicitly out of scope in this phase.
   "enabled": true
 }
 ```
+
+`action.payload` may be omitted for `emit_event`; runtime fills defaults (`target = "all"`, `reason = "scheduled"`).
 
 ### Planned config shape
 ```toml
