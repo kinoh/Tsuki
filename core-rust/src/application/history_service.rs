@@ -2,7 +2,8 @@ use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
-use crate::event::{build_event, Event};
+use crate::event::contracts::role_text_output;
+use crate::event::Event;
 use crate::AppState;
 
 pub(crate) async fn format_event_history(
@@ -133,11 +134,11 @@ fn apply_submodule_output_overrides(events: &mut Vec<Event>, overrides: &HashMap
     let mut synthetic = missing
         .into_iter()
         .map(|(name, text)| {
-            build_event(
+            role_text_output(
                 format!("submodule:{}", name).as_str(),
-                "text",
-                json!({ "text": text }),
-                vec!["submodule".to_string()],
+                "submodule",
+                text.to_string(),
+                false,
             )
         })
         .collect::<Vec<_>>();
@@ -244,28 +245,19 @@ fn is_observability_event(event: &Event) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::contracts::{decision_text, input_text};
 
     #[test]
     fn apply_submodule_output_overrides_replaces_and_inserts() {
         let mut events = vec![
-            build_event(
-                "user",
-                "text",
-                json!({ "text": "hello" }),
-                vec!["input".to_string(), "type:message".to_string()],
-            ),
-            build_event(
+            input_text("user", "message", "hello"),
+            role_text_output(
                 "submodule:curiosity",
-                "text",
-                json!({ "text": "old curiosity" }),
-                vec!["submodule".to_string()],
+                "submodule",
+                "old curiosity".to_string(),
+                false,
             ),
-            build_event(
-                "decision",
-                "text",
-                json!({ "text": "decision=respond reason=test" }),
-                vec!["decision".to_string()],
-            ),
+            decision_text("decision=respond reason=test".to_string(), false),
         ];
         let overrides = HashMap::from([
             ("curiosity".to_string(), "new curiosity".to_string()),

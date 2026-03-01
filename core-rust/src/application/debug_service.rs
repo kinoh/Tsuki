@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashSet;
 
 use crate::application::execution_service::{
@@ -9,7 +9,7 @@ use crate::application::execution_service::{
 };
 use crate::application::history_service::{is_decision_event, is_user_input_event, latest_events};
 use crate::application::router_service::run_router;
-use crate::event::build_event;
+use crate::event::contracts::{input_text as emit_input_text, named_trigger, parse_error};
 use crate::{record_event, AppState, DebugRunRequest, DebugRunResponse};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,12 +156,7 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
     let ingress = match parse_input_message(raw) {
         Ok(value) => value,
         Err(message) => {
-            let event = build_event(
-                "system",
-                "text",
-                json!({ "text": message }),
-                vec!["error".to_string()],
-            );
+            let event = parse_error(message);
             record_event(state, event).await;
             return Err(());
         }
@@ -169,7 +164,7 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
 
     match ingress {
         ParsedIngress::Trigger { event, payload } => {
-            let trigger_event = build_event("system", "text", payload, vec![event]);
+            let trigger_event = named_trigger("system", &event, payload);
             record_event(state, trigger_event).await;
             return Err(());
         }
@@ -179,12 +174,7 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
             } else {
                 "user"
             };
-            let input_event = build_event(
-                source,
-                "text",
-                json!({ "text": text }),
-                vec!["input".to_string(), format!("type:{}", kind)],
-            );
+            let input_event = emit_input_text(source, &kind, &text);
             record_event(state, input_event.clone()).await;
 
             Ok(input_event
@@ -262,12 +252,7 @@ async fn maybe_append_debug_input_event(
     if !should_append {
         return;
     }
-    let event = build_event(
-        "user",
-        "text",
-        json!({ "text": normalized_input }),
-        vec!["input".to_string(), "type:message".to_string()],
-    );
+    let event = emit_input_text("user", "message", normalized_input);
     record_event(state, event).await;
 }
 

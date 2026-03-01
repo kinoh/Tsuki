@@ -206,14 +206,9 @@ impl Db {
             let tags_json: String = row.get(5)?;
             let payload: Value = serde_json::from_str(&payload_json)?;
             let tags: Vec<String> = serde_json::from_str(&tags_json)?;
-            events.push(Event {
-                event_id,
-                ts,
-                source,
-                modality,
-                payload,
-                meta: crate::event::EventMeta { tags },
-            });
+            events.push(crate::event::rehydrate_event(
+                event_id, ts, source, modality, payload, tags,
+            ));
         }
         events.reverse();
         Ok(events)
@@ -281,14 +276,9 @@ impl Db {
             let tags_json: String = row.get(5)?;
             let payload: Value = serde_json::from_str(&payload_json)?;
             let tags: Vec<String> = serde_json::from_str(&tags_json)?;
-            events.push(Event {
-                event_id,
-                ts,
-                source,
-                modality,
-                payload,
-                meta: crate::event::EventMeta { tags },
-            });
+            events.push(crate::event::rehydrate_event(
+                event_id, ts, source, modality, payload, tags,
+            ));
         }
         Ok(events)
     }
@@ -310,14 +300,9 @@ impl Db {
             let tags_json: String = row.get(5)?;
             let payload: Value = serde_json::from_str(&payload_json)?;
             let tags: Vec<String> = serde_json::from_str(&tags_json)?;
-            return Ok(Some(Event {
-                event_id,
-                ts,
-                source,
-                modality,
-                payload,
-                meta: crate::event::EventMeta { tags },
-            }));
+            return Ok(Some(crate::event::rehydrate_event(
+                event_id, ts, source, modality, payload, tags,
+            )));
         }
         Ok(None)
     }

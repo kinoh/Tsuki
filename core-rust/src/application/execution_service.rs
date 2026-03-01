@@ -10,7 +10,7 @@ use crate::application::history_service::{format_decision_debug_history, format_
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
 };
-use crate::event::build_event;
+use crate::event::contracts::{decision_text, llm_error, llm_raw, role_text_output};
 use crate::llm::{
     LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError, ToolHandler,
 };
@@ -138,12 +138,7 @@ pub(crate) async fn run_decision(
                 error_detail
             );
             let error_text = format!("error: {}", error_detail);
-            let error_event = build_event(
-                "decision",
-                "text",
-                json!({ "text": error_text }),
-                vec!["decision".to_string(), "error".to_string()],
-            );
+            let error_event = decision_text(error_text, true);
             record_event(state, error_event).await;
             emit_debug_module_error_event(state, "decision", "runtime", &context, &error_detail)
                 .await;
@@ -157,11 +152,9 @@ pub(crate) async fn run_decision(
 
     let parsed = parse_decision(&response.text);
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
-    let decision_event = build_event(
-        "decision",
-        "text",
-        json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
-        vec!["decision".to_string()],
+    let decision_event = decision_text(
+        format!("decision={} reason={}", parsed.decision, reason_text),
+        false,
     );
     record_event(state, decision_event).await;
     emit_debug_module_events(state, "decision", "runtime", &context, &response).await;
@@ -258,11 +251,9 @@ pub(crate) async fn run_decision_debug(
     };
     let parsed = parse_decision(&response.text);
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
-    let decision_event = build_event(
-        "decision",
-        "text",
-        json!({ "text": format!("decision={} reason={}", parsed.decision, reason_text) }),
-        vec!["decision".to_string()],
+    let decision_event = decision_text(
+        format!("decision={} reason={}", parsed.decision, reason_text),
+        false,
     );
     record_event(state, decision_event).await;
     emit_debug_module_events(state, "decision", "module_only", &context, &response).await;
@@ -378,11 +369,11 @@ pub(crate) async fn run_submodule_debug(
             return Err((StatusCode::INTERNAL_SERVER_ERROR, error));
         }
     };
-    let response_event = build_event(
+    let response_event = role_text_output(
         format!("submodule:{}", name).as_str(),
-        "text",
-        json!({ "text": response.text.clone() }),
-        vec!["submodule".to_string()],
+        "submodule",
+        response.text.clone(),
+        false,
     );
     record_event(state, response_event).await;
     emit_debug_module_events(state, name, "module_only", &context, &response).await;
@@ -601,9 +592,8 @@ async fn emit_debug_module_events(
     context: &str,
     response: &crate::llm::LlmResponse,
 ) {
-    let raw_event = build_event(
+    let raw_event = llm_raw(
         module_owner_source(module).as_str(),
-        "text",
         json!({
             "raw": response.raw.clone(),
             "context": context,
@@ -611,11 +601,7 @@ async fn emit_debug_module_events(
             "tool_calls": response.tool_calls.clone(),
             "mode": mode,
         }),
-        vec![
-            "debug".to_string(),
-            "llm.raw".to_string(),
-            format!("mode:{}", mode),
-        ],
+        vec![format!("mode:{}", mode)],
     );
     record_event(state, raw_event).await;
 }
@@ -627,20 +613,14 @@ async fn emit_debug_module_error_event(
     context: &str,
     error: &str,
 ) {
-    let error_event = build_event(
+    let error_event = llm_error(
         module_owner_source(module).as_str(),
-        "text",
         json!({
             "mode": mode,
             "context": context,
             "error": error,
         }),
-        vec![
-            "debug".to_string(),
-            "llm.error".to_string(),
-            "error".to_string(),
-            format!("mode:{}", mode),
-        ],
+        vec![format!("mode:{}", mode)],
     );
     record_event(state, error_event).await;
 }
@@ -670,11 +650,11 @@ async fn run_module(
         .await
     {
         Ok(response) => {
-            let response_event = build_event(
+            let response_event = role_text_output(
                 owner_source_for_role(role_tag, &name).as_str(),
-                "text",
-                json!({ "text": response.text }),
-                vec![role_tag.to_string()],
+                role_tag,
+                response.text.clone(),
+                false,
             );
             record_event(state, response_event).await;
             emit_debug_module_events(state, &name, "runtime", &context, &response).await;
@@ -685,11 +665,11 @@ async fn run_module(
         Err(err) => {
             let error_detail = err.to_string();
             let error_text = format!("error: {}", error_detail);
-            let error_event = build_event(
+            let error_event = role_text_output(
                 owner_source_for_role(role_tag, &name).as_str(),
-                "text",
-                json!({ "text": error_text }),
-                vec![role_tag.to_string(), "error".to_string()],
+                role_tag,
+                error_text,
+                true,
             );
             record_event(state, error_event).await;
             emit_debug_module_error_event(state, &name, "runtime", &context, &error_detail).await;

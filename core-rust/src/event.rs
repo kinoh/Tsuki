@@ -3,22 +3,26 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+pub(crate) mod contracts;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
-    pub event_id: String,
-    pub ts: String,
-    pub source: String,
-    pub modality: String,
-    pub payload: Value,
-    pub meta: EventMeta,
+    pub(crate) event_id: String,
+    pub(crate) ts: String,
+    pub(crate) source: String,
+    pub(crate) modality: String,
+    pub(crate) payload: Value,
+    pub(crate) meta: EventMeta,
+    #[serde(skip)]
+    _sealed: (),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventMeta {
-    pub tags: Vec<String>,
+    pub(crate) tags: Vec<String>,
 }
 
-pub fn build_event(source: &str, modality: &str, payload: Value, tags: Vec<String>) -> Event {
+fn build_event(source: &str, modality: &str, payload: Value, tags: Vec<String>) -> Event {
     Event {
         event_id: Uuid::new_v4().to_string(),
         ts: now_iso8601(),
@@ -26,5 +30,25 @@ pub fn build_event(source: &str, modality: &str, payload: Value, tags: Vec<Strin
         modality: modality.to_string(),
         payload,
         meta: EventMeta { tags },
+        _sealed: (),
+    }
+}
+
+pub(crate) fn rehydrate_event(
+    event_id: String,
+    ts: String,
+    source: String,
+    modality: String,
+    payload: Value,
+    tags: Vec<String>,
+) -> Event {
+    Event {
+        event_id,
+        ts,
+        source,
+        modality,
+        payload,
+        meta: EventMeta { tags },
+        _sealed: (),
     }
 }

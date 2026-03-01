@@ -5,7 +5,9 @@ use tokio::sync::{broadcast::error::RecvError, Semaphore};
 
 use crate::application::history_service::format_event_history;
 use crate::clock::now_iso8601;
-use crate::event::build_event;
+use crate::event::contracts::{
+    llm_raw, self_improvement_module_processed, self_improvement_trigger_processed,
+};
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::write_prompts;
@@ -645,9 +647,8 @@ async fn emit_trigger_debug_raw(
     input: &str,
     response: &crate::llm::LlmResponse,
 ) {
-    let event = build_event(
+    let event = llm_raw(
         TRIGGER_WORKER_SOURCE,
-        "text",
         json!({
             "trigger_event_id": trigger_event_id,
             "module_target": module_target,
@@ -656,11 +657,7 @@ async fn emit_trigger_debug_raw(
             "raw": response.raw,
             "tool_calls": response.tool_calls,
         }),
-        vec![
-            "debug".to_string(),
-            "llm.raw".to_string(),
-            "module:self_improvement".to_string(),
-        ],
+        vec!["module:self_improvement".to_string()],
     );
     crate::record_event(state, event).await;
 }
@@ -690,12 +687,7 @@ async fn emit_module_processed_event(
     if let Some(value) = &result.error_detail {
         payload["error_detail"] = json!(value);
     }
-    let event = build_event(
-        TRIGGER_WORKER_SOURCE,
-        "text",
-        payload,
-        vec!["self_improvement.module_processed".to_string()],
-    );
+    let event = self_improvement_module_processed(payload);
     crate::record_event(state, event).await;
 }
 
@@ -727,15 +719,7 @@ async fn emit_trigger_processed_event(
     if let Some(value) = error_detail {
         payload["error_detail"] = json!(value);
     }
-    let event = build_event(
-        TRIGGER_WORKER_SOURCE,
-        "text",
-        payload,
-        vec![
-            "self_improvement.trigger_processed".to_string(),
-            "debug".to_string(),
-        ],
-    );
+    let event = self_improvement_trigger_processed(payload);
     crate::record_event(state, event).await;
 }
 

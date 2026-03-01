@@ -2,7 +2,9 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 
 use crate::clock::now_iso8601;
-use crate::event::build_event;
+use crate::event::contracts::{
+    self_improvement_applied, self_improvement_proposed, self_improvement_reviewed,
+};
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::{write_prompts, PromptOverrides};
 use crate::{
@@ -79,20 +81,15 @@ pub(crate) async fn propose_improvement(
         .unwrap_or("manual")
         .to_string();
     let created_at = now_iso8601();
-    let mut proposal_event = build_event(
-        "system",
-        "text",
-        json!({
-            "proposal_id": "",
-            "job_id": job_id,
-            "target": target_raw,
-            "diff_text": diff_text,
-            "requires_approval": true,
-            "created_by": created_by,
-            "created_at": created_at,
-        }),
-        vec!["self_improvement.proposed".to_string()],
-    );
+    let mut proposal_event = self_improvement_proposed(json!({
+        "proposal_id": "",
+        "job_id": job_id,
+        "target": target_raw,
+        "diff_text": diff_text,
+        "requires_approval": true,
+        "created_by": created_by,
+        "created_at": created_at,
+    }));
 
     let proposal_id = proposal_event.event_id.clone();
     proposal_event.payload["proposal_id"] = json!(proposal_id);
@@ -203,20 +200,15 @@ pub(crate) async fn review_improvement(
         .unwrap_or("none")
         .to_string();
     let reviewed_at = now_iso8601();
-    let review_event = build_event(
-        "system",
-        "text",
-        json!({
-            "proposal_id": proposal_id,
-            "job_id": job_id,
-            "target": target_raw,
-            "decision": decision,
-            "reviewed_by": reviewed_by,
-            "review_reason": review_reason,
-            "reviewed_at": reviewed_at,
-        }),
-        vec!["self_improvement.reviewed".to_string()],
-    );
+    let review_event = self_improvement_reviewed(json!({
+        "proposal_id": proposal_id,
+        "job_id": job_id,
+        "target": target_raw,
+        "decision": decision,
+        "reviewed_by": reviewed_by,
+        "review_reason": review_reason,
+        "reviewed_at": reviewed_at,
+    }));
     let review_event_id = review_event.event_id.clone();
     crate::record_event(state, review_event).await;
 
@@ -236,20 +228,15 @@ pub(crate) async fn review_improvement(
         .map(|_| payload_str(&proposal_event.payload, "diff_text").unwrap_or_default())
     {
         Ok(applied_diff_text) => {
-            let apply_event = build_event(
-                "system",
-                "text",
-                json!({
-                    "proposal_id": proposal_id,
-                    "job_id": job_id,
-                    "target": target_raw,
-                    "status": "success",
-                    "applied_by": applied_by,
-                    "applied_at": applied_at,
-                    "applied_diff_text": applied_diff_text,
-                }),
-                vec!["self_improvement.applied".to_string()],
-            );
+            let apply_event = self_improvement_applied(json!({
+                "proposal_id": proposal_id,
+                "job_id": job_id,
+                "target": target_raw,
+                "status": "success",
+                "applied_by": applied_by,
+                "applied_at": applied_at,
+                "applied_diff_text": applied_diff_text,
+            }));
             let apply_event_id = apply_event.event_id.clone();
             crate::record_event(state, apply_event).await;
             Ok(DebugImproveResponse {
@@ -260,21 +247,16 @@ pub(crate) async fn review_improvement(
             })
         }
         Err(err) => {
-            let apply_event = build_event(
-                "system",
-                "text",
-                json!({
-                    "proposal_id": proposal_id,
-                    "job_id": job_id,
-                    "target": target_raw,
-                    "status": "failed",
-                    "applied_by": applied_by,
-                    "applied_at": applied_at,
-                    "error_code": "APPLY_DIFF_FAILED",
-                    "error_detail": err,
-                }),
-                vec!["self_improvement.applied".to_string()],
-            );
+            let apply_event = self_improvement_applied(json!({
+                "proposal_id": proposal_id,
+                "job_id": job_id,
+                "target": target_raw,
+                "status": "failed",
+                "applied_by": applied_by,
+                "applied_at": applied_at,
+                "error_code": "APPLY_DIFF_FAILED",
+                "error_detail": err,
+            }));
             let apply_event_id = apply_event.event_id.clone();
             crate::record_event(state, apply_event).await;
             Err((

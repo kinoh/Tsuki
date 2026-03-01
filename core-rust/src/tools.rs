@@ -1,5 +1,5 @@
 use crate::activation_concept_graph::ConceptGraphStore;
-use crate::event::build_event;
+use crate::event::contracts::{response_text, tool_observation};
 use crate::llm::{ToolError, ToolHandler};
 use crate::scheduler::{
     ScheduleStore, ScheduleUpsertInput, SCHEDULE_SCOPE_DEFAULT, SELF_IMPROVEMENT_SCHEDULE_ID,
@@ -132,23 +132,13 @@ impl StateToolHandler {
             Ok(value) => ("ok", Some(value.as_str()), None),
             Err(err) => ("error", None, Some(err.to_string())),
         };
-        let event = build_event(
-            "tooling",
-            "state",
-            json!({
-                "tool_name": tool_name,
-                "arguments": parsed_arguments,
-                "outcome": outcome,
-                "output": output,
-                "error": error,
-                "elapsed_ms": elapsed_ms,
-            }),
-            vec![
-                "observe".to_string(),
-                "tool".to_string(),
-                format!("tool:{}", tool_name),
-                format!("outcome:{}", outcome),
-            ],
+        let event = tool_observation(
+            tool_name,
+            parsed_arguments,
+            outcome,
+            output,
+            error,
+            elapsed_ms,
         );
         (self.emit_tool_observation)(event);
     }
@@ -182,12 +172,7 @@ impl StateToolHandler {
             EMIT_USER_REPLY_TOOL => {
                 let args: EmitUserReplyArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
-                let event = build_event(
-                    "assistant",
-                    "text",
-                    json!({ "text": args.text }),
-                    vec!["response".to_string()],
-                );
+                let event = response_text(args.text);
                 (self.emit_event)(event);
                 Ok("{\"ok\":true}".to_string())
             }

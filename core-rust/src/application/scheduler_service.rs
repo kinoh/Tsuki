@@ -1,6 +1,6 @@
 use crate::clock::now_iso8601;
 use crate::config::SchedulerConfig;
-use crate::event::build_event;
+use crate::event::contracts::{named_trigger, scheduler_fired, scheduler_notice};
 use crate::scheduler::{
     ScheduleAction, ScheduleStore, ScheduleUpsertInput, SCHEDULE_SCOPE_DEFAULT,
     SELF_IMPROVEMENT_SCHEDULE_ID,
@@ -166,18 +166,11 @@ async fn emit_self_improvement_event(
                 map.insert("created_by".to_string(), json!("scheduler"));
             }
 
-            let action_event = build_event(
-                "scheduler",
-                "text",
-                action_payload.clone(),
-                vec![event.to_string()],
-            );
+            let action_event = named_trigger("scheduler", event, action_payload.clone());
             record_event(state, action_event).await;
 
             let fired_at = now_iso8601();
-            let fired_event = build_event(
-                "scheduler",
-                "text",
+            let fired_event = scheduler_fired(
                 json!({
                     "schedule_id": schedule_id,
                     "scheduled_at": scheduled_at,
@@ -187,7 +180,7 @@ async fn emit_self_improvement_event(
                         "payload": action_payload,
                     }
                 }),
-                vec!["scheduler.fired".to_string(), event.to_string()],
+                event,
             );
             record_event(state, fired_event).await;
             Ok(())
@@ -206,22 +199,15 @@ async fn emit_scheduler_notice(
     scheduled_at: &str,
 ) -> Result<(), String> {
     let action_json = serde_json::to_value(action).map_err(|err| err.to_string())?;
-    let notice_event = build_event(
-        "scheduler",
-        "text",
-        json!({
-            "schedule_id": schedule_id,
-            "scheduled_at": scheduled_at,
-            "noticed_at": now_iso8601(),
-            "action": action_json,
-        }),
-        vec!["scheduler.notice".to_string()],
-    );
+    let notice_event = scheduler_notice(json!({
+        "schedule_id": schedule_id,
+        "scheduled_at": scheduled_at,
+        "noticed_at": now_iso8601(),
+        "action": action_json,
+    }));
     record_event(state, notice_event).await;
 
-    let fired_event = build_event(
-        "scheduler",
-        "text",
+    let fired_event = scheduler_fired(
         json!({
             "schedule_id": schedule_id,
             "scheduled_at": scheduled_at,
@@ -229,10 +215,7 @@ async fn emit_scheduler_notice(
             "action": action,
             "disposition": "notice_only",
         }),
-        vec![
-            "scheduler.fired".to_string(),
-            "scheduler.notice".to_string(),
-        ],
+        "scheduler.notice",
     );
     record_event(state, fired_event).await;
     Ok(())

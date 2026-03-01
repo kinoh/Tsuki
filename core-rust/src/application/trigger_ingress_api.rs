@@ -1,7 +1,7 @@
 use axum::http::StatusCode;
 use serde_json::Value;
 
-use crate::event::build_event;
+use crate::event::contracts::named_trigger;
 use crate::{AppState, DebugTriggerRequest, DebugTriggerResponse};
 
 pub(crate) async fn trigger_improvement(
@@ -13,13 +13,12 @@ pub(crate) async fn trigger_improvement(
         return Err((StatusCode::BAD_REQUEST, "event is required".to_string()));
     }
 
-    let trigger_event = build_event(
+    let trigger_event = named_trigger(
         "system",
-        "text",
+        event,
         payload
             .payload
             .unwrap_or_else(|| Value::Object(Default::default())),
-        vec![event.to_string()],
     );
     let trigger_event_id = trigger_event.event_id.clone();
     crate::record_event(state, trigger_event).await;

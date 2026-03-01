@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use crate::event::build_event;
+use crate::event::contracts::{concept_graph_query, llm_error, llm_raw, router_state};
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError};
 use crate::prompts::PromptOverrides;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
@@ -138,12 +138,9 @@ where
         soft_recommendations,
         hard_trigger_results,
     };
-    let router_event = build_event(
-        "router",
-        "state",
+    let router_event = router_state(
         serde_json::to_value(&router_output)
             .unwrap_or_else(|_| json!({ "error": "router_output_serialize_failed" })),
-        vec!["router".to_string()],
     );
     record_event(state, router_event).await;
     println!(
@@ -419,9 +416,8 @@ async fn emit_router_debug_raw(
     output_text: &str,
     tool_calls: &[crate::llm::ToolCallTrace],
 ) {
-    let event = build_event(
+    let event = llm_raw(
         "router",
-        "text",
         json!({
             "raw": raw,
             "context": context,
@@ -429,30 +425,20 @@ async fn emit_router_debug_raw(
             "tool_calls": tool_calls,
             "mode": "runtime",
         }),
-        vec![
-            "debug".to_string(),
-            "llm.raw".to_string(),
-            "mode:runtime".to_string(),
-        ],
+        vec!["mode:runtime".to_string()],
     );
     record_event(state, event).await;
 }
 
 async fn emit_router_debug_error(state: &AppState, context: &str, error: &str) {
-    let event = build_event(
+    let event = llm_error(
         "router",
-        "text",
         json!({
             "mode": "runtime",
             "context": context,
             "error": error,
         }),
-        vec![
-            "debug".to_string(),
-            "llm.error".to_string(),
-            "error".to_string(),
-            "mode:runtime".to_string(),
-        ],
+        vec!["mode:runtime".to_string()],
     );
     record_event(state, event).await;
 }
@@ -465,18 +451,13 @@ async fn emit_concept_graph_query_event(
     selected_seeds: &[String],
     active_concepts_from_concept_graph: &str,
 ) {
-    let event = build_event(
-        "router",
-        "state",
-        json!({
-            "query_terms": query_terms,
-            "limit": limit,
-            "result_concepts": candidate_concepts,
-            "selected_seeds": selected_seeds,
-            "active_concepts_from_concept_graph": active_concepts_from_concept_graph,
-        }),
-        vec!["debug".to_string(), "concept_graph.query".to_string()],
-    );
+    let event = concept_graph_query(json!({
+        "query_terms": query_terms,
+        "limit": limit,
+        "result_concepts": candidate_concepts,
+        "selected_seeds": selected_seeds,
+        "active_concepts_from_concept_graph": active_concepts_from_concept_graph,
+    }));
     record_event(state, event).await;
 }
 
