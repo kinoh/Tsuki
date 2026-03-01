@@ -54,6 +54,8 @@ struct TriggerProcessingPlan {
     #[serde(default)]
     concept_upserts: Vec<String>,
     #[serde(default)]
+    affect_updates: Vec<AffectUpdatePlan>,
+    #[serde(default)]
     episode_additions: Vec<EpisodeAdditionPlan>,
     #[serde(default)]
     relation_additions: Vec<RelationAdditionPlan>,
@@ -80,6 +82,12 @@ struct EpisodeAdditionPlan {
     summary: String,
     #[serde(default)]
     concepts: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AffectUpdatePlan {
+    target: String,
+    valence_delta: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -374,6 +382,26 @@ async fn run_module_worker(
             }
             Err(err) => issues.push(TriggerWorkerIssue {
                 code: "CONCEPT_UPSERT_FAILED",
+                detail: err,
+            }),
+        }
+    }
+
+    for update in plan.affect_updates {
+        let target = update.target.trim().to_string();
+        if target.is_empty() {
+            continue;
+        }
+        match state
+            .activation_concept_graph
+            .update_affect(target, update.valence_delta)
+            .await
+        {
+            Ok(_) => {
+                concept_graph_updated = true;
+            }
+            Err(err) => issues.push(TriggerWorkerIssue {
+                code: "AFFECT_UPDATE_FAILED",
                 detail: err,
             }),
         }
@@ -791,6 +819,7 @@ mod tests {
         let raw = r#"{
             "memory_section_update": {"target":"decision","content":"updated"},
             "concept_upserts": ["submodule:curiosity"],
+            "affect_updates": [{"target":"submodule:curiosity","valence_delta":0.2}],
             "episode_additions": [{"summary":"星の話をした","concepts":["宇宙","雑談"]}],
             "relation_additions": [{"from":"submodule:curiosity","to":"旅行","relation_type":"EVOKES"}],
             "proposal": {"target":"router","diff_text":"@@ -1 +1 @@\n-old\n+new"}
@@ -798,6 +827,7 @@ mod tests {
         let plan = parse_trigger_processing_plan(raw).expect("must parse");
         assert!(plan.memory_section_update.is_some());
         assert_eq!(plan.concept_upserts.len(), 1);
+        assert_eq!(plan.affect_updates.len(), 1);
         assert_eq!(plan.episode_additions.len(), 1);
         assert_eq!(plan.relation_additions.len(), 1);
         assert!(plan.proposal.is_some());
