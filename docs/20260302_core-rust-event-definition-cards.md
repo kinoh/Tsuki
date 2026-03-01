@@ -3,9 +3,9 @@
 ## Overview
 This document defines event contracts using only four axes:
 - `is_context_element`: whether the event is part of reasoning input context
-- `emitters`: who can emit it
+- `emitters`: which module emits the event kind
 - `event_contract`: minimum event shape constraints
-- `receivers`: where the event is transmitted and consumed as a contract
+- `receivers`: which module receives and uses the event kind
 
 Compatibility Impact: `breaking-by-default (no compatibility layer)`.
 
@@ -14,7 +14,7 @@ Compatibility Impact: `breaking-by-default (no compatibility layer)`.
 kind: <event kind>
 is_context_element: <true|false>
 emitters:
-  - <module/path>
+  - <module>
 event_contract:
   source: <constraint or "*">
   modality: <constraint or "*">
@@ -22,13 +22,13 @@ event_contract:
   payload_required:
     <key>: <type>
 receivers:
-  - <module/path>: <contract usage>
+  - <module or boundary>: <contract usage>
 ```
 
 ## Shared Receiver Rule for `is_context_element: true`
 All `is_context_element: true` events are transmitted to reasoning context through:
-- `application/history_service::latest_events` -> `format_event_history`
-- `application/execution_service` (`run_decision`, `run_submodule_tool`, debug variants)
+- `application/history_service`
+- `application/execution_service`
 
 This shared path is omitted from each individual card to avoid repetition.
 
@@ -39,8 +39,7 @@ This shared path is omitted from each individual card to avoid repetition.
 kind: input
 is_context_element: true
 emitters:
-  - core-rust/src/application/debug_service.rs::parse_and_append_input
-  - core-rust/src/application/debug_service.rs::maybe_append_debug_input_event
+  - application/debug_service
 event_contract:
   source: "user|system"
   modality: text
@@ -48,8 +47,8 @@ event_contract:
   payload_required:
     text: string
 receivers:
-  - core-rust/src/application/history_service.rs::is_user_input_event: user-input detection
-  - core-rust/src/application/debug_service.rs::should_append_debug_input_for_reuse_open: debug append decision
+  - application/history_service: user-input detection
+  - application/debug_service: debug append decision
 ```
 
 ### Card: `response`
@@ -57,7 +56,7 @@ receivers:
 kind: response
 is_context_element: true
 emitters:
-  - core-rust/src/tools.rs::StateToolHandler::handle_inner (emit_user_reply)
+  - tools
 event_contract:
   source: assistant
   modality: text
@@ -65,7 +64,7 @@ event_contract:
   payload_required:
     text: string
 receivers:
-  - websocket/http event stream readers: assistant output event consumption
+  - websocket/http clients: assistant output consumption
 ```
 
 ### Card: `decision`
@@ -73,8 +72,7 @@ receivers:
 kind: decision
 is_context_element: true
 emitters:
-  - core-rust/src/application/execution_service.rs::run_decision
-  - core-rust/src/application/execution_service.rs::run_decision_debug
+  - application/execution_service
 event_contract:
   source: decision
   modality: text
@@ -82,8 +80,8 @@ event_contract:
   payload_required:
     text: string
 receivers:
-  - core-rust/src/application/history_service.rs::is_decision_event: decision-event detection
-  - core-rust/src/application/debug_service.rs::should_append_debug_input_for_reuse_open: open-turn closure check
+  - application/history_service: decision detection in history pipeline
+  - application/debug_service: open-turn closure check
 ```
 
 ### Card: `submodule`
@@ -91,8 +89,7 @@ receivers:
 kind: submodule
 is_context_element: true
 emitters:
-  - core-rust/src/application/execution_service.rs::run_submodule_debug
-  - core-rust/src/application/execution_service.rs::run_module (role_tag=submodule)
+  - application/execution_service
 event_contract:
   source: "submodule:<name>"
   modality: text
@@ -100,8 +97,7 @@ event_contract:
   payload_required:
     text: string
 receivers:
-  - core-rust/src/application/history_service.rs::event_submodule_name: submodule identity extraction
-  - core-rust/src/application/history_service.rs::apply_submodule_output_overrides: submodule output replacement
+  - application/history_service: submodule identity and override handling
 ```
 
 ### Card: `router`
@@ -109,7 +105,7 @@ receivers:
 kind: router
 is_context_element: true
 emitters:
-  - core-rust/src/application/router_service.rs::run_router
+  - application/router_service
 event_contract:
   source: router
   modality: state
@@ -119,7 +115,7 @@ event_contract:
     hard_triggers: array
     soft_recommendations: array
 receivers:
-  - websocket/http event stream readers: router-state observation
+  - websocket/http clients: router-state observation
 ```
 
 ### Card: `self_improvement.run`
@@ -127,16 +123,16 @@ receivers:
 kind: self_improvement.run
 is_context_element: true
 emitters:
-  - core-rust/src/application/scheduler_service.rs::emit_self_improvement_event
-  - core-rust/src/application/trigger_ingress_api.rs::trigger_improvement
-  - core-rust/src/application/debug_service.rs::parse_and_append_input (trigger type)
+  - application/scheduler_service
+  - application/trigger_ingress_api
+  - application/debug_service
 event_contract:
   source: "scheduler|system"
   modality: text
   tags_required: ["self_improvement.run"]
   payload_required: {}
 receivers:
-  - core-rust/src/application/improve_service.rs::start_trigger_consumer: trigger worker start
+  - application/improve_service: trigger worker start
 ```
 
 ### Card: `self_improvement.module_processed`
@@ -144,7 +140,7 @@ receivers:
 kind: self_improvement.module_processed
 is_context_element: true
 emitters:
-  - core-rust/src/application/improve_service.rs::emit_module_processed_event
+  - application/improve_service
 event_contract:
   source: self_improvement
   modality: text
@@ -154,7 +150,7 @@ event_contract:
     module_target: string
     status: string
 receivers:
-  - integration scenario/harness readers: self-improvement step progress verification
+  - integration harness/scenarios: self-improvement progress verification
 ```
 
 ### Card: `self_improvement.trigger_processed`
@@ -162,7 +158,7 @@ receivers:
 kind: self_improvement.trigger_processed
 is_context_element: false
 emitters:
-  - core-rust/src/application/improve_service.rs::emit_trigger_processed_event
+  - application/improve_service
 event_contract:
   source: self_improvement
   modality: text
@@ -171,7 +167,7 @@ event_contract:
     trigger_event_id: string
     status: string
 receivers:
-  - integration scenario/harness readers: self-improvement completion wait condition
+  - integration harness/scenarios: self-improvement completion wait condition
 ```
 
 ### Card: `self_improvement.proposed`
@@ -179,7 +175,7 @@ receivers:
 kind: self_improvement.proposed
 is_context_element: true
 emitters:
-  - core-rust/src/application/improve_approval_service.rs::propose_improvement
+  - application/improve_approval_service
 event_contract:
   source: system
   modality: text
@@ -190,7 +186,7 @@ event_contract:
     target: string
     diff_text: string
 receivers:
-  - core-rust/src/application/improve_approval_service.rs::review_improvement: proposal validation and lookup
+  - application/improve_approval_service: proposal validation and lookup
 ```
 
 ### Card: `self_improvement.reviewed`
@@ -198,7 +194,7 @@ receivers:
 kind: self_improvement.reviewed
 is_context_element: true
 emitters:
-  - core-rust/src/application/improve_approval_service.rs::review_improvement
+  - application/improve_approval_service
 event_contract:
   source: system
   modality: text
@@ -207,7 +203,7 @@ event_contract:
     proposal_id: string
     decision: string
 receivers:
-  - core-rust/src/application/improve_approval_service.rs::proposal_has_review: duplicate-review detection
+  - application/improve_approval_service: duplicate-review detection
 ```
 
 ### Card: `self_improvement.applied`
@@ -215,7 +211,7 @@ receivers:
 kind: self_improvement.applied
 is_context_element: true
 emitters:
-  - core-rust/src/application/improve_approval_service.rs::review_improvement
+  - application/improve_approval_service
 event_contract:
   source: system
   modality: text
@@ -232,7 +228,7 @@ receivers:
 kind: scheduler.notice
 is_context_element: true
 emitters:
-  - core-rust/src/application/scheduler_service.rs::emit_scheduler_notice
+  - application/scheduler_service
 event_contract:
   source: scheduler
   modality: text
@@ -242,7 +238,7 @@ event_contract:
     scheduled_at: string
     action: object
 receivers:
-  - core-rust/src/application/scheduler_notice_service.rs::start_notice_consumer: transform to scheduler_notice input
+  - application/scheduler_notice_service: transform to scheduler_notice input
 ```
 
 ### Card: `scheduler.fired`
@@ -250,8 +246,7 @@ receivers:
 kind: scheduler.fired
 is_context_element: true
 emitters:
-  - core-rust/src/application/scheduler_service.rs::emit_self_improvement_event
-  - core-rust/src/application/scheduler_service.rs::emit_scheduler_notice
+  - application/scheduler_service
 event_contract:
   source: scheduler
   modality: text
@@ -261,7 +256,7 @@ event_contract:
     scheduled_at: string
     fired_at: string
 receivers:
-  - core-rust/src/db.rs::exists_scheduler_fired: duplicate-fire check by event log
+  - storage/db: duplicate-fire check by event log
 ```
 
 ### Card: `concept_graph.query`
@@ -269,7 +264,7 @@ receivers:
 kind: concept_graph.query
 is_context_element: false
 emitters:
-  - core-rust/src/application/router_service.rs::emit_concept_graph_query_event
+  - application/router_service
 event_contract:
   source: router
   modality: state
@@ -278,7 +273,7 @@ event_contract:
     query_terms: array
     result_concepts: array
 receivers:
-  - core-rust/src/main.rs::debug_concept_graph_queries: debug query API
+  - server/debug_api: concept-graph debug query endpoint
 ```
 
 ### Card: `llm.raw`
@@ -286,9 +281,9 @@ receivers:
 kind: llm.raw
 is_context_element: false
 emitters:
-  - core-rust/src/application/execution_service.rs::emit_debug_module_events
-  - core-rust/src/application/router_service.rs::emit_router_debug_raw
-  - core-rust/src/application/improve_service.rs::emit_trigger_debug_raw
+  - application/execution_service
+  - application/router_service
+  - application/improve_service
 event_contract:
   source: "router|decision|submodule:*|self_improvement"
   modality: text
@@ -297,7 +292,7 @@ event_contract:
     raw: any
     context: string
 receivers:
-  - debug UI / event log readers: LLM raw inspection
+  - debug UI / event-log readers: LLM raw inspection
 ```
 
 ### Card: `llm.error`
@@ -305,8 +300,8 @@ receivers:
 kind: llm.error
 is_context_element: false
 emitters:
-  - core-rust/src/application/execution_service.rs::emit_debug_module_error_event
-  - core-rust/src/application/router_service.rs::emit_router_debug_error
+  - application/execution_service
+  - application/router_service
 event_contract:
   source: "router|decision|submodule:*"
   modality: text
@@ -315,7 +310,7 @@ event_contract:
     context: string
     error: string
 receivers:
-  - debug UI / event log readers: LLM failure diagnostics
+  - debug UI / event-log readers: LLM failure diagnostics
 ```
 
 ### Card: `observe` (tool observation family)
@@ -323,7 +318,7 @@ receivers:
 kind: observe
 is_context_element: false
 emitters:
-  - core-rust/src/tools.rs::StateToolHandler::emit_tool_observation
+  - tools
 event_contract:
   source: tooling
   modality: state
@@ -333,7 +328,7 @@ event_contract:
     arguments: any
     outcome: string
 receivers:
-  - integration scenario/harness readers: tool execution coverage checks
+  - integration harness/scenarios: tool execution coverage checks
 ```
 
 ### Card: `error` (ingress parse error)
@@ -341,7 +336,7 @@ receivers:
 kind: error
 is_context_element: true
 emitters:
-  - core-rust/src/application/debug_service.rs::parse_and_append_input (error branch)
+  - application/debug_service
 event_contract:
   source: system
   modality: text
@@ -349,10 +344,6 @@ event_contract:
   payload_required:
     text: string
 receivers:
-  - event log readers: ingress parse failure diagnostics
+  - event-log readers: ingress parse failure diagnostics
 ```
-
-## Note
-`is_context_element` is a contract value in this document.
-If runtime filtering rules change, this document and filtering implementation must be updated together.
 
