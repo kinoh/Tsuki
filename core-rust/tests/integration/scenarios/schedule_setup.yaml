@@ -33,10 +33,13 @@ metrics_definition:
 
   schedule_tool_log_coverage:
     description: |
-      Using debug `llm.raw` event payload `tool_calls`, verify all expected scheduler tools are present:
+      Using tool observation events (`source=tooling`, tags include `observe`, `tool`),
+      verify all expected scheduler tools are present:
       - `schedule_upsert`
       - `schedule_list`
       - `schedule_remove`
+      Tool observability must be judged from `tool:<name>` tags (or equivalent `tool_name` payload),
+      not from debug `llm.raw` payloads.
       Score high only when all three are observable in the event stream.
 
   schedule_contract_alignment:
