@@ -409,7 +409,15 @@ fn schedule_upsert_schema() -> Value {
           "properties": {
             "kind": { "type": "string", "const": "emit_event" },
             "event": { "type": "string" },
-            "payload": { "type": "object" }
+            "payload": {
+              "type": "object",
+              "properties": {
+                "target": { "type": "string" },
+                "reason": { "type": "string" }
+              },
+              "required": ["target", "reason"],
+              "additionalProperties": false
+            }
           },
           "required": ["kind", "event", "payload"],
           "additionalProperties": false
