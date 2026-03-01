@@ -9,6 +9,8 @@ pub struct Config {
     pub router: RouterConfig,
     pub input: InputConfig,
     pub db: DbConfig,
+    #[serde(default)]
+    pub prompts: Option<PromptsConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +78,11 @@ pub struct InputConfig {
     pub router_context_template: String,
     pub decision_context_template: String,
     pub submodule_context_template: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PromptsConfig {
+    pub path: Option<String>,
 }
 
 pub fn load_config(path: &str) -> Result<Config, String> {

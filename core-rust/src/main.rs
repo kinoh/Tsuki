@@ -320,7 +320,7 @@ async fn main() {
         .await
         .expect("failed to invalidate outdated admin sessions");
     let event_store = Arc::new(EventStore::new(db.clone()));
-    let prompts_path = prompts_path_from_env();
+    let prompts_path = prompts_path_from_config(&config);
     let prompt_overrides = load_prompts(&prompts_path).unwrap_or_else(|err| {
         panic!(
             "failed to load prompts '{}': {}",
@@ -561,7 +561,19 @@ async fn sync_module_registry_from_prompts(
     Ok(())
 }
 
-fn prompts_path_from_env() -> PathBuf {
+fn prompts_path_from_config(config: &Config) -> PathBuf {
+    if let Some(path) = config
+        .prompts
+        .as_ref()
+        .and_then(|prompts| prompts.path.as_deref())
+    {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            panic!("config.toml [prompts].path must not be empty when provided");
+        }
+        return PathBuf::from(trimmed);
+    }
+
     let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string());
     PathBuf::from(data_dir).join("prompts.md")
 }
