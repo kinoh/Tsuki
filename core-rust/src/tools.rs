@@ -181,11 +181,31 @@ impl ToolHandler for StateToolHandler {
             SCHEDULE_UPSERT_TOOL => {
                 let args: ScheduleUpsertArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+                if args.action.kind != "emit_event" {
+                    return Err(ToolError::new(format!(
+                        "invalid action.kind: expected 'emit_event', got '{}'",
+                        args.action.kind
+                    )));
+                }
+                let mut payload = serde_json::Map::new();
+                if let Some(target) = args.action.target {
+                    if !target.trim().is_empty() {
+                        payload.insert("target".to_string(), json!(target));
+                    }
+                }
+                if let Some(reason) = args.action.reason {
+                    if !reason.trim().is_empty() {
+                        payload.insert("reason".to_string(), json!(reason));
+                    }
+                }
                 let input = ScheduleUpsertInput {
                     id: args.id,
                     recurrence: args.recurrence,
                     timezone: args.timezone,
-                    action: args.action,
+                    action: crate::scheduler::ScheduleAction::EmitEvent {
+                        event: args.action.event,
+                        payload: Value::Object(payload),
+                    },
                     enabled: args.enabled,
                 };
                 let schedule = tokio::task::block_in_place(|| {
@@ -268,8 +288,18 @@ struct ScheduleUpsertArgs {
     id: String,
     recurrence: crate::scheduler::ScheduleRecurrence,
     timezone: String,
-    action: crate::scheduler::ScheduleAction,
+    action: ScheduleToolActionArgs,
     enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScheduleToolActionArgs {
+    kind: String,
+    event: String,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -409,41 +439,8 @@ fn schedule_upsert_schema() -> Value {
           "properties": {
             "kind": { "type": "string", "const": "emit_event" },
             "event": { "type": "string" },
-            "payload": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {},
-                  "required": [],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "target": { "type": "string" }
-                  },
-                  "required": ["target"],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "reason": { "type": "string" }
-                  },
-                  "required": ["reason"],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "target": { "type": "string" },
-                    "reason": { "type": "string" }
-                  },
-                  "required": ["target", "reason"],
-                  "additionalProperties": false
-                }
-              ]
-            }
+            "target": { "type": "string" },
+            "reason": { "type": "string" }
           },
           "required": ["kind", "event"],
           "additionalProperties": false

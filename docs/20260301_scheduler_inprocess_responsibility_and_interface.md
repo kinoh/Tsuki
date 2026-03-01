@@ -49,6 +49,8 @@ Google Calendar integration is explicitly out of scope in this phase.
 - `schedule_upsert.action.payload` allows omitted `target` and `reason`.
   - Runtime defaulting: `target = "all"`, `reason = "scheduled"`.
   - Why: keep authoring friction low while preserving deterministic runtime behavior.
+- Tool wire contract uses strict-schema-compatible flat fields (`action.target`, `action.reason`) and runtime normalizes them into internal action payload.
+  - Why: OpenAI strict function schema rejects nested optional object patterns used for payload-level optional keys.
 
 ### 3. No external `owner` field
 - Tool/config inputs must not carry free-form `owner`.
@@ -106,16 +108,14 @@ Google Calendar integration is explicitly out of scope in this phase.
   "action": {
     "kind": "emit_event",
     "event": "self_improvement.run",
-    "payload": {
-      "target": "all",
-      "reason": "scheduled_daily"
-    }
+    "target": "all",
+    "reason": "scheduled_daily"
   },
   "enabled": true
 }
 ```
 
-`action.payload` may be omitted for `emit_event`; runtime fills defaults (`target = "all"`, `reason = "scheduled"`).
+`action.target` and `action.reason` may be omitted for `emit_event`; runtime fills defaults (`target = "all"`, `reason = "scheduled"`), then normalizes to internal action payload.
 
 ### Planned config shape
 ```toml

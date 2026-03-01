@@ -43,5 +43,5 @@ metrics_definition:
       Verify scheduler tool-call arguments are contract-aligned:
       - non-cron recurrence representation (daily with explicit time/timezone)
       - action event is `self_improvement.run`
-      - payload may include `target` and `reason`; omission is acceptable and defaults are allowed
+      - action may include `target` and `reason`; omission is acceptable and defaults are allowed
       Penalize malformed contract fields.
