@@ -98,7 +98,7 @@ Verification notes (2026-02-28):
 - [x] Add end-to-end checks: WebSocket message flow + `/events` retrieval.
 - [x] Run history-import validation on a representative backup dataset.
 - [x] Execute cutover rehearsal in local production-like environment (no staging environment exists).
-- [ ] Perform production cutover and post-cutover smoke checks.
+- [x] Perform production cutover and post-cutover smoke checks.
 
 History-import validation notes (2026-02-28):
 - Source backup: `backup/tsuki-backup-20260208231014.tar.gz` (`./mastra.db`).
@@ -126,11 +126,28 @@ Local production-like rehearsal notes (2026-02-28):
   - `/notification/tokens` persistence
 - Startup fail-fast validated for missing `/data/prompts.md` (no fallback persona source).
 
+Production cutover notes (2026-02-28):
+- Production backend switched to `core-rust`.
+- WebSocket send/receive path validated.
+- Runtime config persistence validated after restart.
+- WebSocket auth failure behavior validated:
+  - `WS_AUTH_FAIL reason=invalid_token` observed.
+  - Corresponding transport upgrade log observed (`HTTP_ACCESS path=/ status=101` before auth rejection).
+- Notification delivery validated on production-installed client via `POST /notification/_test`.
+
 ## Acceptance Checklist (Definition of Done)
-- [ ] No production dependency remains on `threads` or `messages` APIs.
-- [ ] `/events` is the sole history retrieval API in active clients.
-- [ ] Legacy conversation history is imported with original timestamps.
-- [ ] Imported dataset excludes tool/reasoning internals by design.
-- [ ] WebSocket chat loop works with agreed auth and payload contracts.
+- [x] No production dependency remains on `threads` or `messages` APIs.
+- [x] `/events` is the sole history retrieval API in active clients.
+- [x] Legacy conversation history is imported with original timestamps.
+- [x] Imported dataset excludes tool/reasoning internals by design.
+- [x] WebSocket chat loop works with agreed auth and payload contracts.
 - [x] Compose/Taskfile operational path starts `core-rust` as primary backend.
-- [ ] Runbook/docs are updated for on-call and routine operations.
+- [x] Runbook/docs are updated for on-call and routine operations.
+
+Acceptance notes (2026-03-01):
+- Active production client scope is GUI only.
+- Production access logs show no `/threads` or `/messages` usage after cutover.
+- `/admin/events` review indicates migrated event dataset integrity and exclusion policy hold.
+- `/admin` review indicates concept graph migration is in expected state.
+- On-call and routine operations runbook added:
+  - `docs/20260301_core-rust-production-runbook.md`
