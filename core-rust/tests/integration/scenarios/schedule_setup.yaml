@@ -41,9 +41,13 @@ metrics_definition:
 
   schedule_contract_alignment:
     description: |
-      Verify scheduler tool-call arguments are contract-aligned:
-      - non-cron recurrence representation (daily with explicit time/timezone)
+      Verify only `schedule_upsert` arguments for semantic contract alignment:
+      - recurrence is non-cron daily at 04:00 in Asia/Tokyo
       - action kind is `emit_message`
       - message is non-empty
-      - event may be null
-      Penalize malformed contract fields.
+      - `event` is optional for `emit_message` and may be null or omitted
+      Ignore `schedule_list` / `schedule_remove` observability in this metric
+      (those are covered by `schedule_tool_log_coverage`).
+      Judge semantic validity only; do not fail solely because nullable helper keys
+      in strict schemas (e.g. action/recurrence auxiliary fields) are omitted.
+      Penalize only clear contract mismatches or malformed primary fields.
