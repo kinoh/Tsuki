@@ -536,6 +536,7 @@ fn build_modules(
         state_store,
         concept_graph,
         schedule_store,
+        emit_event.clone(),
         emit_event,
     ));
 

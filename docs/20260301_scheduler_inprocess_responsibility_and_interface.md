@@ -83,6 +83,15 @@ Google Calendar integration is explicitly out of scope in this phase.
 - Runtime must fail fast when `scheduler.self_improvement` is invalid.
   - Why: policy belongs to configuration, not hardcoded runtime behavior.
 
+### 8. Execution contract and observability contract are separated
+- Scheduler/runtime behavior must not depend on test-only assumptions.
+- Tool execution observability is emitted as dedicated events from `StateToolHandler`:
+  - source: `tooling`
+  - tags: `observe`, `tool`, `tool:<name>`, `outcome:<ok|error>`
+  - payload: `tool_name`, `arguments`, `outcome`, `output`, `error`, `elapsed_ms`
+- `arguments` is a single field (JSON value when parseable, otherwise string). We intentionally avoid duplicated fields such as `arguments_raw` and `arguments_parsed`.
+- Why: stream processing can be interrupted at any time; `debug,llm.raw` is not a stable contract for pass/fail assertions.
+
 ## Implementation Details
 ### Planned runtime components
 - `ScheduleStore`

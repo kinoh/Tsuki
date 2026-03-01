@@ -9,6 +9,7 @@ use async_openai::types::responses::{FunctionTool, Tool};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::runtime::Handle;
 
 pub const STATE_SET_TOOL: &str = "state_set";
@@ -98,6 +99,7 @@ pub struct StateToolHandler {
     concept_graph: Arc<dyn ConceptGraphStore>,
     schedule_store: Arc<ScheduleStore>,
     emit_event: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
+    emit_tool_observation: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
 }
 
 impl StateToolHandler {
@@ -106,18 +108,52 @@ impl StateToolHandler {
         concept_graph: Arc<dyn ConceptGraphStore>,
         schedule_store: Arc<ScheduleStore>,
         emit_event: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
+        emit_tool_observation: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
     ) -> Self {
         Self {
             store,
             concept_graph,
             schedule_store,
             emit_event,
+            emit_tool_observation,
         }
     }
-}
 
-impl ToolHandler for StateToolHandler {
-    fn handle(&self, tool_name: &str, arguments: &str) -> Result<String, ToolError> {
+    fn emit_tool_observation(
+        &self,
+        tool_name: &str,
+        arguments: &str,
+        result: &Result<String, ToolError>,
+        elapsed_ms: u128,
+    ) {
+        let parsed_arguments = serde_json::from_str::<Value>(arguments)
+            .unwrap_or_else(|_| Value::String(arguments.to_string()));
+        let (outcome, output, error) = match result {
+            Ok(value) => ("ok", Some(value.as_str()), None),
+            Err(err) => ("error", None, Some(err.to_string())),
+        };
+        let event = build_event(
+            "tooling",
+            "state",
+            json!({
+                "tool_name": tool_name,
+                "arguments": parsed_arguments,
+                "outcome": outcome,
+                "output": output,
+                "error": error,
+                "elapsed_ms": elapsed_ms,
+            }),
+            vec![
+                "observe".to_string(),
+                "tool".to_string(),
+                format!("tool:{}", tool_name),
+                format!("outcome:{}", outcome),
+            ],
+        );
+        (self.emit_tool_observation)(event);
+    }
+
+    fn handle_inner(&self, tool_name: &str, arguments: &str) -> Result<String, ToolError> {
         match tool_name {
             STATE_SET_TOOL => {
                 let args: StateSetArgs = serde_json::from_str(arguments)
@@ -242,6 +278,15 @@ impl ToolHandler for StateToolHandler {
             }
             _ => Err(ToolError::new(format!("unknown tool: {}", tool_name))),
         }
+    }
+}
+
+impl ToolHandler for StateToolHandler {
+    fn handle(&self, tool_name: &str, arguments: &str) -> Result<String, ToolError> {
+        let started = Instant::now();
+        let result = self.handle_inner(tool_name, arguments);
+        self.emit_tool_observation(tool_name, arguments, &result, started.elapsed().as_millis());
+        result
     }
 }
 
