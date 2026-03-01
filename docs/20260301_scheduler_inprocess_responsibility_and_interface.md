@@ -21,7 +21,7 @@ We need a single in-process model where:
 
 ## Solution
 Adopt an in-process scheduler in `core-rust` with:
-- configuration bootstrap (`config.toml`) for default schedules
+- configuration (`config.toml`) for default schedule policy
 - non-cron structured recurrence schema for both external tool input and internal storage
 - one runtime engine loop that computes due schedules and emits scheduled events through a single function
 - duplicate prevention by querying existing event history before event emission
@@ -49,7 +49,7 @@ Google Calendar integration is explicitly out of scope in this phase.
 
 ### 3. No external `owner` field
 - Tool/config inputs must not carry free-form `owner`.
-- Runtime derives owner scope from authenticated context (or fixed bootstrap scope).
+- Runtime derives owner scope from authenticated context (or fixed config scope).
   - Why: avoids ambiguous or spoofable ownership input while preserving internal multi-user partitioning.
 
 ### 4. No cron in interface or storage
@@ -69,8 +69,8 @@ Google Calendar integration is explicitly out of scope in this phase.
   - Why: avoid redundant identifiers and inconsistency risk.
 
 ### 7. Auto-trigger policy is config-driven
-- Initial schedules must be declared in `config.toml` bootstrap entries.
-- Runtime must fail fast when bootstrap entries are invalid.
+- Self-improvement auto-trigger must be declared in `config.toml` under `scheduler.self_improvement`.
+- Runtime must fail fast when `scheduler.self_improvement` is invalid.
   - Why: policy belongs to configuration, not hardcoded runtime behavior.
 
 ## Implementation Details
@@ -112,28 +112,17 @@ Google Calendar integration is explicitly out of scope in this phase.
 }
 ```
 
-### Planned bootstrap config shape
+### Planned config shape
 ```toml
 [scheduler]
 enabled = true
 tick_interval_ms = 1000
 
-[[scheduler.bootstrap]]
-id = "daily_self_improvement"
+[scheduler.self_improvement]
 enabled = true
 timezone = "Asia/Tokyo"
-
-[scheduler.bootstrap.recurrence]
-kind = "daily"
-at = "04:00:00"
-
-[scheduler.bootstrap.action]
-kind = "emit_event"
-event = "self_improvement.run"
-
-[scheduler.bootstrap.action.payload]
-target = "all"
-reason = "scheduled_daily"
+recurrence = { kind = "daily", at = "04:00:00" }
+action = { kind = "emit_event", event = "self_improvement.run", payload = { target = "all", reason = "scheduled_daily" } }
 ```
 
 ### Planned emitted event contract
