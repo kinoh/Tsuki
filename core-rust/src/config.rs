@@ -1,3 +1,4 @@
+use crate::scheduler::{ScheduleAction, ScheduleRecurrence};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -11,6 +12,8 @@ pub struct Config {
     pub db: DbConfig,
     #[serde(default)]
     pub prompts: Option<PromptsConfig>,
+    #[serde(default)]
+    pub scheduler: SchedulerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -83,6 +86,43 @@ pub struct InputConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PromptsConfig {
     pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchedulerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_scheduler_tick_interval_ms")]
+    pub tick_interval_ms: u64,
+    #[serde(default)]
+    pub self_improvement: Option<SchedulerSelfImprovementConfig>,
+}
+
+impl Default for SchedulerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tick_interval_ms: default_scheduler_tick_interval_ms(),
+            self_improvement: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchedulerSelfImprovementConfig {
+    #[serde(default = "default_scheduler_policy_enabled")]
+    pub enabled: bool,
+    pub timezone: String,
+    pub recurrence: ScheduleRecurrence,
+    pub action: ScheduleAction,
+}
+
+fn default_scheduler_tick_interval_ms() -> u64 {
+    1000
+}
+
+fn default_scheduler_policy_enabled() -> bool {
+    true
 }
 
 pub fn load_config(path: &str) -> Result<Config, String> {

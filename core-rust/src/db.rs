@@ -80,6 +80,26 @@ impl Db {
         )
         .await?;
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS schedules (\
+        scope TEXT NOT NULL,\
+        id TEXT NOT NULL,\
+        recurrence_json TEXT NOT NULL,\
+        timezone TEXT NOT NULL,\
+        action_json TEXT NOT NULL,\
+        enabled INTEGER NOT NULL,\
+        next_fire_at TEXT,\
+        updated_at TEXT NOT NULL,\
+        PRIMARY KEY (scope, id)\
+      )",
+            params![],
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(enabled, next_fire_at)",
+            params![],
+        )
+        .await?;
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS state_records (\
         key TEXT PRIMARY KEY,\
         content TEXT NOT NULL,\
@@ -300,6 +320,174 @@ impl Db {
             }));
         }
         Ok(None)
+    }
+
+    pub async fn exists_scheduler_fired(
+        &self,
+        schedule_id: &str,
+        scheduled_at: &str,
+    ) -> DbResult<bool> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM events \
+                 WHERE tags_json LIKE '%\"scheduler.fired\"%' \
+                   AND json_extract(payload_json, '$.schedule_id') = ? \
+                   AND json_extract(payload_json, '$.scheduled_at') = ? \
+                 LIMIT 1",
+                params![schedule_id, scheduled_at],
+            )
+            .await?;
+        Ok(rows.next().await?.is_some())
+    }
+
+    pub async fn upsert_schedule(
+        &self,
+        scope: &str,
+        id: &str,
+        recurrence_json: &str,
+        timezone: &str,
+        action_json: &str,
+        enabled: bool,
+        next_fire_at: Option<&str>,
+    ) -> DbResult<String> {
+        let updated_at = now_iso8601();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO schedules (scope, id, recurrence_json, timezone, action_json, enabled, next_fire_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT(scope, id) DO UPDATE SET \
+               recurrence_json=excluded.recurrence_json,\
+               timezone=excluded.timezone,\
+               action_json=excluded.action_json,\
+               enabled=excluded.enabled,\
+               next_fire_at=excluded.next_fire_at,\
+               updated_at=excluded.updated_at",
+            params![
+                scope,
+                id,
+                recurrence_json,
+                timezone,
+                action_json,
+                if enabled { 1 } else { 0 },
+                next_fire_at,
+                updated_at.clone()
+            ],
+        )
+        .await?;
+        Ok(updated_at)
+    }
+
+    pub async fn load_schedules(
+        &self,
+        scope: &str,
+    ) -> DbResult<
+        Vec<(
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            Option<String>,
+            String,
+        )>,
+    > {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT scope, id, recurrence_json, timezone, action_json, enabled, next_fire_at, updated_at \
+                 FROM schedules WHERE scope = ? ORDER BY id ASC",
+                params![scope],
+            )
+            .await?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let scope: String = row.get(0)?;
+            let id: String = row.get(1)?;
+            let recurrence_json: String = row.get(2)?;
+            let timezone: String = row.get(3)?;
+            let action_json: String = row.get(4)?;
+            let enabled: i64 = row.get(5)?;
+            let next_fire_at: Option<String> = row.get(6)?;
+            let updated_at: String = row.get(7)?;
+            results.push((
+                scope,
+                id,
+                recurrence_json,
+                timezone,
+                action_json,
+                enabled,
+                next_fire_at,
+                updated_at,
+            ));
+        }
+        Ok(results)
+    }
+
+    pub async fn remove_schedule(&self, scope: &str, id: &str) -> DbResult<bool> {
+        let conn = self.conn.lock().await;
+        let affected = conn
+            .execute(
+                "DELETE FROM schedules WHERE scope = ? AND id = ?",
+                params![scope, id],
+            )
+            .await?;
+        Ok(affected > 0)
+    }
+
+    pub async fn acquire_due_schedules(
+        &self,
+        now_ts: &str,
+        limit: usize,
+    ) -> DbResult<Vec<(String, String, String, String, String, String)>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT scope, id, recurrence_json, timezone, action_json, next_fire_at \
+                 FROM schedules \
+                 WHERE enabled = 1 AND next_fire_at IS NOT NULL AND next_fire_at <= ? \
+                 ORDER BY next_fire_at ASC, id ASC LIMIT ?",
+                params![now_ts, limit as i64],
+            )
+            .await?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let scope: String = row.get(0)?;
+            let id: String = row.get(1)?;
+            let recurrence_json: String = row.get(2)?;
+            let timezone: String = row.get(3)?;
+            let action_json: String = row.get(4)?;
+            let next_fire_at: String = row.get(5)?;
+            results.push((
+                scope,
+                id,
+                recurrence_json,
+                timezone,
+                action_json,
+                next_fire_at,
+            ));
+        }
+        Ok(results)
+    }
+
+    pub async fn update_schedule_next_fire(
+        &self,
+        scope: &str,
+        id: &str,
+        next_fire_at: Option<&str>,
+    ) -> DbResult<()> {
+        let updated_at = now_iso8601();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE schedules SET next_fire_at = ?, updated_at = ? WHERE scope = ? AND id = ?",
+            params![next_fire_at, updated_at, scope, id],
+        )
+        .await?;
+        Ok(())
     }
 
     pub async fn upsert_state_record(

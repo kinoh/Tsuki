@@ -5,7 +5,7 @@ This document defines the scheduler design for `core-rust` with explicit respons
 
 Compatibility Impact: breaking-by-default (introduces a new in-process scheduler contract with no compatibility layer for MCP-subscription-based scheduling).
 
-Status: planned change (design-approved, implementation not yet merged).
+Status: implemented in `core-rust` (2026-03-01).
 
 ## Problem Statement
 Current scheduling behavior is split from `core-rust` runtime semantics:
@@ -139,6 +139,7 @@ action = { kind = "emit_event", event = "self_improvement.run", payload = { targ
 - If runtime becomes multi-instance, duplicate checks must be transaction-safe at storage/query boundary.
 - If recurrence needs richer calendars later, extend structured recurrence types rather than introducing cron text as default.
 - External calendar adapters (Google Calendar, etc.) should remain separate adapters that call scheduler upsert/remove interfaces.
+- Current timezone support is intentionally narrow (`UTC`, `Asia/Tokyo`, `±HH:MM`) to keep dependencies minimal. If IANA timezone-wide support becomes necessary, introduce a dedicated timezone library with explicit rollout.
 
 ## Supersedes
 - Scheduler-scope part of `docs/20260207_self-improvement-phase-event-native-design.md` that marked in-process daily scheduler as out of scope.

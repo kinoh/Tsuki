@@ -70,3 +70,13 @@ Execution reason: {{execution_reason}}"""
 [db]
 path = "./data/core-rust.db"
 # remote_url = "libsql://..."
+
+[scheduler]
+enabled = true
+tick_interval_ms = 1000
+
+[scheduler.self_improvement]
+enabled = true
+timezone = "Asia/Tokyo"
+recurrence = { kind = "daily", at = "04:00:00" }
+action = { kind = "emit_event", event = "self_improvement.run", payload = { target = "all", reason = "scheduled_daily" } }

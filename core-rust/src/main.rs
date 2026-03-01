@@ -9,6 +9,7 @@ mod llm;
 mod module_registry;
 mod notification;
 mod prompts;
+mod scheduler;
 mod state;
 mod tools;
 
@@ -48,6 +49,7 @@ use crate::event_store::EventStore;
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
+use crate::scheduler::ScheduleStore;
 use crate::state::{DbStateStore, StateStore};
 use crate::tools::{concept_graph_tools, state_tools, StateToolHandler};
 
@@ -324,6 +326,7 @@ async fn main() {
         .await
         .expect("failed to invalidate outdated admin sessions");
     let event_store = Arc::new(EventStore::new(db.clone()));
+    let schedule_store = Arc::new(ScheduleStore::new(db.clone()));
     let prompts_path = prompts_path_from_config(&config);
     let prompt_overrides = load_prompts(&prompts_path).unwrap_or_else(|err| {
         panic!(
@@ -388,6 +391,7 @@ async fn main() {
     let modules = build_modules(
         state_store.clone(),
         activation_concept_graph.clone(),
+        schedule_store.clone(),
         module_registry,
         &config,
         base_instructions,
@@ -429,6 +433,13 @@ async fn main() {
         submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
     };
     crate::application::improve_service::start_trigger_consumer(state.clone());
+    crate::application::scheduler_service::start_scheduler(
+        state.clone(),
+        schedule_store.clone(),
+        config.scheduler.clone(),
+    )
+    .await
+    .expect("failed to start scheduler");
 
     let admin_router = Router::new()
         .route("/styles/{name}", get(debug_style))
@@ -505,6 +516,7 @@ async fn main() {
 fn build_modules(
     state_store: Arc<dyn StateStore>,
     concept_graph: Arc<dyn ConceptGraphStore>,
+    schedule_store: Arc<ScheduleStore>,
     registry: ModuleRegistry,
     config: &Config,
     base_instructions: String,
@@ -522,6 +534,7 @@ fn build_modules(
     let tool_handler = Arc::new(StateToolHandler::new(
         state_store,
         concept_graph,
+        schedule_store,
         emit_event,
     ));
 
