@@ -139,14 +139,24 @@ async fn emit_scheduled_event(
         ScheduleAction::EmitEvent { event, payload } => {
             let mut action_payload = payload.clone();
             if let Some(map) = action_payload.as_object_mut() {
+                if !map.contains_key("target") {
+                    map.insert("target".to_string(), json!("all"));
+                }
+                if !map.contains_key("reason") {
+                    map.insert("reason".to_string(), json!("scheduled"));
+                }
                 map.insert("schedule_id".to_string(), json!(schedule_id));
                 map.insert("scheduled_at".to_string(), json!(scheduled_at));
                 map.insert("created_at".to_string(), json!(now_iso8601()));
                 map.insert("created_by".to_string(), json!("scheduler"));
             }
 
-            let action_event =
-                build_event("scheduler", "text", action_payload, vec![event.to_string()]);
+            let action_event = build_event(
+                "scheduler",
+                "text",
+                action_payload.clone(),
+                vec![event.to_string()],
+            );
             record_event(state, action_event).await;
 
             let fired_at = now_iso8601();
@@ -159,7 +169,7 @@ async fn emit_scheduled_event(
                     "fired_at": fired_at,
                     "action": {
                         "event": event,
-                        "payload": payload,
+                        "payload": action_payload,
                     }
                 }),
                 vec!["scheduler.fired".to_string(), event.to_string()],
