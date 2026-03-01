@@ -19,6 +19,11 @@ Environment variables (secrets only):
 - `OPENAI_API_KEY` (required)
 - `TURSO_AUTH_TOKEN` (required when `db.remote_url` is set)
 
+Environment variables (router concept embedding):
+- `CONCEPT_EMBEDDING_MODEL_DIR` (optional; default: `/data/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja`)
+  - Required model files: `tokenizer.json`, `model_rest.safetensors`, `embedding.q4_k_m.bin`
+  - Startup fails if files are missing or invalid.
+
 ## CLI (reuse existing ws_client.js)
 ```
 cd core
@@ -59,3 +64,11 @@ You will receive event messages:
 - Decision uses recent event history from the event store.
 - All outputs (input, submodules, decision, action) are emitted as events.
 - Events, state, and modules are persisted in libSQL (local when `db.remote_url` is unset).
+
+## Backfill concept embeddings
+```
+cd core-rust
+CONCEPT_EMBEDDING_MODEL_DIR=/path/to/model \
+MEMGRAPH_URI=bolt://localhost:7687 \
+cargo run --bin backfill_concept_embeddings -- --limit 1000
+```

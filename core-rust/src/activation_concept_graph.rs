@@ -1,9 +1,14 @@
 use async_trait::async_trait;
 use neo4rs::{query, Graph};
+use safetensors::{tensor::TensorView, Dtype, SafeTensors};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
+use tokenizers::Tokenizer;
 
 const DEFAULT_VALENCE: f64 = 0.0;
 const DEFAULT_AROUSAL_LEVEL: f64 = 0.0;
@@ -13,14 +18,28 @@ const DEFAULT_ACCESSED_AT: i64 = 0;
 const DEFAULT_RELATION_WEIGHT: f64 = 0.25;
 const RELATION_WEIGHT_ALPHA: f64 = 0.2;
 const REVERSE_PENALTY: f64 = 0.5;
+const DEFAULT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER: usize = 4;
+const DEFAULT_VECTOR_SEARCH_SEMANTIC_WEIGHT: f64 = 0.75;
+const DEFAULT_VECTOR_SEARCH_AROUSAL_WEIGHT: f64 = 0.25;
+const DEFAULT_VECTOR_INDEX_NAME: &str = "concept_embedding_idx";
+const DEFAULT_VECTOR_INDEX_CAPACITY: usize = 200_000;
+const DEFAULT_VECTOR_INDEX_SCALAR_KIND: &str = "f32";
+const DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT: usize = 2;
+const DEFAULT_CONCEPT_EMBEDDING_MODEL_DIR: &str =
+    "/data/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja";
+const CONCEPT_EMBEDDING_MODEL_DIR_ENV: &str = "CONCEPT_EMBEDDING_MODEL_DIR";
+const CONCEPT_VECTOR_INDEX_NAME_ENV: &str = "CONCEPT_VECTOR_INDEX_NAME";
+const CONCEPT_VECTOR_INDEX_CAPACITY_ENV: &str = "CONCEPT_VECTOR_INDEX_CAPACITY";
+const CONCEPT_VECTOR_INDEX_SCALAR_KIND_ENV: &str = "CONCEPT_VECTOR_INDEX_SCALAR_KIND";
+const CONCEPT_VECTOR_INDEX_RESIZE_COEFFICIENT_ENV: &str = "CONCEPT_VECTOR_INDEX_RESIZE_COEFFICIENT";
+const CONCEPT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER_ENV: &str =
+    "CONCEPT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER";
+const CONCEPT_VECTOR_SEARCH_SEMANTIC_WEIGHT_ENV: &str = "CONCEPT_VECTOR_SEARCH_SEMANTIC_WEIGHT";
+const CONCEPT_VECTOR_SEARCH_AROUSAL_WEIGHT_ENV: &str = "CONCEPT_VECTOR_SEARCH_AROUSAL_WEIGHT";
 
 #[async_trait]
 pub(crate) trait ConceptGraphActivationReader: Send + Sync {
-    async fn concept_search(
-        &self,
-        keywords: &[String],
-        limit: usize,
-    ) -> Result<Vec<String>, String>;
+    async fn concept_search(&self, input_text: &str, limit: usize) -> Result<Vec<String>, String>;
     async fn concept_activation(&self, concepts: &[String])
         -> Result<HashMap<String, f64>, String>;
 }
@@ -119,16 +138,258 @@ struct Proposition {
     valence: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
+struct VectorCandidate {
+    name: String,
+    semantic: f64,
+}
+
+#[derive(Debug, Clone)]
+struct EmbeddingConfig {
+    model_dir: PathBuf,
+    vector_index_name: String,
+    vector_index_capacity: usize,
+    vector_index_scalar_kind: String,
+    vector_index_resize_coefficient: usize,
+    vector_search_raw_limit_multiplier: usize,
+    vector_search_semantic_weight: f64,
+    vector_search_arousal_weight: f64,
+}
+
+#[derive(Debug)]
+struct SseEmbeddingModel {
+    tokenizer: Tokenizer,
+    hidden_dim: usize,
+    vocab_size: usize,
+    packed: Vec<u8>,
+    scales: Vec<f32>,
+    alpha: Vec<f32>,
+    beta: Vec<f32>,
+    bias: Vec<f32>,
+}
+
+impl EmbeddingConfig {
+    fn from_env() -> Result<Self, String> {
+        let model_dir = env::var(CONCEPT_EMBEDDING_MODEL_DIR_ENV)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_CONCEPT_EMBEDDING_MODEL_DIR));
+        let vector_index_name = env::var(CONCEPT_VECTOR_INDEX_NAME_ENV)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_VECTOR_INDEX_NAME.to_string());
+        let vector_index_capacity = env::var(CONCEPT_VECTOR_INDEX_CAPACITY_ENV)
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_VECTOR_INDEX_CAPACITY)
+            .max(1);
+        let vector_index_scalar_kind = env::var(CONCEPT_VECTOR_INDEX_SCALAR_KIND_ENV)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_VECTOR_INDEX_SCALAR_KIND.to_string());
+        let vector_index_resize_coefficient = env::var(CONCEPT_VECTOR_INDEX_RESIZE_COEFFICIENT_ENV)
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT)
+            .max(1);
+        let vector_search_raw_limit_multiplier =
+            env::var(CONCEPT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER_ENV)
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(DEFAULT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER)
+                .max(1);
+        let semantic_weight = env::var(CONCEPT_VECTOR_SEARCH_SEMANTIC_WEIGHT_ENV)
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(DEFAULT_VECTOR_SEARCH_SEMANTIC_WEIGHT)
+            .clamp(0.0, 1.0);
+        let arousal_weight = env::var(CONCEPT_VECTOR_SEARCH_AROUSAL_WEIGHT_ENV)
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(DEFAULT_VECTOR_SEARCH_AROUSAL_WEIGHT)
+            .clamp(0.0, 1.0);
+        if !model_dir.exists() {
+            return Err(format!(
+                "embedding model directory not found: {}",
+                model_dir.display()
+            ));
+        }
+        if semantic_weight <= 0.0 && arousal_weight <= 0.0 {
+            return Err(
+                "invalid vector ranking weights: both semantic/arousal are zero".to_string(),
+            );
+        }
+        Ok(Self {
+            model_dir,
+            vector_index_name,
+            vector_index_capacity,
+            vector_index_scalar_kind,
+            vector_index_resize_coefficient,
+            vector_search_raw_limit_multiplier,
+            vector_search_semantic_weight: semantic_weight,
+            vector_search_arousal_weight: arousal_weight,
+        })
+    }
+}
+
+impl SseEmbeddingModel {
+    fn load(model_dir: &std::path::Path) -> Result<Self, String> {
+        let tokenizer_path = model_dir.join("tokenizer.json");
+        let tokenizer = Tokenizer::from_file(tokenizer_path)
+            .map_err(|err| format!("tokenizer load: {}", err))?;
+
+        let rest_path = model_dir.join("model_rest.safetensors");
+        let rest_bytes = fs::read(rest_path).map_err(|err| format!("read model_rest: {}", err))?;
+        let safetensors = SafeTensors::deserialize(&rest_bytes)
+            .map_err(|err| format!("parse model_rest.safetensors: {}", err))?;
+
+        let alpha = read_f32_tensor(&safetensors, "dyt.alpha")?;
+        let beta = read_f32_tensor(&safetensors, "dyt.beta")?;
+        let bias = read_f32_tensor(&safetensors, "dyt.bias")?;
+        if alpha.len() != beta.len() || alpha.len() != bias.len() {
+            return Err("invalid dyt tensor sizes".to_string());
+        }
+        let hidden_dim = alpha.len();
+        if hidden_dim == 0 || hidden_dim % 2 != 0 {
+            return Err(format!(
+                "hidden dimension must be positive and even, got {}",
+                hidden_dim
+            ));
+        }
+
+        let emb_path = model_dir.join("embedding.q4_k_m.bin");
+        let emb_bytes = fs::read(emb_path).map_err(|err| format!("read embedding: {}", err))?;
+        let bytes_per_row = hidden_dim / 2 + 4;
+        if emb_bytes.is_empty() || emb_bytes.len() % bytes_per_row != 0 {
+            return Err(format!(
+                "invalid embedding binary size: {} bytes (bytes_per_row={})",
+                emb_bytes.len(),
+                bytes_per_row
+            ));
+        }
+        let vocab_size = emb_bytes.len() / bytes_per_row;
+        let packed_size = vocab_size * hidden_dim / 2;
+        let packed = emb_bytes[..packed_size].to_vec();
+        let scale_bytes = &emb_bytes[packed_size..];
+        let scales = scale_bytes
+            .chunks_exact(4)
+            .map(|chunk| {
+                let mut bytes = [0u8; 4];
+                bytes.copy_from_slice(chunk);
+                f32::from_le_bytes(bytes)
+            })
+            .collect::<Vec<_>>();
+        if scales.len() != vocab_size {
+            return Err(format!(
+                "invalid scale length: expected {}, got {}",
+                vocab_size,
+                scales.len()
+            ));
+        }
+        Ok(Self {
+            tokenizer,
+            hidden_dim,
+            vocab_size,
+            packed,
+            scales,
+            alpha,
+            beta,
+            bias,
+        })
+    }
+
+    fn encode(&self, text: &str) -> Result<Vec<f64>, String> {
+        let encoding = self
+            .tokenizer
+            .encode(text, false)
+            .map_err(|err| format!("tokenize failed for '{}': {}", text, err))?;
+        let ids = encoding.get_ids();
+        if ids.is_empty() {
+            return Ok(vec![0.0; self.hidden_dim]);
+        }
+        let mut acc = vec![0.0_f64; self.hidden_dim];
+        for token_id in ids {
+            self.add_dequantized_row(*token_id as usize, &mut acc)?;
+        }
+        let denom = ids.len() as f64;
+        for value in &mut acc {
+            *value /= denom;
+        }
+        for (idx, value) in acc.iter_mut().enumerate() {
+            let x = self.alpha[idx] as f64 * *value + self.bias[idx] as f64;
+            *value = self.beta[idx] as f64 * x.tanh();
+        }
+        ActivationConceptGraphStore::l2_normalize(&mut acc);
+        Ok(acc)
+    }
+
+    fn add_dequantized_row(&self, token_id: usize, out: &mut [f64]) -> Result<(), String> {
+        if token_id >= self.vocab_size {
+            return Err(format!(
+                "token id out of range: id={} vocab_size={}",
+                token_id, self.vocab_size
+            ));
+        }
+        let row_scale = self.scales[token_id] as f64;
+        let row_start = token_id * (self.hidden_dim / 2);
+        for pair_idx in 0..(self.hidden_dim / 2) {
+            let byte = self.packed[row_start + pair_idx];
+            let hi = ((byte >> 4) & 0x0F) as f64;
+            let lo = (byte & 0x0F) as f64;
+            let dim_hi = pair_idx * 2;
+            let dim_lo = dim_hi + 1;
+            out[dim_hi] += ((hi / 7.5) - 1.0) * row_scale;
+            out[dim_lo] += ((lo / 7.5) - 1.0) * row_scale;
+        }
+        Ok(())
+    }
+}
+
+fn read_f32_tensor(safetensors: &SafeTensors<'_>, name: &str) -> Result<Vec<f32>, String> {
+    let tensor = safetensors
+        .tensor(name)
+        .map_err(|err| format!("missing tensor {}: {}", name, err))?;
+    tensor_view_to_f32_vec(&tensor)
+}
+
+fn tensor_view_to_f32_vec(view: &TensorView<'_>) -> Result<Vec<f32>, String> {
+    if view.dtype() != Dtype::F32 {
+        return Err(format!("expected f32 tensor, got {:?}", view.dtype()));
+    }
+    let bytes = view.data();
+    if bytes.len() % 4 != 0 {
+        return Err(format!("invalid f32 tensor byte size: {}", bytes.len()));
+    }
+    Ok(bytes
+        .chunks_exact(4)
+        .map(|chunk| {
+            let mut raw = [0u8; 4];
+            raw.copy_from_slice(chunk);
+            f32::from_le_bytes(raw)
+        })
+        .collect())
+}
+
 pub(crate) struct ActivationConceptGraphStore {
     graph: Arc<Graph>,
     arousal_tau_ms: f64,
+    embedding: Arc<SseEmbeddingModel>,
+    embedding_config: EmbeddingConfig,
 }
 
 impl ActivationConceptGraphStore {
-    pub(crate) fn new(graph: Arc<Graph>, arousal_tau_ms: f64) -> Self {
+    fn new(
+        graph: Arc<Graph>,
+        arousal_tau_ms: f64,
+        embedding: Arc<SseEmbeddingModel>,
+        embedding_config: EmbeddingConfig,
+    ) -> Self {
         Self {
             graph,
             arousal_tau_ms: arousal_tau_ms.max(1.0),
+            embedding,
+            embedding_config,
         }
     }
 
@@ -138,9 +399,20 @@ impl ActivationConceptGraphStore {
         password: String,
         arousal_tau_ms: f64,
     ) -> Result<Self, String> {
+        let embedding_config = EmbeddingConfig::from_env()?;
+        let embedding = Arc::new(SseEmbeddingModel::load(
+            embedding_config.model_dir.as_path(),
+        )?);
+        let embedding_dim = embedding.hidden_dim;
         let graph = Graph::new(uri, user, password).map_err(|err| err.to_string())?;
         Self::ensure_constraints(&graph).await?;
-        Ok(Self::new(Arc::new(graph), arousal_tau_ms))
+        Self::ensure_vector_index(&graph, &embedding_config, embedding_dim).await?;
+        Ok(Self::new(
+            Arc::new(graph),
+            arousal_tau_ms,
+            embedding,
+            embedding_config,
+        ))
     }
 
     fn now_ms(&self) -> i64 {
@@ -228,6 +500,179 @@ impl ActivationConceptGraphStore {
                 }
             }
         }
+    }
+
+    async fn ensure_vector_index(
+        graph: &Graph,
+        config: &EmbeddingConfig,
+        dimension: usize,
+    ) -> Result<(), String> {
+        let mut has_index = false;
+        let mut result = graph
+            .execute(query("SHOW VECTOR INDEX INFO;"))
+            .await
+            .map_err(|err| format!("SHOW VECTOR INDEX INFO failed: {}", err))?;
+        while let Ok(Some(row)) = result.next().await {
+            let index_name: String = row.get("index_name").unwrap_or_default();
+            if index_name == config.vector_index_name {
+                has_index = true;
+                let existing_dimension: i64 = row.get("dimension").unwrap_or(0);
+                if existing_dimension != dimension as i64 {
+                    return Err(format!(
+                        "vector index '{}' has incompatible dimension: expected {}, got {}",
+                        config.vector_index_name, dimension, existing_dimension
+                    ));
+                }
+                break;
+            }
+        }
+        if has_index {
+            return Ok(());
+        }
+        let cypher = format!(
+            "CREATE VECTOR INDEX {} ON :Concept(embedding) WITH CONFIG {{\"dimension\": $dimension, \"capacity\": $capacity, \"metric\": \"cos\", \"resize_coefficient\": $resize_coefficient, \"scalar_kind\": $scalar_kind}};",
+            config.vector_index_name
+        );
+        let mut stream = graph
+            .execute(
+                query(cypher.as_str())
+                    .param("dimension", dimension as i64)
+                    .param("capacity", config.vector_index_capacity as i64)
+                    .param(
+                        "resize_coefficient",
+                        config.vector_index_resize_coefficient as i64,
+                    )
+                    .param("scalar_kind", config.vector_index_scalar_kind.clone()),
+            )
+            .await
+            .map_err(|err| format!("CREATE VECTOR INDEX failed: {}", err))?;
+        let _ = stream.next().await;
+        Ok(())
+    }
+
+    fn l2_normalize(values: &mut [f64]) {
+        let norm_sq = values.iter().map(|value| value * value).sum::<f64>();
+        if norm_sq <= 0.0 {
+            return;
+        }
+        let norm = norm_sq.sqrt();
+        for value in values {
+            *value /= norm;
+        }
+    }
+
+    fn to_embedding_property_vector(embedding: &[f64]) -> Vec<f64> {
+        embedding
+            .iter()
+            .map(|value| Self::round_score(*value))
+            .collect::<Vec<_>>()
+    }
+
+    async fn upsert_concept_embedding(&self, concept: &str) -> Result<(), String> {
+        let embedding = self.embedding.encode(concept)?;
+        let embedding = Self::to_embedding_property_vector(&embedding);
+        let mut stream = self
+            .graph
+            .execute(
+                query(
+                    "MATCH (c:Concept {name: $name})
+                     SET c.embedding = $embedding
+                     RETURN c.name AS name",
+                )
+                .param("name", concept)
+                .param("embedding", embedding),
+            )
+            .await
+            .map_err(|err| format!("upsert concept embedding failed for {}: {}", concept, err))?;
+        let _ = stream.next().await;
+        Ok(())
+    }
+
+    async fn vector_search_candidates(
+        &self,
+        input_text: &str,
+        limit: usize,
+    ) -> Result<Vec<VectorCandidate>, String> {
+        let query_text = input_text.trim();
+        if query_text.is_empty() {
+            return Ok(Vec::new());
+        }
+        let query_embedding = self.embedding.encode(query_text)?;
+        let query_embedding = Self::to_embedding_property_vector(&query_embedding);
+        let raw_limit = limit
+            .max(1)
+            .saturating_mul(self.embedding_config.vector_search_raw_limit_multiplier);
+        let cypher = format!(
+            "CALL vector_search.search(\"{}\", $limit, $embedding) YIELD node, similarity
+             RETURN node.name AS name, similarity
+             ORDER BY similarity DESC",
+            self.embedding_config.vector_index_name
+        );
+        let mut result = self
+            .graph
+            .execute(
+                query(cypher.as_str())
+                    .param("limit", raw_limit as i64)
+                    .param("embedding", query_embedding),
+            )
+            .await
+            .map_err(|err| format!("vector_search.search failed: {}", err))?;
+        let mut candidates = Vec::<VectorCandidate>::new();
+        let mut seen = HashSet::<String>::new();
+        while let Ok(Some(row)) = result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if name.is_empty() || !seen.insert(name.clone()) {
+                continue;
+            }
+            let semantic = row.get::<f64>("similarity").unwrap_or(0.0);
+            candidates.push(VectorCandidate {
+                name,
+                semantic: semantic.clamp(0.0, 1.0),
+            });
+            if candidates.len() >= raw_limit {
+                break;
+            }
+        }
+        Ok(candidates)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn backfill_concept_embeddings(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<(usize, usize), String> {
+        let mut names = Vec::<String>::new();
+        let mut result = self
+            .graph
+            .execute(query(
+                "MATCH (c:Concept) RETURN c.name AS name ORDER BY name ASC",
+            ))
+            .await
+            .map_err(|err| format!("concept name scan failed: {}", err))?;
+        while let Ok(Some(row)) = result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            names.push(name);
+            if let Some(max) = limit {
+                if names.len() >= max {
+                    break;
+                }
+            }
+        }
+        let mut updated = 0usize;
+        let mut failed = 0usize;
+        for name in &names {
+            match self.upsert_concept_embedding(name.as_str()).await {
+                Ok(_) => updated += 1,
+                Err(err) => {
+                    failed += 1;
+                    eprintln!("EMBED_BACKFILL_ERROR concept={} error={}", name, err);
+                }
+            }
+        }
+        Ok((updated, failed))
     }
 
     fn local_date_yyyymmdd(now_ms: i64) -> String {
@@ -573,52 +1018,40 @@ impl ActivationConceptGraphStore {
 
 #[async_trait]
 impl ConceptGraphActivationReader for ActivationConceptGraphStore {
-    async fn concept_search(
-        &self,
-        keywords: &[String],
-        limit: usize,
-    ) -> Result<Vec<String>, String> {
+    async fn concept_search(&self, input_text: &str, limit: usize) -> Result<Vec<String>, String> {
         let limit = Self::clamp_limit(limit, 50, 200);
-        let normalized_keywords = keywords
-            .iter()
-            .filter_map(|value| Self::normalize_non_empty(value))
-            .collect::<Vec<_>>();
-        let mut concepts = Vec::new();
-        let mut seen = HashSet::new();
-        if !normalized_keywords.is_empty() {
-            let q = query(
-                "UNWIND $keywords AS kw
-                 MATCH (c:Concept)
-                 WHERE toLower(c.name) CONTAINS toLower(kw)
-                 RETURN DISTINCT c.name AS name
-                 ORDER BY name
-                 LIMIT $limit",
-            )
-            .param("keywords", normalized_keywords)
-            .param("limit", limit as i64);
-            let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
-            while let Ok(Some(row)) = result.next().await {
-                let name: String = row.get("name").unwrap_or_default();
-                if name.is_empty() || !seen.insert(name.clone()) {
-                    continue;
-                }
-                concepts.push(name);
-                if concepts.len() >= limit {
-                    break;
-                }
-            }
+        let now = self.now_ms();
+        let candidates = self.vector_search_candidates(input_text, limit).await?;
+        let mut ranked = Vec::<(String, f64)>::new();
+        let mut seen = HashSet::<String>::new();
+        for item in candidates {
+            let arousal = match self.fetch_concept_state(item.name.as_str(), now).await? {
+                Some(state) => self.arousal(state.arousal_level, state.accessed_at, now),
+                None => 0.0,
+            };
+            let final_score = (item.semantic * self.embedding_config.vector_search_semantic_weight)
+                + (arousal * self.embedding_config.vector_search_arousal_weight);
+            ranked.push((item.name.clone(), final_score));
+            seen.insert(item.name);
         }
+        ranked.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        let mut concepts = ranked
+            .into_iter()
+            .take(limit)
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
         if concepts.len() < limit {
-            let now = self.now_ms();
             let remaining = limit - concepts.len();
             let fallback = self.fetch_arousal_ranked(&seen, remaining, now).await?;
             for name in fallback {
                 if concepts.len() >= limit {
                     break;
                 }
-                if seen.insert(name.clone()) {
-                    concepts.push(name);
-                }
+                concepts.push(name);
             }
         }
         Ok(concepts)
@@ -673,6 +1106,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
             .map_err(|err| err.to_string())?
             .ok_or_else(|| "Failed to upsert concept: empty result".to_string())?;
         let created: bool = row.get("created").unwrap_or(false);
+        self.upsert_concept_embedding(concept.as_str()).await?;
         Ok(json!({
             "concept_id": concept,
             "created": created,
@@ -719,6 +1153,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
 
         self.ensure_concept(target.as_str(), now, new_arousal_level)
             .await?;
+        self.upsert_concept_embedding(target.as_str()).await?;
         let current = self
             .fetch_concept_state(target.as_str(), now)
             .await?
@@ -886,6 +1321,9 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         .param("relation_weight", DEFAULT_RELATION_WEIGHT);
         let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
         let _ = result.next().await;
+        for concept in &concepts {
+            self.upsert_concept_embedding(concept.as_str()).await?;
+        }
         Ok(json!({
             "episode_id": episode_id,
             "linked_concepts": concepts,
@@ -959,6 +1397,12 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
             .param("alpha", RELATION_WEIGHT_ALPHA);
         let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
         let _ = result.next().await;
+        if !from_is_episode {
+            self.upsert_concept_embedding(from.as_str()).await?;
+        }
+        if !to_is_episode {
+            self.upsert_concept_embedding(to.as_str()).await?;
+        }
         Ok(json!({
             "from": from,
             "to": to,

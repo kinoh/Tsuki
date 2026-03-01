@@ -258,7 +258,7 @@ struct DebugConceptSearchResponse {
 struct DebugConceptGraphQueryItem {
     event_id: String,
     ts: String,
-    query_terms: Vec<String>,
+    query_text: Option<String>,
     limit: Option<usize>,
     result_concepts: Vec<String>,
     error: Option<String>,
@@ -1395,17 +1395,11 @@ async fn debug_concept_graph_queries(
         {
             continue;
         }
-        let query_terms = event
+        let query_text = event
             .payload
-            .get("query_terms")
-            .and_then(|value| value.as_array())
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(|value| value.as_str().map(str::to_string))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+            .get("query_text")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
         let result_concepts = event
             .payload
             .get("result_concepts")
@@ -1430,7 +1424,7 @@ async fn debug_concept_graph_queries(
         items.push(DebugConceptGraphQueryItem {
             event_id: event.event_id,
             ts: event.ts,
-            query_terms,
+            query_text,
             limit: limit_value,
             result_concepts,
             error,

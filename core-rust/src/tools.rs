@@ -195,10 +195,12 @@ impl StateToolHandler {
                 let args: ConceptSearchArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
                 let limit = args.limit.max(1).min(200);
-                let query_terms = args.query_terms;
+                let input_text = args.input_text;
                 let concepts = tokio::task::block_in_place(|| {
-                    Handle::current()
-                        .block_on(self.concept_graph.concept_search(&query_terms, limit))
+                    Handle::current().block_on(
+                        self.concept_graph
+                            .concept_search(input_text.as_str(), limit),
+                    )
                 })
                 .map_err(ToolError::new)?;
                 Ok(to_json_string(&json!({
@@ -316,7 +318,7 @@ struct EmitUserReplyArgs {
 
 #[derive(Debug, Deserialize)]
 struct ConceptSearchArgs {
-    query_terms: Vec<String>,
+    input_text: String,
     limit: usize,
 }
 
@@ -591,10 +593,10 @@ fn concept_search_schema() -> Value {
     json!({
       "type": "object",
       "properties": {
-        "query_terms": { "type": "array", "items": { "type": "string" } },
+        "input_text": { "type": "string" },
         "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
       },
-      "required": ["query_terms", "limit"],
+      "required": ["input_text", "limit"],
       "additionalProperties": false
     })
 }
