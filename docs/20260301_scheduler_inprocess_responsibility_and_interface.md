@@ -90,6 +90,8 @@ Google Calendar integration is explicitly out of scope in this phase.
   - tags: `observe`, `tool`, `tool:<name>`, `outcome:<ok|error>`
   - payload: `tool_name`, `arguments`, `outcome`, `output`, `error`, `elapsed_ms`
 - `arguments` is a single field (JSON value when parseable, otherwise string). We intentionally avoid duplicated fields such as `arguments_raw` and `arguments_parsed`.
+- Observability events (`observe` tagged) are excluded from runtime decision/submodule history inputs.
+  - Why: they are machine-facing execution facts and should not become conversational context.
 - Why: stream processing can be interrupted at any time; `debug,llm.raw` is not a stable contract for pass/fail assertions.
 
 ## Implementation Details

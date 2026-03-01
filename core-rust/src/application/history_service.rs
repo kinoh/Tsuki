@@ -57,6 +57,7 @@ pub(crate) async fn latest_events(
         Ok(events) => events
             .into_iter()
             .filter(|event| !is_debug_event(event))
+            .filter(|event| !is_observability_event(event))
             .filter(|event| {
                 excluded_event_ids
                     .map(|ids| !ids.contains(event.event_id.as_str()))
@@ -234,6 +235,10 @@ fn truncate(value: &str, max: usize) -> String {
 
 fn is_debug_event(event: &Event) -> bool {
     event.meta.tags.iter().any(|tag| tag == "debug")
+}
+
+fn is_observability_event(event: &Event) -> bool {
+    event.meta.tags.iter().any(|tag| tag == "observe")
 }
 
 #[cfg(test)]
