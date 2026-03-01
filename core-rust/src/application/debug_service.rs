@@ -174,8 +174,13 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
             return Err(());
         }
         ParsedIngress::Input { kind, text } => {
+            let source = if kind == "scheduler_notice" {
+                "system"
+            } else {
+                "user"
+            };
             let input_event = build_event(
-                "user",
+                source,
                 "text",
                 json!({ "text": text }),
                 vec!["input".to_string(), format!("type:{}", kind)],

@@ -440,6 +440,7 @@ async fn main() {
     )
     .await
     .expect("failed to start scheduler");
+    crate::application::scheduler_notice_service::start_notice_consumer(state.clone());
 
     let admin_router = Router::new()
         .route("/styles/{name}", get(debug_style))

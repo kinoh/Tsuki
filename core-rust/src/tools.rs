@@ -1,7 +1,9 @@
 use crate::activation_concept_graph::ConceptGraphStore;
 use crate::event::build_event;
 use crate::llm::{ToolError, ToolHandler};
-use crate::scheduler::{ScheduleStore, ScheduleUpsertInput, SCHEDULE_SCOPE_DEFAULT};
+use crate::scheduler::{
+    ScheduleStore, ScheduleUpsertInput, SCHEDULE_SCOPE_DEFAULT, SELF_IMPROVEMENT_SCHEDULE_ID,
+};
 use crate::state::{StateRecord, StateStore};
 use async_openai::types::responses::{FunctionTool, Tool};
 use serde::Deserialize;
@@ -181,6 +183,11 @@ impl ToolHandler for StateToolHandler {
             SCHEDULE_UPSERT_TOOL => {
                 let args: ScheduleUpsertArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+                if args.id.trim() == SELF_IMPROVEMENT_SCHEDULE_ID {
+                    return Err(ToolError::new(
+                        "schedule id is reserved for internal self-improvement policy",
+                    ));
+                }
                 let recurrence = normalize_recurrence(args.recurrence)?;
                 let action = normalize_action(args.action)?;
                 let input = ScheduleUpsertInput {
@@ -204,6 +211,10 @@ impl ToolHandler for StateToolHandler {
                     Handle::current().block_on(self.schedule_store.list(SCHEDULE_SCOPE_DEFAULT))
                 })
                 .map_err(ToolError::new)?;
+                let schedules = schedules
+                    .into_iter()
+                    .filter(|item| item.id != SELF_IMPROVEMENT_SCHEDULE_ID)
+                    .collect::<Vec<_>>();
                 Ok(to_json_string(&json!({
                     "count": schedules.len(),
                     "items": schedules,
@@ -212,6 +223,11 @@ impl ToolHandler for StateToolHandler {
             SCHEDULE_REMOVE_TOOL => {
                 let args: ScheduleRemoveArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+                if args.id.trim() == SELF_IMPROVEMENT_SCHEDULE_ID {
+                    return Err(ToolError::new(
+                        "schedule id is reserved for internal self-improvement policy",
+                    ));
+                }
                 let removed = tokio::task::block_in_place(|| {
                     Handle::current().block_on(
                         self.schedule_store
@@ -477,7 +493,7 @@ fn schedule_upsert_schema() -> Value {
         "recurrence": {
           "type": "object",
           "properties": {
-            "kind": { "type": "string" },
+            "kind": { "type": "string", "enum": ["once", "daily", "weekly", "monthly", "interval"] },
             "at": { "type": ["string", "null"] },
             "weekdays": { "type": ["array", "null"], "items": { "type": "integer" } },
             "day": { "type": ["integer", "null"] },
@@ -490,7 +506,7 @@ fn schedule_upsert_schema() -> Value {
         "action": {
           "type": "object",
           "properties": {
-            "kind": { "type": "string" },
+            "kind": { "type": "string", "enum": ["emit_event", "emit_message"] },
             "event": { "type": ["string", "null"] },
             "message": { "type": ["string", "null"] },
             "target": { "type": ["string", "null"] },

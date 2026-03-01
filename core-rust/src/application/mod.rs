@@ -5,5 +5,6 @@ pub mod improve_approval_service;
 pub mod improve_service;
 pub mod pipeline_service;
 pub mod router_service;
+pub mod scheduler_notice_service;
 pub mod scheduler_service;
 pub mod trigger_ingress_api;

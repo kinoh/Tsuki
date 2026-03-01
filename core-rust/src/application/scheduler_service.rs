@@ -138,6 +138,18 @@ async fn emit_scheduled_event(
         return Ok(());
     }
 
+    if schedule_id == SELF_IMPROVEMENT_SCHEDULE_ID {
+        return emit_self_improvement_event(state, action, schedule_id, scheduled_at).await;
+    }
+    emit_scheduler_notice(state, action, schedule_id, scheduled_at).await
+}
+
+async fn emit_self_improvement_event(
+    state: &AppState,
+    action: &ScheduleAction,
+    schedule_id: &str,
+    scheduled_at: &str,
+) -> Result<(), String> {
     match action {
         ScheduleAction::EmitEvent { event, payload } => {
             let mut action_payload = payload.clone();
@@ -180,40 +192,48 @@ async fn emit_scheduled_event(
             record_event(state, fired_event).await;
             Ok(())
         }
-        ScheduleAction::EmitMessage { message } => {
-            let action_event = build_event(
-                "assistant",
-                "text",
-                json!({
-                    "text": message,
-                    "schedule_id": schedule_id,
-                    "scheduled_at": scheduled_at,
-                    "created_at": now_iso8601(),
-                    "created_by": "scheduler",
-                }),
-                vec!["response".to_string(), "scheduler.message".to_string()],
-            );
-            record_event(state, action_event).await;
-
-            let fired_event = build_event(
-                "scheduler",
-                "text",
-                json!({
-                    "schedule_id": schedule_id,
-                    "scheduled_at": scheduled_at,
-                    "fired_at": now_iso8601(),
-                    "action": {
-                        "kind": "emit_message",
-                        "message": message,
-                    }
-                }),
-                vec![
-                    "scheduler.fired".to_string(),
-                    "scheduler.message".to_string(),
-                ],
-            );
-            record_event(state, fired_event).await;
-            Ok(())
-        }
+        ScheduleAction::EmitMessage { .. } => Err(
+            "self-improvement policy must use emit_event action, emit_message is not allowed"
+                .to_string(),
+        ),
     }
+}
+
+async fn emit_scheduler_notice(
+    state: &AppState,
+    action: &ScheduleAction,
+    schedule_id: &str,
+    scheduled_at: &str,
+) -> Result<(), String> {
+    let action_json = serde_json::to_value(action).map_err(|err| err.to_string())?;
+    let notice_event = build_event(
+        "scheduler",
+        "text",
+        json!({
+            "schedule_id": schedule_id,
+            "scheduled_at": scheduled_at,
+            "noticed_at": now_iso8601(),
+            "action": action_json,
+        }),
+        vec!["scheduler.notice".to_string()],
+    );
+    record_event(state, notice_event).await;
+
+    let fired_event = build_event(
+        "scheduler",
+        "text",
+        json!({
+            "schedule_id": schedule_id,
+            "scheduled_at": scheduled_at,
+            "fired_at": now_iso8601(),
+            "action": action,
+            "disposition": "notice_only",
+        }),
+        vec![
+            "scheduler.fired".to_string(),
+            "scheduler.notice".to_string(),
+        ],
+    );
+    record_event(state, fired_event).await;
+    Ok(())
 }
