@@ -143,7 +143,7 @@ struct PromptsPayload {
     router: Option<String>,
     decision: String,
     #[serde(default)]
-    self_improvement_trigger: Option<String>,
+    self_improvement: Option<String>,
     submodules: Vec<PromptModulePayload>,
 }
 
@@ -344,8 +344,8 @@ async fn main() {
         prompts_path.as_path(),
     );
     required_prompt(
-        prompt_overrides.self_improvement_trigger.as_deref(),
-        "Self Improvement Trigger",
+        prompt_overrides.self_improvement.as_deref(),
+        "Self Improvement",
         prompts_path.as_path(),
     );
     let prompts = Arc::new(RwLock::new(prompt_overrides.clone()));
@@ -965,10 +965,10 @@ async fn debug_update_prompts(
             .clone()
             .or_else(|| current_overrides.router.clone()),
         decision: Some(payload.decision.clone()),
-        self_improvement_trigger: payload
-            .self_improvement_trigger
+        self_improvement: payload
+            .self_improvement
             .clone()
-            .or_else(|| current_overrides.self_improvement_trigger.clone()),
+            .or_else(|| current_overrides.self_improvement.clone()),
         submodules,
     };
     write_prompts(&state.prompts_path, &overrides)
@@ -1833,8 +1833,8 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
         .router
         .clone()
         .unwrap_or_else(|| state.router_instructions.clone());
-    let self_improvement_trigger = overrides
-        .self_improvement_trigger
+    let self_improvement = overrides
+        .self_improvement
         .clone()
         .unwrap_or_default();
     let module_defs = state
@@ -1859,7 +1859,7 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
         base,
         router: Some(router),
         decision,
-        self_improvement_trigger: Some(self_improvement_trigger),
+        self_improvement: Some(self_improvement),
         submodules,
     })
 }

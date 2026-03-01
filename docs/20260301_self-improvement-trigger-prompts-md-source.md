@@ -1,16 +1,16 @@
-# Self-Improvement Trigger Instructions from prompts.md
+# Self-Improvement Instructions from prompts.md
 
 ## Context
-- `core-rust` still had a hardcoded fallback (`DEFAULT_SELF_IMPROVEMENT_TRIGGER_INSTRUCTIONS`) for self-improvement trigger worker instructions.
+- `core-rust` still had a hardcoded fallback (`DEFAULT_SELF_IMPROVEMENT_TRIGGER_INSTRUCTIONS`) for self-improvement worker instructions.
 - This contradicted the prompt-source policy used in the rest of runtime prompt loading, where prompt text should come from `prompts.md` and fail fast when invalid/missing.
 - The hardcoded path also made prompt ownership split across files (`main.rs` + `prompts.md`), which increased drift risk.
 
 ## Decision
 - Extend `prompts.md` schema with a required top-level section:
-  - `# Self Improvement Trigger`
-- Parse and persist it through `PromptOverrides.self_improvement_trigger`.
+  - `# Self Improvement`
+- Parse and persist it through `PromptOverrides.self_improvement`.
 - Remove hardcoded default trigger instructions from `main.rs`.
-- Require non-empty `Self Improvement Trigger` in prompt validation at load/write time.
+- Require non-empty `Self Improvement` in prompt validation at load/write time.
 - At trigger execution time, read instructions from loaded prompt overrides.
 
 ## Why
@@ -20,17 +20,16 @@
 
 ## Implementation Notes
 - `core-rust/src/prompts.rs`
-  - Added `self_improvement_trigger` field.
-  - Added `# Self Improvement Trigger` read/write handling.
+  - Added `self_improvement` field.
+  - Added `# Self Improvement` read/write handling.
   - Added required-section validation for non-empty trigger instructions.
 - `core-rust/src/main.rs`
   - Removed hardcoded default string.
-  - Startup now validates `Self Improvement Trigger` presence through `prompts.md`.
-  - Prompt admin payload now carries `self_improvement_trigger`.
+  - Startup now validates `Self Improvement` presence through `prompts.md`.
+  - Prompt admin payload now carries `self_improvement`.
 - `core-rust/src/application/improve_service.rs`
   - Trigger worker now reads instructions from prompt overrides.
-  - If missing/empty at runtime, processing fails with `TRIGGER_INSTRUCTIONS_MISSING`.
+  - If missing/empty at runtime, processing fails with `SELF_IMPROVEMENT_INSTRUCTIONS_MISSING`.
 
 ## Compatibility Impact
 breaking-by-default (no compatibility layer)
-
