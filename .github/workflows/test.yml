@@ -2,49 +2,31 @@ name: Test
 
 on:
   push:
-    paths-ignore:
-      - 'gui/**'
+    paths:
+      - "core-rust/**"
+      - ".github/workflows/test.yml"
   pull_request:
-    paths-ignore:
-      - 'gui/**'
+    paths:
+      - "core-rust/**"
+      - ".github/workflows/test.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  GIT_HASH: ${{ github.sha }}
 
 jobs:
   test:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./core
+        working-directory: ./core-rust
     steps:
-    - uses: actions/checkout@v4
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        version: 10
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '22'
-        cache: 'pnpm'
-        cache-dependency-path: 'core/pnpm-lock.yaml'
-    - name: Install dependencies
-      run: pnpm install --frozen-lockfile
-    - name: Type check
-      run: pnpm exec tsc --noEmit
-    - name: Lint
-      run: pnpm exec eslint .
-    - name: Build check
-      run: pnpm run build
-    - name: Run tests
-      env:
-        OPENAI_API_KEY: xxx
-        WEB_AUTH_TOKEN: xxx
-        DIFY_SANDBOX_API_KEY: xxx
-        PROMPT_PRIVATE_KEY: xxx
-      run: pnpm test
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        run: rustup update stable && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            core-rust -> target
+      - name: Run tests
+        run: cargo test
