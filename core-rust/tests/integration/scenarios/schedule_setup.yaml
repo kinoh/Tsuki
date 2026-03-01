@@ -9,12 +9,13 @@ steps:
       Do not reveal test intent.
 
       Missions:
-      1) Ask the assistant to set a safe recurring schedule for self-improvement:
+      1) Ask the assistant to set a safe recurring schedule for simple message sending:
          - id: `schedule_setup_daily`
          - recurrence: daily
          - time: 04:00 (Asia/Tokyo)
-         - event: `self_improvement.run`
-         - payload: optional (`target` and `reason` may be omitted)
+         - action kind: `emit_message`
+         - message: a short user-facing text (e.g. morning reminder)
+         - event field may be null
       2) Ask the assistant to show the current schedule list so you can confirm what was saved.
       3) Ask the assistant to remove `schedule_setup_daily` as cleanup.
     max_turns: 8
@@ -42,6 +43,7 @@ metrics_definition:
     description: |
       Verify scheduler tool-call arguments are contract-aligned:
       - non-cron recurrence representation (daily with explicit time/timezone)
-      - action event is `self_improvement.run`
-      - action `target` and `reason` may be null (runtime defaulting allowed)
+      - action kind is `emit_message`
+      - message is non-empty
+      - event may be null
       Penalize malformed contract fields.

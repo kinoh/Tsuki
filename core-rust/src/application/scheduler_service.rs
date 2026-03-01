@@ -28,6 +28,9 @@ pub(crate) async fn start_scheduler(
 
     let action_event = match policy.action {
         ScheduleAction::EmitEvent { ref event, .. } => event.clone(),
+        ScheduleAction::EmitMessage { .. } => {
+            return Err("scheduler.self_improvement.action.kind must be 'emit_event'".to_string());
+        }
     };
     if action_event != "self_improvement.run" {
         return Err(
@@ -173,6 +176,41 @@ async fn emit_scheduled_event(
                     }
                 }),
                 vec!["scheduler.fired".to_string(), event.to_string()],
+            );
+            record_event(state, fired_event).await;
+            Ok(())
+        }
+        ScheduleAction::EmitMessage { message } => {
+            let action_event = build_event(
+                "assistant",
+                "text",
+                json!({
+                    "text": message,
+                    "schedule_id": schedule_id,
+                    "scheduled_at": scheduled_at,
+                    "created_at": now_iso8601(),
+                    "created_by": "scheduler",
+                }),
+                vec!["response".to_string(), "scheduler.message".to_string()],
+            );
+            record_event(state, action_event).await;
+
+            let fired_event = build_event(
+                "scheduler",
+                "text",
+                json!({
+                    "schedule_id": schedule_id,
+                    "scheduled_at": scheduled_at,
+                    "fired_at": now_iso8601(),
+                    "action": {
+                        "kind": "emit_message",
+                        "message": message,
+                    }
+                }),
+                vec![
+                    "scheduler.fired".to_string(),
+                    "scheduler.message".to_string(),
+                ],
             );
             record_event(state, fired_event).await;
             Ok(())

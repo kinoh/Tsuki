@@ -182,31 +182,12 @@ impl ToolHandler for StateToolHandler {
                 let args: ScheduleUpsertArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
                 let recurrence = normalize_recurrence(args.recurrence)?;
-                if args.action.kind != "emit_event" {
-                    return Err(ToolError::new(format!(
-                        "invalid action.kind: expected 'emit_event', got '{}'",
-                        args.action.kind
-                    )));
-                }
-                let mut payload = serde_json::Map::new();
-                if let Some(target) = args.action.target {
-                    if !target.trim().is_empty() {
-                        payload.insert("target".to_string(), json!(target));
-                    }
-                }
-                if let Some(reason) = args.action.reason {
-                    if !reason.trim().is_empty() {
-                        payload.insert("reason".to_string(), json!(reason));
-                    }
-                }
+                let action = normalize_action(args.action)?;
                 let input = ScheduleUpsertInput {
                     id: args.id,
                     recurrence,
                     timezone: args.timezone,
-                    action: crate::scheduler::ScheduleAction::EmitEvent {
-                        event: args.action.event,
-                        payload: Value::Object(payload),
-                    },
+                    action,
                     enabled: args.enabled,
                 };
                 let schedule = tokio::task::block_in_place(|| {
@@ -309,7 +290,10 @@ struct ScheduleToolRecurrenceArgs {
 #[derive(Debug, Deserialize)]
 struct ScheduleToolActionArgs {
     kind: String,
-    event: String,
+    #[serde(default)]
+    event: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
     #[serde(default)]
     target: Option<String>,
     #[serde(default)]
@@ -384,6 +368,45 @@ fn normalize_recurrence(
         }),
         _ => Err(ToolError::new(format!(
             "invalid recurrence.kind: expected one of once|daily|weekly|monthly|interval, got '{}'",
+            kind
+        ))),
+    }
+}
+
+fn normalize_action(
+    value: ScheduleToolActionArgs,
+) -> Result<crate::scheduler::ScheduleAction, ToolError> {
+    let kind = value.kind.trim();
+    if kind.is_empty() {
+        return Err(ToolError::new("action.kind is required"));
+    }
+
+    match kind {
+        "emit_event" => {
+            let mut payload = serde_json::Map::new();
+            if let Some(target) = value.target {
+                let trimmed = target.trim();
+                if !trimmed.is_empty() {
+                    payload.insert("target".to_string(), json!(trimmed));
+                }
+            }
+            if let Some(reason) = value.reason {
+                let trimmed = reason.trim();
+                if !trimmed.is_empty() {
+                    payload.insert("reason".to_string(), json!(trimmed));
+                }
+            }
+            let event = required_non_empty(value.event, "action.event")?;
+            Ok(crate::scheduler::ScheduleAction::EmitEvent {
+                event,
+                payload: Value::Object(payload),
+            })
+        }
+        "emit_message" => Ok(crate::scheduler::ScheduleAction::EmitMessage {
+            message: required_non_empty(value.message, "action.message")?,
+        }),
+        _ => Err(ToolError::new(format!(
+            "invalid action.kind: expected emit_event|emit_message, got '{}'",
             kind
         ))),
     }
@@ -467,12 +490,13 @@ fn schedule_upsert_schema() -> Value {
         "action": {
           "type": "object",
           "properties": {
-            "kind": { "type": "string", "const": "emit_event" },
-            "event": { "type": "string" },
+            "kind": { "type": "string" },
+            "event": { "type": ["string", "null"] },
+            "message": { "type": ["string", "null"] },
             "target": { "type": ["string", "null"] },
             "reason": { "type": ["string", "null"] }
           },
-          "required": ["kind", "event", "target", "reason"],
+          "required": ["kind", "event", "message", "target", "reason"],
           "additionalProperties": false
         },
         "enabled": { "type": "boolean" }

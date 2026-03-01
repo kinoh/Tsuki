@@ -59,6 +59,9 @@ pub enum ScheduleAction {
         #[serde(default = "default_emit_event_payload")]
         payload: Value,
     },
+    EmitMessage {
+        message: String,
+    },
 }
 
 #[derive(Clone)]
@@ -287,6 +290,11 @@ impl ScheduleAction {
                 }
                 if !payload.is_object() {
                     return Err("action.payload must be an object".to_string());
+                }
+            }
+            Self::EmitMessage { message } => {
+                if message.trim().is_empty() {
+                    return Err("action.message must not be empty".to_string());
                 }
             }
         }

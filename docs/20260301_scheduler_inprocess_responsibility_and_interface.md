@@ -46,11 +46,12 @@ Google Calendar integration is explicitly out of scope in this phase.
   - `schedule_remove`
 - Do not expose `enable/disable` as separate tools.
   - Why: `enabled` is part of the `schedule_upsert` payload.
-- `schedule_upsert.action.payload` allows omitted `target` and `reason`.
-  - Runtime defaulting: `target = "all"`, `reason = "scheduled"`.
-  - Why: keep authoring friction low while preserving deterministic runtime behavior.
-- Tool wire contract uses strict-schema-compatible flat fields (`action.target`, `action.reason`) and runtime normalizes them into internal action payload.
-  - `action.target` and `action.reason` are nullable in the wire schema and runtime treats `null` as omitted.
+- `schedule_upsert` action supports:
+  - `emit_event` (runtime event emission)
+  - `emit_message` (simple user-facing message emission)
+- Tool wire contract uses strict-schema-compatible flat action fields (`action.event`, `action.message`, `action.target`, `action.reason`).
+  - these fields are nullable in the wire schema; runtime validates required fields by `action.kind`.
+  - for `emit_event`, `target/reason` defaults are applied when null (`target = "all"`, `reason = "scheduled"`).
   - Why: OpenAI strict function schema requires all declared object properties to be listed in `required`.
 - Tool wire contract also uses strict-schema-compatible flat recurrence fields (`recurrence.kind`, `recurrence.at`, `recurrence.weekdays`, `recurrence.day`, `recurrence.seconds`).
   - Non-applicable recurrence fields are represented as `null` in the wire schema and normalized by runtime based on `kind`.
@@ -113,16 +114,17 @@ Google Calendar integration is explicitly out of scope in this phase.
   },
   "timezone": "Asia/Tokyo",
   "action": {
-    "kind": "emit_event",
-    "event": "self_improvement.run",
-    "target": "all",
-    "reason": "scheduled_daily"
+    "kind": "emit_message",
+    "event": null,
+    "message": "Good morning. Scheduled reminder.",
+    "target": null,
+    "reason": null
   },
   "enabled": true
 }
 ```
 
-`action.target` and `action.reason` are nullable for `emit_event`; when `null`, runtime fills defaults (`target = "all"`, `reason = "scheduled"`), then normalizes to internal action payload.
+`action.event/message/target/reason` are nullable in the wire schema. Runtime applies kind-based validation and normalization.
 
 ### Planned config shape
 ```toml
@@ -143,9 +145,11 @@ action = { kind = "emit_event", event = "self_improvement.run", payload = { targ
   - `schedule_id`
   - `scheduled_at`
   - `fired_at`
-  - `action.event`
-  - `action.payload`
-- additional routing tag: action event name (for example `self_improvement.run`)
+  - `action.kind`
+  - `action` detail (`event/payload` or `message`)
+- additional routing tag:
+  - for `emit_event`: action event name (for example `self_improvement.run`)
+  - for `emit_message`: `scheduler.message`
 
 ## Future Considerations
 - If runtime becomes multi-instance, duplicate checks must be transaction-safe at storage/query boundary.
