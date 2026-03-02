@@ -70,5 +70,10 @@ You will receive event messages:
 cd core-rust
 CONCEPT_EMBEDDING_MODEL_DIR=/path/to/model \
 MEMGRAPH_URI=bolt://localhost:7687 \
-cargo run --bin backfill_concept_embeddings -- --limit 1000
+cargo run --bin tsuki-core-rust -- backfill --limit 1000
+```
+
+Production one-shot (snapshot before/after included):
+```
+DOCKER_HOST=ssh://<prod-host> task memgraph/backfill
 ```

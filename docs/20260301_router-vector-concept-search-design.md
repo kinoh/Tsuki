@@ -95,8 +95,8 @@ A one-time full concept backfill is required:
 This decision was explicitly re-confirmed with user feedback in this task:
 - full re-embedding is required at initialization and model updates
 
-New helper binary:
-- `core-rust/src/bin/backfill_concept_embeddings.rs`
+Operational entrypoint:
+- `tsuki-core-rust backfill --limit <N>`
 
 ## Failure Policy
 - Fail fast if model artifacts are missing or invalid.
