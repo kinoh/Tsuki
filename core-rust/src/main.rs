@@ -1,6 +1,8 @@
 mod activation_concept_graph;
 mod application;
+mod cli;
 mod clock;
+mod commands;
 mod config;
 mod db;
 mod event;
@@ -312,12 +314,6 @@ pub(crate) struct DebugImproveResponse {
     pub(crate) applied: bool,
 }
 
-#[derive(Debug, Clone)]
-enum CliCommand {
-    Serve,
-    Backfill { limit: Option<usize> },
-}
-
 #[tokio::main]
 async fn main() {
     if let Err(err) = run().await {
@@ -327,12 +323,12 @@ async fn main() {
 }
 
 async fn run() -> Result<(), String> {
-    match parse_cli_command()? {
-        CliCommand::Serve => {
+    match cli::parse_cli_command()? {
+        cli::CliCommand::Serve => {
             run_server().await;
             Ok(())
         }
-        CliCommand::Backfill { limit } => run_backfill(limit).await,
+        cli::CliCommand::Backfill { limit } => commands::backfill::run(limit).await,
     }
 }
 
@@ -535,77 +531,6 @@ async fn run_server() {
         .await
         .expect("failed to bind listener");
     axum::serve(listener, app).await.expect("server error");
-}
-
-async fn run_backfill(limit: Option<usize>) -> Result<(), String> {
-    let arousal_tau_ms = std::env::var("AROUSAL_TAU_MS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or(86_400_000.0);
-    let store = ActivationConceptGraphStore::connect(
-        std::env::var("MEMGRAPH_URI").unwrap_or_else(|_| "bolt://localhost:7687".to_string()),
-        std::env::var("MEMGRAPH_USER").unwrap_or_default(),
-        std::env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
-        arousal_tau_ms,
-    )
-    .await?;
-
-    let (updated, failed) = store.backfill_concept_embeddings(limit).await?;
-    println!(
-        "EMBED_BACKFILL_RESULT updated={} failed={} limit={}",
-        updated,
-        failed,
-        limit
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "all".to_string())
-    );
-    if failed > 0 {
-        return Err(format!("backfill failed for {} concepts", failed));
-    }
-    Ok(())
-}
-
-fn parse_cli_command() -> Result<CliCommand, String> {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.is_empty() {
-        return Ok(CliCommand::Serve);
-    }
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        print_usage();
-        std::process::exit(0);
-    }
-
-    match args[0].as_str() {
-        "serve" => Ok(CliCommand::Serve),
-        "backfill" => {
-            let mut limit = None;
-            let mut idx = 1usize;
-            while idx < args.len() {
-                match args[idx].as_str() {
-                    "--limit" => {
-                        let value = args.get(idx + 1).ok_or("--limit requires a value")?;
-                        limit = Some(
-                            value
-                                .parse::<usize>()
-                                .map_err(|err| format!("invalid --limit: {}", err))?
-                                .max(1),
-                        );
-                        idx += 2;
-                    }
-                    option => return Err(format!("unknown option for backfill: {}", option)),
-                }
-            }
-            Ok(CliCommand::Backfill { limit })
-        }
-        command => Err(format!("unknown command: {}", command)),
-    }
-}
-
-fn print_usage() {
-    println!("tsuki-core-rust");
-    println!("Usage:");
-    println!("  tsuki-core-rust [serve]");
-    println!("  tsuki-core-rust backfill [--limit N]");
 }
 
 fn build_modules(
