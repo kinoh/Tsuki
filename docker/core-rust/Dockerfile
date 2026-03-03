@@ -29,9 +29,6 @@ RUN mkdir -p /opt/tsuki/models
 
 COPY --from=builder /tmp/tsuki-core-rust /usr/local/bin/tsuki-core-rust
 COPY --from=builder /tmp/config.toml /app/config.toml
-COPY core-rust/scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint.sh
-
-RUN chmod +x /usr/local/bin/container-entrypoint.sh
 
 ENV RUST_LOG=info
 ENV TZ=UTC
@@ -39,4 +36,4 @@ ENV CONCEPT_EMBEDDING_MODEL_DIR=/opt/tsuki/models/quantized-stable-static-embedd
 
 EXPOSE 2953
 
-ENTRYPOINT ["/usr/local/bin/container-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/tsuki-core-rust"]
