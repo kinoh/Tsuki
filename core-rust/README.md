@@ -20,7 +20,7 @@ Environment variables (secrets only):
 - `TURSO_AUTH_TOKEN` (required when `db.remote_url` is set)
 
 Environment variables (router concept embedding):
-- `CONCEPT_EMBEDDING_MODEL_DIR` (optional; default: `/data/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja`)
+- `CONCEPT_EMBEDDING_MODEL_DIR` (optional; default: `/opt/tsuki/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja`)
   - Required model files: `tokenizer.json`, `model_rest.safetensors`, `embedding.q4_k_m.bin`
   - Startup fails if files are missing or invalid.
 

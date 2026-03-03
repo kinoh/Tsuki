@@ -115,7 +115,7 @@ Admin concept graph timeline UI now renders `query_text` instead of `query_terms
 
 ## Delivery/Runtime Impact
 - Runtime env wiring updated in `compose.yaml`:
-  - `CONCEPT_EMBEDDING_MODEL_DIR=/data/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja`
+  - `CONCEPT_EMBEDDING_MODEL_DIR=/opt/tsuki/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja`
 - Operator notes updated in `core-rust/README.md`.
 
 ## Compatibility Impact

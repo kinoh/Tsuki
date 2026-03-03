@@ -18,7 +18,6 @@ services:
       FCM_PROJECT_ID: ${FCM_PROJECT_ID}
       DATA_DIR: /data
       MEMGRAPH_URI: bolt://memgraph:7687
-      CONCEPT_EMBEDDING_MODEL_DIR: /data/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja
       GIT_HASH: ${GIT_HASH}
     volumes:
       - core-data:/data

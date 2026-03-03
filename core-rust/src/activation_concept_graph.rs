@@ -26,7 +26,7 @@ const DEFAULT_VECTOR_INDEX_CAPACITY: usize = 200_000;
 const DEFAULT_VECTOR_INDEX_SCALAR_KIND: &str = "f32";
 const DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT: usize = 2;
 const DEFAULT_CONCEPT_EMBEDDING_MODEL_DIR: &str =
-    "/data/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja";
+    "/opt/tsuki/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja";
 const CONCEPT_EMBEDDING_MODEL_DIR_ENV: &str = "CONCEPT_EMBEDDING_MODEL_DIR";
 const CONCEPT_VECTOR_INDEX_NAME_ENV: &str = "CONCEPT_VECTOR_INDEX_NAME";
 const CONCEPT_VECTOR_INDEX_CAPACITY_ENV: &str = "CONCEPT_VECTOR_INDEX_CAPACITY";
