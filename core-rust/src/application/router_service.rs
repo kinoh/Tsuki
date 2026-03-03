@@ -445,18 +445,13 @@ async fn emit_concept_graph_query_event(
     selected_seeds: &[String],
     active_concepts_from_concept_graph: &str,
 ) {
-    let event = build_event(
-        "router",
-        "state",
-        json!({
-            "query_text": query_text,
-            "limit": limit,
-            "result_concepts": candidate_concepts,
-            "selected_seeds": selected_seeds,
-            "active_concepts_from_concept_graph": active_concepts_from_concept_graph,
-        }),
-        vec!["debug".to_string(), "concept_graph.query".to_string()],
-    );
+    let event = concept_graph_query(json!({
+        "query_text": query_text,
+        "limit": limit,
+        "result_concepts": candidate_concepts,
+        "selected_seeds": selected_seeds,
+        "active_concepts_from_concept_graph": active_concepts_from_concept_graph,
+    }));
     record_event(state, event).await;
 }
 
