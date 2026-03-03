@@ -25,7 +25,16 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /opt/tsuki/models
+RUN set -eux; \
+    model_dir="/opt/tsuki/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja"; \
+    mkdir -p "${model_dir}"; \
+    base_url="https://huggingface.co/RikkaBotan/quantized-stable-static-embedding-fast-retrieval-mrl-ja/resolve/e092037cf8c85a3f1325bfa22d2797f3bc13594e"; \
+    wget -O "${model_dir}/tokenizer.json" "${base_url}/tokenizer.json"; \
+    wget -O "${model_dir}/model_rest.safetensors" "${base_url}/model_rest.safetensors"; \
+    wget -O "${model_dir}/embedding.q4_k_m.bin" "${base_url}/embedding.q4_k_m.bin"; \
+    test -s "${model_dir}/tokenizer.json"; \
+    test -s "${model_dir}/model_rest.safetensors"; \
+    test -s "${model_dir}/embedding.q4_k_m.bin"
 
 COPY --from=builder /tmp/tsuki-core-rust /usr/local/bin/tsuki-core-rust
 COPY --from=builder /tmp/config.toml /app/config.toml
