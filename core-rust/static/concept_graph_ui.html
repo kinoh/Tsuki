@@ -478,13 +478,13 @@
         }
         els.timeline.innerHTML = items
           .map((item) => {
-            const terms = Array.isArray(item.query_terms) ? item.query_terms.join(", ") : "";
+            const queryText = typeof item.query_text === "string" ? item.query_text : "";
             const concepts = Array.isArray(item.result_concepts) ? item.result_concepts.join(", ") : "";
             const error = item.error ? `<div class="status-ng">error=${escapeHtml(item.error)}</div>` : "";
             return `
               <div class="timeline-item">
                 <div class="timeline-meta">${escapeHtml(item.ts || "-")} · event_id=${escapeHtml(item.event_id || "-")}</div>
-                <div>query_terms: ${escapeHtml(terms || "-")}</div>
+                <div>query_text: ${escapeHtml(queryText || "-")}</div>
                 <div>result_concepts: ${escapeHtml(concepts || "-")}</div>
                 ${error}
               </div>

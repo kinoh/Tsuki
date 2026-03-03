@@ -26,7 +26,6 @@ pub(crate) struct HardTriggerResult {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RouterOutput {
-    pub(crate) activation_query_terms: Vec<String>,
     pub(crate) active_concepts_from_concept_graph: String,
     pub(crate) module_scores: BTreeMap<String, f64>,
     pub(crate) saturation_penalties: BTreeMap<String, f64>,
@@ -45,7 +44,6 @@ pub(crate) struct ActivationSnapshot {
 
 #[derive(Debug, Clone)]
 struct RouterPreprocessOutput {
-    query_terms: Vec<String>,
     candidate_concepts: Vec<String>,
 }
 
@@ -81,10 +79,9 @@ where
         overrides,
     )
     .await;
-    let activation_query_terms = preprocess.query_terms.clone();
     emit_concept_graph_query_event(
         state,
-        &preprocess.query_terms,
+        input_text,
         concept_limit,
         &preprocess.candidate_concepts,
         &resolution.selected_seeds,
@@ -129,7 +126,6 @@ where
     dampen_hard_triggered_submodule_arousal(state, &hard_triggers).await;
 
     let router_output = RouterOutput {
-        activation_query_terms,
         active_concepts_from_concept_graph: resolution.active_concepts_from_concept_graph,
         module_scores,
         saturation_penalties,
@@ -229,14 +225,12 @@ fn render_router_context_template(
     template: &str,
     latest_user_input: &str,
     active_submodules: &str,
-    query_terms: &str,
     candidate_concepts: &str,
     router_query_terms_max: usize,
 ) -> String {
     template
         .replace("{{latest_user_input}}", latest_user_input)
         .replace("{{active_submodules}}", active_submodules)
-        .replace("{{query_terms}}", query_terms)
         .replace("{{candidate_concepts}}", candidate_concepts)
         .replace(
             "{{router_query_terms_max}}",
@@ -445,19 +439,24 @@ async fn emit_router_debug_error(state: &AppState, context: &str, error: &str) {
 
 async fn emit_concept_graph_query_event(
     state: &AppState,
-    query_terms: &[String],
+    query_text: &str,
     limit: usize,
     candidate_concepts: &[String],
     selected_seeds: &[String],
     active_concepts_from_concept_graph: &str,
 ) {
-    let event = concept_graph_query(json!({
-        "query_terms": query_terms,
-        "limit": limit,
-        "result_concepts": candidate_concepts,
-        "selected_seeds": selected_seeds,
-        "active_concepts_from_concept_graph": active_concepts_from_concept_graph,
-    }));
+    let event = build_event(
+        "router",
+        "state",
+        json!({
+            "query_text": query_text,
+            "limit": limit,
+            "result_concepts": candidate_concepts,
+            "selected_seeds": selected_seeds,
+            "active_concepts_from_concept_graph": active_concepts_from_concept_graph,
+        }),
+        vec!["debug".to_string(), "concept_graph.query".to_string()],
+    );
     record_event(state, event).await;
 }
 
@@ -466,22 +465,18 @@ async fn preprocess_router_activation(
     concept_limit: usize,
     state: &AppState,
 ) -> RouterPreprocessOutput {
-    let query_terms = extract_query_terms_v0(input_text, concept_limit);
-    if query_terms.is_empty() {
+    let query_text = input_text.trim();
+    if query_text.is_empty() {
         return RouterPreprocessOutput {
-            query_terms,
             candidate_concepts: Vec::new(),
         };
     }
     let candidate_concepts = state
         .activation_concept_graph
-        .concept_search(&query_terms, concept_limit)
+        .concept_search(query_text, concept_limit)
         .await
         .unwrap_or_default();
-    RouterPreprocessOutput {
-        query_terms,
-        candidate_concepts,
-    }
+    RouterPreprocessOutput { candidate_concepts }
 }
 
 async fn resolve_active_concepts_from_concept_graph(
@@ -503,13 +498,11 @@ async fn resolve_active_concepts_from_concept_graph(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let query_term_lines = render_list_for_prompt(&preprocess.query_terms);
     let candidate_lines = render_list_for_prompt(&preprocess.candidate_concepts);
     let context = render_router_context_template(
         &state.input.router_context_template,
         input_text,
         &module_lines,
-        &query_term_lines,
         &candidate_lines,
         state.router.query_terms_max.max(1),
     );
@@ -687,181 +680,6 @@ fn render_recall_result_as_active_concepts(value: &Value, max_lines: usize) -> S
     }
 }
 
-fn extract_query_terms_v0(input_text: &str, max_terms: usize) -> Vec<String> {
-    let normalized = normalize_input_text_v0(input_text);
-    if normalized.is_empty() {
-        return Vec::new();
-    }
-    let segments = segment_by_char_class(&normalized);
-    let mut terms = Vec::<String>::new();
-    for segment in segments {
-        append_segment_variants(&mut terms, &segment);
-    }
-    dedupe_and_filter_terms(terms, max_terms.max(1))
-}
-
-fn normalize_input_text_v0(input_text: &str) -> String {
-    let mut chars = String::with_capacity(input_text.len());
-    for ch in input_text.chars() {
-        let normalized = normalize_full_width_char(ch);
-        if normalized.is_whitespace() || is_punctuation_like(normalized) {
-            chars.push(' ');
-        } else {
-            chars.push(normalized);
-        }
-    }
-    chars.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn normalize_full_width_char(ch: char) -> char {
-    match ch {
-        '\u{3000}' => ' ',
-        '\u{FF01}'..='\u{FF5E}' => char::from_u32(ch as u32 - 0xFEE0).unwrap_or(ch),
-        _ => ch,
-    }
-}
-
-fn is_punctuation_like(ch: char) -> bool {
-    ch.is_ascii_punctuation()
-        || matches!(
-            ch,
-            '。' | '、'
-                | '・'
-                | '「'
-                | '」'
-                | '『'
-                | '』'
-                | '（'
-                | '）'
-                | '【'
-                | '】'
-                | '［'
-                | '］'
-                | '｛'
-                | '｝'
-                | '〈'
-                | '〉'
-                | '《'
-                | '》'
-                | '！'
-                | '？'
-                | '：'
-                | '；'
-                | '，'
-                | '．'
-                | '〜'
-                | '～'
-        )
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CharClass {
-    Kanji,
-    Hiragana,
-    Katakana,
-    Alnum,
-    Other,
-}
-
-fn classify_char(ch: char) -> CharClass {
-    if ch.is_ascii_alphanumeric() || ('０'..='９').contains(&ch) || ('ａ'..='ｚ').contains(&ch)
-    {
-        return CharClass::Alnum;
-    }
-    if ('\u{4E00}'..='\u{9FFF}').contains(&ch) || ('\u{3400}'..='\u{4DBF}').contains(&ch) {
-        return CharClass::Kanji;
-    }
-    if ('\u{3040}'..='\u{309F}').contains(&ch) {
-        return CharClass::Hiragana;
-    }
-    if ('\u{30A0}'..='\u{30FF}').contains(&ch) || ('\u{31F0}'..='\u{31FF}').contains(&ch) {
-        return CharClass::Katakana;
-    }
-    CharClass::Other
-}
-
-fn segment_by_char_class(input: &str) -> Vec<String> {
-    let mut segments = Vec::<String>::new();
-    let mut current = String::new();
-    let mut current_class = CharClass::Other;
-    for ch in input.chars() {
-        let class = classify_char(ch);
-        if class == CharClass::Other {
-            if !current.is_empty() {
-                segments.push(current.clone());
-                current.clear();
-            }
-            current_class = CharClass::Other;
-            continue;
-        }
-        if current.is_empty() || class == current_class {
-            current.push(ch);
-            current_class = class;
-            continue;
-        }
-        segments.push(current.clone());
-        current.clear();
-        current.push(ch);
-        current_class = class;
-    }
-    if !current.is_empty() {
-        segments.push(current);
-    }
-    segments
-}
-
-fn append_segment_variants(out: &mut Vec<String>, segment: &str) {
-    let chars = segment.chars().collect::<Vec<_>>();
-    let len = chars.len();
-    if len == 0 {
-        return;
-    }
-    out.push(segment.to_string());
-    if len >= 3 {
-        out.push(chars[..(len - 1)].iter().collect::<String>());
-        out.push(chars[1..].iter().collect::<String>());
-    }
-    if len >= 4 {
-        out.push(chars[1..(len - 1)].iter().collect::<String>());
-    }
-}
-
-fn dedupe_and_filter_terms(terms: Vec<String>, max_terms: usize) -> Vec<String> {
-    let mut out = Vec::<String>::new();
-    let mut seen = HashSet::<String>::new();
-    for term in terms {
-        let cleaned = term.trim();
-        if !is_valid_query_term(cleaned) {
-            continue;
-        }
-        let key = cleaned.to_lowercase();
-        if !seen.insert(key) {
-            continue;
-        }
-        out.push(cleaned.to_string());
-        if out.len() >= max_terms {
-            break;
-        }
-    }
-    out
-}
-
-fn is_valid_query_term(value: &str) -> bool {
-    if value.is_empty() {
-        return false;
-    }
-    if value.chars().count() == 1 {
-        return value
-            .chars()
-            .next()
-            .map(|ch| ('\u{4E00}'..='\u{9FFF}').contains(&ch))
-            .unwrap_or(false);
-    }
-    value
-        .chars()
-        .all(|ch| classify_char(ch) != CharClass::Other && !ch.is_whitespace())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -880,15 +698,6 @@ mod tests {
             soft,
             vec!["curiosity".to_string(), "self_preservation".to_string()]
         );
-    }
-
-    #[test]
-    fn extract_query_terms_v0_splits_and_dedupes() {
-        let terms = extract_query_terms_v0("京都旅行プラン2026!!", 8);
-        assert!(!terms.is_empty());
-        assert!(terms.iter().any(|term| term == "京都旅行"));
-        assert!(terms.iter().any(|term| term == "プラン"));
-        assert!(terms.iter().any(|term| term == "2026"));
     }
 
     #[test]

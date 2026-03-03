@@ -164,3 +164,18 @@ tasks:
       - '{{.DOCKER_COMPOSE}} cp {{.BACKUP_DIR}}/{{.BACKUP_FILE_NAME}} memgraph:/data/snapshots/{{.BACKUP_FILE_NAME}}'
       - '{{.DOCKER_COMPOSE}} exec -u root memgraph chown memgraph:memgraph /data/snapshots/{{.BACKUP_FILE_NAME}}'
       - 'echo "RECOVER SNAPSHOT ''/data/snapshots/{{.BACKUP_FILE_NAME}}'' FORCE;" | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole'
+
+  memgraph/backfill:
+    desc: Backfill concept embeddings in production Memgraph and create before/after snapshots
+    vars:
+      LIMIT: '{{.LIMIT | default "200000"}}'
+    cmds:
+      - task memgraph/backup
+      - '{{.DOCKER_COMPOSE}} run --rm core backfill --limit {{.LIMIT}}'
+      - |
+        echo "MATCH (c:Concept) RETURN count(c) AS total, count(c.embedding) AS with_embedding;" \
+        | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole
+      - |
+        echo "SHOW VECTOR INDEX INFO;" \
+        | {{.DOCKER_COMPOSE}} exec -T memgraph mgconsole
+      - task memgraph/backup

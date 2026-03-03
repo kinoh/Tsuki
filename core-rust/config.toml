@@ -26,8 +26,6 @@ Active submodules:
 {{active_submodules}}
 
 router_preprocessing:
-query_terms:
-{{query_terms}}
 candidate_concepts:
 {{candidate_concepts}}
 

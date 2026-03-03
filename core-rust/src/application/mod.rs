@@ -1,3 +1,5 @@
+pub mod event_service;
+pub mod module_bootstrap;
 pub mod debug_service;
 pub mod execution_service;
 pub mod history_service;
