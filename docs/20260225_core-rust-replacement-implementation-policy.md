@@ -8,7 +8,6 @@ The policy is intentionally optimized for fast cutover and reduced complexity.
 Compatibility Impact: breaking-by-default (no compatibility layer)
 
 ## Fixed Scope
-- Do not provide `/tts` API for now.
 - Remove thread-based history APIs and semantics.
 - Use `/events` as the only history retrieval API.
 - Convert legacy conversation history into event rows.
@@ -16,6 +15,19 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 - Preserve original message timestamps during import.
 
 ## API Policy
+
+### `POST /tts`
+- Provide text-to-speech synthesis endpoint compatible with legacy `core` behavior.
+- Request body:
+  - `message: string` (required, trimmed, non-empty)
+- Response:
+  - `200` with `audio/wav` binary body
+- Error mapping:
+  - invalid payload/message -> `400`
+  - VoiceVox `accent_phrases` failure -> `502`
+  - VoiceVox `synthesis` failure -> `502`
+  - upstream timeout -> `504`
+  - unexpected failure -> `500`
 
 ### `GET /events`
 `/events` is the canonical read model for conversation history.
@@ -78,13 +90,12 @@ Minimum verification:
 - `GET /threads`
 - `GET /threads/:id`
 - `GET /messages`
-- `POST /tts`
 
 Clients and operational tooling must migrate to event-centric reads.
 
 ## Implementation Order
 1. Finalize and implement `/events` production endpoint in `core-rust`.
 2. Implement legacy message -> event import tool with fixed normalization rules.
-3. Remove thread/message/tts routes from active production contract.
+3. Remove thread/message routes from active production contract.
 4. Update GUI and operational references to `/events`.
 5. Run cutover verification and switch runtime entry to `core-rust`.

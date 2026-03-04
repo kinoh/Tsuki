@@ -4,7 +4,7 @@ use axum::{
         Extension, Path, Query, Request, State,
     },
     http::{
-        header::{CONTENT_TYPE, HOST, ORIGIN, REFERER, SET_COOKIE},
+        header::{CONTENT_LENGTH, CONTENT_TYPE, HOST, ORIGIN, REFERER, SET_COOKIE},
         HeaderMap, Method, StatusCode,
     },
     middleware::Next,
@@ -16,24 +16,26 @@ use axum::{
     Json, Router,
 };
 use futures::{SinkExt, StreamExt};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    convert::Infallible, net::SocketAddr, path::PathBuf, process::Command, sync::Arc, time::Instant,
+    convert::Infallible, net::SocketAddr, path::PathBuf, process::Command, sync::Arc,
+    time::Duration, time::Instant,
 };
 use time::OffsetDateTime;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 
 use crate::activation_concept_graph::{ActivationConceptGraphStore, ConceptGraphStore};
+use crate::application::module_bootstrap::{
+    build_modules, sync_module_registry_from_prompts, Modules,
+};
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig};
 use crate::db::{Db, RuntimeConfigRecord};
 use crate::event::Event;
 use crate::event_store::EventStore;
-use crate::application::module_bootstrap::{
-    build_modules, sync_module_registry_from_prompts, Modules,
-};
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
@@ -43,6 +45,10 @@ use crate::state::{DbStateStore, StateStore};
 const ADMIN_SESSION_COOKIE_NAME: &str = "tsuki_admin_session";
 const ADMIN_SESSION_ABSOLUTE_TTL_SECS: i64 = 2_592_000;
 const ADMIN_SESSION_IDLE_TIMEOUT_SECS: i64 = 86_400;
+const DEFAULT_JA_ACCENT_URL: &str = "http://ja-accent:2954";
+const DEFAULT_VOICEVOX_URL: &str = "http://voicevox-engine:50021";
+const DEFAULT_VOICEVOX_SPEAKER: u32 = 10;
+const DEFAULT_VOICEVOX_TIMEOUT_MS: u64 = 10_000;
 
 #[derive(Clone, Debug)]
 struct AdminSessionContext {
@@ -209,6 +215,11 @@ struct NotificationResult {
 }
 
 #[derive(Debug, Deserialize)]
+struct JaAccentResponse {
+    accent: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct DebugConceptSearchQuery {
     q: Option<String>,
     limit: Option<usize>,
@@ -325,8 +336,10 @@ pub(crate) async fn run_server() {
         prompts_path.as_path(),
     );
     let prompts = Arc::new(RwLock::new(prompt_overrides.clone()));
-    let emit_event =
-        crate::application::event_service::build_emit_event_callback(event_store.clone(), tx.clone());
+    let emit_event = crate::application::event_service::build_emit_event_callback(
+        event_store.clone(),
+        tx.clone(),
+    );
     let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
     let arousal_tau_ms = std::env::var("AROUSAL_TAU_MS")
         .ok()
@@ -453,6 +466,7 @@ pub(crate) async fn run_server() {
         )
         .route("/notification/tokens", get(notification_tokens_get))
         .route("/notification/_test", post(notification_test))
+        .route("/tts", post(tts_post))
         .route("/auth/login", post(auth_login))
         .route("/admin/login", get(auth_login_page))
         .route("/triggers", post(improve_trigger))
@@ -1152,6 +1166,136 @@ async fn notification_test(
     Ok(Json(NotificationResult { ok: true }))
 }
 
+async fn tts_post(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<Response, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
+
+    let message = parse_tts_message(&payload)?;
+    if message.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Message is required".to_string()));
+    }
+
+    let speaker = voicevox_speaker();
+    let timeout = Duration::from_millis(voicevox_timeout_ms());
+    let client = Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(internal_error)?;
+
+    let accent_base = ja_accent_url();
+    let accent_url = format!("{}/accent", accent_base.trim_end_matches('/'));
+    let accent_response = client
+        .post(accent_url)
+        .json(&serde_json::json!({ "text": message }))
+        .send()
+        .await
+        .map_err(map_tts_transport_error)?;
+    let accent: JaAccentResponse = accent_response.json().await.map_err(internal_error)?;
+    println!(
+        "TTS_ACCENT_GENERATED message={} accent={}",
+        message, accent.accent
+    );
+
+    let voicevox_base = voicevox_url();
+    let phrases_url = format!("{}/accent_phrases", voicevox_base.trim_end_matches('/'));
+    let phrases_response = client
+        .post(phrases_url)
+        .query(&[
+            ("speaker", speaker.to_string()),
+            ("text", accent.accent),
+            ("is_kana", "true".to_string()),
+        ])
+        .send()
+        .await
+        .map_err(map_tts_transport_error)?;
+
+    if !phrases_response.status().is_success() {
+        let status = phrases_response.status().as_u16();
+        let body = phrases_response.text().await.unwrap_or_default();
+        println!(
+            "TTS_VOICEVOX_ACCENT_PHRASES_FAILED status={} body={}",
+            status, body
+        );
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "VoiceVox accent_phrases failed".to_string(),
+        ));
+    }
+
+    let accent_phrases: Value = phrases_response.json().await.map_err(internal_error)?;
+    let query = serde_json::json!({
+        "accent_phrases": accent_phrases,
+        "speedScale": 1.15,
+        "pitchScale": -0.02,
+        "intonationScale": 1.4,
+        "volumeScale": 1.0,
+        "pauseLengthScale": 0.4,
+        "prePhonemeLength": 0,
+        "postPhonemeLength": 0,
+        "outputSamplingRate": 24000,
+        "outputStereo": false
+    });
+
+    let synthesis_url = format!("{}/synthesis", voicevox_base.trim_end_matches('/'));
+    let synth_response = client
+        .post(synthesis_url)
+        .query(&[("speaker", speaker.to_string())])
+        .json(&query)
+        .send()
+        .await
+        .map_err(map_tts_transport_error)?;
+
+    if !synth_response.status().is_success() {
+        let status = synth_response.status().as_u16();
+        let body = synth_response.text().await.unwrap_or_default();
+        println!(
+            "TTS_VOICEVOX_SYNTHESIS_FAILED status={} body={}",
+            status, body
+        );
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "VoiceVox synthesis failed".to_string(),
+        ));
+    }
+
+    let content_length = synth_response
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let audio = synth_response.bytes().await.map_err(internal_error)?;
+
+    let mut response = Response::new(axum::body::Body::from(audio));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        "audio/wav"
+            .parse()
+            .expect("audio/wav is a valid header value"),
+    );
+    if let Some(length) = content_length {
+        if let Ok(value) = length.parse() {
+            response.headers_mut().insert(CONTENT_LENGTH, value);
+        }
+    }
+
+    Ok(response)
+}
+
+fn parse_tts_message(payload: &Value) -> Result<&str, (StatusCode, String)> {
+    let object = payload
+        .as_object()
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid payload".to_string()))?;
+    let message = object
+        .get("message")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid payload".to_string()))?;
+    Ok(message.trim())
+}
+
 async fn debug_events_stream(
     State(state): State<AppState>,
 ) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>>, (StatusCode, String)> {
@@ -1540,6 +1684,69 @@ fn method_requires_csrf(method: &Method) -> bool {
         *method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     )
+}
+
+fn map_tts_transport_error(err: reqwest::Error) -> (StatusCode, String) {
+    if err.is_timeout() {
+        println!("TTS_REQUEST_TIMEOUT error={}", err);
+        return (
+            StatusCode::GATEWAY_TIMEOUT,
+            "TTS request timed out".to_string(),
+        );
+    }
+    internal_error(err)
+}
+
+fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
+    println!("HTTP_INTERNAL_ERROR error={}", err);
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Internal server error".to_string(),
+    )
+}
+
+fn parse_positive_u32_env(name: &str, fallback: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(fallback)
+}
+
+fn parse_positive_u64_env(name: &str, fallback: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(fallback)
+}
+
+fn ja_accent_url() -> String {
+    std::env::var("JA_ACCENT_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_JA_ACCENT_URL.to_string())
+}
+
+fn voicevox_url() -> String {
+    std::env::var("VOICEVOX_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_VOICEVOX_URL.to_string())
+}
+
+fn voicevox_speaker() -> u32 {
+    parse_positive_u32_env("VOICEVOX_SPEAKER", DEFAULT_VOICEVOX_SPEAKER)
+}
+
+fn voicevox_timeout_ms() -> u64 {
+    parse_positive_u64_env("VOICEVOX_TIMEOUT_MS", DEFAULT_VOICEVOX_TIMEOUT_MS)
 }
 
 fn validate_admin_csrf(request: &Request) -> Result<(), (StatusCode, String)> {

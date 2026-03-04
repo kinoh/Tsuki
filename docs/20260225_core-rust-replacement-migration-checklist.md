@@ -4,7 +4,6 @@
 This document defines the concrete migration tasks required to replace `core/` (TypeScript) with `core-rust/` as the production backend.
 
 It reflects the currently agreed scope:
-- Do not provide TTS as an API for now.
 - Remove thread-based history APIs/concepts.
 - Use `/events` as the history retrieval interface.
 - Implement runtime configuration API (`/config`) required by clients.
@@ -30,9 +29,9 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
   - `GET /threads`
   - `GET /threads/:id`
   - `GET /messages`
-  - `POST /tts`
 - Provide/standardize:
   - `GET /events` (read model for history)
+  - `POST /tts` (text-to-speech synthesis)
   - Existing WebSocket ingress for user input and egress for runtime events
 
 ## Migration Plan
