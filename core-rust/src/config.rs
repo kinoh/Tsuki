@@ -10,8 +10,9 @@ pub struct Config {
     pub router: RouterConfig,
     pub input: InputConfig,
     pub db: DbConfig,
-    #[serde(default)]
-    pub prompts: Option<PromptsConfig>,
+    pub prompts: PromptsConfig,
+    pub concept_graph: ConceptGraphConfig,
+    pub tts: TtsConfig,
     #[serde(default)]
     pub scheduler: SchedulerConfig,
 }
@@ -85,7 +86,23 @@ pub struct InputConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PromptsConfig {
-    pub path: Option<String>,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConceptGraphConfig {
+    pub memgraph_uri: String,
+    #[serde(default)]
+    pub memgraph_user: String,
+    pub arousal_tau_ms: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TtsConfig {
+    pub ja_accent_url: String,
+    pub voicevox_url: String,
+    pub voicevox_speaker: u32,
+    pub voicevox_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

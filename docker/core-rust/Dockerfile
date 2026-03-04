@@ -41,7 +41,6 @@ COPY --from=builder /tmp/config.toml /app/config.toml
 
 ENV RUST_LOG=info
 ENV TZ=UTC
-ENV CONCEPT_EMBEDDING_MODEL_DIR=/opt/tsuki/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja
 
 EXPOSE 2953
 

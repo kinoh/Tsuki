@@ -80,7 +80,7 @@ Compatibility Impact: breaking-by-default (no compatibility layer)
 Verification notes (2026-02-28):
 - Taskfile change was not required because runtime service name remains `core`.
 - Validated compose runtime env mapping for `core-rust`:
-  - required at startup: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `DATA_DIR`, `MEMGRAPH_URI`
+  - required at startup: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`
   - optional for notification delivery: `FCM_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_KEY`
 - Runtime persistence check passed after `core` restart:
   - `/config` value persisted (`enableNotification=true`, `enableSensory=false`)

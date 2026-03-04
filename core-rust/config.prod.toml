@@ -1,2 +1,12 @@
 [db]
 path = "/data/core-rust.db"
+
+[prompts]
+path = "/data/prompts.md"
+
+[concept_graph]
+memgraph_uri = "bolt://memgraph:7687"
+
+[tts]
+ja_accent_url = "http://ja-accent:2954"
+voicevox_url = "http://voicevox-engine:50021"

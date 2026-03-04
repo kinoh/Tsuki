@@ -3,7 +3,6 @@ use neo4rs::{query, Graph};
 use safetensors::{tensor::TensorView, Dtype, SafeTensors};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,15 +26,6 @@ const DEFAULT_VECTOR_INDEX_SCALAR_KIND: &str = "f32";
 const DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT: usize = 2;
 const DEFAULT_CONCEPT_EMBEDDING_MODEL_DIR: &str =
     "/opt/tsuki/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja";
-const CONCEPT_EMBEDDING_MODEL_DIR_ENV: &str = "CONCEPT_EMBEDDING_MODEL_DIR";
-const CONCEPT_VECTOR_INDEX_NAME_ENV: &str = "CONCEPT_VECTOR_INDEX_NAME";
-const CONCEPT_VECTOR_INDEX_CAPACITY_ENV: &str = "CONCEPT_VECTOR_INDEX_CAPACITY";
-const CONCEPT_VECTOR_INDEX_SCALAR_KIND_ENV: &str = "CONCEPT_VECTOR_INDEX_SCALAR_KIND";
-const CONCEPT_VECTOR_INDEX_RESIZE_COEFFICIENT_ENV: &str = "CONCEPT_VECTOR_INDEX_RESIZE_COEFFICIENT";
-const CONCEPT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER_ENV: &str =
-    "CONCEPT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER";
-const CONCEPT_VECTOR_SEARCH_SEMANTIC_WEIGHT_ENV: &str = "CONCEPT_VECTOR_SEARCH_SEMANTIC_WEIGHT";
-const CONCEPT_VECTOR_SEARCH_AROUSAL_WEIGHT_ENV: &str = "CONCEPT_VECTOR_SEARCH_AROUSAL_WEIGHT";
 
 #[async_trait]
 pub(crate) trait ConceptGraphActivationReader: Send + Sync {
@@ -169,46 +159,15 @@ struct SseEmbeddingModel {
 }
 
 impl EmbeddingConfig {
-    fn from_env() -> Result<Self, String> {
-        let model_dir = env::var(CONCEPT_EMBEDDING_MODEL_DIR_ENV)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_CONCEPT_EMBEDDING_MODEL_DIR));
-        let vector_index_name = env::var(CONCEPT_VECTOR_INDEX_NAME_ENV)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_VECTOR_INDEX_NAME.to_string());
-        let vector_index_capacity = env::var(CONCEPT_VECTOR_INDEX_CAPACITY_ENV)
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_VECTOR_INDEX_CAPACITY)
-            .max(1);
-        let vector_index_scalar_kind = env::var(CONCEPT_VECTOR_INDEX_SCALAR_KIND_ENV)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_VECTOR_INDEX_SCALAR_KIND.to_string());
-        let vector_index_resize_coefficient = env::var(CONCEPT_VECTOR_INDEX_RESIZE_COEFFICIENT_ENV)
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT)
-            .max(1);
-        let vector_search_raw_limit_multiplier =
-            env::var(CONCEPT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER_ENV)
-                .ok()
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(DEFAULT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER)
-                .max(1);
-        let semantic_weight = env::var(CONCEPT_VECTOR_SEARCH_SEMANTIC_WEIGHT_ENV)
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
-            .unwrap_or(DEFAULT_VECTOR_SEARCH_SEMANTIC_WEIGHT)
-            .clamp(0.0, 1.0);
-        let arousal_weight = env::var(CONCEPT_VECTOR_SEARCH_AROUSAL_WEIGHT_ENV)
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
-            .unwrap_or(DEFAULT_VECTOR_SEARCH_AROUSAL_WEIGHT)
-            .clamp(0.0, 1.0);
+    fn from_defaults() -> Result<Self, String> {
+        let model_dir = PathBuf::from(DEFAULT_CONCEPT_EMBEDDING_MODEL_DIR);
+        let vector_index_name = DEFAULT_VECTOR_INDEX_NAME.to_string();
+        let vector_index_capacity = DEFAULT_VECTOR_INDEX_CAPACITY.max(1);
+        let vector_index_scalar_kind = DEFAULT_VECTOR_INDEX_SCALAR_KIND.to_string();
+        let vector_index_resize_coefficient = DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT.max(1);
+        let vector_search_raw_limit_multiplier = DEFAULT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER.max(1);
+        let semantic_weight = DEFAULT_VECTOR_SEARCH_SEMANTIC_WEIGHT.clamp(0.0, 1.0);
+        let arousal_weight = DEFAULT_VECTOR_SEARCH_AROUSAL_WEIGHT.clamp(0.0, 1.0);
         if !model_dir.exists() {
             return Err(format!(
                 "embedding model directory not found: {}",
@@ -424,7 +383,7 @@ impl ActivationConceptGraphStore {
         password: String,
         arousal_tau_ms: f64,
     ) -> Result<Self, String> {
-        let embedding_config = EmbeddingConfig::from_env()?;
+        let embedding_config = EmbeddingConfig::from_defaults()?;
         let embedding = Arc::new(SseEmbeddingModel::load(
             embedding_config.model_dir.as_path(),
         )?);

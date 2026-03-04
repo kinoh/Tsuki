@@ -33,14 +33,14 @@ After cutover, operational and product needs required TTS again, and keeping it 
   - Added `POST /tts` route.
   - Added request payload validation and auth checks.
   - Added upstream calls:
-    1. `JA_ACCENT_URL/accent`
-    2. `VOICEVOX_URL/accent_phrases`
-    3. `VOICEVOX_URL/synthesis`
-  - Added env/defaults aligned with `core`:
-    - `JA_ACCENT_URL` (default `http://ja-accent:2954`)
-    - `VOICEVOX_URL` (default `http://voicevox-engine:50021`)
-    - `VOICEVOX_SPEAKER` (default `10`)
-    - `VOICEVOX_TIMEOUT_MS` (default `10000`)
+    1. `tts.ja_accent_url + "/accent"`
+    2. `tts.voicevox_url + "/accent_phrases"`
+    3. `tts.voicevox_url + "/synthesis"`
+  - Added explicit `config.toml` fields:
+    - `tts.ja_accent_url`
+    - `tts.voicevox_url`
+    - `tts.voicevox_speaker`
+    - `tts.voicevox_timeout_ms`
 - `api-specs/openapi.yaml`
   - Added `/tts` contract and `TtsRequest` schema.
   - Updated API version to `1.2.0`.

@@ -16,8 +16,6 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GCP_SERVICE_ACCOUNT_KEY: ${GCP_SERVICE_ACCOUNT_KEY}
       FCM_PROJECT_ID: ${FCM_PROJECT_ID}
-      DATA_DIR: /data
-      MEMGRAPH_URI: bolt://memgraph:7687
       GIT_HASH: ${GIT_HASH}
     volumes:
       - core-data:/data

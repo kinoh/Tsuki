@@ -32,7 +32,7 @@ use crate::application::module_bootstrap::{
     build_modules, sync_module_registry_from_prompts, Modules,
 };
 use crate::clock::now_iso8601;
-use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig};
+use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig, TtsConfig};
 use crate::db::{Db, RuntimeConfigRecord};
 use crate::event::Event;
 use crate::event_store::EventStore;
@@ -45,10 +45,6 @@ use crate::state::{DbStateStore, StateStore};
 const ADMIN_SESSION_COOKIE_NAME: &str = "tsuki_admin_session";
 const ADMIN_SESSION_ABSOLUTE_TTL_SECS: i64 = 2_592_000;
 const ADMIN_SESSION_IDLE_TIMEOUT_SECS: i64 = 86_400;
-const DEFAULT_JA_ACCENT_URL: &str = "http://ja-accent:2954";
-const DEFAULT_VOICEVOX_URL: &str = "http://voicevox-engine:50021";
-const DEFAULT_VOICEVOX_SPEAKER: u32 = 10;
-const DEFAULT_VOICEVOX_TIMEOUT_MS: u64 = 10_000;
 
 #[derive(Clone, Debug)]
 struct AdminSessionContext {
@@ -76,6 +72,7 @@ pub(crate) struct AppState {
     pub(crate) router_model: String,
     pub(crate) router_instructions: String,
     pub(crate) decision_instructions: String,
+    pub(crate) tts: TtsConfig,
     pub(crate) submodule_saturation_levels: Arc<RwLock<std::collections::HashMap<String, f64>>>,
 }
 
@@ -295,6 +292,7 @@ pub(crate) struct DebugImproveResponse {
 
 pub(crate) async fn run_server() {
     let config = load_config("config.toml").expect("failed to load config");
+    validate_required_config(&config);
     let port = config.server.port;
     let auth_token = std::env::var("WEB_AUTH_TOKEN").expect("WEB_AUTH_TOKEN is required");
     let admin_auth_password =
@@ -341,16 +339,12 @@ pub(crate) async fn run_server() {
         tx.clone(),
     );
     let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
-    let arousal_tau_ms = std::env::var("AROUSAL_TAU_MS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or(86_400_000.0);
     let activation_concept_graph = Arc::new(
         ActivationConceptGraphStore::connect(
-            std::env::var("MEMGRAPH_URI").unwrap_or_else(|_| "bolt://localhost:7687".to_string()),
-            std::env::var("MEMGRAPH_USER").unwrap_or_default(),
+            config.concept_graph.memgraph_uri.clone(),
+            config.concept_graph.memgraph_user.clone(),
             std::env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
-            arousal_tau_ms,
+            config.concept_graph.arousal_tau_ms,
         )
         .await
         .expect("failed to connect activation concept graph store"),
@@ -401,6 +395,7 @@ pub(crate) async fn run_server() {
             .unwrap_or_else(|| config.llm.model.clone()),
         router_instructions,
         decision_instructions,
+        tts: config.tts.clone(),
         submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
     };
     crate::application::improve_service::start_trigger_consumer(state.clone());
@@ -486,21 +481,36 @@ pub(crate) async fn run_server() {
     axum::serve(listener, app).await.expect("server error");
 }
 
-fn prompts_path_from_config(config: &Config) -> PathBuf {
-    if let Some(path) = config
-        .prompts
-        .as_ref()
-        .and_then(|prompts| prompts.path.as_deref())
-    {
-        let trimmed = path.trim();
-        if trimmed.is_empty() {
-            panic!("config.toml [prompts].path must not be empty when provided");
-        }
-        return PathBuf::from(trimmed);
+fn validate_required_config(config: &Config) {
+    if config.prompts.path.trim().is_empty() {
+        panic!("config.toml [prompts].path must not be empty");
     }
+    if config.concept_graph.memgraph_uri.trim().is_empty() {
+        panic!("config.toml [concept_graph].memgraph_uri must not be empty");
+    }
+    if config.concept_graph.arousal_tau_ms <= 0.0 {
+        panic!("config.toml [concept_graph].arousal_tau_ms must be > 0");
+    }
+    if config.tts.ja_accent_url.trim().is_empty() {
+        panic!("config.toml [tts].ja_accent_url must not be empty");
+    }
+    if config.tts.voicevox_url.trim().is_empty() {
+        panic!("config.toml [tts].voicevox_url must not be empty");
+    }
+    if config.tts.voicevox_speaker == 0 {
+        panic!("config.toml [tts].voicevox_speaker must be > 0");
+    }
+    if config.tts.voicevox_timeout_ms == 0 {
+        panic!("config.toml [tts].voicevox_timeout_ms must be > 0");
+    }
+}
 
-    let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string());
-    PathBuf::from(data_dir).join("prompts.md")
+fn prompts_path_from_config(config: &Config) -> PathBuf {
+    let trimmed = config.prompts.path.trim();
+    if trimmed.is_empty() {
+        panic!("config.toml [prompts].path must not be empty");
+    }
+    PathBuf::from(trimmed)
 }
 
 fn required_prompt(raw: Option<&str>, section: &str, prompts_path: &std::path::Path) -> String {
@@ -1178,14 +1188,14 @@ async fn tts_post(
         return Err((StatusCode::BAD_REQUEST, "Message is required".to_string()));
     }
 
-    let speaker = voicevox_speaker();
-    let timeout = Duration::from_millis(voicevox_timeout_ms());
+    let speaker = state.tts.voicevox_speaker;
+    let timeout = Duration::from_millis(state.tts.voicevox_timeout_ms);
     let client = Client::builder()
         .timeout(timeout)
         .build()
         .map_err(internal_error)?;
 
-    let accent_base = ja_accent_url();
+    let accent_base = state.tts.ja_accent_url.clone();
     let accent_url = format!("{}/accent", accent_base.trim_end_matches('/'));
     let accent_response = client
         .post(accent_url)
@@ -1199,7 +1209,7 @@ async fn tts_post(
         message, accent.accent
     );
 
-    let voicevox_base = voicevox_url();
+    let voicevox_base = state.tts.voicevox_url.clone();
     let phrases_url = format!("{}/accent_phrases", voicevox_base.trim_end_matches('/'));
     let phrases_response = client
         .post(phrases_url)
@@ -1703,50 +1713,6 @@ fn internal_error(err: impl std::fmt::Display) -> (StatusCode, String) {
         StatusCode::INTERNAL_SERVER_ERROR,
         "Internal server error".to_string(),
     )
-}
-
-fn parse_positive_u32_env(name: &str, fallback: u32) -> u32 {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .and_then(|value| value.parse::<u32>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(fallback)
-}
-
-fn parse_positive_u64_env(name: &str, fallback: u64) -> u64 {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(fallback)
-}
-
-fn ja_accent_url() -> String {
-    std::env::var("JA_ACCENT_URL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_JA_ACCENT_URL.to_string())
-}
-
-fn voicevox_url() -> String {
-    std::env::var("VOICEVOX_URL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_VOICEVOX_URL.to_string())
-}
-
-fn voicevox_speaker() -> u32 {
-    parse_positive_u32_env("VOICEVOX_SPEAKER", DEFAULT_VOICEVOX_SPEAKER)
-}
-
-fn voicevox_timeout_ms() -> u64 {
-    parse_positive_u64_env("VOICEVOX_TIMEOUT_MS", DEFAULT_VOICEVOX_TIMEOUT_MS)
 }
 
 fn validate_admin_csrf(request: &Request) -> Result<(), (StatusCode, String)> {

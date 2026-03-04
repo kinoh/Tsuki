@@ -11,18 +11,17 @@ cargo run
 
 Config file:
 - `config.toml` (required, no defaults)
-- `[[modules]]` defines initial module registry entries
 - `llm.temperature_enabled` controls whether temperature is sent (some models reject it)
+- `prompts.path` must be explicitly configured
+- `concept_graph.memgraph_uri` / `concept_graph.arousal_tau_ms` configure graph runtime
+- `tts.*` configures VoiceVox/ja-accent endpoints and timeout/speaker
 
 Environment variables (secrets only):
 - `WEB_AUTH_TOKEN` (required)
+- `ADMIN_AUTH_PASSWORD` (required)
 - `OPENAI_API_KEY` (required)
+- `MEMGRAPH_PASSWORD` (required when Memgraph auth is enabled)
 - `TURSO_AUTH_TOKEN` (required when `db.remote_url` is set)
-
-Environment variables (router concept embedding):
-- `CONCEPT_EMBEDDING_MODEL_DIR` (optional; default: `/opt/tsuki/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja`)
-  - Required model files: `tokenizer.json`, `model_rest.safetensors`, `embedding.q4_k_m.bin`
-  - Startup fails if files are missing or invalid.
 
 ## CLI (reuse existing ws_client.js)
 ```

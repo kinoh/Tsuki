@@ -69,6 +69,20 @@ Execution reason: {{execution_reason}}"""
 path = "./data/core-rust.db"
 # remote_url = "libsql://..."
 
+[prompts]
+path = "./data/prompts.md"
+
+[concept_graph]
+memgraph_uri = "bolt://localhost:7687"
+memgraph_user = ""
+arousal_tau_ms = 86400000
+
+[tts]
+ja_accent_url = "http://localhost:2954"
+voicevox_url = "http://localhost:50021"
+voicevox_speaker = 10
+voicevox_timeout_ms = 10000
+
 [scheduler]
 enabled = true
 tick_interval_ms = 1000

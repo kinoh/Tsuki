@@ -90,7 +90,7 @@ Current production verification:
 ## Required Runtime Mapping (Operations Reference)
 
 ### Runtime container environment (`compose.yaml`)
-- Required: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `DATA_DIR`, `MEMGRAPH_URI`
+- Required: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `ADMIN_AUTH_PASSWORD`
 - Optional (notifications): `FCM_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_KEY`
 
 ### CI/CD secret mapping (`.github/workflows/deploy.yml`)
@@ -99,4 +99,3 @@ Current production verification:
 - `ADMIN_AUTH_PASSWORD`
 - `GCP_SERVICE_ACCOUNT_KEY`
 - `FCM_PROJECT_ID`
-
