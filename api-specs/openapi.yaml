@@ -49,6 +49,19 @@ paths:
             enum: [asc, desc]
             default: desc
           description: Sort order by `(ts, event_id)`.
+        - name: tags
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+          description: |
+            Optional OR filter by event tags.
+            Repeat the query key for multiple tags
+            (e.g. `?tags=input&tags=response`).
       responses:
         '200':
           description: Event list.

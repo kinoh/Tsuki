@@ -1,7 +1,7 @@
 use axum::{
     extract::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
-        Extension, Path, Query, Request, State,
+        Extension, Path, Query, RawQuery, Request, State,
     },
     http::{
         header::{CONTENT_LENGTH, CONTENT_TYPE, HOST, ORIGIN, REFERER, SET_COOKIE},
@@ -164,9 +164,6 @@ struct EventsQuery {
     limit: Option<usize>,
     before_ts: Option<String>,
     order: Option<String>,
-    tags: Option<String>,
-    #[serde(rename = "tags[]")]
-    tags_bracket: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -997,6 +994,7 @@ async fn debug_events(
 
 async fn events(
     State(state): State<AppState>,
+    RawQuery(raw_query): RawQuery,
     headers: HeaderMap,
     Query(query): Query<EventsQuery>,
 ) -> Result<Json<EventsResponse>, (StatusCode, String)> {
@@ -1024,7 +1022,7 @@ async fn events(
         Some(_) => return Err((StatusCode::BAD_REQUEST, "invalid order".to_string())),
     };
 
-    let tags = parse_events_query_tags(&query);
+    let tags = parse_events_query_tags(raw_query.as_deref());
     let items = if tags.is_empty() {
         state
             .event_store
@@ -1597,18 +1595,24 @@ fn normalize_event_tags(raw_tags: &[&str]) -> Vec<String> {
         .collect()
 }
 
-fn parse_events_query_tags(query: &EventsQuery) -> Vec<String> {
-    let source = query
-        .tags
-        .as_deref()
-        .or(query.tags_bracket.as_deref())
-        .unwrap_or("");
-    let values = source
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+fn parse_events_query_tags(raw_query: Option<&str>) -> Vec<String> {
+    let Some(raw_query) = raw_query else {
+        return Vec::new();
+    };
+    let values = url::form_urlencoded::parse(raw_query.as_bytes())
+        .filter_map(|(key, value)| {
+            if key == "tags" {
+                Some(value.into_owned())
+            } else {
+                None
+            }
+        })
         .collect::<Vec<_>>();
-    normalize_event_tags(values.as_slice())
+    let refs = values
+        .iter()
+        .map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    normalize_event_tags(refs.as_slice())
 }
 
 fn event_has_any_tag(event: &Event, tags: &[String]) -> bool {
@@ -2043,7 +2047,10 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
 
 #[cfg(test)]
 mod tests {
-    use super::{event_has_any_tag, normalize_event_tags, read_spec_info_version, verify_auth};
+    use super::{
+        event_has_any_tag, normalize_event_tags, parse_events_query_tags, read_spec_info_version,
+        verify_auth,
+    };
     use crate::event::contracts::response_text;
 
     #[test]
@@ -2085,5 +2092,19 @@ mod tests {
         assert!(event_has_any_tag(&event, &["response".to_string()]));
         assert!(event_has_any_tag(&event, &["decision".to_string()]));
         assert!(!event_has_any_tag(&event, &["input".to_string()]));
+    }
+
+    #[test]
+    fn parse_events_query_tags_reads_repeated_tags_params() {
+        let tags = parse_events_query_tags(Some("limit=20&tags=input&tags=response&order=desc"));
+        assert_eq!(tags.len(), 2);
+        assert!(tags.iter().any(|tag| tag == "input"));
+        assert!(tags.iter().any(|tag| tag == "response"));
+    }
+
+    #[test]
+    fn parse_events_query_tags_ignores_non_standard_bracket_form() {
+        let tags = parse_events_query_tags(Some("tags[]=input&tags[]=response"));
+        assert!(tags.is_empty());
     }
 }

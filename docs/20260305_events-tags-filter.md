@@ -25,7 +25,7 @@ When debug/observe/state events were dense, visible message count became lower t
 ## Implementation Details
 - Server file: `core-rust/src/server_app.rs`
   - `EventsQuery.tags` added.
-  - Supports `tags=response,input` (CSV) and `tags[]=input` (single value compatibility).
+  - Supports repeated `tags` query keys (`style: form`, `explode: true`), such as `tags=input&tags=response`.
   - `normalize_event_tags` added for trim/lowercase/dedup.
   - `event_has_any_tag` added (case-insensitive match).
   - `list_events_with_tags` added to fetch in batches and filter server-side until `limit` or scan cap.
