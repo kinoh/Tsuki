@@ -43,6 +43,7 @@
     router_model: string;
     active_modules: string[];
   };
+  const CHAT_EVENT_TAGS = ["response", "input"] as const;
 
   let config: { endpoint: string, token: string, user: string } = $state(JSON.parse(localStorage.getItem("config") ?? "{}"));
   let clientConfig: ClientConfig = $state(loadClientConfig());
@@ -155,10 +156,29 @@
     messages.unshift(next);
   }
 
+  function buildEventsUrl(limit: number, beforeTs?: string): string {
+    const url = new URL(`http${secure()}://${config.endpoint}/events`);
+    url.searchParams.set("limit", String(limit));
+    url.searchParams.set("order", "desc");
+    if (beforeTs) {
+      url.searchParams.set("before_ts", beforeTs);
+    }
+    if (!clientConfig.showInternalMessages) {
+      CHAT_EVENT_TAGS.forEach(tag => url.searchParams.append("tags", tag));
+    }
+    return url.toString();
+  }
+
   function connect() {
     log("info", "ws", "Connect requested.");
-    log("debug", "http", "Events request.", { endpoint: config.endpoint, limit: 20, order: "desc" });
-    fetch(`http${secure()}://${config.endpoint}/events?limit=20&order=desc`, {
+    const eventsUrl = buildEventsUrl(20);
+    log("debug", "http", "Events request.", {
+      endpoint: config.endpoint,
+      limit: 20,
+      order: "desc",
+      tags: clientConfig.showInternalMessages ? undefined : [...CHAT_EVENT_TAGS],
+    });
+    fetch(eventsUrl, {
       headers: {
         "Authorization": `${config.user}:${config.token}`,
       }
@@ -245,8 +265,8 @@
     loadingMore = true;
 
     let lastMessage = messages[messages.length - 1];
-    const beforeTs = encodeURIComponent(lastMessage.ts);
-    fetch(`http${secure()}://${config.endpoint}/events?limit=20&order=desc&before_ts=${beforeTs}`, {
+    const eventsUrl = buildEventsUrl(20, lastMessage.ts);
+    fetch(eventsUrl, {
       headers: {
         "Authorization": `${config.user}:${config.token}`,
       }

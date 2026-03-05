@@ -164,6 +164,8 @@ struct EventsQuery {
     limit: Option<usize>,
     before_ts: Option<String>,
     order: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1021,13 +1023,68 @@ async fn events(
         Some(_) => return Err((StatusCode::BAD_REQUEST, "invalid order".to_string())),
     };
 
-    let items = state
-        .event_store
-        .list(limit, query.before_ts.as_deref(), desc)
-        .await
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let tags = normalize_event_tags(&query.tags);
+    let items = if tags.is_empty() {
+        state
+            .event_store
+            .list(limit, query.before_ts.as_deref(), desc)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+    } else {
+        list_events_with_tags(
+            &state,
+            limit,
+            query.before_ts.as_deref(),
+            desc,
+            tags.as_slice(),
+        )
+        .await?
+    };
 
     Ok(Json(EventsResponse { items }))
+}
+
+async fn list_events_with_tags(
+    state: &AppState,
+    limit: usize,
+    before_ts: Option<&str>,
+    desc: bool,
+    tags: &[String],
+) -> Result<Vec<Event>, (StatusCode, String)> {
+    let mut items = Vec::with_capacity(limit);
+    let mut cursor = before_ts.map(str::to_string);
+    let batch_size = limit.saturating_mul(4).clamp(50, 500);
+    let mut scanned = 0usize;
+    let max_scanned = 5_000usize;
+
+    while items.len() < limit && scanned < max_scanned {
+        let batch = state
+            .event_store
+            .list(batch_size, cursor.as_deref(), desc)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+        if batch.is_empty() {
+            break;
+        }
+
+        scanned += batch.len();
+        cursor = batch.last().map(|event| event.ts.clone());
+
+        for event in batch {
+            if event_has_any_tag(&event, tags) {
+                items.push(event);
+                if items.len() >= limit {
+                    break;
+                }
+            }
+        }
+
+        if scanned >= max_scanned {
+            break;
+        }
+    }
+
+    Ok(items)
 }
 
 async fn config_get(
@@ -1529,6 +1586,24 @@ fn matches_debug_event_filters(event: &Event, query: &DebugEventsQuery) -> bool 
         .unwrap_or(true)
 }
 
+fn normalize_event_tags(raw_tags: &[String]) -> Vec<String> {
+    raw_tags
+        .iter()
+        .map(|tag| tag.trim().to_ascii_lowercase())
+        .filter(|tag| !tag.is_empty())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn event_has_any_tag(event: &Event, tags: &[String]) -> bool {
+    event
+        .meta
+        .tags
+        .iter()
+        .any(|event_tag| tags.iter().any(|tag| event_tag.eq_ignore_ascii_case(tag)))
+}
+
 fn event_module_name(event: &Event) -> Option<&str> {
     if event.source.eq_ignore_ascii_case("decision") {
         return Some("decision");
@@ -1953,7 +2028,8 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
 
 #[cfg(test)]
 mod tests {
-    use super::verify_auth;
+    use super::{event_has_any_tag, normalize_event_tags, read_spec_info_version, verify_auth};
+    use crate::event::contracts::response_text;
 
     #[test]
     fn verify_auth_accepts_valid_user_and_token() {
@@ -1968,5 +2044,36 @@ mod tests {
     #[test]
     fn verify_auth_rejects_missing_user() {
         assert!(!verify_auth(":test-token", "test-token"));
+    }
+
+    #[test]
+    fn read_spec_info_version_parses_api_specs() {
+        let asyncapi_version =
+            read_spec_info_version(include_str!("../../api-specs/asyncapi.yaml"));
+        let openapi_version = read_spec_info_version(include_str!("../../api-specs/openapi.yaml"));
+        assert!(asyncapi_version.is_some());
+        assert!(openapi_version.is_some());
+    }
+
+    #[test]
+    fn normalize_event_tags_removes_empty_and_deduplicates() {
+        let tags = normalize_event_tags(&[
+            " response ".to_string(),
+            "".to_string(),
+            "input".to_string(),
+            "RESPONSE".to_string(),
+        ]);
+        assert_eq!(tags.len(), 2);
+        assert!(tags.iter().any(|tag| tag == "response"));
+        assert!(tags.iter().any(|tag| tag == "input"));
+    }
+
+    #[test]
+    fn event_has_any_tag_matches_ignore_case() {
+        let mut event = response_text("hello".to_string());
+        event.meta.tags.push("Decision".to_string());
+        assert!(event_has_any_tag(&event, &["response".to_string()]));
+        assert!(event_has_any_tag(&event, &["decision".to_string()]));
+        assert!(!event_has_any_tag(&event, &["input".to_string()]));
     }
 }

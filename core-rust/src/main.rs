@@ -16,12 +16,12 @@ mod server_app;
 mod state;
 mod tools;
 
+pub(crate) use application::event_service::record_event;
+pub(crate) use application::module_bootstrap::{ModuleRuntime, Modules};
 pub(crate) use server_app::{
     AppState, DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
     DebugRunRequest, DebugRunResponse, DebugTriggerRequest, DebugTriggerResponse,
 };
-pub(crate) use application::event_service::record_event;
-pub(crate) use application::module_bootstrap::{ModuleRuntime, Modules};
 
 #[tokio::main]
 async fn main() {

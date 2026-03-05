@@ -1,10 +1,10 @@
-pub mod event_service;
-pub mod module_bootstrap;
 pub mod debug_service;
+pub mod event_service;
 pub mod execution_service;
 pub mod history_service;
 pub mod improve_approval_service;
 pub mod improve_service;
+pub mod module_bootstrap;
 pub mod pipeline_service;
 pub mod router_service;
 pub mod scheduler_notice_service;
