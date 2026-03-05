@@ -33,7 +33,7 @@ use crate::application::module_bootstrap::{
 };
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig, TtsConfig};
-use crate::db::{Db, RuntimeConfigRecord};
+use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
@@ -204,6 +204,22 @@ struct MetadataResponse {
 #[derive(Debug, Serialize)]
 struct NotificationTokensResponse {
     tokens: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MetricsUsageResponse {
+    input_tokens: i64,
+    output_tokens: i64,
+    total_tokens: i64,
+    reasoning_tokens: i64,
+    cached_input_tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct MetricsResponse {
+    total_messages: i64,
+    total_users: i64,
+    usage: MetricsUsageResponse,
 }
 
 #[derive(Debug, Serialize)]
@@ -454,6 +470,7 @@ pub(crate) async fn run_server() {
         .route("/", get(ws_handler))
         .route("/events", get(events))
         .route("/metadata", get(metadata_get))
+        .route("/metrics", get(metrics_get))
         .route("/config", get(config_get).put(config_put))
         .route(
             "/notification/token",
@@ -1123,6 +1140,19 @@ async fn metadata_get(
         router_model: state.router_model.clone(),
         active_modules,
     }))
+}
+
+async fn metrics_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
+    verify_http_auth(&headers, &state.auth_token)?;
+    let summary = state
+        .db
+        .get_usage_metrics_summary()
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(metrics_payload(summary)))
 }
 
 async fn config_put(
@@ -1947,6 +1977,20 @@ fn runtime_config_payload(config: RuntimeConfigRecord) -> RuntimeConfigPayload {
     RuntimeConfigPayload {
         enable_notification: config.enable_notification,
         enable_sensory: config.enable_sensory,
+    }
+}
+
+fn metrics_payload(summary: UsageMetricsSummary) -> MetricsResponse {
+    MetricsResponse {
+        total_messages: summary.total_messages,
+        total_users: summary.total_users,
+        usage: MetricsUsageResponse {
+            input_tokens: summary.input_tokens,
+            output_tokens: summary.output_tokens,
+            total_tokens: summary.total_tokens,
+            reasoning_tokens: summary.reasoning_tokens,
+            cached_input_tokens: summary.cached_input_tokens,
+        },
     }
 }
 

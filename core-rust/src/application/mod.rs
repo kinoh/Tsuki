@@ -10,3 +10,4 @@ pub mod router_service;
 pub mod scheduler_notice_service;
 pub mod scheduler_service;
 pub mod trigger_ingress_api;
+pub mod usage_service;

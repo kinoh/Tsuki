@@ -4,6 +4,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::{broadcast::error::RecvError, Semaphore};
 
 use crate::application::history_service::format_event_history;
+use crate::application::usage_service::record_llm_usage;
 use crate::clock::now_iso8601;
 use crate::event::contracts::{
     llm_raw, self_improvement_module_processed, self_improvement_trigger_processed,
@@ -300,6 +301,8 @@ async fn run_module_worker(
             };
         }
     };
+    let agent_name = format!("self_improvement:{}", module_target);
+    record_llm_usage(state, "user", &agent_name, &response).await;
 
     emit_trigger_debug_raw(state, trigger_event_id, module_target, &input, &response).await;
 

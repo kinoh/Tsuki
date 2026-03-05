@@ -7,6 +7,7 @@ use std::{
     time::Instant,
 };
 
+use crate::application::usage_service::record_llm_usage;
 use crate::event::contracts::{concept_graph_query, llm_error, llm_raw, router_state};
 use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError};
 use crate::prompts::PromptOverrides;
@@ -548,6 +549,7 @@ async fn resolve_active_concepts_from_concept_graph(
             };
         }
     };
+    record_llm_usage(state, "user", "router", &response).await;
     emit_router_debug_raw(
         state,
         &context,

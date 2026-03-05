@@ -29,6 +29,30 @@ pub struct Db {
     conn: Mutex<Connection>,
 }
 
+#[derive(Debug, Clone)]
+pub struct UsageStatRecord {
+    pub id: String,
+    pub user_id: String,
+    pub agent_name: String,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+    pub cached_input_tokens: Option<i64>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UsageMetricsSummary {
+    pub total_messages: i64,
+    pub total_users: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cached_input_tokens: i64,
+}
+
 impl Db {
     pub async fn connect(config: &DbConfig) -> DbResult<Arc<Self>> {
         let db_path = config.path.clone();
@@ -151,7 +175,32 @@ impl Db {
         )
         .await?;
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS usage_stats (\
+        id TEXT PRIMARY KEY,\
+        user_id TEXT NOT NULL,\
+        agent_name TEXT NOT NULL,\
+        input_tokens INTEGER,\
+        output_tokens INTEGER,\
+        total_tokens INTEGER,\
+        reasoning_tokens INTEGER,\
+        cached_input_tokens INTEGER,\
+        created_at TEXT NOT NULL\
+      )",
+            params![],
+        )
+        .await?;
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_admin_sessions_last_seen ON admin_sessions(last_seen_at)",
+            params![],
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_stats_created_at ON usage_stats(created_at)",
+            params![],
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_stats_user_id ON usage_stats(user_id)",
             params![],
         )
         .await?;
@@ -760,5 +809,74 @@ impl Db {
         )
         .await?;
         Ok(())
+    }
+
+    pub async fn insert_usage_stat(&self, record: UsageStatRecord) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT OR IGNORE INTO usage_stats (\
+             id, user_id, agent_name, input_tokens, output_tokens, total_tokens, reasoning_tokens, cached_input_tokens, created_at\
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                record.id,
+                record.user_id,
+                record.agent_name,
+                record.input_tokens,
+                record.output_tokens,
+                record.total_tokens,
+                record.reasoning_tokens,
+                record.cached_input_tokens,
+                record.created_at
+            ],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_usage_metrics_summary(&self) -> DbResult<UsageMetricsSummary> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT\
+                 COUNT(*) AS total_messages,\
+                 COUNT(DISTINCT user_id) AS total_users,\
+                 COALESCE(SUM(input_tokens), 0) AS input_tokens,\
+                 COALESCE(SUM(output_tokens), 0) AS output_tokens,\
+                 COALESCE(SUM(total_tokens), 0) AS total_tokens,\
+                 COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,\
+                 COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens\
+                 FROM usage_stats",
+                params![],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            let total_messages: i64 = row.get(0)?;
+            let total_users: i64 = row.get(1)?;
+            let input_tokens: i64 = row.get(2)?;
+            let output_tokens: i64 = row.get(3)?;
+            let total_tokens: i64 = row.get(4)?;
+            let reasoning_tokens: i64 = row.get(5)?;
+            let cached_input_tokens: i64 = row.get(6)?;
+            return Ok(UsageMetricsSummary {
+                total_messages,
+                total_users,
+                input_tokens,
+                output_tokens,
+                total_tokens,
+                reasoning_tokens,
+                cached_input_tokens,
+            });
+        }
+
+        Ok(UsageMetricsSummary {
+            total_messages: 0,
+            total_users: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            reasoning_tokens: 0,
+            cached_input_tokens: 0,
+        })
     }
 }

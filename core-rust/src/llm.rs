@@ -21,9 +21,11 @@ pub struct LlmRequest {
 
 #[derive(Debug, Clone)]
 pub struct LlmResponse {
+    pub response_id: String,
     pub text: String,
     pub raw: Value,
     pub tool_calls: Vec<ToolCallTrace>,
+    pub usage: Option<LlmUsage>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +34,15 @@ pub struct ToolCallTrace {
     pub name: String,
     pub output: String,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmUsage {
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+    pub cached_input_tokens: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -229,6 +240,7 @@ impl LlmAdapter for ResponseApiAdapter {
             .unwrap_or_else(|| "(empty response)".to_string());
         let raw = serde_json::to_value(&response)
             .unwrap_or_else(|_| json!({ "error": "failed to serialize response" }));
+        let usage = extract_usage_from_raw(&raw);
         println!(
             "PERF llm respond_id={} stage=end total_ms={} output_chars={} tool_calls={} llm_rounds={}",
             respond_id,
@@ -239,9 +251,11 @@ impl LlmAdapter for ResponseApiAdapter {
         );
 
         Ok(LlmResponse {
+            response_id: response.id,
             text,
             raw,
             tool_calls,
+            usage,
         })
     }
 }
@@ -319,4 +333,46 @@ fn build_tool_output_with_trace(
         error,
     };
     (item, trace)
+}
+
+fn extract_usage_from_raw(raw: &Value) -> Option<LlmUsage> {
+    let usage = raw.get("usage")?.as_object()?;
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(|value| value.as_i64())
+        .or_else(|| usage.get("prompt_tokens").and_then(|value| value.as_i64()));
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(|value| value.as_i64())
+        .or_else(|| {
+            usage
+                .get("completion_tokens")
+                .and_then(|value| value.as_i64())
+        });
+    let total_tokens = usage.get("total_tokens").and_then(|value| value.as_i64());
+    let reasoning_tokens = usage
+        .get("output_tokens_details")
+        .and_then(|value| value.as_object())
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(|value| value.as_i64());
+    let cached_input_tokens = usage
+        .get("input_tokens_details")
+        .and_then(|value| value.as_object())
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(|value| value.as_i64());
+    if input_tokens.is_none()
+        && output_tokens.is_none()
+        && total_tokens.is_none()
+        && reasoning_tokens.is_none()
+        && cached_input_tokens.is_none()
+    {
+        return None;
+    }
+    Some(LlmUsage {
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        reasoning_tokens,
+        cached_input_tokens,
+    })
 }

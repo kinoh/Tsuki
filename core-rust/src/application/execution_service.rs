@@ -10,6 +10,7 @@ use crate::application::history_service::{format_decision_debug_history, format_
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
 };
+use crate::application::usage_service::record_llm_usage;
 use crate::event::contracts::{decision_text, llm_error, llm_raw, role_text_output};
 use crate::llm::{
     LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError, ToolHandler,
@@ -151,6 +152,7 @@ pub(crate) async fn run_decision(
     };
 
     let parsed = parse_decision(&response.text);
+    record_llm_usage(state, "user", "decision", &response).await;
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = decision_text(
         format!("decision={} reason={}", parsed.decision, reason_text),
@@ -250,6 +252,7 @@ pub(crate) async fn run_decision_debug(
         }
     };
     let parsed = parse_decision(&response.text);
+    record_llm_usage(state, "user", "decision", &response).await;
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = decision_text(
         format!("decision={} reason={}", parsed.decision, reason_text),
@@ -375,6 +378,8 @@ pub(crate) async fn run_submodule_debug(
         response.text.clone(),
         false,
     );
+    let agent_name = format!("submodule:{}", name);
+    record_llm_usage(state, "user", &agent_name, &response).await;
     record_event(state, response_event).await;
     emit_debug_module_events(state, name, "module_only", &context, &response).await;
     Ok(response.text)
@@ -656,6 +661,14 @@ async fn run_module(
                 response.text.clone(),
                 false,
             );
+            let agent_name = if role_tag == "decision" {
+                "decision".to_string()
+            } else if role_tag == "submodule" {
+                format!("submodule:{}", name)
+            } else {
+                name.clone()
+            };
+            record_llm_usage(state, "user", &agent_name, &response).await;
             record_event(state, response_event).await;
             emit_debug_module_events(state, &name, "runtime", &context, &response).await;
             ModuleOutput {
