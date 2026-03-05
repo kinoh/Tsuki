@@ -42,7 +42,7 @@ components:
           description: Optional if images present.
         images:
           type: array
-          description: Base64 (no data: prefix)
+          description: "Base64 (no data: prefix)"
           items:
             type: object
             required: [data]

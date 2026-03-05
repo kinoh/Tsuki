@@ -542,7 +542,7 @@ components:
           description: Must match proposal target.
         decision:
           type: string
-          description: `approved` or `rejected`.
+          description: "`approved` or `rejected`."
         reviewed_by:
           type: string
         review_reason:
