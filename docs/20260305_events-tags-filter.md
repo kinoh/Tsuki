@@ -1,7 +1,7 @@
 # Events Tags Filter for GUI Message Fetch
 
 ## Overview
-Added `tags` query support to `GET /events` in `core-rust` so GUI can request only display-target events (`response`, `input`) when internal messages are hidden.
+Added `tags` query support to `GET /events` in `core-rust` so clients can request display-target events (`response`, `input`) when needed.
 
 ## Problem Statement
 GUI previously fetched the latest N raw events and then discarded non-display events locally.
@@ -12,9 +12,7 @@ When debug/observe/state events were dense, visible message count became lower t
 - Implemented OR matching: an event is included when it has at least one requested tag.
 - Kept backward compatibility for callers that do not pass `tags` (same behavior as before).
 - Added server-side batched scan when `tags` is provided to fill `limit` after filtering.
-- Updated GUI `/events` calls:
-  - `showInternalMessages=false`: append `tags=response&tags=input`
-  - `showInternalMessages=true`: do not send `tags`
+- Kept GUI unchanged in this change set; adoption is deferred to explicit GUI work.
 
 ## Design Decisions
 - Single parameter only (`tags`), no include/exclude split.
@@ -27,13 +25,10 @@ When debug/observe/state events were dense, visible message count became lower t
 ## Implementation Details
 - Server file: `core-rust/src/server_app.rs`
   - `EventsQuery.tags` added.
+  - Supports `tags=response,input` (CSV) and `tags[]=input` (single value compatibility).
   - `normalize_event_tags` added for trim/lowercase/dedup.
   - `event_has_any_tag` added (case-insensitive match).
   - `list_events_with_tags` added to fetch in batches and filter server-side until `limit` or scan cap.
-- GUI file: `gui/src/routes/+page.svelte`
-  - Added `buildEventsUrl()`.
-  - Added `CHAT_EVENT_TAGS = ["response", "input"]`.
-  - `connect()` and `loadMore()` now use `tags` only when internal messages are hidden.
 
 ## Numeric Targets and Limits
 - Target: return up to requested `limit` after filtering, not before filtering.
@@ -49,3 +44,4 @@ existing clients without `tags` keep previous behavior.
 - Internal mode should omit `tags` instead of forcing include lists.
 - New tags should be handled by updating GUI include list explicitly.
 - Compatibility fallback for legacy tag names is not required.
+- Do not change GUI without explicit request; API-side work and GUI-side adoption are separated.

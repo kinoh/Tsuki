@@ -164,8 +164,9 @@ struct EventsQuery {
     limit: Option<usize>,
     before_ts: Option<String>,
     order: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
+    tags: Option<String>,
+    #[serde(rename = "tags[]")]
+    tags_bracket: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1023,7 +1024,7 @@ async fn events(
         Some(_) => return Err((StatusCode::BAD_REQUEST, "invalid order".to_string())),
     };
 
-    let tags = normalize_event_tags(&query.tags);
+    let tags = parse_events_query_tags(&query);
     let items = if tags.is_empty() {
         state
             .event_store
@@ -1586,7 +1587,7 @@ fn matches_debug_event_filters(event: &Event, query: &DebugEventsQuery) -> bool 
         .unwrap_or(true)
 }
 
-fn normalize_event_tags(raw_tags: &[String]) -> Vec<String> {
+fn normalize_event_tags(raw_tags: &[&str]) -> Vec<String> {
     raw_tags
         .iter()
         .map(|tag| tag.trim().to_ascii_lowercase())
@@ -1594,6 +1595,20 @@ fn normalize_event_tags(raw_tags: &[String]) -> Vec<String> {
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect()
+}
+
+fn parse_events_query_tags(query: &EventsQuery) -> Vec<String> {
+    let source = query
+        .tags
+        .as_deref()
+        .or(query.tags_bracket.as_deref())
+        .unwrap_or("");
+    let values = source
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    normalize_event_tags(values.as_slice())
 }
 
 fn event_has_any_tag(event: &Event, tags: &[String]) -> bool {
@@ -2057,12 +2072,7 @@ mod tests {
 
     #[test]
     fn normalize_event_tags_removes_empty_and_deduplicates() {
-        let tags = normalize_event_tags(&[
-            " response ".to_string(),
-            "".to_string(),
-            "input".to_string(),
-            "RESPONSE".to_string(),
-        ]);
+        let tags = normalize_event_tags(&[" response ", "", "input", "RESPONSE"]);
         assert_eq!(tags.len(), 2);
         assert!(tags.iter().any(|tag| tag == "response"));
         assert!(tags.iter().any(|tag| tag == "input"));
