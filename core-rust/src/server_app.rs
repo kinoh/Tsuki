@@ -1024,32 +1024,30 @@ async fn events(
 
     let tags = parse_events_query_tags(raw_query.as_deref());
     let items = if tags.is_empty() {
-        state
-            .event_store
-            .list(limit, query.before_ts.as_deref(), desc)
-            .await
-            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+        list_events_filtered(&state, limit, query.before_ts.as_deref(), desc, |event| {
+            !event_has_tag(event, "debug")
+        })
+        .await?
     } else {
-        list_events_with_tags(
-            &state,
-            limit,
-            query.before_ts.as_deref(),
-            desc,
-            tags.as_slice(),
-        )
+        list_events_filtered(&state, limit, query.before_ts.as_deref(), desc, |event| {
+            matches_event_for_requested_tags(event, tags.as_slice())
+        })
         .await?
     };
 
     Ok(Json(EventsResponse { items }))
 }
 
-async fn list_events_with_tags(
+async fn list_events_filtered<F>(
     state: &AppState,
     limit: usize,
     before_ts: Option<&str>,
     desc: bool,
-    tags: &[String],
-) -> Result<Vec<Event>, (StatusCode, String)> {
+    mut predicate: F,
+) -> Result<Vec<Event>, (StatusCode, String)>
+where
+    F: FnMut(&Event) -> bool,
+{
     let mut items = Vec::with_capacity(limit);
     let mut cursor = before_ts.map(str::to_string);
     let batch_size = limit.saturating_mul(4).clamp(50, 500);
@@ -1070,7 +1068,7 @@ async fn list_events_with_tags(
         cursor = batch.last().map(|event| event.ts.clone());
 
         for event in batch {
-            if event_has_any_tag(&event, tags) {
+            if predicate(&event) {
                 items.push(event);
                 if items.len() >= limit {
                     break;
@@ -1623,6 +1621,22 @@ fn event_has_any_tag(event: &Event, tags: &[String]) -> bool {
         .any(|event_tag| tags.iter().any(|tag| event_tag.eq_ignore_ascii_case(tag)))
 }
 
+fn event_has_tag(event: &Event, tag: &str) -> bool {
+    event
+        .meta
+        .tags
+        .iter()
+        .any(|event_tag| event_tag.eq_ignore_ascii_case(tag))
+}
+
+fn matches_event_for_requested_tags(event: &Event, tags: &[String]) -> bool {
+    let include_debug = tags.iter().any(|tag| tag.eq_ignore_ascii_case("debug"));
+    if !include_debug && event_has_tag(event, "debug") {
+        return false;
+    }
+    event_has_any_tag(event, tags)
+}
+
 fn event_module_name(event: &Event) -> Option<&str> {
     if event.source.eq_ignore_ascii_case("decision") {
         return Some("decision");
@@ -2048,8 +2062,8 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
 #[cfg(test)]
 mod tests {
     use super::{
-        event_has_any_tag, normalize_event_tags, parse_events_query_tags, read_spec_info_version,
-        verify_auth,
+        event_has_any_tag, event_has_tag, matches_event_for_requested_tags, normalize_event_tags,
+        parse_events_query_tags, read_spec_info_version, verify_auth,
     };
     use crate::event::contracts::response_text;
 
@@ -2092,6 +2106,28 @@ mod tests {
         assert!(event_has_any_tag(&event, &["response".to_string()]));
         assert!(event_has_any_tag(&event, &["decision".to_string()]));
         assert!(!event_has_any_tag(&event, &["input".to_string()]));
+    }
+
+    #[test]
+    fn event_has_tag_matches_ignore_case() {
+        let mut event = response_text("hello".to_string());
+        event.meta.tags.push("Debug".to_string());
+        assert!(event_has_tag(&event, "debug"));
+        assert!(!event_has_tag(&event, "input"));
+    }
+
+    #[test]
+    fn matches_event_for_requested_tags_excludes_debug_unless_requested() {
+        let mut event = response_text("hello".to_string());
+        event.meta.tags.push("debug".to_string());
+        assert!(!matches_event_for_requested_tags(
+            &event,
+            &["response".to_string()]
+        ));
+        assert!(matches_event_for_requested_tags(
+            &event,
+            &["response".to_string(), "debug".to_string()]
+        ));
     }
 
     #[test]

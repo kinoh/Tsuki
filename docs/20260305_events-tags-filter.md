@@ -2,6 +2,7 @@
 
 ## Overview
 Added `tags` query support to `GET /events` in `core-rust` so clients can request display-target events (`response`, `input`) when needed.
+`debug` events are excluded by default unless explicitly requested.
 
 ## Problem Statement
 GUI previously fetched the latest N raw events and then discarded non-display events locally.
@@ -12,6 +13,8 @@ When debug/observe/state events were dense, visible message count became lower t
 - Implemented OR matching: an event is included when it has at least one requested tag.
 - Kept backward compatibility for callers that do not pass `tags` (same behavior as before).
 - Added server-side batched scan when `tags` is provided to fill `limit` after filtering.
+- Changed default behavior: when `tags` is omitted, events with `debug` tag are excluded.
+- When `tags` is provided, events with `debug` tag are still excluded unless `debug` is included in requested tags.
 - Kept GUI unchanged in this change set; adoption is deferred to explicit GUI work.
 
 ## Design Decisions
@@ -21,6 +24,8 @@ When debug/observe/state events were dense, visible message count became lower t
   - Reason: rejected because it breaks multimodal extensibility.
 - OR semantics for `tags`.
   - Reason: GUI chat fetch needs either `response` or `input`, not intersection.
+- Debug-off by default.
+  - Reason: debug payloads are verbose and should not appear unless explicitly requested.
 
 ## Implementation Details
 - Server file: `core-rust/src/server_app.rs`
@@ -28,7 +33,8 @@ When debug/observe/state events were dense, visible message count became lower t
   - Supports repeated `tags` query keys (`style: form`, `explode: true`), such as `tags=input&tags=response`.
   - `normalize_event_tags` added for trim/lowercase/dedup.
   - `event_has_any_tag` added (case-insensitive match).
-  - `list_events_with_tags` added to fetch in batches and filter server-side until `limit` or scan cap.
+  - Added explicit `debug` exclusion policy in filtering.
+  - `list_events_filtered` fetches in batches and applies filtering server-side until `limit` or scan cap.
 
 ## Numeric Targets and Limits
 - Target: return up to requested `limit` after filtering, not before filtering.
@@ -45,3 +51,4 @@ existing clients without `tags` keep previous behavior.
 - New tags should be handled by updating GUI include list explicitly.
 - Compatibility fallback for legacy tag names is not required.
 - Do not change GUI without explicit request; API-side work and GUI-side adoption are separated.
+- Debug should be excluded unless explicitly requested due to payload length.

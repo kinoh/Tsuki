@@ -62,6 +62,7 @@ paths:
             Optional OR filter by event tags.
             Repeat the query key for multiple tags
             (e.g. `?tags=input&tags=response`).
+            Events tagged `debug` are excluded unless `tags=debug` is explicitly provided.
       responses:
         '200':
           description: Event list.
