@@ -21,11 +21,9 @@ pub struct LlmRequest {
 
 #[derive(Debug, Clone)]
 pub struct LlmResponse {
-    pub response_id: String,
     pub text: String,
     pub raw: Value,
     pub tool_calls: Vec<ToolCallTrace>,
-    pub usage: Option<LlmUsage>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,6 +69,31 @@ pub trait LlmAdapter: Send + Sync {
     async fn respond(&self, request: LlmRequest) -> Result<LlmResponse, LlmError>;
 }
 
+#[derive(Debug, Clone)]
+pub struct LlmUsageContext {
+    pub user_id: String,
+    pub agent_name: String,
+}
+
+impl LlmUsageContext {
+    pub fn new(user_id: impl Into<String>, agent_name: impl Into<String>) -> Self {
+        Self {
+            user_id: user_id.into(),
+            agent_name: agent_name.into(),
+        }
+    }
+}
+
+#[async_trait]
+pub trait LlmUsageRecorder: Send + Sync {
+    async fn record_usage(
+        &self,
+        response_id: &str,
+        usage: &LlmUsage,
+        context: &LlmUsageContext,
+    ) -> Result<(), String>;
+}
+
 pub trait ToolHandler: Send + Sync {
     fn handle(&self, tool_name: &str, arguments: &str) -> Result<String, ToolError>;
 }
@@ -104,6 +127,8 @@ pub struct ResponseApiConfig {
     pub max_output_tokens: Option<u32>,
     pub tools: Vec<Tool>,
     pub tool_handler: Option<Arc<dyn ToolHandler>>,
+    pub usage_recorder: Option<Arc<dyn LlmUsageRecorder>>,
+    pub usage_context: Option<LlmUsageContext>,
     pub max_tool_rounds: usize,
 }
 
@@ -241,6 +266,22 @@ impl LlmAdapter for ResponseApiAdapter {
         let raw = serde_json::to_value(&response)
             .unwrap_or_else(|_| json!({ "error": "failed to serialize response" }));
         let usage = extract_usage_from_raw(&raw);
+        let response_id = response.id.clone();
+        if let (Some(recorder), Some(context), Some(usage_value)) = (
+            &self.config.usage_recorder,
+            &self.config.usage_context,
+            &usage,
+        ) {
+            if let Err(err) = recorder
+                .record_usage(&response_id, usage_value, context)
+                .await
+            {
+                eprintln!(
+                    "LLM_USAGE_RECORD_ERROR user_id={} agent_name={} response_id={} error={}",
+                    context.user_id, context.agent_name, response_id, err
+                );
+            }
+        }
         println!(
             "PERF llm respond_id={} stage=end total_ms={} output_chars={} tool_calls={} llm_rounds={}",
             respond_id,
@@ -251,11 +292,9 @@ impl LlmAdapter for ResponseApiAdapter {
         );
 
         Ok(LlmResponse {
-            response_id: response.id,
             text,
             raw,
             tool_calls,
-            usage,
         })
     }
 }

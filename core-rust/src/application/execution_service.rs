@@ -10,10 +10,11 @@ use crate::application::history_service::{format_decision_debug_history, format_
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
 };
-use crate::application::usage_service::record_llm_usage;
+use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::event::contracts::{decision_text, llm_error, llm_raw, role_text_output};
 use crate::llm::{
-    LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError, ToolHandler,
+    LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiAdapter,
+    ResponseApiConfig, ToolError, ToolHandler,
 };
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::PromptOverrides;
@@ -92,11 +93,15 @@ pub(crate) async fn run_decision(
         base_handler: modules.runtime.tool_handler.clone(),
         module_instructions: module_instructions.clone(),
     };
+    let usage_recorder: Arc<dyn LlmUsageRecorder> =
+        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
     let adapter = ResponseApiAdapter::new(build_config_with_tools_and_handler(
         compose_instructions(&base_instructions, &decision_instructions),
         &modules.runtime,
         decision_tools(&modules.runtime.tools, module_instructions.keys().cloned()),
         Arc::new(handler),
+        Some(LlmUsageContext::new("user", "decision")),
+        Some(usage_recorder),
     ));
     let activation_concepts =
         format_activation_context(&activation_snapshot.active_concepts_from_concept_graph);
@@ -152,7 +157,6 @@ pub(crate) async fn run_decision(
     };
 
     let parsed = parse_decision(&response.text);
-    record_llm_usage(state, "user", "decision", &response).await;
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = decision_text(
         format!("decision={} reason={}", parsed.decision, reason_text),
@@ -211,6 +215,8 @@ pub(crate) async fn run_decision_debug(
         base_handler: state.modules.runtime.tool_handler.clone(),
         module_instructions: module_instructions.clone(),
     };
+    let usage_recorder: Arc<dyn LlmUsageRecorder> =
+        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
     let adapter = ResponseApiAdapter::new(build_config_with_tools_and_handler(
         compose_instructions(&base_instructions, &decision_instructions),
         &state.modules.runtime,
@@ -219,6 +225,8 @@ pub(crate) async fn run_decision_debug(
             module_instructions.keys().cloned(),
         ),
         Arc::new(handler),
+        Some(LlmUsageContext::new("user", "decision")),
+        Some(usage_recorder),
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         let activation_concepts =
@@ -252,7 +260,6 @@ pub(crate) async fn run_decision_debug(
         }
     };
     let parsed = parse_decision(&response.text);
-    record_llm_usage(state, "user", "decision", &response).await;
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = decision_text(
         format!("decision={} reason={}", parsed.decision, reason_text),
@@ -345,9 +352,13 @@ pub(crate) async fn run_submodule_debug(
         .get(&definition.name)
         .cloned()
         .unwrap_or(definition.instructions);
+    let usage_recorder: Arc<dyn LlmUsageRecorder> =
+        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
     let adapter = ResponseApiAdapter::new(build_config(
         compose_instructions(&base_instructions, &instructions),
         &state.modules.runtime,
+        Some(LlmUsageContext::new("user", format!("submodule:{}", name))),
+        Some(usage_recorder),
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         render_submodule_context_template(
@@ -378,8 +389,6 @@ pub(crate) async fn run_submodule_debug(
         response.text.clone(),
         false,
     );
-    let agent_name = format!("submodule:{}", name);
-    record_llm_usage(state, "user", &agent_name, &response).await;
     record_event(state, response_event).await;
     emit_debug_module_events(state, name, "module_only", &context, &response).await;
     Ok(response.text)
@@ -400,7 +409,17 @@ pub(crate) async fn run_submodule_tool(
         .clone()
         .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
     let instructions = compose_instructions(&base_instructions, module_instructions);
-    let adapter = ResponseApiAdapter::new(build_config(instructions, &state.modules.runtime));
+    let usage_recorder: Arc<dyn LlmUsageRecorder> =
+        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+    let adapter = ResponseApiAdapter::new(build_config(
+        instructions,
+        &state.modules.runtime,
+        Some(LlmUsageContext::new(
+            "user",
+            format!("submodule:{}", module_name),
+        )),
+        Some(usage_recorder),
+    ));
     let context = render_submodule_context_template(
         &state.input.submodule_context_template,
         input_text,
@@ -661,14 +680,6 @@ async fn run_module(
                 response.text.clone(),
                 false,
             );
-            let agent_name = if role_tag == "decision" {
-                "decision".to_string()
-            } else if role_tag == "submodule" {
-                format!("submodule:{}", name)
-            } else {
-                name.clone()
-            };
-            record_llm_usage(state, "user", &agent_name, &response).await;
             record_event(state, response_event).await;
             emit_debug_module_events(state, &name, "runtime", &context, &response).await;
             ModuleOutput {
@@ -734,7 +745,12 @@ fn owner_source_for_role(role_tag: &str, module_name: &str) -> String {
     "system".to_string()
 }
 
-fn build_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiConfig {
+fn build_config(
+    instructions: String,
+    runtime: &ModuleRuntime,
+    usage_context: Option<LlmUsageContext>,
+    usage_recorder: Option<Arc<dyn LlmUsageRecorder>>,
+) -> ResponseApiConfig {
     ResponseApiConfig {
         model: runtime.model.clone(),
         instructions,
@@ -742,6 +758,8 @@ fn build_config(instructions: String, runtime: &ModuleRuntime) -> ResponseApiCon
         max_output_tokens: runtime.max_output_tokens,
         tools: runtime.tools.clone(),
         tool_handler: Some(runtime.tool_handler.clone()),
+        usage_recorder,
+        usage_context,
         max_tool_rounds: runtime.max_tool_rounds,
     }
 }
@@ -751,6 +769,8 @@ fn build_config_with_tools_and_handler(
     runtime: &ModuleRuntime,
     tools: Vec<async_openai::types::responses::Tool>,
     tool_handler: Arc<dyn ToolHandler>,
+    usage_context: Option<LlmUsageContext>,
+    usage_recorder: Option<Arc<dyn LlmUsageRecorder>>,
 ) -> ResponseApiConfig {
     ResponseApiConfig {
         model: runtime.model.clone(),
@@ -759,6 +779,8 @@ fn build_config_with_tools_and_handler(
         max_output_tokens: runtime.max_output_tokens,
         tools,
         tool_handler: Some(tool_handler),
+        usage_recorder,
+        usage_context,
         max_tool_rounds: runtime.max_tool_rounds,
     }
 }

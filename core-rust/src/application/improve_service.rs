@@ -4,12 +4,15 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::{broadcast::error::RecvError, Semaphore};
 
 use crate::application::history_service::format_event_history;
-use crate::application::usage_service::record_llm_usage;
+use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::clock::now_iso8601;
 use crate::event::contracts::{
     llm_raw, self_improvement_module_processed, self_improvement_trigger_processed,
 };
-use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
+use crate::llm::{
+    LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiAdapter,
+    ResponseApiConfig,
+};
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::write_prompts;
 use crate::{AppState, DebugImproveProposalRequest};
@@ -271,6 +274,8 @@ async fn run_module_worker(
             error_detail: Some("prompts.md missing non-empty `# Self Improvement`".to_string()),
         };
     }
+    let usage_recorder: Arc<dyn LlmUsageRecorder> =
+        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
     let adapter = ResponseApiAdapter::new(ResponseApiConfig {
         model: state.modules.runtime.model.clone(),
         instructions: self_improvement_instructions,
@@ -278,6 +283,11 @@ async fn run_module_worker(
         max_output_tokens: state.modules.runtime.max_output_tokens,
         tools: Vec::new(),
         tool_handler: None,
+        usage_context: Some(LlmUsageContext::new(
+            "user",
+            format!("self_improvement:{}", module_target),
+        )),
+        usage_recorder: Some(usage_recorder),
         max_tool_rounds: 0,
     });
 
@@ -301,9 +311,6 @@ async fn run_module_worker(
             };
         }
     };
-    let agent_name = format!("self_improvement:{}", module_target);
-    record_llm_usage(state, "user", &agent_name, &response).await;
-
     emit_trigger_debug_raw(state, trigger_event_id, module_target, &input, &response).await;
 
     let plan = match parse_trigger_processing_plan(response.text.as_str()) {

@@ -442,6 +442,8 @@ Task:
         max_output_tokens: Some(4_000),
         tools: Vec::new(),
         tool_handler: None,
+        usage_recorder: None,
+        usage_context: None,
         max_tool_rounds: 0,
     });
     let response = adapter

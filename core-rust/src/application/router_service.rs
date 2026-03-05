@@ -4,12 +4,16 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     future::Future,
+    sync::Arc,
     time::Instant,
 };
 
-use crate::application::usage_service::record_llm_usage;
+use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::event::contracts::{concept_graph_query, llm_error, llm_raw, router_state};
-use crate::llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig, ToolError};
+use crate::llm::{
+    LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiAdapter,
+    ResponseApiConfig, ToolError,
+};
 use crate::prompts::PromptOverrides;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
@@ -392,6 +396,8 @@ fn build_router_config(
     instructions: String,
     runtime: &ModuleRuntime,
     router_model: &str,
+    usage_context: Option<LlmUsageContext>,
+    usage_recorder: Option<Arc<dyn LlmUsageRecorder>>,
 ) -> ResponseApiConfig {
     ResponseApiConfig {
         model: router_model.to_string(),
@@ -400,6 +406,8 @@ fn build_router_config(
         max_output_tokens: runtime.max_output_tokens,
         tools: Vec::new(),
         tool_handler: None,
+        usage_recorder,
+        usage_context,
         max_tool_rounds: 0,
     }
 }
@@ -514,10 +522,14 @@ async fn resolve_active_concepts_from_concept_graph(
         "{}\n\n{}\n\nYou are the router preconscious module. Select recall seed concepts only.",
         base_instructions, router_instructions
     );
+    let usage_recorder: Arc<dyn LlmUsageRecorder> =
+        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
     let adapter = ResponseApiAdapter::new(build_router_config(
         instructions,
         &modules.runtime,
         state.router_model.as_str(),
+        Some(LlmUsageContext::new("user", "router")),
+        Some(usage_recorder),
     ));
     let llm_started = Instant::now();
     let response = match adapter
@@ -549,7 +561,6 @@ async fn resolve_active_concepts_from_concept_graph(
             };
         }
     };
-    record_llm_usage(state, "user", "router", &response).await;
     emit_router_debug_raw(
         state,
         &context,

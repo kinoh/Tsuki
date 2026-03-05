@@ -10,7 +10,7 @@ Without a dedicated usage table, cost/volume tracking relied on debug raw events
 ## Solution
 - Added a dedicated `usage_stats` table in `core-rust`.
 - Extracted usage fields from OpenAI response payloads in `llm.rs`.
-- Recorded usage on successful LLM calls in runtime paths (`router`, `decision`, `submodule`, `self_improvement`).
+- Added `LlmUsageRecorder` interface and moved usage recording into `ResponseApiAdapter` (single point).
 - Added `GET /metrics` endpoint returning lifetime cumulative metrics.
 
 ## API Contract
@@ -42,10 +42,13 @@ Reason: preserve vocabulary consistency across code, API, and operations. Renami
 
 ## Design Decisions
 - Responsibility boundaries:
-  - `llm.rs`: extract usage from response payload
+  - `llm.rs`: extract usage from response payload and invoke `LlmUsageRecorder`
   - `db.rs`: persist usage and aggregate metrics
-  - `application/usage_service.rs`: shared usage-recording path
+  - `application/usage_service.rs`: DB-backed `LlmUsageRecorder` implementation
   - `server_app.rs`: expose `/metrics`
+- Applied dependency inversion for usage persistence:
+  - high-level `llm` module depends on `LlmUsageRecorder` abstraction, not on DB implementation.
+  - low-level DB implementation (`DbLlmUsageRecorder`) is injected via `ResponseApiConfig`.
 - No time-range query (`from/to`) was introduced; endpoint is lifetime cumulative by design.
 - No fallback aggregation from event logs; fail-fast and explicit table contract is preferred.
 
