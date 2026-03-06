@@ -8,7 +8,7 @@ mod llm;
 use activation_concept_graph::{
     ActivationConceptGraphStore, ConceptGraphDebugReader, ConceptGraphOps,
 };
-use llm::{LlmAdapter, LlmRequest, ResponseApiAdapter, ResponseApiConfig};
+use llm::{build_response_api_llm, LlmRequest, ResponseApiConfig};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -434,7 +434,7 @@ Task:
 {{\"selected\":[\"concept1\",\"concept2\"]}}"
     );
 
-    let adapter = ResponseApiAdapter::new(ResponseApiConfig {
+    let adapter = build_response_api_llm(ResponseApiConfig {
         model: model.to_string(),
         instructions: "You are a strict JSON selector for concept-graph curation tasks."
             .to_string(),

@@ -10,8 +10,7 @@ use crate::event::contracts::{
     llm_raw, self_improvement_module_processed, self_improvement_trigger_processed,
 };
 use crate::llm::{
-    LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiAdapter,
-    ResponseApiConfig,
+    build_response_api_llm, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiConfig,
 };
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::write_prompts;
@@ -276,7 +275,7 @@ async fn run_module_worker(
     }
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
-    let adapter = ResponseApiAdapter::new(ResponseApiConfig {
+    let adapter = build_response_api_llm(ResponseApiConfig {
         model: state.modules.runtime.model.clone(),
         instructions: self_improvement_instructions,
         temperature: state.modules.runtime.temperature,

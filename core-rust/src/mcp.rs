@@ -1,5 +1,4 @@
 use async_openai::types::responses::{FunctionTool, Tool};
-use async_openai::{config::OpenAIConfig, types::responses::CreateResponseArgs, Client};
 use rmcp::model::{CallToolRequestParam, ClientCapabilities, ClientInfo, Implementation};
 use rmcp::service::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
@@ -12,6 +11,7 @@ use crate::activation_concept_graph::ConceptGraphStore;
 use crate::config::McpServerConfig;
 use crate::event::contracts::{llm_error, llm_raw};
 use crate::event::Event;
+use crate::llm::{LlmAdapter, LlmRequest};
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct McpToolDescriptor {
@@ -90,7 +90,7 @@ impl McpRegistry {
     pub(crate) async fn bootstrap(
         servers: &BTreeMap<String, McpServerConfig>,
         concept_graph: &dyn ConceptGraphStore,
-        llm_model: &str,
+        llm: Arc<dyn LlmAdapter>,
         emit_event: Arc<dyn Fn(Event) + Send + Sync>,
     ) -> McpBootstrapResult {
         let mut out = Self::empty();
@@ -154,7 +154,7 @@ impl McpRegistry {
                     phase: "bootstrap",
                 });
                 let extracted = match extract_trigger_concepts_with_llm(
-                    llm_model,
+                    llm.clone(),
                     mapping.server_id.as_str(),
                     &discovered_tool,
                     emit_event.clone(),
@@ -379,12 +379,11 @@ async fn call_tool(url: &str, remote_tool_name: &str, arguments: Value) -> Resul
 }
 
 async fn extract_trigger_concepts_with_llm(
-    model: &str,
+    llm: Arc<dyn LlmAdapter>,
     server_id: &str,
     tool: &ToolObject,
     emit_event: Arc<dyn Fn(Event) + Send + Sync>,
 ) -> Result<Vec<String>, String> {
-    let client: Client<OpenAIConfig> = Client::new();
     let schema_text = serde_json::to_string(tool.input_schema.as_ref().unwrap_or(&json!({})))
         .unwrap_or_else(|_| "{}".to_string());
     let base_prompt = format!(
@@ -410,16 +409,10 @@ input_schema_json: {schema}",
     let mut last_error = "llm parse check failed: empty output".to_string();
 
     for prompt in prompts {
-        let request = CreateResponseArgs::default()
-            .model(model)
-            .input(prompt.as_str())
-            .instructions("Return exactly one JSON object. No markdown. No prose.")
-            .max_output_tokens(200u32)
-            .build()
-            .map_err(|err| format!("llm request build failed: {}", err))?;
-        let response = client
-            .responses()
-            .create(request)
+        let response = llm
+            .respond(LlmRequest {
+                input: prompt.clone(),
+            })
             .await;
         let response = match response {
             Ok(value) => value,
@@ -440,11 +433,12 @@ input_schema_json: {schema}",
             server_id,
             tool.name.as_str(),
             prompt.as_str(),
-            &response,
+            &response.raw,
+            response.text.as_str(),
         );
-        let text = response
-            .output_text()
-            .or_else(|| extract_output_text_from_response_json(&response));
+        let text = Some(response.text.clone()).or_else(|| {
+            extract_output_text_from_raw_json(&response.raw)
+        });
         let Some(text) = text else {
             last_error = "llm parse check failed: empty output".to_string();
             continue;
@@ -464,10 +458,9 @@ fn emit_mcp_llm_raw(
     server_id: &str,
     tool_name: &str,
     prompt: &str,
-    response: &async_openai::types::responses::Response,
+    raw: &Value,
+    output_text: &str,
 ) {
-    let raw = serde_json::to_value(response)
-        .unwrap_or_else(|_| json!({ "error": "mcp_bootstrap_response_serialize_failed" }));
     let event = llm_raw(
         "tooling",
         json!({
@@ -477,7 +470,7 @@ fn emit_mcp_llm_raw(
             "tool_name": tool_name,
             "context": prompt,
             "raw": raw,
-            "output_text": response.output_text(),
+            "output_text": output_text,
             "tool_calls": [],
         }),
         vec![
@@ -535,10 +528,7 @@ fn parse_trigger_concepts(raw: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-fn extract_output_text_from_response_json(
-    response: &async_openai::types::responses::Response,
-) -> Option<String> {
-    let value = serde_json::to_value(response).ok()?;
+fn extract_output_text_from_raw_json(value: &Value) -> Option<String> {
     let output = value.get("output")?.as_array()?;
     for item in output {
         let content = item.get("content").and_then(Value::as_array);

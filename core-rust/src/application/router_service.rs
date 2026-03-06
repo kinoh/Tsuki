@@ -11,8 +11,8 @@ use std::{
 use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::event::contracts::{concept_graph_query, llm_error, llm_raw, router_state};
 use crate::llm::{
-    LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiAdapter,
-    ResponseApiConfig, ToolError,
+    build_response_api_llm, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiConfig,
+    ToolError,
 };
 use crate::mcp::McpToolVisibility;
 use crate::prompts::PromptOverrides;
@@ -541,7 +541,7 @@ async fn resolve_active_concepts_from_concept_graph(
     );
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
-    let adapter = ResponseApiAdapter::new(build_router_config(
+    let adapter = build_response_api_llm(build_router_config(
         instructions,
         &modules.runtime,
         state.router_model.as_str(),

@@ -146,6 +146,10 @@ impl ResponseApiAdapter {
     }
 }
 
+pub fn build_response_api_llm(config: ResponseApiConfig) -> Arc<dyn LlmAdapter> {
+    Arc::new(ResponseApiAdapter::new(config))
+}
+
 #[async_trait]
 impl LlmAdapter for ResponseApiAdapter {
     async fn respond(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {

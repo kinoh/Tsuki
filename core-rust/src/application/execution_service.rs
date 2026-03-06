@@ -13,7 +13,7 @@ use crate::application::router_service::{
 use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::event::contracts::{decision_text, llm_error, llm_raw, role_text_output};
 use crate::llm::{
-    LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiAdapter,
+    build_response_api_llm, LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder,
     ResponseApiConfig, ToolError, ToolHandler,
 };
 use crate::module_registry::ModuleRegistryReader;
@@ -95,7 +95,7 @@ pub(crate) async fn run_decision(
     };
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
-    let adapter = ResponseApiAdapter::new(build_config_with_tools_and_handler(
+    let adapter = build_response_api_llm(build_config_with_tools_and_handler(
         compose_instructions(&base_instructions, &decision_instructions),
         &modules.runtime,
         decision_tools(
@@ -230,7 +230,7 @@ pub(crate) async fn run_decision_debug(
     };
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
-    let adapter = ResponseApiAdapter::new(build_config_with_tools_and_handler(
+    let adapter = build_response_api_llm(build_config_with_tools_and_handler(
         compose_instructions(&base_instructions, &decision_instructions),
         &state.modules.runtime,
         decision_tools(
@@ -377,7 +377,7 @@ pub(crate) async fn run_submodule_debug(
         .unwrap_or(definition.instructions);
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
-    let adapter = ResponseApiAdapter::new(build_config(
+    let adapter = build_response_api_llm(build_config(
         compose_instructions(&base_instructions, &instructions),
         &state.modules.runtime,
         Some(LlmUsageContext::new("user", format!("submodule:{}", name))),
@@ -434,7 +434,7 @@ pub(crate) async fn run_submodule_tool(
     let instructions = compose_instructions(&base_instructions, module_instructions);
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
-    let adapter = ResponseApiAdapter::new(build_config(
+    let adapter = build_response_api_llm(build_config(
         instructions,
         &state.modules.runtime,
         Some(LlmUsageContext::new(
@@ -455,7 +455,7 @@ pub(crate) async fn run_submodule_tool(
         state,
         module_name.to_string(),
         "submodule",
-        Arc::new(adapter),
+        adapter,
         context,
     )
     .await;

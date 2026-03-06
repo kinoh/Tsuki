@@ -36,6 +36,7 @@ use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::event::Event;
 use crate::event_store::EventStore;
+use crate::llm::{build_response_api_llm, ResponseApiConfig};
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::mcp::McpRegistry;
 use crate::notification::FcmNotificationSender;
@@ -371,7 +372,18 @@ pub(crate) async fn run_server() {
     let mcp_bootstrap = crate::mcp::McpRegistry::bootstrap(
         &config.mcp_servers,
         activation_concept_graph.as_ref(),
-        config.llm.model.as_str(),
+        build_response_api_llm(ResponseApiConfig {
+            model: config.llm.model.clone(),
+            instructions:
+                "Extract trigger concepts for MCP tools. Return strict JSON only.".to_string(),
+            temperature: None,
+            max_output_tokens: Some(200),
+            tools: Vec::new(),
+            tool_handler: None,
+            usage_recorder: None,
+            usage_context: None,
+            max_tool_rounds: 0,
+        }),
         emit_event.clone(),
     )
     .await;
