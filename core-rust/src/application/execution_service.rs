@@ -6,7 +6,10 @@ use std::time::Instant;
 use std::{collections::HashMap, sync::Arc};
 use tokio::runtime::Handle;
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
 use crate::application::history_service::{format_decision_debug_history, format_event_history};
+use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
 };
@@ -19,7 +22,6 @@ use crate::llm::{
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::PromptOverrides;
 use crate::tools::EMIT_USER_REPLY_TOOL;
-use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const SUBMODULE_TOOL_PREFIX: &str = "run_submodule__";
 
@@ -72,20 +74,15 @@ pub(crate) async fn run_decision(
         router_output.soft_recommendations.len()
     );
     let history_started = Instant::now();
-    let history = format_event_history(state, state.limits.decision_history, None, None).await;
+    let history =
+        format_event_history(state, state.config.limits.decision_history, None, None).await;
     println!(
         "PERF decision stage=history ms={} history_len={}",
         history_started.elapsed().as_millis(),
         history.len()
     );
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
-    let decision_instructions = overrides
-        .decision
-        .clone()
-        .unwrap_or_else(|| state.decision_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(&overrides);
+    let decision_instructions = state.prompts.decision_or_default(&overrides);
     let activation_snapshot = activation_snapshot_from_router_output(router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
@@ -95,14 +92,20 @@ pub(crate) async fn run_decision(
         module_instructions: module_instructions.clone(),
     };
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let visible_mcp_tools = state
+        .services
         .mcp_registry
         .available_tools()
         .into_iter()
         .filter(|tool| {
             tool_name(tool)
-                .map(|name| router_output.mcp_visible_tools.iter().any(|item| item == name))
+                .map(|name| {
+                    router_output
+                        .mcp_visible_tools
+                        .iter()
+                        .any(|item| item == name)
+                })
                 .unwrap_or(false)
         })
         .collect::<Vec<_>>();
@@ -129,7 +132,7 @@ pub(crate) async fn run_decision(
     let submodule_candidates =
         format_soft_recommendations(&activation_snapshot.soft_recommendations);
     let context = render_decision_context_template(
-        &state.input.decision_context_template,
+        &state.config.input.decision_context_template,
         DecisionContextTemplateVars {
             latest_user_input: input_text,
             active_concepts_from_concept_graph: &activation_concepts,
@@ -225,7 +228,7 @@ pub(crate) async fn run_decision_debug(
     } else if include_history {
         format_decision_debug_history(
             state,
-            state.limits.decision_history,
+            state.config.limits.decision_history,
             history_cutoff_ts,
             Some(excluded_event_ids),
             submodule_outputs_raw,
@@ -234,31 +237,31 @@ pub(crate) async fn run_decision_debug(
     } else {
         "none".to_string()
     };
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
-    let decision_instructions = overrides
-        .decision
-        .clone()
-        .unwrap_or_else(|| state.decision_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(&overrides);
+    let decision_instructions = state.prompts.decision_or_default(&overrides);
     let activation_snapshot = activation_snapshot_from_router_output(router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
         activation_snapshot: activation_snapshot.clone(),
-        base_handler: state.modules.runtime.tool_handler.clone(),
+        base_handler: state.runtime.modules.runtime.tool_handler.clone(),
         module_instructions: module_instructions.clone(),
     };
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let visible_mcp_tools = state
+        .services
         .mcp_registry
         .available_tools()
         .into_iter()
         .filter(|tool| {
             tool_name(tool)
-                .map(|name| router_output.mcp_visible_tools.iter().any(|item| item == name))
+                .map(|name| {
+                    router_output
+                        .mcp_visible_tools
+                        .iter()
+                        .any(|item| item == name)
+                })
                 .unwrap_or(false)
         })
         .collect::<Vec<_>>();
@@ -268,9 +271,9 @@ pub(crate) async fn run_decision_debug(
             &decision_instructions,
             &visible_mcp_tools,
         ),
-        &state.modules.runtime,
+        &state.runtime.modules.runtime,
         decision_tools(
-            &state.modules.runtime.tools,
+            &state.runtime.modules.runtime.tools,
             visible_mcp_tools.clone(),
             module_instructions.keys().cloned(),
         ),
@@ -286,7 +289,7 @@ pub(crate) async fn run_decision_debug(
         let submodule_candidates =
             format_soft_recommendations(&activation_snapshot.soft_recommendations);
         render_decision_context_template(
-            &state.input.decision_context_template,
+            &state.config.input.decision_context_template,
             DecisionContextTemplateVars {
                 latest_user_input: input_text,
                 active_concepts_from_concept_graph: &activation_concepts,
@@ -329,6 +332,7 @@ pub(crate) async fn run_all_submodules_debug(
     state: &AppState,
 ) -> Result<String, (StatusCode, String)> {
     let module_names = state
+        .runtime
         .modules
         .registry
         .list_active()
@@ -375,7 +379,7 @@ pub(crate) async fn run_submodule_debug(
     } else if include_history {
         format_event_history(
             state,
-            state.limits.submodule_history,
+            state.config.limits.submodule_history,
             history_cutoff_ts,
             Some(excluded_event_ids),
         )
@@ -384,11 +388,9 @@ pub(crate) async fn run_submodule_debug(
         "none".to_string()
     };
     let overrides = current_prompt_overrides(state).await;
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(&overrides);
     let module_defs = state
+        .runtime
         .modules
         .registry
         .list_active()
@@ -404,16 +406,16 @@ pub(crate) async fn run_submodule_debug(
         .cloned()
         .unwrap_or(definition.instructions);
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let adapter = build_response_api_llm(build_config(
         compose_instructions(&base_instructions, &instructions),
-        &state.modules.runtime,
+        &state.runtime.modules.runtime,
         Some(LlmUsageContext::new("user", format!("submodule:{}", name))),
         Some(usage_recorder),
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         render_submodule_context_template(
-            &state.input.submodule_context_template,
+            &state.config.input.submodule_context_template,
             input_text,
             "none",
             "none",
@@ -453,18 +455,16 @@ pub(crate) async fn run_submodule_tool(
     module_instructions: &str,
     execution_reason: Option<&str>,
 ) -> Result<String, ToolError> {
-    let history = format_event_history(state, state.limits.submodule_history, None, None).await;
+    let history =
+        format_event_history(state, state.config.limits.submodule_history, None, None).await;
     let overrides = current_prompt_overrides(state).await;
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(&overrides);
     let instructions = compose_instructions(&base_instructions, module_instructions);
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let adapter = build_response_api_llm(build_config(
         instructions,
-        &state.modules.runtime,
+        &state.runtime.modules.runtime,
         Some(LlmUsageContext::new(
             "user",
             format!("submodule:{}", module_name),
@@ -472,7 +472,7 @@ pub(crate) async fn run_submodule_tool(
         Some(usage_recorder),
     ));
     let context = render_submodule_context_template(
-        &state.input.submodule_context_template,
+        &state.config.input.submodule_context_template,
         input_text,
         &format_activation_context(&activation_snapshot.active_concepts_from_concept_graph),
         &format_soft_recommendations(&activation_snapshot.soft_recommendations),
@@ -491,14 +491,14 @@ pub(crate) async fn run_submodule_tool(
 }
 
 pub(crate) async fn current_prompt_overrides(state: &AppState) -> PromptOverrides {
-    state.prompts.read().await.clone()
+    state.prompts.overrides.read().await.clone()
 }
 
 pub(crate) async fn load_active_module_instructions(
     state: &AppState,
     overrides: &PromptOverrides,
 ) -> HashMap<String, String> {
-    let module_defs = match state.modules.registry.list_active().await {
+    let module_defs = match state.runtime.modules.registry.list_active().await {
         Ok(list) => list,
         Err(err) => {
             println!("MODULE_REGISTRY_ERROR error={}", err);
@@ -699,9 +699,7 @@ fn format_soft_recommendations(recommendations: &[String]) -> String {
         .join("\n")
 }
 
-fn format_visible_mcp_tool_contracts(
-    tools: &[async_openai::types::responses::Tool],
-) -> String {
+fn format_visible_mcp_tool_contracts(tools: &[async_openai::types::responses::Tool]) -> String {
     let mut lines = Vec::<String>::new();
     for tool in tools {
         let async_openai::types::responses::Tool::Function(def) = tool else {
@@ -939,7 +937,7 @@ async fn repair_missing_emit_user_reply(
         "{original_context}\n\ntool_call_results_from_previous_attempt:\n{tool_results}\n\nRepair requirement:\nCall emit_user_reply now using the gathered tool results."
     );
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let adapter = build_response_api_llm(ResponseApiConfig {
         model: modules.runtime.model.clone(),
         instructions: repair_instructions,

@@ -8,6 +8,9 @@ use std::{
     time::Instant,
 };
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
+use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::event::contracts::{concept_graph_query, llm_error, llm_raw, router_state};
 use crate::llm::{
@@ -16,7 +19,6 @@ use crate::llm::{
 };
 use crate::mcp::McpToolVisibility;
 use crate::prompts::PromptOverrides;
-use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const ROUTER_RECALL_MAX_HOP: u32 = 2;
 const SATURATION_STEP: f64 = 0.24;
@@ -75,7 +77,7 @@ where
 {
     let router_started = Instant::now();
     let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
-    let concept_limit = state.router.query_terms_max.max(1);
+    let concept_limit = state.config.router.query_terms_max.max(1);
     let preprocess = preprocess_router_activation(input_text, concept_limit, state).await;
     let resolution = resolve_active_concepts_from_concept_graph(
         input_text,
@@ -99,6 +101,7 @@ where
     let activation_sources = collect_submodule_activation_sources(&resolution.selected_seeds);
     if !activation_sources.is_empty() {
         if let Err(err) = state
+            .services
             .activation_concept_graph
             .activate_related_submodules(activation_sources)
             .await
@@ -116,14 +119,15 @@ where
     let (hard_scores, saturation_penalties, hard_effective_scores) =
         apply_saturation_penalty(&scores, &saturation_levels);
     let hard_triggers =
-        select_modules_by_threshold(&hard_scores, state.router.hard_trigger_threshold);
+        select_modules_by_threshold(&hard_scores, state.config.router.hard_trigger_threshold);
     let soft_recommendations =
-        select_modules_by_threshold(&scores, state.router.recommendation_threshold);
+        select_modules_by_threshold(&scores, state.config.router.recommendation_threshold);
     let mcp_tool_visibility = state
+        .services
         .mcp_registry
         .resolve_visibility(
-            state.activation_concept_graph.as_ref(),
-            state.router.recommendation_threshold,
+            state.services.activation_concept_graph.as_ref(),
+            state.config.router.recommendation_threshold,
         )
         .await;
     let mcp_visible_tools = mcp_tool_visibility
@@ -269,6 +273,7 @@ async fn compute_module_scores_from_concept_activation(
         .map(|name| format!("submodule:{}", name))
         .collect::<Vec<_>>();
     let concept_scores = state
+        .services
         .activation_concept_graph
         .concept_activation(&submodule_concepts)
         .await
@@ -313,7 +318,7 @@ async fn read_saturation_levels(
     state: &AppState,
     active_module_names: &[String],
 ) -> HashMap<String, f64> {
-    let guard = state.submodule_saturation_levels.read().await;
+    let guard = state.runtime.submodule_saturation_levels.read().await;
     active_module_names
         .iter()
         .filter_map(|name| {
@@ -361,7 +366,7 @@ async fn update_saturation_levels(
     hard_triggers: &[String],
 ) {
     let hard_set = hard_triggers.iter().cloned().collect::<HashSet<_>>();
-    let mut guard = state.submodule_saturation_levels.write().await;
+    let mut guard = state.runtime.submodule_saturation_levels.write().await;
     for name in active_module_names {
         let current = guard
             .get(name.as_str())
@@ -385,6 +390,7 @@ async fn dampen_hard_triggered_submodule_arousal(state: &AppState, hard_triggers
     for module_name in hard_triggers {
         let concept = format!("submodule:{}", module_name);
         if let Err(err) = state
+            .services
             .activation_concept_graph
             .dampen_concept_arousal(concept, POST_HARD_DAMPEN_RATIO)
             .await
@@ -493,6 +499,7 @@ async fn preprocess_router_activation(
         };
     }
     let candidate_concepts = state
+        .services
         .activation_concept_graph
         .concept_search(query_text, concept_limit)
         .await
@@ -521,30 +528,24 @@ async fn resolve_active_concepts_from_concept_graph(
     };
     let candidate_lines = render_list_for_prompt(&preprocess.candidate_concepts);
     let context = render_router_context_template(
-        &state.input.router_context_template,
+        &state.config.input.router_context_template,
         input_text,
         &module_lines,
         &candidate_lines,
-        state.router.query_terms_max.max(1),
+        state.config.router.query_terms_max.max(1),
     );
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
-    let router_instructions = overrides
-        .router
-        .clone()
-        .unwrap_or_else(|| state.router_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(overrides);
+    let router_instructions = state.prompts.router_or_default(overrides);
     let instructions = format!(
         "{}\n\n{}\n\nYou are the router preconscious module. Select recall seed concepts only.",
         base_instructions, router_instructions
     );
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let adapter = build_response_api_llm(build_router_config(
         instructions,
         &modules.runtime,
-        state.router_model.as_str(),
+        state.runtime.router_model.as_str(),
         Some(LlmUsageContext::new("user", "router")),
         Some(usage_recorder),
     ));
@@ -591,6 +592,7 @@ async fn resolve_active_concepts_from_concept_graph(
         "none".to_string()
     } else {
         match state
+            .services
             .activation_concept_graph
             .recall_query(selected_seeds.clone(), ROUTER_RECALL_MAX_HOP)
             .await

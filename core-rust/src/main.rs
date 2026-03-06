@@ -1,28 +1,23 @@
 mod activation_concept_graph;
+mod app_state;
 mod application;
 mod cli;
 mod clock;
 mod commands;
 mod config;
 mod db;
+mod debug_api;
 mod event;
 mod event_store;
 mod llm;
-mod module_registry;
 mod mcp;
+mod module_registry;
 mod notification;
 mod prompts;
 mod scheduler;
 mod server_app;
 mod state;
 mod tools;
-
-pub(crate) use application::event_service::record_event;
-pub(crate) use application::module_bootstrap::{ModuleRuntime, Modules};
-pub(crate) use server_app::{
-    AppState, DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
-    DebugRunRequest, DebugRunResponse, DebugTriggerRequest, DebugTriggerResponse,
-};
 
 #[tokio::main]
 async fn main() {

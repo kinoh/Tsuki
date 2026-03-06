@@ -3,14 +3,16 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashSet;
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
 use crate::application::execution_service::{
     current_prompt_overrides, load_active_module_instructions, run_all_submodules_debug,
     run_decision_debug, run_submodule_debug, run_submodule_tool,
 };
 use crate::application::history_service::{is_decision_event, is_user_input_event, latest_events};
 use crate::application::router_service::run_router;
+use crate::debug_api::{DebugRunRequest, DebugRunResponse};
 use crate::event::contracts::{input_text as emit_input_text, named_trigger, parse_error};
-use crate::{record_event, AppState, DebugRunRequest, DebugRunResponse};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppendInputMode {
@@ -90,7 +92,7 @@ pub(crate) async fn run_debug_module(
     let router_output = run_router(
         &input_text,
         &module_instructions,
-        &state.modules,
+        &state.runtime.modules,
         state,
         &overrides,
         |module_name, activation_snapshot, instructions, focus| {

@@ -1,13 +1,14 @@
 use serde_json::{json, Value};
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::{application::pipeline_service, AppState};
+use crate::app_state::AppState;
+use crate::application::pipeline_service;
 
 const SCHEDULER_NOTICE_TAG: &str = "scheduler.notice";
 
 pub(crate) fn start_notice_consumer(state: AppState) {
     tokio::spawn(async move {
-        let mut rx = state.tx.subscribe();
+        let mut rx = state.services.tx.subscribe();
         loop {
             let event = match rx.recv().await {
                 Ok(value) => value,

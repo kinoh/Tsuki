@@ -1,15 +1,17 @@
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
 use crate::clock::now_iso8601;
+use crate::debug_api::{
+    DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
+};
 use crate::event::contracts::{
     self_improvement_applied, self_improvement_proposed, self_improvement_reviewed,
 };
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::{write_prompts, PromptOverrides};
-use crate::{
-    AppState, DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
-};
 
 const MAX_REVIEW_SCAN_EVENTS: usize = 5000;
 #[derive(Debug, Clone)]
@@ -94,7 +96,7 @@ pub(crate) async fn propose_improvement(
     let proposal_id = proposal_event.event_id.clone();
     proposal_event.payload["proposal_id"] = json!(proposal_id);
 
-    crate::record_event(state, proposal_event).await;
+    record_event(state, proposal_event).await;
 
     Ok(DebugImproveResponse {
         proposal_id: Some(proposal_id),
@@ -136,6 +138,7 @@ pub(crate) async fn review_improvement(
     }
 
     let proposal_event = state
+        .services
         .event_store
         .get_by_id(proposal_id)
         .await
@@ -210,7 +213,7 @@ pub(crate) async fn review_improvement(
         "reviewed_at": reviewed_at,
     }));
     let review_event_id = review_event.event_id.clone();
-    crate::record_event(state, review_event).await;
+    record_event(state, review_event).await;
 
     if decision != "approved" {
         return Ok(DebugImproveResponse {
@@ -238,7 +241,7 @@ pub(crate) async fn review_improvement(
                 "applied_diff_text": applied_diff_text,
             }));
             let apply_event_id = apply_event.event_id.clone();
-            crate::record_event(state, apply_event).await;
+            record_event(state, apply_event).await;
             Ok(DebugImproveResponse {
                 proposal_id: Some(proposal_id.to_string()),
                 review_event_id: Some(review_event_id),
@@ -258,7 +261,7 @@ pub(crate) async fn review_improvement(
                 "error_detail": err,
             }));
             let apply_event_id = apply_event.event_id.clone();
-            crate::record_event(state, apply_event).await;
+            record_event(state, apply_event).await;
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("apply failed (event_id={})", apply_event_id),
@@ -279,6 +282,7 @@ fn normalize_decision(value: &str) -> Option<&'static str> {
 
 async fn proposal_has_review(state: &AppState, proposal_id: &str) -> Result<bool, String> {
     let events = state
+        .services
         .event_store
         .latest(MAX_REVIEW_SCAN_EVENTS)
         .await
@@ -303,7 +307,7 @@ async fn apply_prompt_diff(
     let diff_text = payload_str(&proposal_event.payload, "diff_text")
         .ok_or_else(|| "proposal diff_text is required".to_string())?;
 
-    let mut overrides = state.prompts.read().await.clone();
+    let mut overrides = state.prompts.overrides.read().await.clone();
     let current_target_prompt = resolve_target_prompt_text(state, &overrides, target).await?;
     let next_target_prompt =
         apply_unified_diff(current_target_prompt.as_str(), diff_text.as_str())?;
@@ -326,8 +330,8 @@ async fn apply_prompt_diff(
         }
     }
 
-    write_prompts(&state.prompts_path, &overrides)?;
-    *state.prompts.write().await = overrides;
+    write_prompts(&state.prompts.path, &overrides)?;
+    *state.prompts.overrides.write().await = overrides;
     Ok(())
 }
 
@@ -336,6 +340,7 @@ pub(crate) async fn ensure_active_submodule_exists(
     name: &str,
 ) -> Result<(), String> {
     let modules = state
+        .runtime
         .modules
         .registry
         .list_active()
@@ -353,23 +358,15 @@ pub(crate) async fn resolve_target_prompt_text(
     target: &PromptTarget,
 ) -> Result<String, String> {
     match target {
-        PromptTarget::Base => Ok(overrides
-            .base
-            .clone()
-            .unwrap_or_else(|| state.modules.runtime.base_instructions.clone())),
-        PromptTarget::Router => Ok(overrides
-            .router
-            .clone()
-            .unwrap_or_else(|| state.router_instructions.clone())),
-        PromptTarget::Decision => Ok(overrides
-            .decision
-            .clone()
-            .unwrap_or_else(|| state.decision_instructions.clone())),
+        PromptTarget::Base => Ok(state.prompts.base_or_default(overrides)),
+        PromptTarget::Router => Ok(state.prompts.router_or_default(overrides)),
+        PromptTarget::Decision => Ok(state.prompts.decision_or_default(overrides)),
         PromptTarget::Submodule(name) => {
             if let Some(text) = overrides.submodules.get(name) {
                 return Ok(text.clone());
             }
             let module = state
+                .runtime
                 .modules
                 .registry
                 .list_active()

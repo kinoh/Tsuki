@@ -1,8 +1,10 @@
 use axum::http::StatusCode;
 use serde_json::Value;
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
+use crate::debug_api::{DebugTriggerRequest, DebugTriggerResponse};
 use crate::event::contracts::named_trigger;
-use crate::{AppState, DebugTriggerRequest, DebugTriggerResponse};
 
 pub(crate) async fn trigger_improvement(
     state: &AppState,
@@ -21,7 +23,7 @@ pub(crate) async fn trigger_improvement(
             .unwrap_or_else(|| Value::Object(Default::default())),
     );
     let trigger_event_id = trigger_event.event_id.clone();
-    crate::record_event(state, trigger_event).await;
+    record_event(state, trigger_event).await;
 
     Ok(DebugTriggerResponse {
         event_id: trigger_event_id,
