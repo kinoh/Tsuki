@@ -371,6 +371,7 @@ pub(crate) async fn run_server() {
     let mcp_bootstrap = crate::mcp::McpRegistry::bootstrap(
         &config.mcp_servers,
         activation_concept_graph.as_ref(),
+        config.llm.model.as_str(),
     )
     .await;
     for entry in &mcp_bootstrap.auto_created {
@@ -381,6 +382,17 @@ pub(crate) async fn run_server() {
     }
     for err in &mcp_bootstrap.errors {
         eprintln!("MCP_BOOTSTRAP_ERROR {}", err);
+    }
+    for item in &mcp_bootstrap.trigger_associations {
+        println!(
+            "MCP_TRIGGER_ASSOCIATION server_id={} tool_name={} tool_concept={} trigger_count={} relation_success_count={} triggers={}",
+            item.server_id,
+            item.tool_name,
+            item.tool_concept,
+            item.trigger_concepts.len(),
+            item.relation_success_count,
+            item.trigger_concepts.join(",")
+        );
     }
     let mcp_registry = Arc::new(mcp_bootstrap.registry);
     let mcp_available_tools = Arc::new(mcp_registry.available_tool_names());

@@ -1,4 +1,5 @@
 use async_openai::types::responses::{FunctionTool, Tool};
+use async_openai::{config::OpenAIConfig, types::responses::CreateResponseArgs, Client};
 use rmcp::model::{CallToolRequestParam, ClientCapabilities, ClientInfo, Implementation};
 use rmcp::service::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
@@ -38,6 +39,7 @@ pub(crate) struct McpRegistry {
 pub(crate) struct McpBootstrapResult {
     pub(crate) registry: McpRegistry,
     pub(crate) auto_created: Vec<McpAutoCreatedLog>,
+    pub(crate) trigger_associations: Vec<McpTriggerAssociationLog>,
     pub(crate) errors: Vec<String>,
 }
 
@@ -51,6 +53,15 @@ pub(crate) struct McpAutoCreatedLog {
     pub(crate) phase: &'static str,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct McpTriggerAssociationLog {
+    pub(crate) server_id: String,
+    pub(crate) tool_name: String,
+    pub(crate) tool_concept: String,
+    pub(crate) trigger_concepts: Vec<String>,
+    pub(crate) relation_success_count: usize,
+}
+
 #[derive(Debug, Deserialize)]
 struct ToolObject {
     name: String,
@@ -58,6 +69,11 @@ struct ToolObject {
     description: Option<String>,
     #[serde(default)]
     input_schema: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TriggerConceptsOutput {
+    trigger_concepts: Vec<String>,
 }
 
 impl McpRegistry {
@@ -71,9 +87,11 @@ impl McpRegistry {
     pub(crate) async fn bootstrap(
         servers: &BTreeMap<String, McpServerConfig>,
         concept_graph: &dyn ConceptGraphStore,
+        llm_model: &str,
     ) -> McpBootstrapResult {
         let mut out = Self::empty();
         let mut auto_created = Vec::<McpAutoCreatedLog>::new();
+        let mut trigger_associations = Vec::<McpTriggerAssociationLog>::new();
         let mut errors = Vec::<String>::new();
         let mut concept_keys = BTreeSet::<String>::new();
 
@@ -118,11 +136,11 @@ impl McpRegistry {
                     continue;
                 }
 
-                let concept_upsert = concept_graph
-                    .concept_upsert(mapping.concept_key.clone())
-                    .await
-                    .map(|_| "created")
-                    .unwrap_or("already_exists");
+                let concept_upsert = upsert_result_label(
+                    concept_graph
+                        .concept_upsert(mapping.concept_key.clone())
+                        .await,
+                );
                 auto_created.push(McpAutoCreatedLog {
                     server_id: mapping.server_id.clone(),
                     tool_name: mapping.remote_tool_name.clone(),
@@ -130,6 +148,56 @@ impl McpRegistry {
                     reason: "missing_concept",
                     result: concept_upsert,
                     phase: "bootstrap",
+                });
+                let extracted = match extract_trigger_concepts_with_llm(
+                    llm_model,
+                    mapping.server_id.as_str(),
+                    &discovered_tool,
+                )
+                .await
+                {
+                    Ok(values) => values,
+                    Err(err) => {
+                        errors.push(format!(
+                            "mcp trigger onboarding failed server={} tool={} stage=parse_or_non_empty error={}",
+                            mapping.server_id, mapping.remote_tool_name, err
+                        ));
+                        continue;
+                    }
+                };
+                let mut relation_success_count = 0usize;
+                for trigger in &extracted {
+                    let _ = concept_graph.concept_upsert(trigger.clone()).await;
+                    match concept_graph
+                        .relation_add(
+                            trigger.clone(),
+                            mapping.concept_key.clone(),
+                            "evokes".to_string(),
+                        )
+                        .await
+                    {
+                        Ok(_) => relation_success_count += 1,
+                        Err(err) => {
+                            errors.push(format!(
+                                "mcp trigger onboarding failed server={} tool={} stage=edge trigger={} error={}",
+                                mapping.server_id, mapping.remote_tool_name, trigger, err
+                            ));
+                        }
+                    }
+                }
+                if relation_success_count == 0 {
+                    errors.push(format!(
+                        "mcp trigger onboarding failed server={} tool={} stage=edge error=no_relation_created",
+                        mapping.server_id, mapping.remote_tool_name
+                    ));
+                    continue;
+                }
+                trigger_associations.push(McpTriggerAssociationLog {
+                    server_id: mapping.server_id.clone(),
+                    tool_name: mapping.remote_tool_name.clone(),
+                    tool_concept: mapping.concept_key.clone(),
+                    trigger_concepts: extracted,
+                    relation_success_count,
                 });
 
                 out.tools_by_runtime
@@ -140,6 +208,7 @@ impl McpRegistry {
         McpBootstrapResult {
             registry: out,
             auto_created,
+            trigger_associations,
             errors,
         }
     }
@@ -302,6 +371,123 @@ async fn call_tool(url: &str, remote_tool_name: &str, arguments: Value) -> Resul
         }
     }
     Ok(json!({"ok": true}).to_string())
+}
+
+async fn extract_trigger_concepts_with_llm(
+    model: &str,
+    server_id: &str,
+    tool: &ToolObject,
+) -> Result<Vec<String>, String> {
+    let client: Client<OpenAIConfig> = Client::new();
+    let schema_text = serde_json::to_string(tool.input_schema.as_ref().unwrap_or(&json!({})))
+        .unwrap_or_else(|_| "{}".to_string());
+    let base_prompt = format!(
+        "Extract trigger concepts for an MCP tool.\n\
+Return strict JSON only with this shape: {{\"trigger_concepts\": [\"...\"]}}.\n\
+No markdown. No explanation.\n\
+Use natural language concepts directly (no prefixes).\n\
+\n\
+server_id: {server_id}\n\
+tool_name: {tool_name}\n\
+description: {description}\n\
+input_schema_json: {schema}",
+        server_id = server_id,
+        tool_name = tool.name,
+        description = tool.description.clone().unwrap_or_else(|| "none".to_string()),
+        schema = schema_text,
+    );
+    let retry_prompt = format!(
+        "{base}\n\nIMPORTANT: Output exactly one JSON object. Example:\n{{\"trigger_concepts\":[\"コマンド\",\"ニュース取得\"]}}",
+        base = base_prompt
+    );
+    let prompts = [base_prompt, retry_prompt];
+    let mut last_error = "llm parse check failed: empty output".to_string();
+
+    for prompt in prompts {
+        let request = CreateResponseArgs::default()
+            .model(model)
+            .input(prompt)
+            .instructions("Return exactly one JSON object. No markdown. No prose.")
+            .max_output_tokens(200u32)
+            .build()
+            .map_err(|err| format!("llm request build failed: {}", err))?;
+        let response = client
+            .responses()
+            .create(request)
+            .await
+            .map_err(|err| format!("llm call failed: {}", err))?;
+        let text = response
+            .output_text()
+            .or_else(|| extract_output_text_from_response_json(&response));
+        let Some(text) = text else {
+            last_error = "llm parse check failed: empty output".to_string();
+            continue;
+        };
+        match parse_trigger_concepts(text.as_str()) {
+            Ok(values) => return Ok(values),
+            Err(err) => {
+                last_error = err;
+            }
+        }
+    }
+    Err(last_error)
+}
+
+fn parse_trigger_concepts(raw: &str) -> Result<Vec<String>, String> {
+    let parsed = serde_json::from_str::<TriggerConceptsOutput>(raw)
+        .map_err(|err| format!("llm parse check failed: {}", err))?;
+    let mut uniq = BTreeSet::<String>::new();
+    for item in parsed.trigger_concepts {
+        let normalized = item.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        uniq.insert(normalized.to_string());
+    }
+    let out = uniq.into_iter().collect::<Vec<_>>();
+    if out.is_empty() {
+        return Err("llm non-empty check failed: no trigger concepts".to_string());
+    }
+    Ok(out)
+}
+
+fn extract_output_text_from_response_json(
+    response: &async_openai::types::responses::Response,
+) -> Option<String> {
+    let value = serde_json::to_value(response).ok()?;
+    let output = value.get("output")?.as_array()?;
+    for item in output {
+        let content = item.get("content").and_then(Value::as_array);
+        let Some(content) = content else {
+            continue;
+        };
+        for chunk in content {
+            if let Some(text) = chunk.get("text").and_then(Value::as_str) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn upsert_result_label(result: Result<Value, String>) -> &'static str {
+    match result {
+        Ok(value) => {
+            let created = value
+                .get("created")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if created {
+                "created"
+            } else {
+                "already_exists"
+            }
+        }
+        Err(_) => "already_exists",
+    }
 }
 
 fn map_tool(server_id: &str, _url: &str, item: &ToolObject) -> Result<McpToolDescriptor, String> {
