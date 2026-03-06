@@ -180,15 +180,3 @@ pub(crate) fn tool_observation(
         ],
     )
 }
-
-pub(crate) fn mcp_observation(kind: &str, payload: Value, is_error: bool) -> Event {
-    let mut tags = vec![
-        "observe".to_string(),
-        "mcp".to_string(),
-        format!("kind:{}", kind),
-    ];
-    if is_error {
-        tags.push("error".to_string());
-    }
-    emit("tooling", "state", payload, tags)
-}

@@ -436,15 +436,6 @@ pub(crate) async fn run_server() {
         mcp_registry,
         mcp_available_tools,
     };
-    for entry in mcp_bootstrap.auto_created {
-        let event = crate::event::contracts::mcp_observation(
-            "concept_auto_created",
-            serde_json::to_value(&entry)
-                .unwrap_or_else(|_| serde_json::json!({"error": "mcp_auto_create_serialize_failed"})),
-            false,
-        );
-        crate::record_event(&state, event).await;
-    }
     for err in mcp_bootstrap.errors {
         let event = crate::event::contracts::parse_error(
             format!("mcp bootstrap error: {}", err).as_str(),
