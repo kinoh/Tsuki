@@ -98,7 +98,20 @@ pub(crate) async fn run_decision(
     let adapter = ResponseApiAdapter::new(build_config_with_tools_and_handler(
         compose_instructions(&base_instructions, &decision_instructions),
         &modules.runtime,
-        decision_tools(&modules.runtime.tools, module_instructions.keys().cloned()),
+        decision_tools(
+            &modules.runtime.tools,
+            state
+                .mcp_registry
+                .available_tools()
+                .into_iter()
+                .filter(|tool| {
+                    tool_name(tool)
+                        .map(|name| router_output.mcp_visible_tools.iter().any(|item| item == name))
+                        .unwrap_or(false)
+                })
+                .collect(),
+            module_instructions.keys().cloned(),
+        ),
         Arc::new(handler),
         Some(LlmUsageContext::new("user", "decision")),
         Some(usage_recorder),
@@ -222,6 +235,16 @@ pub(crate) async fn run_decision_debug(
         &state.modules.runtime,
         decision_tools(
             &state.modules.runtime.tools,
+            state
+                .mcp_registry
+                .available_tools()
+                .into_iter()
+                .filter(|tool| {
+                    tool_name(tool)
+                        .map(|name| router_output.mcp_visible_tools.iter().any(|item| item == name))
+                        .unwrap_or(false)
+                })
+                .collect(),
             module_instructions.keys().cloned(),
         ),
         Arc::new(handler),
@@ -542,10 +565,12 @@ fn compose_instructions(base: &str, module_specific: &str) -> String {
 
 fn decision_tools(
     base_tools: &[async_openai::types::responses::Tool],
+    mcp_tools: Vec<async_openai::types::responses::Tool>,
     module_names: impl IntoIterator<Item = String>,
 ) -> Vec<async_openai::types::responses::Tool> {
     use async_openai::types::responses::{FunctionTool, Tool};
     let mut tools = base_tools.to_vec();
+    tools.extend(mcp_tools);
     let mut names = module_names.into_iter().collect::<Vec<_>>();
     names.sort();
     for module_name in names {
@@ -570,6 +595,13 @@ fn decision_tools(
         }));
     }
     tools
+}
+
+fn tool_name(tool: &async_openai::types::responses::Tool) -> Option<&str> {
+    match tool {
+        async_openai::types::responses::Tool::Function(def) => Some(def.name.as_str()),
+        _ => None,
+    }
 }
 
 fn format_activation_context(raw: &str) -> String {

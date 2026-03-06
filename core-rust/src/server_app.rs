@@ -37,6 +37,7 @@ use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
+use crate::mcp::McpRegistry;
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
 use crate::scheduler::ScheduleStore;
@@ -74,6 +75,8 @@ pub(crate) struct AppState {
     pub(crate) decision_instructions: String,
     pub(crate) tts: TtsConfig,
     pub(crate) submodule_saturation_levels: Arc<RwLock<std::collections::HashMap<String, f64>>>,
+    pub(crate) mcp_registry: Arc<McpRegistry>,
+    pub(crate) mcp_available_tools: Arc<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -365,6 +368,22 @@ pub(crate) async fn run_server() {
         .await
         .expect("failed to connect activation concept graph store"),
     );
+    let mcp_bootstrap = crate::mcp::McpRegistry::bootstrap(
+        &config.mcp_servers,
+        activation_concept_graph.as_ref(),
+    )
+    .await;
+    for entry in &mcp_bootstrap.auto_created {
+        println!(
+            "MCP_CONCEPT_AUTO_CREATE server_id={} tool_name={} concept_key={} reason={} result={} phase={}",
+            entry.server_id, entry.tool_name, entry.concept_key, entry.reason, entry.result, entry.phase
+        );
+    }
+    for err in &mcp_bootstrap.errors {
+        eprintln!("MCP_BOOTSTRAP_ERROR {}", err);
+    }
+    let mcp_registry = Arc::new(mcp_bootstrap.registry);
+    let mcp_available_tools = Arc::new(mcp_registry.available_tool_names());
     let module_registry = ModuleRegistry::new(db.clone());
     sync_module_registry_from_prompts(&module_registry, &prompt_overrides)
         .await
@@ -373,6 +392,7 @@ pub(crate) async fn run_server() {
         state_store.clone(),
         activation_concept_graph.clone(),
         schedule_store.clone(),
+        mcp_registry.clone(),
         module_registry,
         &config,
         base_instructions,
@@ -413,7 +433,24 @@ pub(crate) async fn run_server() {
         decision_instructions,
         tts: config.tts.clone(),
         submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        mcp_registry,
+        mcp_available_tools,
     };
+    for entry in mcp_bootstrap.auto_created {
+        let event = crate::event::contracts::mcp_observation(
+            "concept_auto_created",
+            serde_json::to_value(&entry)
+                .unwrap_or_else(|_| serde_json::json!({"error": "mcp_auto_create_serialize_failed"})),
+            false,
+        );
+        crate::record_event(&state, event).await;
+    }
+    for err in mcp_bootstrap.errors {
+        let event = crate::event::contracts::parse_error(
+            format!("mcp bootstrap error: {}", err).as_str(),
+        );
+        crate::record_event(&state, event).await;
+    }
     crate::application::improve_service::start_trigger_consumer(state.clone());
     crate::application::scheduler_service::start_scheduler(
         state.clone(),
@@ -519,6 +556,17 @@ fn validate_required_config(config: &Config) {
     }
     if config.tts.voicevox_timeout_ms == 0 {
         panic!("config.toml [tts].voicevox_timeout_ms must be > 0");
+    }
+    for (server_id, server) in &config.mcp_servers {
+        if server_id.trim().is_empty() {
+            panic!("config.toml [mcp_servers] has empty server id");
+        }
+        if server.url.trim().is_empty() {
+            panic!(
+                "config.toml [mcp_servers.{}].url must not be empty",
+                server_id
+            );
+        }
     }
 }
 
@@ -1132,7 +1180,7 @@ async fn metadata_get(
     Ok(Json(MetadataResponse {
         git_hash: get_git_hash(),
         openai_model: state.modules.runtime.model.clone(),
-        mcp_tools: Vec::new(),
+        mcp_tools: state.mcp_available_tools.as_ref().clone(),
         api_versions: MetadataApiVersions {
             asyncapi: state.api_versions.asyncapi.clone(),
             openapi: state.api_versions.openapi.clone(),

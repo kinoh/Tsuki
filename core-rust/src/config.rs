@@ -1,5 +1,6 @@
 use crate::scheduler::{ScheduleAction, ScheduleRecurrence};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -13,6 +14,8 @@ pub struct Config {
     pub prompts: PromptsConfig,
     pub concept_graph: ConceptGraphConfig,
     pub tts: TtsConfig,
+    #[serde(default)]
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
     #[serde(default)]
     pub scheduler: SchedulerConfig,
 }
@@ -103,6 +106,11 @@ pub struct TtsConfig {
     pub voicevox_url: String,
     pub voicevox_speaker: u32,
     pub voicevox_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpServerConfig {
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

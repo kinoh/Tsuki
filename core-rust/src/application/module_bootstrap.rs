@@ -4,6 +4,7 @@ use crate::{
     activation_concept_graph::ConceptGraphStore,
     config::Config,
     event::Event,
+    mcp::McpRegistry,
     module_registry::{ModuleRegistry, ModuleRegistryReader},
     prompts::PromptOverrides,
     scheduler::ScheduleStore,
@@ -32,6 +33,7 @@ pub(crate) fn build_modules(
     state_store: Arc<dyn StateStore>,
     concept_graph: Arc<dyn ConceptGraphStore>,
     schedule_store: Arc<ScheduleStore>,
+    mcp_registry: Arc<McpRegistry>,
     registry: ModuleRegistry,
     config: &Config,
     base_instructions: String,
@@ -49,6 +51,7 @@ pub(crate) fn build_modules(
         state_store,
         concept_graph,
         schedule_store,
+        mcp_registry,
         emit_event.clone(),
         emit_event,
     ));

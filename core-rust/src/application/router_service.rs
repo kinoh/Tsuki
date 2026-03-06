@@ -14,6 +14,7 @@ use crate::llm::{
     LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiAdapter,
     ResponseApiConfig, ToolError,
 };
+use crate::mcp::McpToolVisibility;
 use crate::prompts::PromptOverrides;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
@@ -37,6 +38,8 @@ pub(crate) struct RouterOutput {
     pub(crate) hard_effective_scores: BTreeMap<String, f64>,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
+    pub(crate) mcp_visible_tools: Vec<String>,
+    pub(crate) mcp_tool_visibility: Vec<McpToolVisibility>,
     pub(crate) hard_trigger_results: Vec<HardTriggerResult>,
 }
 
@@ -116,6 +119,18 @@ where
         select_modules_by_threshold(&hard_scores, state.router.hard_trigger_threshold);
     let soft_recommendations =
         select_modules_by_threshold(&scores, state.router.recommendation_threshold);
+    let mcp_tool_visibility = state
+        .mcp_registry
+        .resolve_visibility(
+            state.activation_concept_graph.as_ref(),
+            state.router.recommendation_threshold,
+        )
+        .await;
+    let mcp_visible_tools = mcp_tool_visibility
+        .iter()
+        .filter(|item| item.visible)
+        .map(|item| item.runtime_tool_name.clone())
+        .collect::<Vec<_>>();
     let activation_snapshot = ActivationSnapshot {
         active_concepts_from_concept_graph: resolution.active_concepts_from_concept_graph.clone(),
         hard_triggers: hard_triggers.clone(),
@@ -137,6 +152,8 @@ where
         hard_effective_scores,
         hard_triggers,
         soft_recommendations,
+        mcp_visible_tools,
+        mcp_tool_visibility,
         hard_trigger_results,
     };
     let router_event = router_state(

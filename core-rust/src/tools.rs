@@ -1,6 +1,7 @@
 use crate::activation_concept_graph::ConceptGraphStore;
 use crate::event::contracts::{response_text, tool_observation};
 use crate::llm::{ToolError, ToolHandler};
+use crate::mcp::McpRegistry;
 use crate::scheduler::{
     ScheduleStore, ScheduleUpsertInput, SCHEDULE_SCOPE_DEFAULT, SELF_IMPROVEMENT_SCHEDULE_ID,
 };
@@ -98,6 +99,7 @@ pub struct StateToolHandler {
     store: Arc<dyn StateStore>,
     concept_graph: Arc<dyn ConceptGraphStore>,
     schedule_store: Arc<ScheduleStore>,
+    mcp_registry: Arc<McpRegistry>,
     emit_event: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
     emit_tool_observation: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
 }
@@ -107,6 +109,7 @@ impl StateToolHandler {
         store: Arc<dyn StateStore>,
         concept_graph: Arc<dyn ConceptGraphStore>,
         schedule_store: Arc<ScheduleStore>,
+        mcp_registry: Arc<McpRegistry>,
         emit_event: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
         emit_tool_observation: Arc<dyn Fn(crate::event::Event) + Send + Sync>,
     ) -> Self {
@@ -114,6 +117,7 @@ impl StateToolHandler {
             store,
             concept_graph,
             schedule_store,
+            mcp_registry,
             emit_event,
             emit_tool_observation,
         }
@@ -144,6 +148,15 @@ impl StateToolHandler {
     }
 
     fn handle_inner(&self, tool_name: &str, arguments: &str) -> Result<String, ToolError> {
+        if self.mcp_registry.contains_runtime_tool(tool_name) {
+            let args: Value = serde_json::from_str(arguments)
+                .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+            let value = tokio::task::block_in_place(|| {
+                Handle::current().block_on(self.mcp_registry.call_tool(tool_name, args))
+            })
+            .map_err(ToolError::new)?;
+            return Ok(value);
+        }
         match tool_name {
             STATE_SET_TOOL => {
                 let args: StateSetArgs = serde_json::from_str(arguments)

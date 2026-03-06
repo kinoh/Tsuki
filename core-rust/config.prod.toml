@@ -10,3 +10,6 @@ memgraph_uri = "bolt://memgraph:7687"
 [tts]
 ja_accent_url = "http://ja-accent:2954"
 voicevox_url = "http://voicevox-engine:50021"
+
+[mcp_servers.shell_exec]
+url = "http://sandbox:8000/mcp"

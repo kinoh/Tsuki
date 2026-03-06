@@ -9,6 +9,7 @@ mod event;
 mod event_store;
 mod llm;
 mod module_registry;
+mod mcp;
 mod notification;
 mod prompts;
 mod scheduler;

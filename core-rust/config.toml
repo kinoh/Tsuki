@@ -83,6 +83,9 @@ voicevox_url = "http://localhost:50021"
 voicevox_speaker = 10
 voicevox_timeout_ms = 10000
 
+[mcp_servers.shell_exec]
+url = "http://localhost:8000/mcp"
+
 [scheduler]
 enabled = true
 tick_interval_ms = 1000
