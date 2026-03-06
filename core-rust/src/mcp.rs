@@ -20,7 +20,8 @@ pub(crate) struct McpToolDescriptor {
     pub(crate) remote_tool_name: String,
     pub(crate) concept_key: String,
     pub(crate) description: Option<String>,
-    pub(crate) parameters: Value,
+    pub(crate) input_schema: Value,
+    pub(crate) llm_parameters: Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,6 +72,7 @@ struct ToolObject {
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
+    #[serde(alias = "inputSchema")]
     input_schema: Option<Value>,
 }
 
@@ -228,7 +230,7 @@ impl McpRegistry {
                 Tool::Function(FunctionTool {
                     name: item.runtime_tool_name.clone(),
                     description: item.description.clone(),
-                    parameters: Some(item.parameters.clone()),
+                    parameters: Some(item.llm_parameters.clone()),
                     strict: Some(true),
                 })
             })
@@ -272,7 +274,7 @@ impl McpRegistry {
             )
         })?;
         let required = item
-            .parameters
+            .input_schema
             .get("required")
             .and_then(Value::as_array)
             .map(|items| {
@@ -296,7 +298,7 @@ impl McpRegistry {
             runtime_tool_name,
             missing.join(", ")
         );
-        if let Some(example) = build_required_args_example(&item.parameters) {
+        if let Some(example) = build_required_args_example(&item.input_schema) {
             message.push_str(format!(". Example: {}", example).as_str());
         }
         Err(message)
@@ -650,9 +652,8 @@ fn map_tool(server_id: &str, _url: &str, item: &ToolObject) -> Result<McpToolDes
 
     let runtime_tool_name = format!("{}__{}", server_norm, tool_norm);
     let concept_key = format!("mcp_tool:{}__{}", server_norm, tool_norm);
-    let parameters = normalize_function_parameters(
-        item.input_schema.clone().unwrap_or_else(default_parameters_schema),
-    );
+    let input_schema = item.input_schema.clone().unwrap_or_else(default_parameters_schema);
+    let llm_parameters = normalize_function_parameters_for_openai(input_schema.clone());
 
     Ok(McpToolDescriptor {
         runtime_tool_name,
@@ -660,7 +661,8 @@ fn map_tool(server_id: &str, _url: &str, item: &ToolObject) -> Result<McpToolDes
         remote_tool_name: item.name.clone(),
         concept_key,
         description: item.description.clone(),
-        parameters,
+        input_schema,
+        llm_parameters,
     })
 }
 
@@ -690,12 +692,12 @@ fn default_parameters_schema() -> Value {
     })
 }
 
-fn normalize_function_parameters(mut value: Value) -> Value {
-    normalize_schema_node(&mut value);
+fn normalize_function_parameters_for_openai(mut value: Value) -> Value {
+    normalize_openai_schema_node(&mut value);
     value
 }
 
-fn normalize_schema_node(value: &mut Value) {
+fn normalize_openai_schema_node(value: &mut Value) {
     let Some(object) = value.as_object_mut() else {
         return;
     };
@@ -705,31 +707,66 @@ fn normalize_schema_node(value: &mut Value) {
             .entry("additionalProperties".to_string())
             .or_insert(Value::Bool(false));
         if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+            let property_names = properties.keys().cloned().collect::<Vec<_>>();
             for child in properties.values_mut() {
-                normalize_schema_node(child);
+                normalize_openai_schema_node(child);
             }
+            for name in &property_names {
+                if let Some(child) = properties.get_mut(name) {
+                    make_schema_nullable(child);
+                }
+            }
+            object.insert(
+                "required".to_string(),
+                Value::Array(property_names.into_iter().map(Value::String).collect()),
+            );
         }
     }
 
     if let Some(items) = object.get_mut("items") {
-        normalize_schema_node(items);
+        normalize_openai_schema_node(items);
     }
 
     if let Some(any_of) = object.get_mut("anyOf").and_then(Value::as_array_mut) {
         for child in any_of {
-            normalize_schema_node(child);
+            normalize_openai_schema_node(child);
         }
     }
     if let Some(one_of) = object.get_mut("oneOf").and_then(Value::as_array_mut) {
         for child in one_of {
-            normalize_schema_node(child);
+            normalize_openai_schema_node(child);
         }
     }
     if let Some(all_of) = object.get_mut("allOf").and_then(Value::as_array_mut) {
         for child in all_of {
-            normalize_schema_node(child);
+            normalize_openai_schema_node(child);
         }
     }
+}
+
+fn make_schema_nullable(value: &mut Value) {
+    let already_nullable = value
+        .get("type")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().any(|item| item.as_str() == Some("null")))
+        .unwrap_or(false)
+        || value
+            .get("anyOf")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().any(|item| item.get("type").and_then(Value::as_str) == Some("null")))
+            .unwrap_or(false)
+        || value.get("type").and_then(Value::as_str) == Some("null");
+    if already_nullable {
+        return;
+    }
+
+    let wrapped = value.clone();
+    *value = json!({
+        "anyOf": [
+            wrapped,
+            { "type": "null" }
+        ]
+    });
 }
 
 fn build_required_args_example(schema: &Value) -> Option<String> {

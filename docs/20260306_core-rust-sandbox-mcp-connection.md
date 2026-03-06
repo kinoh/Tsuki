@@ -67,6 +67,7 @@ url = "http://sandbox:8000/mcp"
   - no server-specific argument rewriting in `core-rust`.
   - runtime may reject obviously invalid local arguments before forwarding when MCP tool contract information is already known.
   - tool description quality is owned by the MCP server; `core-rust` must not rewrite discovered MCP tool descriptions.
+  - MCP discovery must read the MCP-native `inputSchema` field without renaming drift or lossy remapping.
 - Tool-to-concept contract:
   - each MCP tool must deterministically resolve to one concept key.
   - if the concept is missing, runtime must auto-create the concept idempotently.
@@ -134,3 +135,9 @@ Planned code paths:
 - Add integration tests for multi-server registration and tool-name collision handling.
 - Add health/status endpoint for MCP connection state per server.
 - If server-specific guardrails become required, add them as explicit policy modules (not ad-hoc branching in transport code).
+
+## Sandbox Runtime Contract Update
+- The sandbox container is allowed to provide practical command-line helpers when they materially improve MCP tool reliability for real tasks.
+- `shell-exec` must not be constrained to a lowest-common-denominator shell environment when the deployment can provide stronger tools directly.
+- `python3` and `jq` are part of the sandbox runtime contract for news/content extraction scenarios because LLM-generated XML/JSON parsing is substantially more reliable with those tools available than with ad-hoc `sed`/`awk` only pipelines.
+- This is a runtime-environment decision, not a `core-rust` compatibility layer. The MCP tool keeps the same `execute` contract; only the sandbox capability set becomes richer.

@@ -19,10 +19,12 @@ RUN apt-get update \
     git \
     gzip \
     iputils-ping \
+    jq \
     less \
     lsof \
     openssl \
     patch \
+    python3 \
     procps \
     sed \
     tar \

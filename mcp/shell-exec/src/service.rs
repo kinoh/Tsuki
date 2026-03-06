@@ -20,9 +20,9 @@ const DEFAULT_LOG_OUTPUT_BYTES: usize = 2048;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ExecuteRequest {
-    #[schemars(description = "Required. Executable path or command name. Example: \"curl\" or \"sh\". Never omit this field.")]
+    #[schemars(description = "Required. Executable path or command name. Example: \"curl\", \"python3\", or \"sh\". Never omit this field.")]
     pub command: String,
-    #[schemars(description = "Optional command arguments. Example for curl: [\"-sL\", \"https://example.com/feed.xml\"]. Example for sh: [\"-c\", \"curl -sL https://example.com/feed.xml | head -n 5\"].")]
+    #[schemars(description = "Optional command arguments. Example for curl: [\"-sL\", \"https://example.com/feed.xml\"]. Example for sh: [\"-lc\", \"curl -sL https://example.com/feed.xml | head -n 5\"]. For RSS/XML/JSON parsing, prefer robust tools such as python3 or jq instead of fragile regex-only parsing.")]
     pub args: Option<Vec<String>>,
     #[schemars(description = "Optional stdin content to pass to the process.")]
     pub stdin: Option<String>,
@@ -264,7 +264,7 @@ impl ShellExecService {
 #[tool_router]
 impl ShellExecService {
     #[tool(
-        description = "Execute a command inside the sandbox. The JSON arguments object must include `command`. For direct execution, use `{\\\"command\\\":\\\"curl\\\",\\\"args\\\":[\\\"-sL\\\",\\\"https://example.com/feed.xml\\\"]}`. For shell pipelines, use `{\\\"command\\\":\\\"sh\\\",\\\"args\\\":[\\\"-c\\\",\\\"curl -sL https://example.com/feed.xml | sed -n '1,5p'\\\"]}`. If `args` is omitted, the server runs `sh -c <command>`."
+        description = "Execute a command inside the sandbox. The JSON arguments object must include `command`. The sandbox includes common CLI tools such as sh/bash, curl, grep, sed, awk, python3, and jq. For direct execution, use `{\\\"command\\\":\\\"curl\\\",\\\"args\\\":[\\\"-sL\\\",\\\"https://example.com/feed.xml\\\"]}`. For shell pipelines, use `{\\\"command\\\":\\\"sh\\\",\\\"args\\\":[\\\"-lc\\\",\\\"curl -sL https://example.com/feed.xml | sed -n '1,5p'\\\"]}`. For RSS/XML parsing, prefer python3 over regex-only title extraction, for example `{\\\"command\\\":\\\"sh\\\",\\\"args\\\":[\\\"-lc\\\",\\\"curl -sL https://example.com/feed.xml | python3 -c 'import sys, xml.etree.ElementTree as ET; root=ET.fromstring(sys.stdin.read()); item=root.find(\\\"./channel/item\\\"); print(item.findtext(\\\"title\\\", \\\"\\\")); print(item.findtext(\\\"link\\\", \\\"\\\"))'\\\"]}`. If `args` is omitted, the server runs `sh -c <command>`."
     )]
     pub async fn execute(
         &self,

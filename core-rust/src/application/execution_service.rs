@@ -18,6 +18,7 @@ use crate::llm::{
 };
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::PromptOverrides;
+use crate::tools::EMIT_USER_REPLY_TOOL;
 use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const SUBMODULE_TOOL_PREFIX: &str = "run_submodule__";
@@ -175,6 +176,21 @@ pub(crate) async fn run_decision(
         }
     };
 
+    let parsed = parse_decision(&response.text);
+    let response = if parsed.decision == "respond" && !has_tool_call(&response, EMIT_USER_REPLY_TOOL) {
+        repair_missing_emit_user_reply(
+            modules,
+            state,
+            &base_instructions,
+            &decision_instructions,
+            &context,
+            &response,
+        )
+        .await
+        .unwrap_or(response)
+    } else {
+        response
+    };
     let parsed = parse_decision(&response.text);
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = decision_text(
@@ -605,7 +621,9 @@ fn compose_decision_instructions(
 If a visible MCP tool can directly satisfy the user's explicit request, call it before replying.\n\
 Do not claim that you cannot execute or fetch something if a visible MCP tool can do it.\n\
 Never call a visible MCP tool with {} unless its schema truly requires no arguments.\n\
-Read the visible MCP tool contracts in the input context and provide the required arguments explicitly.",
+Read the visible MCP tool contracts in the input context and provide the required arguments explicitly.\n\
+If a visible MCP tool fetches external content and the tool result or command reveals the source site or URL, include that source in the same user-facing reply.\n\
+Do not ask for an extra confirmation just to restate a source that is already available from the tool result you have.",
     );
     instructions
 }
@@ -879,5 +897,68 @@ fn build_config_with_tools_and_handler(
         usage_recorder,
         usage_context,
         max_tool_rounds: runtime.max_tool_rounds,
+    }
+}
+
+fn has_tool_call(response: &crate::llm::LlmResponse, tool_name: &str) -> bool {
+    response.tool_calls.iter().any(|call| call.name == tool_name)
+}
+
+async fn repair_missing_emit_user_reply(
+    modules: &Modules,
+    state: &AppState,
+    base_instructions: &str,
+    decision_instructions: &str,
+    original_context: &str,
+    response: &crate::llm::LlmResponse,
+) -> Option<crate::llm::LlmResponse> {
+    let emit_tool = modules
+        .runtime
+        .tools
+        .iter()
+        .find(|tool| tool_name(tool) == Some(EMIT_USER_REPLY_TOOL))
+        .cloned()?;
+    let repair_instructions = format!(
+        "{}\n\n{}\n\nDecision contract repair:\nYou already decided to respond but failed to call emit_user_reply.\nYou must call emit_user_reply exactly once using the available tool.\nDo not call any other tool.\nAfter the tool call, output exactly one line: decision=respond reason=contract_repair.",
+        base_instructions, decision_instructions
+    );
+    let tool_results = response
+        .tool_calls
+        .iter()
+        .map(|call| {
+            format!(
+                "- {}: output={} error={}",
+                call.name,
+                truncate(&call.output, 400),
+                call.error.as_deref().unwrap_or("none")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let repair_context = format!(
+        "{original_context}\n\ntool_call_results_from_previous_attempt:\n{tool_results}\n\nRepair requirement:\nCall emit_user_reply now using the gathered tool results."
+    );
+    let usage_recorder: Arc<dyn LlmUsageRecorder> =
+        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+    let adapter = build_response_api_llm(ResponseApiConfig {
+        model: modules.runtime.model.clone(),
+        instructions: repair_instructions,
+        temperature: modules.runtime.temperature,
+        max_output_tokens: modules.runtime.max_output_tokens,
+        tools: vec![emit_tool],
+        tool_handler: Some(modules.runtime.tool_handler.clone()),
+        usage_recorder: Some(usage_recorder),
+        usage_context: Some(LlmUsageContext::new("user", "decision-repair")),
+        max_tool_rounds: 1,
+    });
+
+    match adapter
+        .respond(LlmRequest {
+            input: repair_context,
+        })
+        .await
+    {
+        Ok(repaired) if has_tool_call(&repaired, EMIT_USER_REPLY_TOOL) => Some(repaired),
+        _ => None,
     }
 }
