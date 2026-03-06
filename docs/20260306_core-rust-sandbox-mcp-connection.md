@@ -40,6 +40,9 @@ url = "http://sandbox:8000/mcp"
 - Do not always expose discovered MCP tools to LLM.
 - Expose MCP tools only when their mapped concept activation reaches the soft recommendation threshold.
 - When a mapped concept does not exist, create it idempotently (auto-create/upsert) before activation-based exposure.
+- Build trigger-to-tool association edges at bootstrap:
+  - trigger concept -> tool concept (`evokes`)
+  - use natural language concepts directly (no synthetic trigger prefix namespace)
 - Do not introduce compatibility fallback paths (no hidden env fallback, no dual transport path).
 
 ## Why
@@ -64,7 +67,17 @@ url = "http://sandbox:8000/mcp"
 - Tool-to-concept contract:
   - each MCP tool must deterministically resolve to one concept key.
   - if the concept is missing, runtime must auto-create the concept idempotently.
-  - if deterministic mapping cannot be built (for example invalid normalized key or collision), mark the tool unavailable and emit an error event.
+  - if deterministic mapping cannot be built (for example invalid normalized key or collision), mark the tool unavailable and log a concrete error.
+- Trigger concept onboarding contract:
+  - trigger concepts are generated from MCP tool definitions by LLM at bootstrap.
+  - generated trigger concepts must be stored as normal concept names (no `mcp_trigger:*` namespace split).
+  - runtime must create `evokes` edges in direction `trigger_concept -> tool_concept`.
+  - onboarding is successful only if at least one trigger edge is created for the tool.
+  - onboarding failure is isolated to the target tool; unrelated tools/servers continue.
+- Trigger generation validation contract (minimum required checks only):
+  - parse check: LLM output must parse into JSON object with `trigger_concepts: string[]`.
+  - non-empty check: after trim and exact dedupe, at least one trigger concept remains.
+  - edge check: at least one `relation_add(trigger_concept, tool_concept, \"evokes\")` succeeds.
 
 ## Failure Policy
 - Startup:
@@ -78,7 +91,7 @@ url = "http://sandbox:8000/mcp"
   - mapping failures must not propagate to unrelated servers/tools.
 - Observability:
   - tool observation events must contain concrete failure cause and server id/tool name.
-  - concept auto-create events must include: `server_id`, `tool_name`, `concept_key`, `reason=missing_concept`, `result=created|already_exists`, and phase/turn identifier.
+  - bootstrap onboarding details (auto-create, mapping failure, trigger-edge build result) are reported via logs, not dedicated event types.
   - tool visibility (`visible`/`hidden`) is turn-scoped and must be attached to router turn events with reason.
 
 ## Threshold Policy
