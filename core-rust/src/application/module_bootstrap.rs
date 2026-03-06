@@ -20,7 +20,6 @@ pub(crate) struct Modules {
 
 #[derive(Clone)]
 pub(crate) struct ModuleRuntime {
-    pub(crate) base_instructions: String,
     pub(crate) model: String,
     pub(crate) temperature: Option<f32>,
     pub(crate) max_output_tokens: Option<u32>,
@@ -36,7 +35,6 @@ pub(crate) fn build_modules(
     mcp_registry: Arc<McpRegistry>,
     registry: ModuleRegistry,
     config: &Config,
-    base_instructions: String,
     emit_event: Arc<dyn Fn(Event) + Send + Sync>,
 ) -> Modules {
     let temperature = if config.llm.temperature_enabled {
@@ -57,7 +55,6 @@ pub(crate) fn build_modules(
     ));
 
     let runtime = ModuleRuntime {
-        base_instructions,
         model: config.llm.model.clone(),
         temperature,
         max_output_tokens,

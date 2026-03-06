@@ -328,7 +328,6 @@ pub(crate) async fn run_server() {
         mcp_registry.clone(),
         module_registry,
         &config,
-        base_instructions.clone(),
         emit_event,
     );
 

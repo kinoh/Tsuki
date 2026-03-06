@@ -84,7 +84,7 @@ pub(crate) async fn run_decision(
     let base_instructions = overrides
         .base
         .clone()
-        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
+        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
     let decision_instructions = overrides
         .decision
         .clone()

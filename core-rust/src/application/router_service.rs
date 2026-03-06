@@ -537,7 +537,7 @@ async fn resolve_active_concepts_from_concept_graph(
     let base_instructions = overrides
         .base
         .clone()
-        .unwrap_or_else(|| modules.runtime.base_instructions.clone());
+        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
     let router_instructions = overrides
         .router
         .clone()
