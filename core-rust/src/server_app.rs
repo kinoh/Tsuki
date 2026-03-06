@@ -372,6 +372,7 @@ pub(crate) async fn run_server() {
         &config.mcp_servers,
         activation_concept_graph.as_ref(),
         config.llm.model.as_str(),
+        emit_event.clone(),
     )
     .await;
     for entry in &mcp_bootstrap.auto_created {

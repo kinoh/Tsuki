@@ -6,9 +6,12 @@ use rmcp::transport::StreamableHttpClientTransport;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use crate::activation_concept_graph::ConceptGraphStore;
 use crate::config::McpServerConfig;
+use crate::event::contracts::{llm_error, llm_raw};
+use crate::event::Event;
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct McpToolDescriptor {
@@ -88,6 +91,7 @@ impl McpRegistry {
         servers: &BTreeMap<String, McpServerConfig>,
         concept_graph: &dyn ConceptGraphStore,
         llm_model: &str,
+        emit_event: Arc<dyn Fn(Event) + Send + Sync>,
     ) -> McpBootstrapResult {
         let mut out = Self::empty();
         let mut auto_created = Vec::<McpAutoCreatedLog>::new();
@@ -153,6 +157,7 @@ impl McpRegistry {
                     llm_model,
                     mapping.server_id.as_str(),
                     &discovered_tool,
+                    emit_event.clone(),
                 )
                 .await
                 {
@@ -377,6 +382,7 @@ async fn extract_trigger_concepts_with_llm(
     model: &str,
     server_id: &str,
     tool: &ToolObject,
+    emit_event: Arc<dyn Fn(Event) + Send + Sync>,
 ) -> Result<Vec<String>, String> {
     let client: Client<OpenAIConfig> = Client::new();
     let schema_text = serde_json::to_string(tool.input_schema.as_ref().unwrap_or(&json!({})))
@@ -406,7 +412,7 @@ input_schema_json: {schema}",
     for prompt in prompts {
         let request = CreateResponseArgs::default()
             .model(model)
-            .input(prompt)
+            .input(prompt.as_str())
             .instructions("Return exactly one JSON object. No markdown. No prose.")
             .max_output_tokens(200u32)
             .build()
@@ -414,8 +420,28 @@ input_schema_json: {schema}",
         let response = client
             .responses()
             .create(request)
-            .await
-            .map_err(|err| format!("llm call failed: {}", err))?;
+            .await;
+        let response = match response {
+            Ok(value) => value,
+            Err(err) => {
+                let detail = format!("llm call failed: {}", err);
+                emit_mcp_llm_error(
+                    emit_event.clone(),
+                    server_id,
+                    tool.name.as_str(),
+                    prompt.as_str(),
+                    detail.as_str(),
+                );
+                return Err(detail);
+            }
+        };
+        emit_mcp_llm_raw(
+            emit_event.clone(),
+            server_id,
+            tool.name.as_str(),
+            prompt.as_str(),
+            &response,
+        );
         let text = response
             .output_text()
             .or_else(|| extract_output_text_from_response_json(&response));
@@ -431,6 +457,64 @@ input_schema_json: {schema}",
         }
     }
     Err(last_error)
+}
+
+fn emit_mcp_llm_raw(
+    emit_event: Arc<dyn Fn(Event) + Send + Sync>,
+    server_id: &str,
+    tool_name: &str,
+    prompt: &str,
+    response: &async_openai::types::responses::Response,
+) {
+    let raw = serde_json::to_value(response)
+        .unwrap_or_else(|_| json!({ "error": "mcp_bootstrap_response_serialize_failed" }));
+    let event = llm_raw(
+        "tooling",
+        json!({
+            "mode": "bootstrap",
+            "purpose": "mcp_trigger_concept_extraction",
+            "server_id": server_id,
+            "tool_name": tool_name,
+            "context": prompt,
+            "raw": raw,
+            "output_text": response.output_text(),
+            "tool_calls": [],
+        }),
+        vec![
+            "mode:bootstrap".to_string(),
+            "purpose:mcp_trigger_concept_extraction".to_string(),
+            format!("server:{}", server_id),
+            format!("tool:{}", tool_name),
+        ],
+    );
+    emit_event(event);
+}
+
+fn emit_mcp_llm_error(
+    emit_event: Arc<dyn Fn(Event) + Send + Sync>,
+    server_id: &str,
+    tool_name: &str,
+    prompt: &str,
+    error: &str,
+) {
+    let event = llm_error(
+        "tooling",
+        json!({
+            "mode": "bootstrap",
+            "purpose": "mcp_trigger_concept_extraction",
+            "server_id": server_id,
+            "tool_name": tool_name,
+            "context": prompt,
+            "error": error,
+        }),
+        vec![
+            "mode:bootstrap".to_string(),
+            "purpose:mcp_trigger_concept_extraction".to_string(),
+            format!("server:{}", server_id),
+            format!("tool:{}", tool_name),
+        ],
+    );
+    emit_event(event);
 }
 
 fn parse_trigger_concepts(raw: &str) -> Result<Vec<String>, String> {
