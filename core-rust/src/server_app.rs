@@ -32,6 +32,7 @@ use crate::app_state::{
     ApiVersions, AppConfigState, AppMetadata, AppServices, AppState, AuthState, PromptState,
     ResolvedPrompts, RuntimeState,
 };
+use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{build_modules, sync_module_registry_from_prompts};
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config};
@@ -385,7 +386,7 @@ pub(crate) async fn run_server() {
     for err in mcp_bootstrap.errors {
         let event =
             crate::event::contracts::parse_error(format!("mcp bootstrap error: {}", err).as_str());
-        crate::record_event(&state, event).await;
+        record_event(&state, event).await;
     }
     crate::application::improve_service::start_trigger_consumer(state.clone());
     crate::application::scheduler_service::start_scheduler(

@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::{event::Event, event_store::EventStore, AppState};
+use crate::app_state::AppState;
+use crate::{event::Event, event_store::EventStore};
 
 pub(crate) fn build_emit_event_callback(
     event_store: Arc<EventStore>,

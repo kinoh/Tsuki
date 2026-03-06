@@ -1,15 +1,17 @@
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
 use crate::clock::now_iso8601;
+use crate::debug_api::{
+    DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
+};
 use crate::event::contracts::{
     self_improvement_applied, self_improvement_proposed, self_improvement_reviewed,
 };
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::{write_prompts, PromptOverrides};
-use crate::{
-    AppState, DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
-};
 
 const MAX_REVIEW_SCAN_EVENTS: usize = 5000;
 #[derive(Debug, Clone)]
@@ -94,7 +96,7 @@ pub(crate) async fn propose_improvement(
     let proposal_id = proposal_event.event_id.clone();
     proposal_event.payload["proposal_id"] = json!(proposal_id);
 
-    crate::record_event(state, proposal_event).await;
+    record_event(state, proposal_event).await;
 
     Ok(DebugImproveResponse {
         proposal_id: Some(proposal_id),
@@ -211,7 +213,7 @@ pub(crate) async fn review_improvement(
         "reviewed_at": reviewed_at,
     }));
     let review_event_id = review_event.event_id.clone();
-    crate::record_event(state, review_event).await;
+    record_event(state, review_event).await;
 
     if decision != "approved" {
         return Ok(DebugImproveResponse {
@@ -239,7 +241,7 @@ pub(crate) async fn review_improvement(
                 "applied_diff_text": applied_diff_text,
             }));
             let apply_event_id = apply_event.event_id.clone();
-            crate::record_event(state, apply_event).await;
+            record_event(state, apply_event).await;
             Ok(DebugImproveResponse {
                 proposal_id: Some(proposal_id.to_string()),
                 review_event_id: Some(review_event_id),
@@ -259,7 +261,7 @@ pub(crate) async fn review_improvement(
                 "error_detail": err,
             }));
             let apply_event_id = apply_event.event_id.clone();
-            crate::record_event(state, apply_event).await;
+            record_event(state, apply_event).await;
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("apply failed (event_id={})", apply_event_id),

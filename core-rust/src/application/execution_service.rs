@@ -6,7 +6,10 @@ use std::time::Instant;
 use std::{collections::HashMap, sync::Arc};
 use tokio::runtime::Handle;
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
 use crate::application::history_service::{format_decision_debug_history, format_event_history};
+use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
 };
@@ -19,7 +22,6 @@ use crate::llm::{
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::PromptOverrides;
 use crate::tools::EMIT_USER_REPLY_TOOL;
-use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const SUBMODULE_TOOL_PREFIX: &str = "run_submodule__";
 

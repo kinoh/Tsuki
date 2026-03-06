@@ -1,9 +1,10 @@
+use crate::app_state::AppState;
 use crate::application::debug_service;
 use crate::application::execution_service::{
     current_prompt_overrides, load_active_module_instructions, run_decision, run_submodule_tool,
 };
 use crate::application::router_service::run_router;
-use crate::{AppState, DebugRunRequest, DebugRunResponse};
+use crate::debug_api::{DebugRunRequest, DebugRunResponse};
 
 use axum::http::StatusCode;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};

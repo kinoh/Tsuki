@@ -3,9 +3,12 @@ use serde_json::{json, Value};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{broadcast::error::RecvError, Semaphore};
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
 use crate::application::history_service::format_event_history;
 use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::clock::now_iso8601;
+use crate::debug_api::DebugImproveProposalRequest;
 use crate::event::contracts::{
     llm_raw, self_improvement_module_processed, self_improvement_trigger_processed,
 };
@@ -14,7 +17,6 @@ use crate::llm::{
 };
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::write_prompts;
-use crate::{AppState, DebugImproveProposalRequest};
 
 use super::improve_approval_service::{
     ensure_active_submodule_exists, propose_improvement, replace_markdown_section_body,
@@ -676,7 +678,7 @@ async fn emit_trigger_debug_raw(
         }),
         vec!["module:self_improvement".to_string()],
     );
-    crate::record_event(state, event).await;
+    record_event(state, event).await;
 }
 
 async fn emit_module_processed_event(
@@ -705,7 +707,7 @@ async fn emit_module_processed_event(
         payload["error_detail"] = json!(value);
     }
     let event = self_improvement_module_processed(payload);
-    crate::record_event(state, event).await;
+    record_event(state, event).await;
 }
 
 async fn emit_trigger_processed_event(
@@ -737,7 +739,7 @@ async fn emit_trigger_processed_event(
         payload["error_detail"] = json!(value);
     }
     let event = self_improvement_trigger_processed(payload);
-    crate::record_event(state, event).await;
+    record_event(state, event).await;
 }
 
 async fn apply_memory_section_update(

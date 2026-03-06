@@ -8,6 +8,9 @@ use std::{
     time::Instant,
 };
 
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
+use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::event::contracts::{concept_graph_query, llm_error, llm_raw, router_state};
 use crate::llm::{
@@ -16,7 +19,6 @@ use crate::llm::{
 };
 use crate::mcp::McpToolVisibility;
 use crate::prompts::PromptOverrides;
-use crate::{record_event, AppState, ModuleRuntime, Modules};
 
 const ROUTER_RECALL_MAX_HOP: u32 = 2;
 const SATURATION_STEP: f64 = 0.24;

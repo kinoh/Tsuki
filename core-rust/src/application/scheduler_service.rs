@@ -1,3 +1,5 @@
+use crate::app_state::AppState;
+use crate::application::event_service::record_event;
 use crate::clock::now_iso8601;
 use crate::config::SchedulerConfig;
 use crate::event::contracts::{named_trigger, scheduler_fired, scheduler_notice};
@@ -5,7 +7,6 @@ use crate::scheduler::{
     ScheduleAction, ScheduleStore, ScheduleUpsertInput, SCHEDULE_SCOPE_DEFAULT,
     SELF_IMPROVEMENT_SCHEDULE_ID,
 };
-use crate::{record_event, AppState};
 use serde_json::json;
 use std::sync::Arc;
 use time::OffsetDateTime;

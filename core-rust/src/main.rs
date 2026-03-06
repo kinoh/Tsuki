@@ -19,14 +19,6 @@ mod server_app;
 mod state;
 mod tools;
 
-pub(crate) use app_state::AppState;
-pub(crate) use application::event_service::record_event;
-pub(crate) use application::module_bootstrap::{ModuleRuntime, Modules};
-pub(crate) use debug_api::{
-    DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest, DebugRunRequest,
-    DebugRunResponse, DebugTriggerRequest, DebugTriggerResponse,
-};
-
 #[tokio::main]
 async fn main() {
     if let Err(err) = run().await {

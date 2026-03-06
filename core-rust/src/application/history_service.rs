@@ -2,9 +2,9 @@ use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
+use crate::app_state::AppState;
 use crate::event::contracts::role_text_output;
 use crate::event::Event;
-use crate::AppState;
 
 pub(crate) async fn format_event_history(
     state: &AppState,

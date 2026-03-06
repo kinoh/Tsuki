@@ -1,7 +1,8 @@
 use serde_json::{json, Value};
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::{application::pipeline_service, AppState};
+use crate::app_state::AppState;
+use crate::application::pipeline_service;
 
 const SCHEDULER_NOTICE_TAG: &str = "scheduler.notice";
 
