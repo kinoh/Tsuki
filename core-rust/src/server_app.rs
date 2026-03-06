@@ -2072,18 +2072,9 @@ struct SpecInfo {
 
 async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (StatusCode, String)> {
     let overrides = state.prompts.overrides.read().await.clone();
-    let base = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
-    let decision = overrides
-        .decision
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.decision_instructions.clone());
-    let router = overrides
-        .router
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.router_instructions.clone());
+    let base = state.prompts.base_or_default(&overrides);
+    let decision = state.prompts.decision_or_default(&overrides);
+    let router = state.prompts.router_or_default(&overrides);
     let self_improvement = overrides.self_improvement.clone().unwrap_or_default();
     let module_defs = state
         .runtime

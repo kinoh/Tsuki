@@ -358,18 +358,9 @@ pub(crate) async fn resolve_target_prompt_text(
     target: &PromptTarget,
 ) -> Result<String, String> {
     match target {
-        PromptTarget::Base => Ok(overrides
-            .base
-            .clone()
-            .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone())),
-        PromptTarget::Router => Ok(overrides
-            .router
-            .clone()
-            .unwrap_or_else(|| state.prompts.resolved.router_instructions.clone())),
-        PromptTarget::Decision => Ok(overrides
-            .decision
-            .clone()
-            .unwrap_or_else(|| state.prompts.resolved.decision_instructions.clone())),
+        PromptTarget::Base => Ok(state.prompts.base_or_default(overrides)),
+        PromptTarget::Router => Ok(state.prompts.router_or_default(overrides)),
+        PromptTarget::Decision => Ok(state.prompts.decision_or_default(overrides)),
         PromptTarget::Submodule(name) => {
             if let Some(text) = overrides.submodules.get(name) {
                 return Ok(text.clone());

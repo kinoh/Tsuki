@@ -124,6 +124,27 @@ impl PromptState {
             resolved,
         }
     }
+
+    pub(crate) fn base_or_default(&self, overrides: &PromptOverrides) -> String {
+        overrides
+            .base
+            .clone()
+            .unwrap_or_else(|| self.resolved.base_instructions.clone())
+    }
+
+    pub(crate) fn router_or_default(&self, overrides: &PromptOverrides) -> String {
+        overrides
+            .router
+            .clone()
+            .unwrap_or_else(|| self.resolved.router_instructions.clone())
+    }
+
+    pub(crate) fn decision_or_default(&self, overrides: &PromptOverrides) -> String {
+        overrides
+            .decision
+            .clone()
+            .unwrap_or_else(|| self.resolved.decision_instructions.clone())
+    }
 }
 
 impl ResolvedPrompts {

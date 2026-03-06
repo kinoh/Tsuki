@@ -81,14 +81,8 @@ pub(crate) async fn run_decision(
         history_started.elapsed().as_millis(),
         history.len()
     );
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
-    let decision_instructions = overrides
-        .decision
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.decision_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(&overrides);
+    let decision_instructions = state.prompts.decision_or_default(&overrides);
     let activation_snapshot = activation_snapshot_from_router_output(router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
@@ -243,14 +237,8 @@ pub(crate) async fn run_decision_debug(
     } else {
         "none".to_string()
     };
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
-    let decision_instructions = overrides
-        .decision
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.decision_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(&overrides);
+    let decision_instructions = state.prompts.decision_or_default(&overrides);
     let activation_snapshot = activation_snapshot_from_router_output(router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
@@ -400,10 +388,7 @@ pub(crate) async fn run_submodule_debug(
         "none".to_string()
     };
     let overrides = current_prompt_overrides(state).await;
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(&overrides);
     let module_defs = state
         .runtime
         .modules
@@ -473,10 +458,7 @@ pub(crate) async fn run_submodule_tool(
     let history =
         format_event_history(state, state.config.limits.submodule_history, None, None).await;
     let overrides = current_prompt_overrides(state).await;
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(&overrides);
     let instructions = compose_instructions(&base_instructions, module_instructions);
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));

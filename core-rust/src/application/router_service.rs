@@ -534,14 +534,8 @@ async fn resolve_active_concepts_from_concept_graph(
         &candidate_lines,
         state.config.router.query_terms_max.max(1),
     );
-    let base_instructions = overrides
-        .base
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
-    let router_instructions = overrides
-        .router
-        .clone()
-        .unwrap_or_else(|| state.prompts.resolved.router_instructions.clone());
+    let base_instructions = state.prompts.base_or_default(overrides);
+    let router_instructions = state.prompts.router_or_default(overrides);
     let instructions = format!(
         "{}\n\n{}\n\nYou are the router preconscious module. Select recall seed concepts only.",
         base_instructions, router_instructions
