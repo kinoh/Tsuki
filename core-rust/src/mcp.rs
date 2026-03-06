@@ -123,7 +123,8 @@ impl McpRegistry {
                     }
                 };
 
-                if let Some(existing) = out.tools_by_runtime.get(mapping.runtime_tool_name.as_str()) {
+                if let Some(existing) = out.tools_by_runtime.get(mapping.runtime_tool_name.as_str())
+                {
                     errors.push(format!(
                         "mcp mapping failed: runtime tool collision runtime_tool={} existing_server={} existing_remote={} new_server={} new_remote={}",
                         mapping.runtime_tool_name,
@@ -445,7 +446,10 @@ description: {description}\n\
 input_schema_json: {schema}",
         server_id = server_id,
         tool_name = tool.name,
-        description = tool.description.clone().unwrap_or_else(|| "none".to_string()),
+        description = tool
+            .description
+            .clone()
+            .unwrap_or_else(|| "none".to_string()),
         schema = schema_text,
     );
     let retry_prompt = format!(

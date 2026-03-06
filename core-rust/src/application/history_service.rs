@@ -54,7 +54,7 @@ pub(crate) async fn latest_events(
     if limit == 0 {
         return Vec::new();
     }
-    match state.event_store.latest(limit).await {
+    match state.services.event_store.latest(limit).await {
         Ok(events) => events
             .into_iter()
             .filter(|event| !is_debug_event(event))

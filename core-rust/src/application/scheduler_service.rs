@@ -125,6 +125,7 @@ async fn emit_scheduled_event(
     scheduled_at: &str,
 ) -> Result<(), String> {
     let duplicate = state
+        .services
         .db
         .exists_scheduler_fired(schedule_id, scheduled_at)
         .await

@@ -136,6 +136,7 @@ pub(crate) async fn review_improvement(
     }
 
     let proposal_event = state
+        .services
         .event_store
         .get_by_id(proposal_id)
         .await
@@ -279,6 +280,7 @@ fn normalize_decision(value: &str) -> Option<&'static str> {
 
 async fn proposal_has_review(state: &AppState, proposal_id: &str) -> Result<bool, String> {
     let events = state
+        .services
         .event_store
         .latest(MAX_REVIEW_SCAN_EVENTS)
         .await
@@ -303,7 +305,7 @@ async fn apply_prompt_diff(
     let diff_text = payload_str(&proposal_event.payload, "diff_text")
         .ok_or_else(|| "proposal diff_text is required".to_string())?;
 
-    let mut overrides = state.prompts.read().await.clone();
+    let mut overrides = state.prompts.overrides.read().await.clone();
     let current_target_prompt = resolve_target_prompt_text(state, &overrides, target).await?;
     let next_target_prompt =
         apply_unified_diff(current_target_prompt.as_str(), diff_text.as_str())?;
@@ -326,8 +328,8 @@ async fn apply_prompt_diff(
         }
     }
 
-    write_prompts(&state.prompts_path, &overrides)?;
-    *state.prompts.write().await = overrides;
+    write_prompts(&state.prompts.path, &overrides)?;
+    *state.prompts.overrides.write().await = overrides;
     Ok(())
 }
 
@@ -336,6 +338,7 @@ pub(crate) async fn ensure_active_submodule_exists(
     name: &str,
 ) -> Result<(), String> {
     let modules = state
+        .runtime
         .modules
         .registry
         .list_active()
@@ -356,20 +359,21 @@ pub(crate) async fn resolve_target_prompt_text(
         PromptTarget::Base => Ok(overrides
             .base
             .clone()
-            .unwrap_or_else(|| state.modules.runtime.base_instructions.clone())),
+            .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone())),
         PromptTarget::Router => Ok(overrides
             .router
             .clone()
-            .unwrap_or_else(|| state.router_instructions.clone())),
+            .unwrap_or_else(|| state.prompts.resolved.router_instructions.clone())),
         PromptTarget::Decision => Ok(overrides
             .decision
             .clone()
-            .unwrap_or_else(|| state.decision_instructions.clone())),
+            .unwrap_or_else(|| state.prompts.resolved.decision_instructions.clone())),
         PromptTarget::Submodule(name) => {
             if let Some(text) = overrides.submodules.get(name) {
                 return Ok(text.clone());
             }
             let module = state
+                .runtime
                 .modules
                 .registry
                 .list_active()

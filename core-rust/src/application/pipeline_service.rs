@@ -59,7 +59,7 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
     let router_output = run_router(
         &input_text,
         &module_instructions,
-        &state.modules,
+        &state.runtime.modules,
         state,
         &overrides,
         |module_name, activation_snapshot, instructions, focus| {
@@ -95,7 +95,7 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
     let _decision_output = run_decision(
         &input_text,
         &router_output,
-        &state.modules,
+        &state.runtime.modules,
         state,
         &module_instructions,
         &overrides,

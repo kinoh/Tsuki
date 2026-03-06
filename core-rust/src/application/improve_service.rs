@@ -26,7 +26,7 @@ const TRIGGER_WORKER_MAX_CONCURRENCY: usize = 1;
 
 pub(crate) fn start_trigger_consumer(state: AppState) {
     tokio::spawn(async move {
-        let mut rx = state.tx.subscribe();
+        let mut rx = state.services.tx.subscribe();
         loop {
             let event = match rx.recv().await {
                 Ok(value) => value,
@@ -246,7 +246,7 @@ async fn run_module_worker(
     reason: &str,
 ) -> ModuleProcessResult {
     let recent_event_history =
-        format_event_history(state, state.limits.submodule_history, None, None).await;
+        format_event_history(state, state.config.limits.submodule_history, None, None).await;
     let input = json!({
         "trigger_event_id": trigger_event_id,
         "module_target": module_target,
@@ -256,6 +256,7 @@ async fn run_module_worker(
     .to_string();
     let self_improvement_instructions = state
         .prompts
+        .overrides
         .read()
         .await
         .self_improvement
@@ -274,12 +275,12 @@ async fn run_module_worker(
         };
     }
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let adapter = build_response_api_llm(ResponseApiConfig {
-        model: state.modules.runtime.model.clone(),
+        model: state.runtime.modules.runtime.model.clone(),
         instructions: self_improvement_instructions,
-        temperature: state.modules.runtime.temperature,
-        max_output_tokens: state.modules.runtime.max_output_tokens,
+        temperature: state.runtime.modules.runtime.temperature,
+        max_output_tokens: state.runtime.modules.runtime.max_output_tokens,
         tools: Vec::new(),
         tool_handler: None,
         usage_context: Some(LlmUsageContext::new(
@@ -337,6 +338,7 @@ async fn run_module_worker(
     if let Some(name) = submodule_name_from_target(module_target) {
         let concept_name = format!("submodule:{}", name);
         match state
+            .services
             .activation_concept_graph
             .concept_upsert(concept_name)
             .await
@@ -384,6 +386,7 @@ async fn run_module_worker(
             continue;
         }
         match state
+            .services
             .activation_concept_graph
             .concept_upsert(name.to_string())
             .await
@@ -404,6 +407,7 @@ async fn run_module_worker(
             continue;
         }
         match state
+            .services
             .activation_concept_graph
             .update_affect(target, update.valence_delta)
             .await
@@ -430,6 +434,7 @@ async fn run_module_worker(
             continue;
         }
         match state
+            .services
             .activation_concept_graph
             .episode_add(summary, concepts)
             .await
@@ -452,6 +457,7 @@ async fn run_module_worker(
             continue;
         }
         match state
+            .services
             .activation_concept_graph
             .relation_add(relation.from, relation.to, relation.relation_type)
             .await
@@ -546,6 +552,7 @@ async fn resolve_trigger_targets(
 
     if target.eq_ignore_ascii_case("submodules") {
         let modules = state
+            .runtime
             .modules
             .registry
             .list_active()
@@ -566,6 +573,7 @@ async fn resolve_trigger_targets(
 
 async fn resolve_all_targets(state: &AppState) -> Result<Vec<String>, String> {
     let modules = state
+        .runtime
         .modules
         .registry
         .list_active()
@@ -764,7 +772,7 @@ async fn apply_memory_section_update(
         ));
     }
 
-    let mut overrides = state.prompts.read().await.clone();
+    let mut overrides = state.prompts.overrides.read().await.clone();
     let current = resolve_target_prompt_text(state, &overrides, &target).await?;
     let next = replace_markdown_section_body(current.as_str(), "Memory", content)?;
 
@@ -784,8 +792,8 @@ async fn apply_memory_section_update(
         }
     }
 
-    write_prompts(&state.prompts_path, &overrides)?;
-    *state.prompts.write().await = overrides;
+    write_prompts(&state.prompts.path, &overrides)?;
+    *state.prompts.overrides.write().await = overrides;
     Ok(true)
 }
 

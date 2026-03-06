@@ -90,7 +90,7 @@ pub(crate) async fn run_debug_module(
     let router_output = run_router(
         &input_text,
         &module_instructions,
-        &state.modules,
+        &state.runtime.modules,
         state,
         &overrides,
         |module_name, activation_snapshot, instructions, focus| {

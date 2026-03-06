@@ -27,18 +27,19 @@ use time::OffsetDateTime;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 
-use crate::activation_concept_graph::{ActivationConceptGraphStore, ConceptGraphStore};
-use crate::application::module_bootstrap::{
-    build_modules, sync_module_registry_from_prompts, Modules,
+use crate::activation_concept_graph::ActivationConceptGraphStore;
+use crate::app_state::{
+    ApiVersions, AppConfigState, AppMetadata, AppServices, AppState, AuthState, PromptState,
+    ResolvedPrompts, RuntimeState,
 };
+use crate::application::module_bootstrap::{build_modules, sync_module_registry_from_prompts};
 use crate::clock::now_iso8601;
-use crate::config::{load_config, Config, InputConfig, LimitsConfig, RouterConfig, TtsConfig};
+use crate::config::{load_config, Config};
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::llm::{build_response_api_llm, ResponseApiConfig};
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
-use crate::mcp::McpRegistry;
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
 use crate::scheduler::ScheduleStore;
@@ -51,33 +52,6 @@ const ADMIN_SESSION_IDLE_TIMEOUT_SECS: i64 = 86_400;
 #[derive(Clone, Debug)]
 struct AdminSessionContext {
     session_id: String,
-}
-
-#[derive(Clone)]
-pub(crate) struct AppState {
-    pub(crate) db: Arc<Db>,
-    pub(crate) event_store: Arc<EventStore>,
-    pub(crate) tx: broadcast::Sender<Event>,
-    pub(crate) auth_token: String,
-    pub(crate) admin_auth_password: String,
-    pub(crate) admin_password_fingerprint: String,
-    pub(crate) fcm_sender: Option<FcmNotificationSender>,
-    pub(crate) state_store: Arc<dyn StateStore>,
-    pub(crate) activation_concept_graph: Arc<dyn ConceptGraphStore>,
-    pub(crate) modules: Modules,
-    pub(crate) limits: LimitsConfig,
-    pub(crate) router: RouterConfig,
-    pub(crate) input: InputConfig,
-    pub(crate) api_versions: ApiVersions,
-    pub(crate) prompts: Arc<RwLock<PromptOverrides>>,
-    pub(crate) prompts_path: PathBuf,
-    pub(crate) router_model: String,
-    pub(crate) router_instructions: String,
-    pub(crate) decision_instructions: String,
-    pub(crate) tts: TtsConfig,
-    pub(crate) submodule_saturation_levels: Arc<RwLock<std::collections::HashMap<String, f64>>>,
-    pub(crate) mcp_registry: Arc<McpRegistry>,
-    pub(crate) mcp_available_tools: Arc<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -181,12 +155,6 @@ struct RuntimeConfigPayload {
     enable_notification: bool,
     #[serde(rename = "enableSensory")]
     enable_sensory: bool,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ApiVersions {
-    asyncapi: Option<String>,
-    openapi: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -374,8 +342,8 @@ pub(crate) async fn run_server() {
         activation_concept_graph.as_ref(),
         build_response_api_llm(ResponseApiConfig {
             model: config.llm.model.clone(),
-            instructions:
-                "Extract trigger concepts for MCP tools. Return strict JSON only.".to_string(),
+            instructions: "Extract trigger concepts for MCP tools. Return strict JSON only."
+                .to_string(),
             temperature: None,
             max_output_tokens: Some(200),
             tools: Vec::new(),
@@ -420,7 +388,7 @@ pub(crate) async fn run_server() {
         mcp_registry.clone(),
         module_registry,
         &config,
-        base_instructions,
+        base_instructions.clone(),
         emit_event,
     );
 
@@ -433,38 +401,51 @@ pub(crate) async fn run_server() {
     };
 
     let state = AppState {
-        db: db.clone(),
-        event_store,
-        tx,
-        auth_token,
-        admin_auth_password,
-        admin_password_fingerprint,
-        fcm_sender,
-        state_store,
-        activation_concept_graph,
-        modules,
-        limits: config.limits.clone(),
-        router: config.router.clone(),
-        input: config.input.clone(),
-        api_versions: load_api_versions(),
-        prompts,
-        prompts_path,
-        router_model: config
-            .llm
-            .router_model
-            .clone()
-            .unwrap_or_else(|| config.llm.model.clone()),
-        router_instructions,
-        decision_instructions,
-        tts: config.tts.clone(),
-        submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
-        mcp_registry,
-        mcp_available_tools,
+        services: AppServices {
+            db: db.clone(),
+            event_store,
+            tx,
+            fcm_sender,
+            activation_concept_graph,
+            mcp_registry,
+        },
+        auth: AuthState {
+            web_auth_token: auth_token,
+            admin_password: admin_auth_password,
+            admin_password_fingerprint,
+        },
+        config: AppConfigState {
+            limits: config.limits.clone(),
+            router: config.router.clone(),
+            input: config.input.clone(),
+            tts: config.tts.clone(),
+        },
+        prompts: PromptState {
+            overrides: prompts,
+            path: prompts_path,
+            resolved: ResolvedPrompts {
+                base_instructions: base_instructions.clone(),
+                router_instructions,
+                decision_instructions,
+            },
+        },
+        runtime: RuntimeState {
+            modules,
+            router_model: config
+                .llm
+                .router_model
+                .clone()
+                .unwrap_or_else(|| config.llm.model.clone()),
+            submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        },
+        metadata: AppMetadata {
+            api_versions: load_api_versions(),
+            mcp_available_tools,
+        },
     };
     for err in mcp_bootstrap.errors {
-        let event = crate::event::contracts::parse_error(
-            format!("mcp bootstrap error: {}", err).as_str(),
-        );
+        let event =
+            crate::event::contracts::parse_error(format!("mcp bootstrap error: {}", err).as_str());
         crate::record_event(&state, event).await;
     }
     crate::application::improve_service::start_trigger_consumer(state.clone());
@@ -711,7 +692,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
         _ => return,
     };
 
-    if !verify_auth(&auth_text, &state.auth_token) {
+    if !verify_auth(&auth_text, &state.auth.web_auth_token) {
         println!("WS_AUTH_FAIL reason=invalid_token");
         let _ = socket
             .send(Message::Close(Some(CloseFrame {
@@ -724,7 +705,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     println!("WS_AUTH_OK");
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let mut rx = state.tx.subscribe();
+    let mut rx = state.services.tx.subscribe();
 
     let send_task = tokio::spawn(async move {
         loop {
@@ -773,7 +754,7 @@ async fn auth_login(
     State(state): State<AppState>,
     Json(payload): Json<AuthLoginRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    if payload.password != state.admin_auth_password {
+    if payload.password != state.auth.admin_password {
         println!("ADMIN_AUTH_LOGIN_FAILURE reason=invalid_password");
         return Err((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()));
     }
@@ -781,12 +762,13 @@ async fn auth_login(
     let session_id = Uuid::new_v4().to_string();
     let now = now_iso8601();
     state
+        .services
         .db
         .create_admin_session(
             &session_id,
             now.as_str(),
             now.as_str(),
-            &state.admin_password_fingerprint,
+            &state.auth.admin_password_fingerprint,
         )
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
@@ -824,6 +806,7 @@ async fn auth_logout(
     Extension(session): Extension<AdminSessionContext>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     state
+        .services
         .db
         .delete_admin_session(&session.session_id)
         .await
@@ -851,6 +834,7 @@ async fn admin_auth_middleware(
             )
         })?;
     let session = state
+        .services
         .db
         .get_admin_session(&session_id)
         .await
@@ -863,8 +847,9 @@ async fn admin_auth_middleware(
         })?;
     let now = OffsetDateTime::now_utc();
 
-    if session.password_fingerprint != state.admin_password_fingerprint {
+    if session.password_fingerprint != state.auth.admin_password_fingerprint {
         state
+            .services
             .db
             .delete_admin_session(&session.session_id)
             .await
@@ -880,6 +865,7 @@ async fn admin_auth_middleware(
         Ok(value) => value,
         Err(_) => {
             state
+                .services
                 .db
                 .delete_admin_session(&session.session_id)
                 .await
@@ -895,6 +881,7 @@ async fn admin_auth_middleware(
         Ok(value) => value,
         Err(_) => {
             state
+                .services
                 .db
                 .delete_admin_session(&session.session_id)
                 .await
@@ -912,6 +899,7 @@ async fn admin_auth_middleware(
         now.unix_timestamp() - last_seen_at.unix_timestamp() > ADMIN_SESSION_IDLE_TIMEOUT_SECS;
     if expired_absolute || expired_idle {
         state
+            .services
             .db
             .delete_admin_session(&session.session_id)
             .await
@@ -931,6 +919,7 @@ async fn admin_auth_middleware(
     }
 
     state
+        .services
         .db
         .update_admin_session_last_seen(&session.session_id, now_iso8601().as_str())
         .await
@@ -962,6 +951,7 @@ async fn debug_update_prompts(
         .map(|module| module.name.as_str())
         .collect::<std::collections::HashSet<_>>();
     let active_modules = state
+        .runtime
         .modules
         .registry
         .list_active()
@@ -970,6 +960,7 @@ async fn debug_update_prompts(
     for module in active_modules {
         if !desired_modules.contains(module.name.as_str()) {
             state
+                .runtime
                 .modules
                 .registry
                 .upsert(&module.name, &module.instructions, false)
@@ -979,13 +970,14 @@ async fn debug_update_prompts(
     }
     for module in &payload.submodules {
         state
+            .runtime
             .modules
             .registry
             .upsert(&module.name, &module.instructions, true)
             .await
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     }
-    let current_overrides = state.prompts.read().await.clone();
+    let current_overrides = state.prompts.overrides.read().await.clone();
     let overrides = PromptOverrides {
         base: Some(payload.base.clone()),
         router: payload
@@ -999,9 +991,9 @@ async fn debug_update_prompts(
             .or_else(|| current_overrides.self_improvement.clone()),
         submodules,
     };
-    write_prompts(&state.prompts_path, &overrides)
+    write_prompts(&state.prompts.path, &overrides)
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
-    *state.prompts.write().await = overrides;
+    *state.prompts.overrides.write().await = overrides;
     Ok(Json(payload))
 }
 
@@ -1028,6 +1020,7 @@ async fn debug_events(
     let limit = query.limit.unwrap_or(200).min(1000);
     let fetch_limit = if around_mode.is_some() { 5000 } else { limit };
     let mut events = state
+        .services
         .event_store
         .latest(fetch_limit)
         .await
@@ -1079,7 +1072,7 @@ async fn events(
     headers: HeaderMap,
     Query(query): Query<EventsQuery>,
 ) -> Result<Json<EventsResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
 
     let limit = query.limit.unwrap_or(50);
     if limit == 0 || limit > 500 {
@@ -1137,6 +1130,7 @@ where
 
     while items.len() < limit && scanned < max_scanned {
         let batch = state
+            .services
             .event_store
             .list(batch_size, cursor.as_deref(), desc)
             .await
@@ -1169,8 +1163,9 @@ async fn config_get(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<RuntimeConfigPayload>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
     let config = state
+        .services
         .db
         .get_runtime_config()
         .await
@@ -1182,8 +1177,9 @@ async fn metadata_get(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<MetadataResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
     let active_modules = state
+        .runtime
         .modules
         .registry
         .list_active()
@@ -1195,13 +1191,13 @@ async fn metadata_get(
 
     Ok(Json(MetadataResponse {
         git_hash: get_git_hash(),
-        openai_model: state.modules.runtime.model.clone(),
-        mcp_tools: state.mcp_available_tools.as_ref().clone(),
+        openai_model: state.runtime.modules.runtime.model.clone(),
+        mcp_tools: state.metadata.mcp_available_tools.as_ref().clone(),
         api_versions: MetadataApiVersions {
-            asyncapi: state.api_versions.asyncapi.clone(),
-            openapi: state.api_versions.openapi.clone(),
+            asyncapi: state.metadata.api_versions.asyncapi.clone(),
+            openapi: state.metadata.api_versions.openapi.clone(),
         },
-        router_model: state.router_model.clone(),
+        router_model: state.runtime.router_model.clone(),
         active_modules,
     }))
 }
@@ -1210,8 +1206,9 @@ async fn metrics_get(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
     let summary = state
+        .services
         .db
         .get_usage_metrics_summary()
         .await
@@ -1224,10 +1221,11 @@ async fn config_put(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Json<RuntimeConfigPayload>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
     let (enable_notification, enable_sensory) = parse_runtime_config_payload(&payload)
         .ok_or_else(|| (StatusCode::BAD_REQUEST, "invalid payload".to_string()))?;
     let config = state
+        .services
         .db
         .set_runtime_config(enable_notification, enable_sensory)
         .await
@@ -1240,7 +1238,7 @@ async fn notification_token_put(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Json<NotificationResult>, (StatusCode, String)> {
-    let user = parse_http_auth_user(&headers, &state.auth_token)?;
+    let user = parse_http_auth_user(&headers, &state.auth.web_auth_token)?;
     let token = parse_notification_token_payload(&payload).ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
@@ -1248,6 +1246,7 @@ async fn notification_token_put(
         )
     })?;
     state
+        .services
         .db
         .add_notification_token(&user, &token)
         .await
@@ -1260,7 +1259,7 @@ async fn notification_token_delete(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Json<NotificationResult>, (StatusCode, String)> {
-    let user = parse_http_auth_user(&headers, &state.auth_token)?;
+    let user = parse_http_auth_user(&headers, &state.auth.web_auth_token)?;
     let token = parse_notification_token_payload(&payload).ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
@@ -1268,6 +1267,7 @@ async fn notification_token_delete(
         )
     })?;
     state
+        .services
         .db
         .remove_notification_token(&user, &token)
         .await
@@ -1279,8 +1279,9 @@ async fn notification_tokens_get(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<NotificationTokensResponse>, (StatusCode, String)> {
-    let user = parse_http_auth_user(&headers, &state.auth_token)?;
+    let user = parse_http_auth_user(&headers, &state.auth.web_auth_token)?;
     let tokens = state
+        .services
         .db
         .list_notification_tokens(&user)
         .await
@@ -1292,8 +1293,9 @@ async fn notification_test(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<NotificationResult>, (StatusCode, String)> {
-    let user = parse_http_auth_user(&headers, &state.auth_token)?;
+    let user = parse_http_auth_user(&headers, &state.auth.web_auth_token)?;
     let config = state
+        .services
         .db
         .get_runtime_config()
         .await
@@ -1305,13 +1307,14 @@ async fn notification_test(
         ));
     }
 
-    let sender = state.fcm_sender.clone().ok_or_else(|| {
+    let sender = state.services.fcm_sender.clone().ok_or_else(|| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "notification sender is not configured".to_string(),
         )
     })?;
     let tokens = state
+        .services
         .db
         .list_notification_tokens(&user)
         .await
@@ -1329,21 +1332,21 @@ async fn tts_post(
     headers: HeaderMap,
     Json(payload): Json<Value>,
 ) -> Result<Response, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
 
     let message = parse_tts_message(&payload)?;
     if message.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Message is required".to_string()));
     }
 
-    let speaker = state.tts.voicevox_speaker;
-    let timeout = Duration::from_millis(state.tts.voicevox_timeout_ms);
+    let speaker = state.config.tts.voicevox_speaker;
+    let timeout = Duration::from_millis(state.config.tts.voicevox_timeout_ms);
     let client = Client::builder()
         .timeout(timeout)
         .build()
         .map_err(internal_error)?;
 
-    let accent_base = state.tts.ja_accent_url.clone();
+    let accent_base = state.config.tts.ja_accent_url.clone();
     let accent_url = format!("{}/accent", accent_base.trim_end_matches('/'));
     let accent_response = client
         .post(accent_url)
@@ -1357,7 +1360,7 @@ async fn tts_post(
         message, accent.accent
     );
 
-    let voicevox_base = state.tts.voicevox_url.clone();
+    let voicevox_base = state.config.tts.voicevox_url.clone();
     let phrases_url = format!("{}/accent_phrases", voicevox_base.trim_end_matches('/'));
     let phrases_response = client
         .post(phrases_url)
@@ -1457,7 +1460,7 @@ fn parse_tts_message(payload: &Value) -> Result<&str, (StatusCode, String)> {
 async fn debug_events_stream(
     State(state): State<AppState>,
 ) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, Infallible>>>, (StatusCode, String)> {
-    let rx = state.tx.subscribe();
+    let rx = state.services.tx.subscribe();
     let stream = futures::stream::unfold(rx, |mut rx| async move {
         loop {
             match rx.recv().await {
@@ -1484,6 +1487,7 @@ async fn debug_concept_graph_health(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let value = state
+        .services
         .activation_concept_graph
         .debug_health()
         .await
@@ -1495,6 +1499,7 @@ async fn debug_concept_graph_stats(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let value = state
+        .services
         .activation_concept_graph
         .debug_counts()
         .await
@@ -1507,6 +1512,7 @@ async fn debug_concept_graph_concepts(
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
     let items = state
+        .services
         .activation_concept_graph
         .debug_concept_search(query.q, query.limit.unwrap_or(50))
         .await
@@ -1519,6 +1525,7 @@ async fn debug_concept_graph_concept_detail(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let value = state
+        .services
         .activation_concept_graph
         .debug_concept_detail(name)
         .await
@@ -1534,6 +1541,7 @@ async fn debug_concept_graph_episodes(
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
     let items = state
+        .services
         .activation_concept_graph
         .debug_episode_search(query.q, query.limit.unwrap_or(50))
         .await
@@ -1546,6 +1554,7 @@ async fn debug_concept_graph_episode_detail(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let value = state
+        .services
         .activation_concept_graph
         .debug_episode_detail(name)
         .await
@@ -1561,6 +1570,7 @@ async fn debug_concept_graph_relations(
     Query(query): Query<DebugConceptSearchQuery>,
 ) -> Result<Json<DebugConceptSearchResponse>, (StatusCode, String)> {
     let items = state
+        .services
         .activation_concept_graph
         .debug_relation_search(query.q, query.limit.unwrap_or(80))
         .await
@@ -1575,6 +1585,7 @@ async fn debug_concept_graph_queries(
     let limit = query.limit.unwrap_or(100).max(1).min(500);
     let fetch_limit = (limit * 5).min(2000);
     let events = state
+        .services
         .event_store
         .latest(fetch_limit)
         .await
@@ -1763,7 +1774,7 @@ async fn improve_trigger(
     headers: HeaderMap,
     Json(payload): Json<DebugTriggerRequest>,
 ) -> Result<Json<DebugTriggerResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
     let result =
         crate::application::trigger_ingress_api::trigger_improvement(&state, payload).await?;
     Ok(Json(result))
@@ -1774,7 +1785,7 @@ async fn improve_proposal(
     headers: HeaderMap,
     Json(payload): Json<DebugImproveProposalRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
     let result =
         crate::application::improve_approval_service::propose_improvement(&state, payload).await?;
     Ok(Json(result))
@@ -1785,7 +1796,7 @@ async fn improve_review(
     headers: HeaderMap,
     Json(payload): Json<DebugImproveReviewRequest>,
 ) -> Result<Json<DebugImproveResponse>, (StatusCode, String)> {
-    verify_http_auth(&headers, &state.auth_token)?;
+    verify_http_auth(&headers, &state.auth.web_auth_token)?;
     let result =
         crate::application::improve_approval_service::review_improvement(&state, payload).await?;
     Ok(Json(result))
@@ -2126,21 +2137,22 @@ struct SpecInfo {
 }
 
 async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (StatusCode, String)> {
-    let overrides = state.prompts.read().await.clone();
+    let overrides = state.prompts.overrides.read().await.clone();
     let base = overrides
         .base
         .clone()
-        .unwrap_or_else(|| state.modules.runtime.base_instructions.clone());
+        .unwrap_or_else(|| state.prompts.resolved.base_instructions.clone());
     let decision = overrides
         .decision
         .clone()
-        .unwrap_or_else(|| state.decision_instructions.clone());
+        .unwrap_or_else(|| state.prompts.resolved.decision_instructions.clone());
     let router = overrides
         .router
         .clone()
-        .unwrap_or_else(|| state.router_instructions.clone());
+        .unwrap_or_else(|| state.prompts.resolved.router_instructions.clone());
     let self_improvement = overrides.self_improvement.clone().unwrap_or_default();
     let module_defs = state
+        .runtime
         .modules
         .registry
         .list_active()

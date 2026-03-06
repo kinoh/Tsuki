@@ -22,10 +22,10 @@ pub(crate) fn build_emit_event_callback(
 }
 
 pub(crate) async fn record_event(state: &AppState, event: Event) {
-    if let Err(err) = state.event_store.append(&event).await {
+    if let Err(err) = state.services.event_store.append(&event).await {
         println!("EVENT_STORE_ERROR error={}", err);
     }
-    let _ = state.tx.send(event.clone());
+    let _ = state.services.tx.send(event.clone());
     log_event(&event);
 }
 
