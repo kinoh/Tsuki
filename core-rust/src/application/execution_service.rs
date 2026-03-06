@@ -95,21 +95,26 @@ pub(crate) async fn run_decision(
     };
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+    let visible_mcp_tools = state
+        .mcp_registry
+        .available_tools()
+        .into_iter()
+        .filter(|tool| {
+            tool_name(tool)
+                .map(|name| router_output.mcp_visible_tools.iter().any(|item| item == name))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
     let adapter = build_response_api_llm(build_config_with_tools_and_handler(
-        compose_instructions(&base_instructions, &decision_instructions),
+        compose_decision_instructions(
+            &base_instructions,
+            &decision_instructions,
+            &visible_mcp_tools,
+        ),
         &modules.runtime,
         decision_tools(
             &modules.runtime.tools,
-            state
-                .mcp_registry
-                .available_tools()
-                .into_iter()
-                .filter(|tool| {
-                    tool_name(tool)
-                        .map(|name| router_output.mcp_visible_tools.iter().any(|item| item == name))
-                        .unwrap_or(false)
-                })
-                .collect(),
+            visible_mcp_tools.clone(),
             module_instructions.keys().cloned(),
         ),
         Arc::new(handler),
@@ -132,6 +137,7 @@ pub(crate) async fn run_decision(
             recent_event_history: &history,
         },
     );
+    let context = append_visible_mcp_tool_contracts(context, &visible_mcp_tools);
 
     let llm_started = Instant::now();
     let response = match adapter
@@ -230,21 +236,26 @@ pub(crate) async fn run_decision_debug(
     };
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+    let visible_mcp_tools = state
+        .mcp_registry
+        .available_tools()
+        .into_iter()
+        .filter(|tool| {
+            tool_name(tool)
+                .map(|name| router_output.mcp_visible_tools.iter().any(|item| item == name))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
     let adapter = build_response_api_llm(build_config_with_tools_and_handler(
-        compose_instructions(&base_instructions, &decision_instructions),
+        compose_decision_instructions(
+            &base_instructions,
+            &decision_instructions,
+            &visible_mcp_tools,
+        ),
         &state.modules.runtime,
         decision_tools(
             &state.modules.runtime.tools,
-            state
-                .mcp_registry
-                .available_tools()
-                .into_iter()
-                .filter(|tool| {
-                    tool_name(tool)
-                        .map(|name| router_output.mcp_visible_tools.iter().any(|item| item == name))
-                        .unwrap_or(false)
-                })
-                .collect(),
+            visible_mcp_tools.clone(),
             module_instructions.keys().cloned(),
         ),
         Arc::new(handler),
@@ -269,6 +280,7 @@ pub(crate) async fn run_decision_debug(
             },
         )
     });
+    let context = append_visible_mcp_tool_contracts(context, &visible_mcp_tools);
     let response = match adapter
         .respond(LlmRequest {
             input: context.clone(),
@@ -537,6 +549,22 @@ fn render_decision_context_template(
         .replace("{{recent_event_history}}", vars.recent_event_history)
 }
 
+fn append_visible_mcp_tool_contracts(
+    mut context: String,
+    visible_mcp_tools: &[async_openai::types::responses::Tool],
+) -> String {
+    let contracts = format_visible_mcp_tool_contracts(visible_mcp_tools);
+    if contracts == "none" {
+        return context;
+    }
+    context.push_str("\n\nvisible_mcp_tool_contracts:\n");
+    context.push_str(&contracts);
+    context.push_str(
+        "\n\nIf you call one of the visible MCP tools, provide a non-empty JSON object that satisfies its required arguments.",
+    );
+    context
+}
+
 fn render_submodule_context_template(
     template: &str,
     latest_user_input: &str,
@@ -561,6 +589,25 @@ fn render_submodule_context_template(
 
 fn compose_instructions(base: &str, module_specific: &str) -> String {
     format!("{}\n\n{}", base, module_specific)
+}
+
+fn compose_decision_instructions(
+    base: &str,
+    module_specific: &str,
+    visible_mcp_tools: &[async_openai::types::responses::Tool],
+) -> String {
+    let mut instructions = compose_instructions(base, module_specific);
+    if visible_mcp_tools.is_empty() {
+        return instructions;
+    }
+    instructions.push_str(
+        "\n\nVisible MCP tools are available for this turn.\n\
+If a visible MCP tool can directly satisfy the user's explicit request, call it before replying.\n\
+Do not claim that you cannot execute or fetch something if a visible MCP tool can do it.\n\
+Never call a visible MCP tool with {} unless its schema truly requires no arguments.\n\
+Read the visible MCP tool contracts in the input context and provide the required arguments explicitly.",
+    );
+    instructions
 }
 
 fn decision_tools(
@@ -632,6 +679,24 @@ fn format_soft_recommendations(recommendations: &[String]) -> String {
         .map(|name| format!("- {}", name))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn format_visible_mcp_tool_contracts(
+    tools: &[async_openai::types::responses::Tool],
+) -> String {
+    let mut lines = Vec::<String>::new();
+    for tool in tools {
+        let async_openai::types::responses::Tool::Function(def) = tool else {
+            continue;
+        };
+        let description = def.description.as_deref().unwrap_or("no description");
+        lines.push(format!("- {}: {}", def.name, description));
+    }
+    if lines.is_empty() {
+        "none".to_string()
+    } else {
+        lines.join("\n")
+    }
 }
 
 fn truncate(value: &str, max: usize) -> String {

@@ -20,13 +20,13 @@ const DEFAULT_LOG_OUTPUT_BYTES: usize = 2048;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ExecuteRequest {
-    #[schemars(description = "Executable path or command name")]
+    #[schemars(description = "Required. Executable path or command name. Example: \"curl\" or \"sh\". Never omit this field.")]
     pub command: String,
-    #[schemars(description = "Command arguments")]
+    #[schemars(description = "Optional command arguments. Example for curl: [\"-sL\", \"https://example.com/feed.xml\"]. Example for sh: [\"-c\", \"curl -sL https://example.com/feed.xml | head -n 5\"].")]
     pub args: Option<Vec<String>>,
-    #[schemars(description = "Stdin content to pass to the process")]
+    #[schemars(description = "Optional stdin content to pass to the process.")]
     pub stdin: Option<String>,
-    #[schemars(description = "Optional timeout in milliseconds")]
+    #[schemars(description = "Optional timeout in milliseconds.")]
     pub timeout_ms: Option<u64>,
 }
 
@@ -263,7 +263,9 @@ impl ShellExecService {
 
 #[tool_router]
 impl ShellExecService {
-    #[tool(description = "Executes a shell command inside the sandbox")]
+    #[tool(
+        description = "Execute a command inside the sandbox. The JSON arguments object must include `command`. For direct execution, use `{\\\"command\\\":\\\"curl\\\",\\\"args\\\":[\\\"-sL\\\",\\\"https://example.com/feed.xml\\\"]}`. For shell pipelines, use `{\\\"command\\\":\\\"sh\\\",\\\"args\\\":[\\\"-c\\\",\\\"curl -sL https://example.com/feed.xml | sed -n '1,5p'\\\"]}`. If `args` is omitted, the server runs `sh -c <command>`."
+    )]
     pub async fn execute(
         &self,
         Parameters(request): Parameters<ExecuteRequest>,

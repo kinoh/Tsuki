@@ -151,6 +151,9 @@ impl StateToolHandler {
         if self.mcp_registry.contains_runtime_tool(tool_name) {
             let args: Value = serde_json::from_str(arguments)
                 .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+            self.mcp_registry
+                .validate_call_arguments(tool_name, &args)
+                .map_err(ToolError::new)?;
             let value = tokio::task::block_in_place(|| {
                 Handle::current().block_on(self.mcp_registry.call_tool(tool_name, args))
             })

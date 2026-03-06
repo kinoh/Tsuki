@@ -153,6 +153,8 @@ impl McpRegistry {
                     result: concept_upsert,
                     phase: "bootstrap",
                 });
+                out.tools_by_runtime
+                    .insert(mapping.runtime_tool_name.clone(), mapping.clone());
                 let extracted = match extract_trigger_concepts_with_llm(
                     llm.clone(),
                     mapping.server_id.as_str(),
@@ -204,9 +206,6 @@ impl McpRegistry {
                     trigger_concepts: extracted,
                     relation_success_count,
                 });
-
-                out.tools_by_runtime
-                    .insert(mapping.runtime_tool_name.clone(), mapping);
             }
         }
 
@@ -230,7 +229,7 @@ impl McpRegistry {
                     name: item.runtime_tool_name.clone(),
                     description: item.description.clone(),
                     parameters: Some(item.parameters.clone()),
-                    strict: Some(false),
+                    strict: Some(true),
                 })
             })
             .collect()
@@ -255,6 +254,52 @@ impl McpRegistry {
             .ok_or_else(|| format!("unknown MCP server: {}", item.server_id))?;
 
         call_tool(endpoint.as_str(), item.remote_tool_name.as_str(), arguments).await
+    }
+
+    pub(crate) fn validate_call_arguments(
+        &self,
+        runtime_tool_name: &str,
+        arguments: &Value,
+    ) -> Result<(), String> {
+        let item = self
+            .tools_by_runtime
+            .get(runtime_tool_name)
+            .ok_or_else(|| format!("unknown MCP runtime tool: {}", runtime_tool_name))?;
+        let object = arguments.as_object().ok_or_else(|| {
+            format!(
+                "invalid arguments for {}: expected JSON object",
+                runtime_tool_name
+            )
+        })?;
+        let required = item
+            .parameters
+            .get("required")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let missing = required
+            .iter()
+            .filter(|name| !object.contains_key(name.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let mut message = format!(
+            "missing required arguments for {}: {}",
+            runtime_tool_name,
+            missing.join(", ")
+        );
+        if let Some(example) = build_required_args_example(&item.parameters) {
+            message.push_str(format!(". Example: {}", example).as_str());
+        }
+        Err(message)
     }
 
     pub(crate) async fn resolve_visibility(
@@ -436,17 +481,17 @@ input_schema_json: {schema}",
             &response.raw,
             response.text.as_str(),
         );
-        let text = Some(response.text.clone()).or_else(|| {
-            extract_output_text_from_raw_json(&response.raw)
-        });
-        let Some(text) = text else {
+        let candidates = collect_trigger_output_candidates(&response);
+        if candidates.is_empty() {
             last_error = "llm parse check failed: empty output".to_string();
             continue;
-        };
-        match parse_trigger_concepts(text.as_str()) {
-            Ok(values) => return Ok(values),
-            Err(err) => {
-                last_error = err;
+        }
+        for text in candidates {
+            match parse_trigger_concepts(text.as_str()) {
+                Ok(values) => return Ok(values),
+                Err(err) => {
+                    last_error = err;
+                }
             }
         }
     }
@@ -528,6 +573,32 @@ fn parse_trigger_concepts(raw: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+fn collect_trigger_output_candidates(response: &crate::llm::LlmResponse) -> Vec<String> {
+    let mut out = Vec::<String>::new();
+    let mut seen = BTreeSet::<String>::new();
+    for candidate in [
+        normalize_llm_output_candidate(response.text.as_str()),
+        extract_output_text_from_raw_json(&response.raw),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if seen.insert(candidate.clone()) {
+            out.push(candidate);
+        }
+    }
+    out
+}
+
+fn normalize_llm_output_candidate(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "(empty response)" {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn extract_output_text_from_raw_json(value: &Value) -> Option<String> {
     let output = value.get("output")?.as_array()?;
     for item in output {
@@ -537,9 +608,8 @@ fn extract_output_text_from_raw_json(value: &Value) -> Option<String> {
         };
         for chunk in content {
             if let Some(text) = chunk.get("text").and_then(Value::as_str) {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    return Some(trimmed.to_string());
+                if let Some(candidate) = normalize_llm_output_candidate(text) {
+                    return Some(candidate);
                 }
             }
         }
@@ -580,7 +650,9 @@ fn map_tool(server_id: &str, _url: &str, item: &ToolObject) -> Result<McpToolDes
 
     let runtime_tool_name = format!("{}__{}", server_norm, tool_norm);
     let concept_key = format!("mcp_tool:{}__{}", server_norm, tool_norm);
-    let parameters = item.input_schema.clone().unwrap_or_else(default_parameters_schema);
+    let parameters = normalize_function_parameters(
+        item.input_schema.clone().unwrap_or_else(default_parameters_schema),
+    );
 
     Ok(McpToolDescriptor {
         runtime_tool_name,
@@ -614,6 +686,94 @@ fn default_parameters_schema() -> Value {
     json!({
         "type": "object",
         "properties": {},
-        "additionalProperties": true
+        "additionalProperties": false
     })
+}
+
+fn normalize_function_parameters(mut value: Value) -> Value {
+    normalize_schema_node(&mut value);
+    value
+}
+
+fn normalize_schema_node(value: &mut Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+
+    if matches!(object.get("type").and_then(Value::as_str), Some("object")) {
+        object
+            .entry("additionalProperties".to_string())
+            .or_insert(Value::Bool(false));
+        if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+            for child in properties.values_mut() {
+                normalize_schema_node(child);
+            }
+        }
+    }
+
+    if let Some(items) = object.get_mut("items") {
+        normalize_schema_node(items);
+    }
+
+    if let Some(any_of) = object.get_mut("anyOf").and_then(Value::as_array_mut) {
+        for child in any_of {
+            normalize_schema_node(child);
+        }
+    }
+    if let Some(one_of) = object.get_mut("oneOf").and_then(Value::as_array_mut) {
+        for child in one_of {
+            normalize_schema_node(child);
+        }
+    }
+    if let Some(all_of) = object.get_mut("allOf").and_then(Value::as_array_mut) {
+        for child in all_of {
+            normalize_schema_node(child);
+        }
+    }
+}
+
+fn build_required_args_example(schema: &Value) -> Option<String> {
+    let required = schema.get("required")?.as_array()?;
+    let properties = schema.get("properties")?.as_object()?;
+    let mut example = serde_json::Map::new();
+    for name in required.iter().filter_map(Value::as_str) {
+        let property = properties.get(name)?;
+        example.insert(name.to_string(), example_value_for_schema(property, name));
+    }
+    if example.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&Value::Object(example)).ok()
+    }
+}
+
+fn example_value_for_schema(schema: &Value, fallback_name: &str) -> Value {
+    match schema.get("type").and_then(Value::as_str) {
+        Some("string") => Value::String(example_string_for_schema(schema, fallback_name)),
+        Some("integer") => Value::Number(1.into()),
+        Some("number") => json!(1),
+        Some("boolean") => Value::Bool(false),
+        Some("array") => Value::Array(vec![]),
+        Some("object") => Value::Object(serde_json::Map::new()),
+        _ => Value::String(format!("<{}>", fallback_name)),
+    }
+}
+
+fn example_string_for_schema(schema: &Value, fallback_name: &str) -> String {
+    let description = schema
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or(fallback_name)
+        .to_ascii_lowercase();
+    if description.contains("command") || fallback_name == "command" {
+        "<command>".to_string()
+    } else if description.contains("path") {
+        "<path>".to_string()
+    } else if description.contains("url") {
+        "<url>".to_string()
+    } else if description.contains("id") || fallback_name == "id" {
+        "<id>".to_string()
+    } else {
+        format!("<{}>", fallback_name)
+    }
 }

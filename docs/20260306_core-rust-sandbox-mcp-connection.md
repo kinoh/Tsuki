@@ -39,6 +39,7 @@ url = "http://sandbox:8000/mcp"
 - Enforce deterministic tool naming across servers to avoid collisions (for example, server-prefixed names).
 - Do not always expose discovered MCP tools to LLM.
 - Expose MCP tools only when their mapped concept activation reaches the soft recommendation threshold.
+- Keep discovered MCP tools registered even if trigger onboarding fails; onboarding failure must affect exposure quality, not discovery availability.
 - When a mapped concept does not exist, create it idempotently (auto-create/upsert) before activation-based exposure.
 - Build trigger-to-tool association edges at bootstrap:
   - trigger concept -> tool concept (`evokes`)
@@ -64,6 +65,8 @@ url = "http://sandbox:8000/mcp"
 - Invocation contract:
   - runtime forwards arguments as-is to MCP `tools/call`.
   - no server-specific argument rewriting in `core-rust`.
+  - runtime may reject obviously invalid local arguments before forwarding when MCP tool contract information is already known.
+  - tool description quality is owned by the MCP server; `core-rust` must not rewrite discovered MCP tool descriptions.
 - Tool-to-concept contract:
   - each MCP tool must deterministically resolve to one concept key.
   - if the concept is missing, runtime must auto-create the concept idempotently.
@@ -93,6 +96,7 @@ url = "http://sandbox:8000/mcp"
   - tool observation events must contain concrete failure cause and server id/tool name.
   - bootstrap onboarding details (auto-create, mapping failure, trigger-edge build result) are reported via logs, not dedicated event types.
   - tool visibility (`visible`/`hidden`) is turn-scoped and must be attached to router turn events with reason.
+  - decision-time LLM context may include visible MCP tool contracts to improve argument construction, but this is advisory context and does not replace MCP-server-owned schema/description quality.
 
 ## Threshold Policy
 - MCP tool visibility threshold is the same value as router soft recommendation threshold.
