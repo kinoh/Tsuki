@@ -77,3 +77,75 @@ pub(crate) struct AppMetadata {
     pub(crate) api_versions: ApiVersions,
     pub(crate) mcp_available_tools: Arc<Vec<String>>,
 }
+
+impl AppState {
+    pub(crate) fn new(
+        services: AppServices,
+        auth: AuthState,
+        config: AppConfigState,
+        prompts: PromptState,
+        runtime: RuntimeState,
+        metadata: AppMetadata,
+    ) -> Self {
+        Self {
+            services,
+            auth,
+            config,
+            prompts,
+            runtime,
+            metadata,
+        }
+    }
+}
+
+impl AuthState {
+    pub(crate) fn new(
+        web_auth_token: String,
+        admin_password: String,
+        admin_password_fingerprint: String,
+    ) -> Self {
+        Self {
+            web_auth_token,
+            admin_password,
+            admin_password_fingerprint,
+        }
+    }
+}
+
+impl PromptState {
+    pub(crate) fn new(
+        overrides: Arc<RwLock<PromptOverrides>>,
+        path: PathBuf,
+        resolved: ResolvedPrompts,
+    ) -> Self {
+        Self {
+            overrides,
+            path,
+            resolved,
+        }
+    }
+}
+
+impl ResolvedPrompts {
+    pub(crate) fn new(
+        base_instructions: String,
+        router_instructions: String,
+        decision_instructions: String,
+    ) -> Self {
+        Self {
+            base_instructions,
+            router_instructions,
+            decision_instructions,
+        }
+    }
+}
+
+impl RuntimeState {
+    pub(crate) fn new(modules: Modules, router_model: String) -> Self {
+        Self {
+            modules,
+            router_model,
+            submodule_saturation_levels: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+}

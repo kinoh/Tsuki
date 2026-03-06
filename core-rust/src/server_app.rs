@@ -339,8 +339,8 @@ pub(crate) async fn run_server() {
         }
     };
 
-    let state = AppState {
-        services: AppServices {
+    let state = AppState::new(
+        AppServices {
             db: db.clone(),
             event_store,
             tx,
@@ -348,40 +348,35 @@ pub(crate) async fn run_server() {
             activation_concept_graph,
             mcp_registry,
         },
-        auth: AuthState {
-            web_auth_token: auth_token,
-            admin_password: admin_auth_password,
-            admin_password_fingerprint,
-        },
-        config: AppConfigState {
+        AuthState::new(auth_token, admin_auth_password, admin_password_fingerprint),
+        AppConfigState {
             limits: config.limits.clone(),
             router: config.router.clone(),
             input: config.input.clone(),
             tts: config.tts.clone(),
         },
-        prompts: PromptState {
-            overrides: prompts,
-            path: prompts_path,
-            resolved: ResolvedPrompts {
-                base_instructions: base_instructions.clone(),
+        PromptState::new(
+            prompts,
+            prompts_path,
+            ResolvedPrompts::new(
+                base_instructions.clone(),
                 router_instructions,
                 decision_instructions,
-            },
-        },
-        runtime: RuntimeState {
+            ),
+        ),
+        RuntimeState::new(
             modules,
-            router_model: config
+            config
                 .llm
                 .router_model
                 .clone()
                 .unwrap_or_else(|| config.llm.model.clone()),
-            submodule_saturation_levels: Arc::new(RwLock::new(std::collections::HashMap::new())),
-        },
-        metadata: AppMetadata {
+        ),
+        AppMetadata {
             api_versions: load_api_versions(),
             mcp_available_tools,
         },
-    };
+    );
     for err in mcp_bootstrap.errors {
         let event =
             crate::event::contracts::parse_error(format!("mcp bootstrap error: {}", err).as_str());
