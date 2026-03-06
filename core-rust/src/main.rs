@@ -6,6 +6,7 @@ mod clock;
 mod commands;
 mod config;
 mod db;
+mod debug_api;
 mod event;
 mod event_store;
 mod llm;
@@ -21,7 +22,7 @@ mod tools;
 pub(crate) use app_state::AppState;
 pub(crate) use application::event_service::record_event;
 pub(crate) use application::module_bootstrap::{ModuleRuntime, Modules};
-pub(crate) use server_app::{
+pub(crate) use debug_api::{
     DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest, DebugRunRequest,
     DebugRunResponse, DebugTriggerRequest, DebugTriggerResponse,
 };

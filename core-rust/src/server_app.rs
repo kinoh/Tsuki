@@ -36,6 +36,10 @@ use crate::application::module_bootstrap::{build_modules, sync_module_registry_f
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config};
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
+use crate::debug_api::{
+    DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest, DebugRunRequest,
+    DebugRunResponse, DebugTriggerRequest, DebugTriggerResponse,
+};
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::llm::{build_response_api_llm, ResponseApiConfig};
@@ -59,28 +63,6 @@ struct OutboundEvent {
     #[serde(rename = "type")]
     kind: &'static str,
     event: Event,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct DebugRunRequest {
-    pub(crate) input: String,
-    #[serde(default)]
-    pub(crate) context_override: Option<String>,
-    #[serde(default)]
-    pub(crate) submodule_outputs: Option<String>,
-    #[serde(default)]
-    pub(crate) include_history: Option<bool>,
-    #[serde(default)]
-    pub(crate) history_cutoff_ts: Option<String>,
-    #[serde(default)]
-    pub(crate) exclude_event_ids: Option<Vec<String>>,
-    #[serde(default)]
-    pub(crate) append_input_mode: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct DebugRunResponse {
-    pub(crate) output: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -233,49 +215,6 @@ struct DebugConceptGraphQueryItem {
 #[derive(Debug, Serialize)]
 struct DebugConceptGraphQueriesResponse {
     items: Vec<DebugConceptGraphQueryItem>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct DebugTriggerRequest {
-    pub(crate) event: String,
-    #[serde(default)]
-    pub(crate) payload: Option<Value>,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct DebugTriggerResponse {
-    pub(crate) event_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct DebugImproveProposalRequest {
-    pub(crate) target: String,
-    pub(crate) job_id: String,
-    pub(crate) diff_text: String,
-    #[serde(default)]
-    pub(crate) requires_approval: Option<bool>,
-    #[serde(default)]
-    pub(crate) created_by: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct DebugImproveReviewRequest {
-    pub(crate) proposal_id: String,
-    pub(crate) job_id: String,
-    pub(crate) target: String,
-    pub(crate) decision: String,
-    #[serde(default)]
-    pub(crate) reviewed_by: Option<String>,
-    #[serde(default)]
-    pub(crate) review_reason: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct DebugImproveResponse {
-    pub(crate) proposal_id: Option<String>,
-    pub(crate) review_event_id: Option<String>,
-    pub(crate) apply_event_id: Option<String>,
-    pub(crate) applied: bool,
 }
 
 pub(crate) async fn run_server() {
