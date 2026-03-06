@@ -937,7 +937,7 @@ async fn repair_missing_emit_user_reply(
         "{original_context}\n\ntool_call_results_from_previous_attempt:\n{tool_results}\n\nRepair requirement:\nCall emit_user_reply now using the gathered tool results."
     );
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.db.clone()));
+        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let adapter = build_response_api_llm(ResponseApiConfig {
         model: modules.runtime.model.clone(),
         instructions: repair_instructions,
