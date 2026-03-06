@@ -1,0 +1,48 @@
+name: Shell Exec News Fetch
+include_debug_events: true
+
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a natural Japanese chat user.
+      Keep each turn short and conversational.
+      Do not reveal test intent.
+
+      Missions:
+      1) Ask the assistant to fetch one latest headline using shell-exec with curl.
+      2) Ask it to summarize the fetched headline in Japanese in 1-2 short sentences.
+      3) Ask what URL/source it used.
+      4) End naturally.
+    max_turns: 8
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: |
+      How well the run satisfies the scenario sequence:
+      - request news fetch
+      - fetch result summary
+      - source URL confirmation
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  shell_exec_tool_log_coverage:
+    description: |
+      Using tool observation events (`source=tooling`, tags include `observe`, `tool`),
+      verify `shell_exec__execute` is observed at least once.
+      Judge from `tool:<name>` tags or `payload.tool_name`, not from debug `llm.raw`.
+
+  shell_exec_curl_contract_alignment:
+    description: |
+      Verify `shell_exec__execute` arguments contain a curl-based invocation for HTTP fetch.
+      Accept either:
+      - command="curl"
+      - command="sh" with args including "-c" and a curl command string.
+      Score high only when an actual network fetch intent is visible in tool arguments.
+
+  news_result_grounding:
+    description: |
+      Verify assistant output is grounded in fetched content:
+      - includes at least one concrete headline/topic detail
+      - mentions or can answer source URL
+      Penalize generic/non-grounded summaries.
