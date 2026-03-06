@@ -37,14 +37,16 @@ url = "http://sandbox:8000/mcp"
 - Implement generic MCP integration in `core-rust`; do not add `shell-exec`-specific adapter logic.
 - Discover tools from connected servers and expose them through a generic forwarding layer.
 - Enforce deterministic tool naming across servers to avoid collisions (for example, server-prefixed names).
-- Keep fail-fast startup behavior for invalid server config and connection/bootstrap errors.
+- Do not always expose discovered MCP tools to LLM.
+- Expose MCP tools only when their mapped concept activation reaches the soft recommendation threshold.
+- When a mapped concept does not exist, create it idempotently (auto-create/upsert) before activation-based exposure.
 - Do not introduce compatibility fallback paths (no hidden env fallback, no dual transport path).
 
 ## Why
 - The requested config shape (`mcp_servers.<name>`) matches common coding-agent MCP conventions and is naturally extensible.
 - Generic integration avoids per-server hardcoding and keeps responsibility boundaries clean.
 - `shell-exec` does not require custom client logic in `core-rust` as long as MCP call forwarding is implemented correctly.
-- Fail-fast startup prevents silent partial runtime where tools appear configured but are unavailable.
+- Explicit error surfacing with per-server failure isolation prevents silent degradation while keeping unaffected MCP servers available.
 
 ## Contract and Naming Policy
 - Runtime config contract:
@@ -54,18 +56,34 @@ url = "http://sandbox:8000/mcp"
   - tools are discovered from MCP `tools/list`.
   - runtime tool names must be collision-safe and stable.
   - recommended rule: `<server_id>__<tool_name>`.
+  - discovered tools are `available`; each turn only a subset becomes `visible` to LLM.
+  - visibility is activation-gated, not static.
 - Invocation contract:
   - runtime forwards arguments as-is to MCP `tools/call`.
   - no server-specific argument rewriting in `core-rust`.
+- Tool-to-concept contract:
+  - each MCP tool must deterministically resolve to one concept key.
+  - if the concept is missing, runtime must auto-create the concept idempotently.
+  - if deterministic mapping cannot be built (for example invalid normalized key or collision), mark the tool unavailable and emit an error event.
 
 ## Failure Policy
 - Startup:
-  - invalid URL or failed MCP bootstrap must fail startup.
+  - invalid `mcp_servers` entry format is a config error.
+  - connection/bootstrap failures are isolated per server; one failed server must not disable other MCP servers.
 - Invocation:
   - MCP transport/protocol errors must surface as explicit tool errors.
   - no silent swallow and no implicit retries unless explicitly designed later.
+- Mapping failures:
+  - mapping failures are handled through the same error pipeline as other tool/runtime errors.
+  - mapping failures must not propagate to unrelated servers/tools.
 - Observability:
   - tool observation events must contain concrete failure cause and server id/tool name.
+  - concept auto-create events must include: `server_id`, `tool_name`, `concept_key`, `reason=missing_concept`, `result=created|already_exists`, and phase/turn identifier.
+  - tool visibility (`visible`/`hidden`) is turn-scoped and must be attached to router turn events with reason.
+
+## Threshold Policy
+- MCP tool visibility threshold is the same value as router soft recommendation threshold.
+- Do not introduce a separate MCP-only threshold at this stage.
 
 ## Implementation Scope
 Planned code paths:
@@ -77,14 +95,18 @@ Planned code paths:
   - connect servers from config
   - list tools
   - call tools via generic forwarding
+- `core-rust/src/application/pipeline_service.rs` and router event payloads
+  - compute turn-level MCP tool visibility from concept activation
+  - attach visibility decisions to router events
 - `core-rust/src/application/module_bootstrap.rs`
-  - include discovered MCP tools in module runtime tool list.
+  - pass only turn-visible MCP tools into module runtime tool list.
 - `core-rust/src/tools.rs` (or dedicated forwarding module)
   - resolve runtime tool name -> (server id, remote tool name)
   - forward call to connected MCP client.
 - `core-rust/src/server_app.rs`
   - initialize MCP integration at startup
-  - expose connected/discovered tools in metadata.
+  - expose available (discovered) tools in metadata.
+  - do not expose turn-level visibility in metadata.
 
 ## Out of Scope
 - `shell-exec` server implementation changes.
