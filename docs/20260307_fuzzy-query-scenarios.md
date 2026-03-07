@@ -40,6 +40,55 @@ The scenarios therefore focus on how the assistant handles ambiguity, not on whe
 - Metrics are framed around pacing, alignment, and natural clarification rather than raw response length.
 - The concept-intro scenario keeps the concrete probe on categorical quantum mechanics because it reliably tempts the model into formal terminology too early.
 
+## Prompt-Side Response
+The scenario work exposed a model-generation-specific tendency:
+- unfamiliar terms were answered with mini-lectures
+- style-name questions were answered with taxonomy-first label bundles
+- follow-up questions often narrowed into A/B branching instead of staying conversational
+
+The prompt response was to add stricter response-pacing rules to the casual reply policy rather than changing runtime logic.
+
+The added constraints explicitly prioritize:
+- a 1-2 sentence foothold for unfamiliar terms and concepts
+- introducing only 1-2 new concepts in one reply
+- not listing labels, framework names, examples, or fine-grained distinctions unless the user asks for more
+- preferring accessibility over completeness when the user says they do not understand
+- using only light conversational check-ins after an explanation, not classification-style narrowing
+
+This was intentionally treated as a prompt-level mitigation for a generation-specific communication bias, not as a domain or architecture change.
+
+## Observed Effect
+After the stronger prompt guidance, the scenarios improved in the intended direction without obvious regression in baseline small talk.
+
+### Fuzzy Style Name Query
+- The assistant stopped opening with 4-5 term bundles and usually stayed within one main label plus one backup label.
+- The strongest single-run result reached:
+  - `premature_taxonomy_penalty = 0.9`
+  - `answer_density_fit = 0.8`
+- A representative improved reply reduced the naming answer to `前景フレーミング` with `レイヤリング` as a softer alternate instead of listing `オクルージョン` and other variants up front.
+
+### Fuzzy Concept Intro Query
+- The first reply no longer front-loaded terms such as `対象/射/テンソル積/ストリング図式`.
+- The strongest single-run result reached:
+  - `jargon_load_control = 0.62`
+  - `conceptual_pacing = 0.63`
+  - `answer_density_fit = 0.6`
+  - `progressive_disclosure = 0.72`
+- A representative improved first reply explained categorical quantum mechanics as "thinking in terms of boxes and arrows / how things compose" and ended with a light check-in rather than a formal expansion.
+
+### Baseline Check
+- `chitchat` still passed cleanly after the stronger prompt wording.
+- `shell_exec_news_fetch` still executed tools correctly; its remaining weakness was grounding on article body retrieval, which is unrelated to the fuzzy-query pacing change.
+
+## Why This Was Kept
+The stronger wording appears to target a generation-specific communication habit rather than changing the general character of the assistant.
+
+It improved the two failure probes that motivated the work:
+- concept introductions that become lectures too early
+- fuzzy style questions that become taxonomy-first answers
+
+At the same time, ordinary chitchat remained natural in the sampled runs.
+
 ## Compatibility Impact
 Scenario-only addition.
 No API, runner, or runtime contract change.
