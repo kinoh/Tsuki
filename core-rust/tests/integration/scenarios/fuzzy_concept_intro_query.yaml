@@ -34,11 +34,13 @@ metrics_definition:
 
   conceptual_pacing:
     description: |
-      Judge whether the assistant introduces the concept at an appropriate pace for a first-contact question.
+      Judge whether the assistant introduces new concepts at a manageable pace.
       Score high when:
-      - the first answer gives an approachable one-paragraph foothold
-      - formal structure, examples, and deeper theory are staged gradually
-      Penalize replies that try to fully teach the concept in the first answer.
+      - each reply introduces only a small number of new concepts or distinctions
+      - new terms are added gradually rather than in dense clusters
+      - the listener can plausibly keep track of the explanation without needing to unpack many new labels at once
+      Penalize replies that introduce many new concepts, framework names, distinctions,
+      or representational layers in a single turn, even when the content is correct.
 
   jargon_load_control:
     description: |
@@ -55,6 +57,16 @@ metrics_definition:
       - the initial answer is intentionally incomplete but useful
       - the intuitive restatement request leads to the next layer of detail
       Penalize front-loading distinctions, formalism, and representative examples before the follow-up arrives.
+
+  answer_density_fit:
+    description: |
+      Judge whether response density fits the user's question scope.
+      Score high when:
+      - the assistant gives a compact first foothold for "what is this?" style questions
+      - later replies still stay proportionate to the user's small follow-up asks
+      - the explanation avoids turning one turn into a mini-lecture
+      Penalize replies that are substantially longer or more layered than the user's question warrants,
+      even when the explanation is correct and coherent.
 
   disambiguation_naturalness:
     description: |
