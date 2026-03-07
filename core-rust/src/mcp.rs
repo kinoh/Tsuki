@@ -13,6 +13,8 @@ use crate::event::contracts::{llm_error, llm_raw};
 use crate::event::Event;
 use crate::llm::{LlmAdapter, LlmRequest};
 
+const MAX_TRIGGER_CONCEPTS: usize = 3;
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct McpToolDescriptor {
     pub(crate) runtime_tool_name: String,
@@ -439,11 +441,18 @@ async fn extract_trigger_concepts_with_llm(
 Return strict JSON only with this shape: {{\"trigger_concepts\": [\"...\"]}}.\n\
 No markdown. No explanation.\n\
 Use natural language concepts directly (no prefixes).\n\
+Return at most {max_trigger_concepts} trigger concepts.\n\
+Prefer precision over recall.\n\
+Choose only concepts that directly and specifically imply this tool should be considered.\n\
+Avoid generic or broad concepts such as command, CLI, input, output, bash, shell, tool, or process.\n\
+Avoid near-duplicates and paraphrase lists.\n\
+If fewer than {max_trigger_concepts} concepts are justified, return fewer.\n\
 \n\
 server_id: {server_id}\n\
 tool_name: {tool_name}\n\
 description: {description}\n\
 input_schema_json: {schema}",
+        max_trigger_concepts = MAX_TRIGGER_CONCEPTS,
         server_id = server_id,
         tool_name = tool.name,
         description = tool
@@ -572,11 +581,34 @@ fn parse_trigger_concepts(raw: &str) -> Result<Vec<String>, String> {
         }
         uniq.insert(normalized.to_string());
     }
-    let out = uniq.into_iter().collect::<Vec<_>>();
+    let out = uniq
+        .into_iter()
+        .take(MAX_TRIGGER_CONCEPTS)
+        .collect::<Vec<_>>();
     if out.is_empty() {
         return Err("llm non-empty check failed: no trigger concepts".to_string());
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_trigger_concepts_caps_count() {
+        let raw = r#"{"trigger_concepts":["alpha","beta","gamma","delta"]}"#;
+        let parsed = parse_trigger_concepts(raw).expect("should parse");
+        assert_eq!(parsed, vec!["alpha", "beta", "delta"]);
+        assert_eq!(parsed.len(), MAX_TRIGGER_CONCEPTS);
+    }
+
+    #[test]
+    fn parse_trigger_concepts_dedupes_before_cap() {
+        let raw = r#"{"trigger_concepts":["alpha","beta","alpha","gamma"]}"#;
+        let parsed = parse_trigger_concepts(raw).expect("should parse");
+        assert_eq!(parsed, vec!["alpha", "beta", "gamma"]);
+    }
 }
 
 fn collect_trigger_output_candidates(response: &crate::llm::LlmResponse) -> Vec<String> {
