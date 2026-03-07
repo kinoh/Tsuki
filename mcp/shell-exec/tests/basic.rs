@@ -2,7 +2,7 @@ use rmcp::model::{CallToolRequestParam, ClientCapabilities, ClientInfo, Implemen
 use rmcp::service::ServiceExt;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_server::{
-    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
 use serde_json::Value;
 use shell_exec::service::ShellExecService;
@@ -43,8 +43,7 @@ async fn test_execute_echo() {
         std::env::set_var("MCP_EXEC_MAX_OUTPUT_BYTES", "4096");
     }
     let (addr, shutdown) = start_server().await;
-    let transport =
-        StreamableHttpClientTransport::from_uri(format!("http://{addr}/mcp"));
+    let transport = StreamableHttpClientTransport::from_uri(format!("http://{addr}/mcp"));
     let client_info = ClientInfo {
         protocol_version: Default::default(),
         capabilities: ClientCapabilities::default(),

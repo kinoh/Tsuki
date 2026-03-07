@@ -1,12 +1,13 @@
 use std::{env, process::Stdio, time::Duration};
 
 use rmcp::{
+    ErrorData, ServerHandler,
     handler::server::router::tool::ToolRouter,
     handler::server::wrapper::Parameters,
     model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo},
     schemars::{self, JsonSchema},
     serde_json::json,
-    tool, tool_handler, tool_router, ErrorData, ServerHandler,
+    tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 use tokio::{
@@ -20,9 +21,13 @@ const DEFAULT_LOG_OUTPUT_BYTES: usize = 2048;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ExecuteRequest {
-    #[schemars(description = "Required. Executable path or command name. Example: \"curl\", \"python3\", or \"sh\". Never omit this field.")]
+    #[schemars(
+        description = "Required. Executable path, command name, or shell command string when `args` is omitted."
+    )]
     pub command: String,
-    #[schemars(description = "Optional command arguments. Example for curl: [\"-sL\", \"https://example.com/feed.xml\"]. Example for sh: [\"-lc\", \"curl -sL https://example.com/feed.xml | head -n 5\"]. For RSS/XML/JSON parsing, prefer robust tools such as python3 or jq instead of fragile regex-only parsing.")]
+    #[schemars(
+        description = "Optional command arguments. When present, the server executes `command` directly without wrapping it in `sh -c`."
+    )]
     pub args: Option<Vec<String>>,
     #[schemars(description = "Optional stdin content to pass to the process.")]
     pub stdin: Option<String>,
@@ -93,10 +98,7 @@ impl ShellExecService {
 
     async fn execute_command(&self, request: ExecuteRequest) -> Result<CallToolResult, ErrorData> {
         if request.command.trim().is_empty() {
-            return Err(ErrorData::invalid_params(
-                "Error: command: empty",
-                None,
-            ));
+            return Err(ErrorData::invalid_params("Error: command: empty", None));
         }
 
         let mut command = if let Some(args) = request.args {
@@ -108,7 +110,10 @@ impl ShellExecService {
             cmd.args(["-c", &request.command]);
             cmd
         };
-        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         let started_at = time::Instant::now();
         let mut child = command.spawn().map_err(|err| {
@@ -120,12 +125,15 @@ impl ShellExecService {
 
         if let Some(stdin) = request.stdin {
             if let Some(mut child_stdin) = child.stdin.take() {
-                child_stdin.write_all(stdin.as_bytes()).await.map_err(|err| {
-                    ErrorData::internal_error(
-                        "Error: execute: stdin write failed",
-                        Some(json!({"reason": err.to_string()})),
-                    )
-                })?;
+                child_stdin
+                    .write_all(stdin.as_bytes())
+                    .await
+                    .map_err(|err| {
+                        ErrorData::internal_error(
+                            "Error: execute: stdin write failed",
+                            Some(json!({"reason": err.to_string()})),
+                        )
+                    })?;
                 child_stdin.shutdown().await.map_err(|err| {
                     ErrorData::internal_error(
                         "Error: execute: stdin close failed",
@@ -137,12 +145,14 @@ impl ShellExecService {
             drop(child.stdin.take());
         }
 
-        let stdout = child.stdout.take().ok_or_else(|| {
-            ErrorData::internal_error("Error: execute: stdout unavailable", None)
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| {
-            ErrorData::internal_error("Error: execute: stderr unavailable", None)
-        })?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| ErrorData::internal_error("Error: execute: stdout unavailable", None))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| ErrorData::internal_error("Error: execute: stderr unavailable", None))?;
 
         let max_output_bytes = self.max_output_bytes;
         let stdout_task = tokio::spawn(read_stream_limited(stdout, max_output_bytes));
@@ -150,26 +160,26 @@ impl ShellExecService {
 
         let mut timed_out = false;
         let status = match request.timeout_ms {
-            Some(timeout_ms) => match time::timeout(Duration::from_millis(timeout_ms), child.wait())
-                .await
-            {
-                Ok(result) => result.map_err(|err| {
-                    ErrorData::internal_error(
-                        "Error: execute: wait failed",
-                        Some(json!({"reason": err.to_string()})),
-                    )
-                })?,
-                Err(_) => {
-                    timed_out = true;
-                    let _ = child.kill().await;
-                    child.wait().await.map_err(|err| {
+            Some(timeout_ms) => {
+                match time::timeout(Duration::from_millis(timeout_ms), child.wait()).await {
+                    Ok(result) => result.map_err(|err| {
                         ErrorData::internal_error(
                             "Error: execute: wait failed",
                             Some(json!({"reason": err.to_string()})),
                         )
-                    })?
+                    })?,
+                    Err(_) => {
+                        timed_out = true;
+                        let _ = child.kill().await;
+                        child.wait().await.map_err(|err| {
+                            ErrorData::internal_error(
+                                "Error: execute: wait failed",
+                                Some(json!({"reason": err.to_string()})),
+                            )
+                        })?
+                    }
                 }
-            },
+            }
             None => child.wait().await.map_err(|err| {
                 ErrorData::internal_error(
                     "Error: execute: wait failed",
@@ -179,22 +189,18 @@ impl ShellExecService {
         };
         let elapsed_ms = started_at.elapsed().as_millis() as u64;
 
-        let (stdout_bytes, stdout_truncated) = stdout_task
-            .await
-            .map_err(|err| {
-                ErrorData::internal_error(
-                    "Error: execute: stdout task failed",
-                    Some(json!({"reason": err.to_string()})),
-                )
-            })??;
-        let (mut stderr_bytes, stderr_truncated) = stderr_task
-            .await
-            .map_err(|err| {
-                ErrorData::internal_error(
-                    "Error: execute: stderr task failed",
-                    Some(json!({"reason": err.to_string()})),
-                )
-            })??;
+        let (stdout_bytes, stdout_truncated) = stdout_task.await.map_err(|err| {
+            ErrorData::internal_error(
+                "Error: execute: stdout task failed",
+                Some(json!({"reason": err.to_string()})),
+            )
+        })??;
+        let (mut stderr_bytes, stderr_truncated) = stderr_task.await.map_err(|err| {
+            ErrorData::internal_error(
+                "Error: execute: stderr task failed",
+                Some(json!({"reason": err.to_string()})),
+            )
+        })??;
 
         if stdout_bytes.len() + stderr_bytes.len() > max_output_bytes {
             let allowed = max_output_bytes.saturating_sub(stdout_bytes.len());
@@ -263,9 +269,7 @@ impl ShellExecService {
 
 #[tool_router]
 impl ShellExecService {
-    #[tool(
-        description = "Execute a command inside the sandbox. The JSON arguments object must include `command`. The sandbox includes common CLI tools such as sh/bash, curl, grep, sed, awk, python3, and jq. For direct execution, use `{\\\"command\\\":\\\"curl\\\",\\\"args\\\":[\\\"-sL\\\",\\\"https://example.com/feed.xml\\\"]}`. For shell pipelines, use `{\\\"command\\\":\\\"sh\\\",\\\"args\\\":[\\\"-lc\\\",\\\"curl -sL https://example.com/feed.xml | sed -n '1,5p'\\\"]}`. For RSS/XML parsing, prefer python3 over regex-only title extraction, for example `{\\\"command\\\":\\\"sh\\\",\\\"args\\\":[\\\"-lc\\\",\\\"curl -sL https://example.com/feed.xml | python3 -c 'import sys, xml.etree.ElementTree as ET; root=ET.fromstring(sys.stdin.read()); item=root.find(\\\"./channel/item\\\"); print(item.findtext(\\\"title\\\", \\\"\\\")); print(item.findtext(\\\"link\\\", \\\"\\\"))'\\\"]}`. If `args` is omitted, the server runs `sh -c <command>`."
-    )]
+    #[tool(description = "Runs commands in an isolated shell environment.")]
     pub async fn execute(
         &self,
         Parameters(request): Parameters<ExecuteRequest>,

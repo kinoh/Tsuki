@@ -1,5 +1,5 @@
 use rmcp::transport::streamable_http_server::{
-    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
 use shell_exec::service::ShellExecService;
 use std::{env, error::Error, io};
@@ -12,9 +12,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         path = format!("/{}", path);
     }
 
-    let service = ShellExecService::from_env().map_err(|err| {
-        io::Error::new(io::ErrorKind::Other, err.message.to_string())
-    })?;
+    let service = ShellExecService::from_env()
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.message.to_string()))?;
     let service_factory = move || Ok(service.clone());
     let service = StreamableHttpService::new(
         service_factory,

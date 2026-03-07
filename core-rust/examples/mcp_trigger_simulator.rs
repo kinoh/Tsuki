@@ -184,6 +184,7 @@ async fn simulate_trigger_concepts(
                         url,
                         server_id,
                         tool,
+                        tool.description.as_deref(),
                         &input_schema,
                         prompt.as_str(),
                         response.text.as_str(),
@@ -202,6 +203,7 @@ async fn simulate_trigger_concepts(
         url,
         server_id,
         tool,
+        tool.description.as_deref(),
         &input_schema,
         last_prompt.as_str(),
         last_output.as_str(),
@@ -271,6 +273,7 @@ fn print_trigger_result(
     url: &str,
     server_id: &str,
     tool: &ToolObject,
+    description: Option<&str>,
     input_schema: &Value,
     prompt: &str,
     raw_output_text: &str,
@@ -281,7 +284,7 @@ fn print_trigger_result(
     println!("tool: {}", tool.name);
     println!();
     println!("description:");
-    println!("{}", tool.description.as_deref().unwrap_or("none"));
+    println!("{}", description.unwrap_or("none"));
     println!();
     println!("input_schema_json:");
     println!(
@@ -305,6 +308,7 @@ fn print_failed_trigger_result(
     url: &str,
     server_id: &str,
     tool: &ToolObject,
+    description: Option<&str>,
     input_schema: &Value,
     prompt: &str,
     raw_output_text: &str,
@@ -316,7 +320,7 @@ fn print_failed_trigger_result(
     println!("tool: {}", tool.name);
     println!();
     println!("description:");
-    println!("{}", tool.description.as_deref().unwrap_or("none"));
+    println!("{}", description.unwrap_or("none"));
     println!();
     println!("input_schema_json:");
     println!(

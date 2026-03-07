@@ -29,8 +29,9 @@ No markdown. No explanation.\n\
 Use natural language concepts directly (no prefixes).\n\
 Return at most {max_trigger_concepts} trigger concepts.\n\
 Prefer precision over recall.\n\
-Choose only concepts that directly and specifically imply this tool should be considered.\n\
-Avoid generic or broad concepts such as command, CLI, input, output, bash, shell, tool, or process.\n\
+Choose generic action concepts that describe the tool category a user is explicitly asking for.\n\
+Prefer stable action-family concepts over downstream use cases.\n\
+Avoid concrete subcommands, protocols, domains, file formats, or task examples such as curl, jq, RSS, JSON, XML, URL, download, or news fetch.\n\
 Avoid near-duplicates and paraphrase lists.\n\
 If fewer than {max_trigger_concepts} concepts are justified, return fewer.\n\
 \n\
@@ -45,7 +46,7 @@ input_schema_json: {schema}",
         schema = schema_text,
     );
     let retry_prompt = format!(
-        "{base}\n\nIMPORTANT: Output exactly one JSON object. Example:\n{{\"trigger_concepts\":[\"ニュース取得\",\"RSS見出し取得\"]}}",
+        "{base}\n\nIMPORTANT: Output exactly one JSON object. Example:\n{{\"trigger_concepts\":[\"run a command\",\"use the shell\",\"execute a terminal command\"]}}",
         base = base_prompt
     );
     [base_prompt, retry_prompt]

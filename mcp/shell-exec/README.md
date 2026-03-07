@@ -19,12 +19,12 @@
 
 ### execute
 
-Runs a command and returns the captured output.
+Runs commands in an isolated shell environment and returns the captured output.
 
 #### Arguments
 
-- `command` (required): Command string or executable name.
-- `args` (optional): Array of arguments. When present, the command is executed directly without a shell.
+- `command` (required): Executable path, command name, or shell command string when `args` is omitted.
+- `args` (optional): Array of arguments. When present, the command is executed directly without a shell wrapper.
 - `stdin` (optional): String content passed to stdin.
 - `timeout_ms` (optional): Timeout in milliseconds. The process is killed on timeout.
 
