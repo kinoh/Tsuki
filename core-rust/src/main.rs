@@ -11,6 +11,7 @@ mod event;
 mod event_store;
 mod llm;
 mod mcp;
+mod mcp_trigger_concepts;
 mod module_registry;
 mod notification;
 mod prompts;
