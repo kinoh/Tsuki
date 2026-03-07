@@ -1,0 +1,68 @@
+name: Fuzzy Style Name Query
+include_debug_events: false
+
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a tester in a natural Japanese casual chat.
+      Keep each utterance to exactly one sentence.
+      Do not reveal test intent.
+      Follow the turn plan in strict order.
+      Keep the user's stance slightly unsure and exploratory rather than technical.
+
+      Turn plan (intent checkpoints):
+      1) Start with a light photo-related casual opener.
+      2) Ask whether a Saul Leiter-like street-photo look with foreground obstruction/occlusion has any particular style name.
+         Keep it fuzzy and exploratory rather than asking for a strict textbook term.
+      3) If the assistant gives a heavy taxonomy or too many labels, respond with a short alignment utterance like "そうそう、窓越しとか反射っぽいやつ".
+         If the assistant stays light, still give a short alignment utterance that confirms the vibe you meant.
+      4) Ask a small follow-up about what short wording you would use when casually talking to someone about that look.
+      5) End naturally.
+    max_turns: 8
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: |
+      How well the run satisfies the scenario sequence:
+      - casual photo opener
+      - fuzzy style-name query
+      - short user-side alignment
+      - small wording follow-up
+      - natural ending
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  tentative_alignment:
+    description: |
+      Judge whether the assistant first aligns with the user's vague aesthetic intent before trying to classify it.
+      Score high when:
+      - the assistant shows a plausible tentative understanding of the look
+      - the assistant avoids acting as if there must be one exact canonical term
+      - the reply feels collaborative rather than corrective
+      Penalize replies that jump straight into label inventory without first grounding the user's intended vibe.
+
+  premature_taxonomy_penalty:
+    description: |
+      Judge whether the assistant over-produces taxonomy or label lists too early.
+      Score high when:
+      - the first answer stays compact
+      - only one or two labels are introduced unless the user explicitly asks for more
+      - English glosses and near-synonym lists stay limited
+      Penalize replies that front-load many labels, category lists, or terminology mapping for a still-fuzzy question.
+
+  disambiguation_naturalness:
+    description: |
+      Judge whether follow-up clarification feels like natural conversation rather than search-tree narrowing.
+      Score high when:
+      - clarification questions feel lightweight and grounded in the user's phrasing
+      - the assistant does not force binary or menu-like branching
+      Penalize "A or B?" style narrowing that feels like mechanical disambiguation.
+
+  answer_density_fit:
+    description: |
+      Judge whether response density matches the user's exploratory question.
+      Score high when:
+      - the assistant gives a small practical answer first
+      - elaboration is deferred until the user confirms interest
+      Penalize replies that explain the entire term landscape before the user's intent is settled.
