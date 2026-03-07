@@ -15,6 +15,8 @@ Guidance for coding agents working on Tsuki.
   - `src/storage/`: LibSQL and usage tracking
   - `scripts/`: prompt encrypt/decrypt, manual checks
 - `core-rust/`: Rust backend to replace `core/` (WIP)
+- `mcp/`: MCP server/provider implementations and their tool contracts
+  - Treat tool descriptions, schemas, and server-specific behavior as owned by each provider here
 - `gui/`: Tauri + Svelte client
   - `src/`: Svelte routes/components (e.g., `routes/+page.svelte`, `Config.svelte`, `Status.svelte`, `Note.svelte`)
   - `src-tauri/`: Tauri shell (Rust) with `src/main.rs`, `lib.rs`, `tauri.conf.json`, `capabilities/`, `icons/`
@@ -64,6 +66,7 @@ Guidance for coding agents working on Tsuki.
 - User-specific MCP (Rust binaries)
   - `scheduler`: time-based notifications, data under `${DATA_DIR}/${userId}__scheduler/`.
 - MCP clients support resource subscriptions; isolation is per user; roots are under `DATA_DIR`.
+- When an MCP tool contract feels wrong (description, schema, examples, behavior), inspect the provider implementation under `mcp/` before patching a consumer such as `core-rust`.
 
 ## Runtime & Commands
 - Core dev

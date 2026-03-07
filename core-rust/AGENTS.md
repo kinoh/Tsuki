@@ -132,6 +132,12 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - Thresholds and context-template wording should be tuned by config, not code rewrites.
 - Do not hardcode prompt text in Rust source; prompt/context wording must be owned by config or prompt files.
 
+## MCP bootstrap policy
+- Initial MCP trigger onboarding should prefer generic action-family concepts, not downstream use-case examples.
+- Keep bootstrap trigger-policy code generic; do not add per-tool hardcoded overrides in shared trigger-generation modules.
+- If an MCP tool description or schema wording is the source of bad trigger generation, fix the provider contract first; do not patch around it in `core-rust`.
+- Enforce bootstrap safety mechanically where needed (for example count caps), but keep semantic steering in shared rules rather than tool-specific exceptions.
+
 ## WIP areas
 
 ### Work Log in debug_ui
@@ -160,6 +166,7 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - For `core-rust` design/implementation docs, include a short `Compatibility Impact` statement:
   - default expectation: `breaking-by-default (no compatibility layer)`.
   - if compatibility is introduced, the document must justify why replacement/removal was not acceptable.
+- Keep one decision goal in one document. If several code changes serve the same design goal, extend the existing same-day doc instead of splitting it into local implementation fragments.
 
 ## Test-scope separation
 - Treat scenario-spec changes and test-harness changes as different scopes.
