@@ -43,7 +43,7 @@ struct DecisionParsed {
 
 struct DecisionContextTemplateVars<'a> {
     latest_user_input: &'a str,
-    active_concepts_from_concept_graph: &'a str,
+    active_concepts_and_arousal: &'a str,
     outputs_from_immediately_executed_submodules: &'a str,
     candidate_submodules_by_interest_match: &'a str,
     recent_event_history: &'a str,
@@ -126,7 +126,7 @@ pub(crate) async fn run_decision(
         Some(usage_recorder),
     ));
     let activation_concepts =
-        format_activation_context(&activation_snapshot.active_concepts_from_concept_graph);
+        format_activation_context(&activation_snapshot.active_concepts_and_arousal);
     let executed_submodule_outputs =
         format_hard_trigger_results(&router_output.hard_trigger_results);
     let submodule_candidates =
@@ -135,7 +135,7 @@ pub(crate) async fn run_decision(
         &state.config.input.decision_context_template,
         DecisionContextTemplateVars {
             latest_user_input: input_text,
-            active_concepts_from_concept_graph: &activation_concepts,
+            active_concepts_and_arousal: &activation_concepts,
             outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
             candidate_submodules_by_interest_match: &submodule_candidates,
             recent_event_history: &history,
@@ -180,20 +180,21 @@ pub(crate) async fn run_decision(
     };
 
     let parsed = parse_decision(&response.text);
-    let response = if parsed.decision == "respond" && !has_tool_call(&response, EMIT_USER_REPLY_TOOL) {
-        repair_missing_emit_user_reply(
-            modules,
-            state,
-            &base_instructions,
-            &decision_instructions,
-            &context,
-            &response,
-        )
-        .await
-        .unwrap_or(response)
-    } else {
-        response
-    };
+    let response =
+        if parsed.decision == "respond" && !has_tool_call(&response, EMIT_USER_REPLY_TOOL) {
+            repair_missing_emit_user_reply(
+                modules,
+                state,
+                &base_instructions,
+                &decision_instructions,
+                &context,
+                &response,
+            )
+            .await
+            .unwrap_or(response)
+        } else {
+            response
+        };
     let parsed = parse_decision(&response.text);
     let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
     let decision_event = decision_text(
@@ -283,7 +284,7 @@ pub(crate) async fn run_decision_debug(
     ));
     let context = context_override.map(str::to_string).unwrap_or_else(|| {
         let activation_concepts =
-            format_activation_context(&activation_snapshot.active_concepts_from_concept_graph);
+            format_activation_context(&activation_snapshot.active_concepts_and_arousal);
         let executed_submodule_outputs =
             format_hard_trigger_results(&router_output.hard_trigger_results);
         let submodule_candidates =
@@ -292,7 +293,7 @@ pub(crate) async fn run_decision_debug(
             &state.config.input.decision_context_template,
             DecisionContextTemplateVars {
                 latest_user_input: input_text,
-                active_concepts_from_concept_graph: &activation_concepts,
+                active_concepts_and_arousal: &activation_concepts,
                 outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
                 candidate_submodules_by_interest_match: &submodule_candidates,
                 recent_event_history: &history,
@@ -474,7 +475,7 @@ pub(crate) async fn run_submodule_tool(
     let context = render_submodule_context_template(
         &state.config.input.submodule_context_template,
         input_text,
-        &format_activation_context(&activation_snapshot.active_concepts_from_concept_graph),
+        &format_activation_context(&activation_snapshot.active_concepts_and_arousal),
         &format_soft_recommendations(&activation_snapshot.soft_recommendations),
         &history,
         execution_reason.unwrap_or("none"),
@@ -551,8 +552,8 @@ fn render_decision_context_template(
     template
         .replace("{{latest_user_input}}", vars.latest_user_input)
         .replace(
-            "{{active_concepts_from_concept_graph}}",
-            vars.active_concepts_from_concept_graph,
+            "{{active_concepts_and_arousal}}",
+            vars.active_concepts_and_arousal,
         )
         .replace(
             "{{outputs_from_immediately_executed_submodules}}",
@@ -584,7 +585,7 @@ fn append_visible_mcp_tool_contracts(
 fn render_submodule_context_template(
     template: &str,
     latest_user_input: &str,
-    active_concepts_from_concept_graph: &str,
+    active_concepts_and_arousal: &str,
     candidate_submodules_by_interest_match: &str,
     recent_event_history: &str,
     execution_reason: &str,
@@ -592,8 +593,8 @@ fn render_submodule_context_template(
     template
         .replace("{{latest_user_input}}", latest_user_input)
         .replace(
-            "{{active_concepts_from_concept_graph}}",
-            active_concepts_from_concept_graph,
+            "{{active_concepts_and_arousal}}",
+            active_concepts_and_arousal,
         )
         .replace(
             "{{candidate_submodules_by_interest_match}}",
@@ -899,7 +900,10 @@ fn build_config_with_tools_and_handler(
 }
 
 fn has_tool_call(response: &crate::llm::LlmResponse, tool_name: &str) -> bool {
-    response.tool_calls.iter().any(|call| call.name == tool_name)
+    response
+        .tool_calls
+        .iter()
+        .any(|call| call.name == tool_name)
 }
 
 async fn repair_missing_emit_user_reply(

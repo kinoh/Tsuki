@@ -30,6 +30,7 @@ const DEFAULT_CONCEPT_EMBEDDING_MODEL_DIR: &str =
 #[async_trait]
 pub(crate) trait ConceptGraphActivationReader: Send + Sync {
     async fn concept_search(&self, input_text: &str, limit: usize) -> Result<Vec<String>, String>;
+    async fn active_nodes(&self, limit: usize) -> Result<Vec<ActiveGraphNode>, String>;
     async fn concept_activation(&self, concepts: &[String])
         -> Result<HashMap<String, f64>, String>;
 }
@@ -132,6 +133,12 @@ struct Proposition {
 struct VectorCandidate {
     name: String,
     semantic: f64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ActiveGraphNode {
+    pub(crate) label: String,
+    pub(crate) arousal: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -1037,6 +1044,78 @@ impl ConceptGraphActivationReader for ActivationConceptGraphStore {
             }
         }
         Ok(concepts)
+    }
+
+    async fn active_nodes(&self, limit: usize) -> Result<Vec<ActiveGraphNode>, String> {
+        let limit = limit.max(1).min(200);
+        let now = self.now_ms();
+        let mut items = Vec::<(String, f64, i64)>::new();
+
+        let concept_query = query(
+            "MATCH (c:Concept)
+             RETURN c.name AS name, c.arousal_level AS arousal_level, c.accessed_at AS accessed_at",
+        );
+        let mut concept_result = self
+            .graph
+            .execute(concept_query)
+            .await
+            .map_err(|err| err.to_string())?;
+        while let Ok(Some(row)) = concept_result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
+            let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+            let arousal = Self::round_score(self.arousal(arousal_level, accessed_at, now));
+            if arousal <= 0.0 {
+                continue;
+            }
+            items.push((name, arousal, accessed_at));
+        }
+
+        let episode_query = query(
+            "MATCH (e:Episode)
+             RETURN e.name AS name, e.summary AS summary,
+                    e.arousal_level AS arousal_level, e.accessed_at AS accessed_at",
+        );
+        let mut episode_result = self
+            .graph
+            .execute(episode_query)
+            .await
+            .map_err(|err| err.to_string())?;
+        while let Ok(Some(row)) = episode_result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            let summary: String = row.get("summary").unwrap_or_default();
+            let label = if summary.trim().is_empty() {
+                name
+            } else {
+                summary.trim().to_string()
+            };
+            let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
+            let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+            let arousal = Self::round_score(self.arousal(arousal_level, accessed_at, now));
+            if arousal <= 0.0 {
+                continue;
+            }
+            items.push((label, arousal, accessed_at));
+        }
+
+        items.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.2.cmp(&a.2))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        items.truncate(limit);
+
+        Ok(items
+            .into_iter()
+            .map(|(label, arousal, _)| ActiveGraphNode { label, arousal })
+            .collect())
     }
 
     async fn concept_activation(

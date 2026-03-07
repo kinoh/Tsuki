@@ -656,7 +656,10 @@ fn map_tool(server_id: &str, _url: &str, item: &ToolObject) -> Result<McpToolDes
 
     let runtime_tool_name = format!("{}__{}", server_norm, tool_norm);
     let concept_key = format!("mcp_tool:{}__{}", server_norm, tool_norm);
-    let input_schema = item.input_schema.clone().unwrap_or_else(default_parameters_schema);
+    let input_schema = item
+        .input_schema
+        .clone()
+        .unwrap_or_else(default_parameters_schema);
     let llm_parameters = normalize_function_parameters_for_openai(input_schema.clone());
 
     Ok(McpToolDescriptor {
@@ -757,7 +760,11 @@ fn make_schema_nullable(value: &mut Value) {
         || value
             .get("anyOf")
             .and_then(Value::as_array)
-            .map(|items| items.iter().any(|item| item.get("type").and_then(Value::as_str) == Some("null")))
+            .map(|items| {
+                items
+                    .iter()
+                    .any(|item| item.get("type").and_then(Value::as_str) == Some("null"))
+            })
             .unwrap_or(false)
         || value.get("type").and_then(Value::as_str) == Some("null");
     if already_nullable {

@@ -1,6 +1,6 @@
 use futures::future::join_all;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     future::Future,
@@ -8,6 +8,7 @@ use std::{
     time::Instant,
 };
 
+use crate::activation_concept_graph::ActiveGraphNode;
 use crate::app_state::AppState;
 use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{ModuleRuntime, Modules};
@@ -34,7 +35,7 @@ pub(crate) struct HardTriggerResult {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RouterOutput {
-    pub(crate) active_concepts_from_concept_graph: String,
+    pub(crate) active_concepts_and_arousal: String,
     pub(crate) module_scores: BTreeMap<String, f64>,
     pub(crate) saturation_penalties: BTreeMap<String, f64>,
     pub(crate) hard_effective_scores: BTreeMap<String, f64>,
@@ -47,7 +48,7 @@ pub(crate) struct RouterOutput {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ActivationSnapshot {
-    pub(crate) active_concepts_from_concept_graph: String,
+    pub(crate) active_concepts_and_arousal: String,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
 }
@@ -60,7 +61,7 @@ struct RouterPreprocessOutput {
 #[derive(Debug, Clone)]
 struct RouterConceptResolution {
     selected_seeds: Vec<String>,
-    active_concepts_from_concept_graph: String,
+    active_concepts_and_arousal: String,
 }
 
 pub(crate) async fn run_router<F, Fut>(
@@ -78,12 +79,14 @@ where
     let router_started = Instant::now();
     let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
     let concept_limit = state.config.router.query_terms_max.max(1);
+    let active_state_limit = state.config.router.active_state_limit.max(1);
     let preprocess = preprocess_router_activation(input_text, concept_limit, state).await;
-    let resolution = resolve_active_concepts_from_concept_graph(
+    let resolution = resolve_active_concepts_and_arousal(
         input_text,
         &active_module_names,
         &preprocess,
         concept_limit,
+        active_state_limit,
         modules,
         state,
         overrides,
@@ -92,10 +95,10 @@ where
     emit_concept_graph_query_event(
         state,
         input_text,
-        concept_limit,
+        active_state_limit,
         &preprocess.candidate_concepts,
         &resolution.selected_seeds,
-        &resolution.active_concepts_from_concept_graph,
+        &resolution.active_concepts_and_arousal,
     )
     .await;
     let activation_sources = collect_submodule_activation_sources(&resolution.selected_seeds);
@@ -136,7 +139,7 @@ where
         .map(|item| item.runtime_tool_name.clone())
         .collect::<Vec<_>>();
     let activation_snapshot = ActivationSnapshot {
-        active_concepts_from_concept_graph: resolution.active_concepts_from_concept_graph.clone(),
+        active_concepts_and_arousal: resolution.active_concepts_and_arousal.clone(),
         hard_triggers: hard_triggers.clone(),
         soft_recommendations: soft_recommendations.clone(),
     };
@@ -150,7 +153,7 @@ where
     dampen_hard_triggered_submodule_arousal(state, &hard_triggers).await;
 
     let router_output = RouterOutput {
-        active_concepts_from_concept_graph: resolution.active_concepts_from_concept_graph,
+        active_concepts_and_arousal: resolution.active_concepts_and_arousal,
         module_scores,
         saturation_penalties,
         hard_effective_scores,
@@ -172,7 +175,7 @@ where
         router_output.hard_triggers.len(),
         router_output.hard_trigger_results.len(),
         router_output.soft_recommendations.len(),
-        router_output.active_concepts_from_concept_graph.len()
+        router_output.active_concepts_and_arousal.len()
     );
     router_output
 }
@@ -181,9 +184,7 @@ pub(crate) fn activation_snapshot_from_router_output(
     router_output: &RouterOutput,
 ) -> ActivationSnapshot {
     ActivationSnapshot {
-        active_concepts_from_concept_graph: router_output
-            .active_concepts_from_concept_graph
-            .clone(),
+        active_concepts_and_arousal: router_output.active_concepts_and_arousal.clone(),
         hard_triggers: router_output.hard_triggers.clone(),
         soft_recommendations: router_output.soft_recommendations.clone(),
     }
@@ -472,17 +473,17 @@ async fn emit_router_debug_error(state: &AppState, context: &str, error: &str) {
 async fn emit_concept_graph_query_event(
     state: &AppState,
     query_text: &str,
-    limit: usize,
+    active_state_limit: usize,
     candidate_concepts: &[String],
     selected_seeds: &[String],
-    active_concepts_from_concept_graph: &str,
+    active_concepts_and_arousal: &str,
 ) {
     let event = concept_graph_query(json!({
         "query_text": query_text,
-        "limit": limit,
+        "active_state_limit": active_state_limit,
         "result_concepts": candidate_concepts,
         "selected_seeds": selected_seeds,
-        "active_concepts_from_concept_graph": active_concepts_from_concept_graph,
+        "active_concepts_and_arousal": active_concepts_and_arousal,
     }));
     record_event(state, event).await;
 }
@@ -507,11 +508,12 @@ async fn preprocess_router_activation(
     RouterPreprocessOutput { candidate_concepts }
 }
 
-async fn resolve_active_concepts_from_concept_graph(
+async fn resolve_active_concepts_and_arousal(
     input_text: &str,
     active_module_names: &[String],
     preprocess: &RouterPreprocessOutput,
     concept_limit: usize,
+    active_state_limit: usize,
     modules: &Modules,
     state: &AppState,
     overrides: &PromptOverrides,
@@ -575,7 +577,7 @@ async fn resolve_active_concepts_from_concept_graph(
             emit_router_debug_error(state, &context, &detail).await;
             return RouterConceptResolution {
                 selected_seeds: Vec::new(),
-                active_concepts_from_concept_graph: "none".to_string(),
+                active_concepts_and_arousal: "none".to_string(),
             };
         }
     };
@@ -588,28 +590,34 @@ async fn resolve_active_concepts_from_concept_graph(
     )
     .await;
     let selected_seeds = parse_recall_seeds(&response.text, concept_limit);
-    let active_concepts_from_concept_graph = if selected_seeds.is_empty() {
-        "none".to_string()
-    } else {
-        match state
+    if !selected_seeds.is_empty() {
+        if let Err(err) = state
             .services
             .activation_concept_graph
             .recall_query(selected_seeds.clone(), ROUTER_RECALL_MAX_HOP)
             .await
         {
-            Ok(value) => render_recall_result_as_active_concepts(&value, concept_limit),
-            Err(err) => {
-                emit_router_debug_error(
-                    state,
-                    &format!("recall_query seeds={:?}", selected_seeds),
-                    &err,
-                )
-                .await;
-                "none".to_string()
-            }
+            emit_router_debug_error(
+                state,
+                &format!("recall_query seeds={:?}", selected_seeds),
+                &err,
+            )
+            .await;
+        }
+    }
+    let active_concepts_and_arousal = match state
+        .services
+        .activation_concept_graph
+        .active_nodes(active_state_limit)
+        .await
+    {
+        Ok(nodes) => render_active_nodes_as_text(&nodes),
+        Err(err) => {
+            emit_router_debug_error(state, "active_nodes", &err).await;
+            "none".to_string()
         }
     };
-    if active_concepts_from_concept_graph == "none" {
+    if active_concepts_and_arousal == "none" {
         println!(
             "PERF router stage=resolve_concepts total_ms={} output=none_empty",
             started.elapsed().as_millis()
@@ -618,12 +626,12 @@ async fn resolve_active_concepts_from_concept_graph(
         println!(
             "PERF router stage=resolve_concepts total_ms={} output_len={}",
             started.elapsed().as_millis(),
-            active_concepts_from_concept_graph.len()
+            active_concepts_and_arousal.len()
         );
     }
     RouterConceptResolution {
         selected_seeds,
-        active_concepts_from_concept_graph,
+        active_concepts_and_arousal,
     }
 }
 
@@ -677,29 +685,21 @@ fn parse_recall_seeds(text: &str, max: usize) -> Vec<String> {
     seeds
 }
 
-fn render_recall_result_as_active_concepts(value: &Value, max_lines: usize) -> String {
-    let lines = value
-        .get("propositions")
-        .and_then(|items| items.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    let text = item.get("text").and_then(|value| value.as_str())?.trim();
-                    if text.is_empty() {
-                        return None;
-                    }
-                    let score = item
-                        .get("score")
-                        .and_then(|value| value.as_f64())
-                        .unwrap_or(0.0);
-                    let clamped = score.clamp(0.0, 1.0);
-                    Some(format!("{}\tscore={:.2}", text, clamped))
-                })
-                .take(max_lines.max(1))
-                .collect::<Vec<_>>()
+fn render_active_nodes_as_text(nodes: &[ActiveGraphNode]) -> String {
+    let lines = nodes
+        .iter()
+        .filter_map(|node| {
+            let label = node.label.trim();
+            if label.is_empty() {
+                return None;
+            }
+            Some(format!(
+                "{}\tarousal={:.2}",
+                label,
+                node.arousal.clamp(0.0, 1.0)
+            ))
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
     if lines.is_empty() {
         "none".to_string()
     } else {
@@ -735,14 +735,13 @@ mod tests {
     }
 
     #[test]
-    fn render_recall_result_as_active_concepts_formats_lines() {
-        let value = json!({
-            "propositions": [
-                { "text": "京都 evokes 寺", "score": 0.8231 }
-            ]
-        });
-        let text = render_recall_result_as_active_concepts(&value, 8);
-        assert_eq!(text, "京都 evokes 寺\tscore=0.82");
+    fn render_active_nodes_as_text_formats_lines() {
+        let nodes = vec![ActiveGraphNode {
+            label: "shell command".to_string(),
+            arousal: 0.973,
+        }];
+        let text = render_active_nodes_as_text(&nodes);
+        assert_eq!(text, "shell command\tarousal=0.97");
     }
 
     #[test]
