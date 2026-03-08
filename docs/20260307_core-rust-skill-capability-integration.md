@@ -1,251 +1,237 @@
-# Core-Rust Skill Capability Integration
+# Core-Rust Skill Integration Into Concept Graph Memory
 
 ## Overview
-This document defines how `core-rust` should introduce agent skills that are discovered and exposed dynamically through concept activation, in the same operational style as MCP tools.
+This document defines how `core-rust` should introduce agent skills without turning them into another callable module or tool system.
 
-The goal is not to rename existing submodules into skills. The goal is to add a new local capability type that participates in the same visibility pipeline as MCP tools while preserving the existing role of submodules as persistent internal cognitive modules.
+`skill` is treated as knowledge, not as an execution unit. It belongs inside the concept graph memory model. Router surfaces candidate skills for the current turn, and Decision chooses whether it needs to inspect the skill body before composing the final response or tool usage plan.
 
 Compatibility Impact: breaking-by-default (no compatibility layer)
 
 ## Problem
-`core-rust` currently has two adjacent but different execution models.
+`core-rust` already has two runtime concepts that may look close to skills but are not the right fit.
 
-- Submodules are persistent internal modules. They are activated by the concept graph and can be hard-triggered in Router, but Decision still receives a callable tool for every active submodule name.
-- MCP tools are bootstrapped into a registry, linked to trigger concepts, and exposed to Decision only when they become visible for the current turn.
+- `submodule` is a persistent internal reasoning module with its own prompt-shaped behavior.
+- `mcp tool` is a callable capability with an explicit invocation contract.
 
-This creates a gap for agent skills.
+If skills are forced into either shape, the architecture becomes muddled.
 
-- If skills are implemented as more submodules, the distinction between persistent inner modules and situational abilities collapses.
-- If skills are implemented as ad-hoc local tools without concept-driven visibility, they bypass the router-first activation model.
-- If skills are implemented with separate loading and visibility logic from MCP tools, the runtime will gain another parallel orchestration path without a clear responsibility boundary.
+- Treating skills as more submodules would blur the boundary between internal reasoning agents and stored knowledge.
+- Treating skills as callable tools would incorrectly imply that a skill performs an action instead of informing Decision.
+- Treating skills as a separate side registry unrelated to the concept graph would weaken the graph-first memory design that `core-rust` is moving toward.
 
 ## Decision
-Introduce a shared `Capability` layer and model local skills as one capability kind beside MCP tools.
+Store skills directly in the concept graph as knowledge nodes.
 
-- Keep `submodule` as a separate domain concept.
-  - `submodule` means a persistent internal module such as curiosity or self-preservation.
-  - `skill` means a situational callable ability selected for the current turn.
-- Add a runtime abstraction that covers both dynamically exposed MCP tools and dynamically exposed local skills.
-- Router remains responsible for activation-driven visibility.
-- Decision receives only visible capabilities for the current turn.
-- Skill prompt bodies and heavy definitions must be loaded lazily only when the skill is actually executed.
+- `skill` is a memory object, not a callable runtime unit.
+- The concept graph is the primary home for skill content, relations, and embedding.
+- Router is responsible for surfacing candidate skills for the current turn.
+- Decision is responsible for deciding whether to inspect the full skill body.
+- Skill usage is learned and improved in Decision behavior over time. The skill summary must not hardcode specific situations or execution recipes.
 
 ## Responsibility Boundaries
 
+### Concept Graph
+- Owns skill storage, embedding, and relations.
+- Treats skills as part of memory, not as external runtime plugins.
+- Must remain the source of truth for skill content.
+
 ### Router
-- Owns capability visibility selection through concept activation.
-- Must not read full skill prompt bodies in the normal activation path.
-- Must not execute local skills unless a future design explicitly marks a skill as hard-triggerable.
+- Activates and ranks candidate skills through the concept graph.
+- Surfaces only lightweight skill metadata in the normal path.
+- Must not inject all skill bodies into Decision context by default.
+- Must not decide how a surfaced skill should be applied in the final response.
 
 ### Decision
-- Consumes visible capabilities prepared by Router.
-- May call a visible capability if it directly serves the user request.
-- Must not re-score or re-rank skill relevance outside Router output.
-
-### Capability Registry
-- Owns descriptor discovery, validation, and current-turn exposure data.
-- Unifies the lookup path for `mcp_tool` and `local_skill`.
-- Must expose stable runtime tool contracts to Decision.
-
-### Skill Registry
-- Owns local skill manifests and lazy loading of skill definitions.
-- Must not own cross-turn relevance policy.
-- Must not duplicate Router visibility logic.
+- Receives surfaced skill summaries from Router.
+- Decides whether a skill body needs to be read for the current turn.
+- Decides how to combine skill knowledge with state and available tools.
+- Owns the final response strategy and any learned usage policy.
 
 ### Submodules
-- Remain persistent internal modules.
-- Continue to be activated through `submodule:{name}` concepts.
-- Must not become the generic container for all callable skills.
+- Remain internal reasoning modules.
+- Are still separate from skill memory.
+- Must not be repurposed as the generic storage or execution mechanism for skills.
 
-## Capability Model
-The runtime should introduce a shared descriptor model similar to:
+### MCP Tools
+- Remain callable tools.
+- Are still exposed through explicit invocation contracts.
+- Must not be used as the conceptual model for skills.
 
-```text
-CapabilityDescriptor
-- runtime_name
-- kind: mcp_tool | local_skill
-- concept_key
-- description
-- input_schema
-- llm_parameters
-- execution_mode: decision_tool | hard_triggerable
-```
+## Skill Model
+Each skill should exist in the concept graph as a node with durable memory properties.
 
-Each capability descriptor must be light enough to load at startup.
-
-The runtime should also define an execution interface similar to:
-
-```text
-CapabilityExecutor
-- validate_call_arguments(runtime_name, args)
-- execute(runtime_name, args, context)
-```
-
-This separates three concerns cleanly:
-
-- discovery/bootstrap
-- visibility resolution
-- execution
-
-## Skill Data Model
-Skills should be split into two layers.
-
-### Skill Manifest
-Startup-safe metadata:
+Minimum fields:
 
 - `name`
-- `description`
-- `input_schema`
-- `trigger_concepts` or `trigger_source`
-- `execution_mode`
-- `prompt_path`
-- optional allowed tools policy
+- `kind = "skill"`
+- `summary`
+- `body`
+- `embedding`
+- `updated_at`
 
-### Skill Definition
-Loaded only at execution time:
+Optional operational metadata may be added later if justified, but the initial runtime model should stay minimal.
 
-- full skill prompt
-- optional execution instructions
-- optional tool allowlist
+## Why `summary` Exists
+`summary` is not a replacement for the skill body.
 
-This prevents the normal routing path from loading all skill prompts every turn.
+Its role is only to let Router surface lightweight candidates and let Decision choose whether deeper reading is necessary. Because of this, `summary` must stay abstract.
 
-## Trigger and Concept Strategy
-Skills should use the same concept-graph association style as MCP tools.
+`summary` must:
 
-- Create a concept node `skill:{name}` for each skill.
-- Add `evokes` relations from trigger concepts to `skill:{name}`.
-- Resolve visibility from concept activation on the `skill:{name}` node.
+- identify what kind of knowledge the skill contains
+- remain short and cheap to surface
+- avoid prescribing concrete situations
+- avoid telling Decision exactly how to apply the skill
 
-Trigger source policy:
+`summary` must not:
 
-1. Prefer explicit `manifest.trigger_concepts`.
-2. If missing, derive trigger concepts from `description` and `input_schema`.
-3. Do not derive trigger concepts from the full prompt body in the default bootstrap path.
+- encode explicit scenario routing rules
+- encode detailed action sequences
+- substitute for the body when the body is actually needed
 
-Why:
+The full `body` remains the authoritative content.
 
-- Skill prompts are usually longer and noisier than MCP tool descriptions.
-- Trigger extraction from full prompts will pull in persona wording and examples that should not become activation concepts.
-- Precision matters more than recall in router-driven visibility.
+## Skill Relations
+Initial skill relation design should stay minimal.
+
+Required relation pattern:
+
+- trigger-like concept -> skill, using `evokes`
+
+This is enough for the first stage because the runtime only needs to:
+
+- activate skills from related concepts
+- surface likely-relevant skill summaries
+- let Decision inspect the body if needed
+
+Do not introduce `skill -> related concept` relations by default. They add maintenance cost without a clear runtime need in the first integration step.
+
+## Trigger Policy
+Trigger associations should be represented in the concept graph itself, not duplicated in a separate manifest as runtime truth.
+
+Policy:
+
+- skill trigger relations live in the graph
+- bootstrap may generate them similarly to MCP trigger onboarding
+- the graph remains the durable representation after generation
+
+Trigger generation should prefer concise skill-identifying material, not arbitrary long-form body text. The goal is to capture what kind of knowledge the skill contains, not to convert every phrase in the skill body into a trigger rule.
 
 ## Runtime Flow
 
-### Bootstrap
-- Load MCP tool descriptors.
-- Load skill manifests.
-- Register both as capabilities.
-- Upsert capability concept nodes and trigger relations into the concept graph.
+### 1. Bootstrap / Import
+- Write the skill node into the concept graph.
+- Store the skill `body`, `summary`, and embedding on the node.
+- Generate or update trigger relations from relevant concepts to the skill node.
 
-### Router
-- Resolve active concepts from the current user input.
-- Activate related targets through the concept graph.
-- Compute visibility for both MCP tools and local skills.
-- Return a single capability visibility payload in router output.
+### 2. Router
+- Activate concepts from the current user input.
+- Allow skill nodes to become active through graph relations and embedding-based retrieval.
+- Select a small set of visible skills for the turn.
+- Pass only lightweight surfaced skill information to Decision.
 
-### Decision
-- Receive only visible capabilities.
-- Expose them as callable tools together with always-on base tools.
-- Execute a capability through the shared dispatcher when selected.
+### 3. Decision
+- Receive visible skill summaries in the decision context.
+- Decide whether any surfaced skill requires deeper inspection.
+- If needed, read the skill body through an internal memory lookup path.
+- Use the inspected knowledge to compose the final response and any tool usage.
 
-### Skill Execution
-- When a visible skill is called, load its full definition lazily.
-- Run the skill through a dedicated local execution path.
-- Emit normal runtime and debug events under explicit ownership such as `skill:{name}`.
+## Decision Access Pattern
+Decision should not receive every skill body by default.
 
-## Required Refactoring Direction
+Instead:
 
-### 1. Generalize visible MCP tools into visible capabilities
-Current router output contains MCP-specific fields. This should become capability-oriented output.
+- Router provides surfaced skill summaries.
+- Decision chooses whether to inspect a skill body.
+- Decision may also inspect state if the skill is relevant but current user/session state is needed for application.
 
-Examples:
+This allows:
 
-- `mcp_visible_tools` -> `visible_capability_names`
-- `mcp_tool_visibility` -> `capability_visibility`
+- large skills without forcing every turn to load them
+- multiple surfaced skills in one turn
+- learned decision-time usage policy rather than hardcoded summary-time policy
 
-### 2. Introduce a shared capability dispatcher
-Current decision handling branches between built-in tools, MCP tools, and submodule tools. Local skills should not add a fourth unrelated branch.
+## Internal Read Path
+Because skill inspection is a memory read, not an action execution, the runtime should expose an internal lookup path rather than modeling skills as callable tools.
 
-The runtime should centralize callable capability execution behind one dispatcher.
+The exact implementation can vary, but the contract should support:
 
-### 3. Keep submodule execution separate
-`run_submodule__{name}` remains a submodule-specific tool path. It should not be merged blindly into local skills because the execution semantics differ.
+- listing surfaced skills for the turn
+- reading a skill body by identifier
+- combining that read with existing state access paths
 
-The difference is intentional:
+This is intentionally closer to memory lookup than to tool execution.
 
-- submodule: internal reasoning module
-- skill: situational callable ability
+## Why Skills Are Not Submodules
+The similarity is real: both may be consulted conditionally, and both may influence final behavior.
 
-### 4. Generalize concept-driven activation helpers carefully
-Current concept-graph helpers are submodule-specific. They may be generalized into target activation helpers if needed, but the API should keep target-type ownership explicit.
+The distinction is still important.
 
-Avoid a vague "activate everything related" contract.
+- `submodule` produces text or reasoning as an internal module with its own prompt behavior
+- `skill` provides stored knowledge that Decision reads and interprets
 
-## Execution Policy
-Initial rollout should support only `decision_tool` skills.
+So the runtime may feel adjacent, but the ownership is different:
 
-Why:
+- submodule = reasoning actor
+- skill = retrievable memory
 
-- It matches the current MCP tool exposure pattern.
-- It avoids introducing another hard-trigger execution path before the capability abstraction is stable.
-- It preserves the current meaning of submodule hard triggers.
+That distinction should remain explicit in code and docs.
 
-Hard-triggerable skills may be added later, but only after a new design decision defines:
+## Persistence Direction
+Do not add a separate skill registry as the primary source of truth.
 
-- allowed skill categories
-- ownership of pre-decision execution
-- observability and failure handling rules
+The concept graph should store:
 
-## Persistence and Configuration
-Skills should not reuse the `modules` table.
+- skill content
+- skill embedding
+- trigger relations
 
-Recommended separation:
+Any import helper, admin view, or editing interface should be secondary to the graph, not a competing runtime authority.
 
-- `modules`: persistent internal submodules
-- `skills`: local callable capability manifests
+## Context Contract
+The decision context should surface skill summaries only, for example:
 
-Why:
+```text
+visible_skills:
+- name: gentle_conversation_guidance
+  summary: Low-pressure supportive conversational guidance
+- name: playful_banter_patterns
+  summary: Light playful interaction patterns
+```
 
-- Their lifecycles are different.
-- Their execution policies are different.
-- Their concepts in the runtime architecture are different.
-
-Configuration should provide:
-
-- skill manifest root path
-- optional enable/disable flags per skill
-- optional bootstrap policy settings for trigger derivation
-
-Prompt wording must remain outside Rust source and stay in prompt/config-owned files.
+This surfaced view is not an instruction about how to use a skill. It only tells Decision what knowledge candidates are available to inspect.
 
 ## Rejected Alternatives
 
-### Treat all skills as submodules
-Rejected because it blurs the line between persistent internal modules and situational abilities, and it keeps Decision exposure too broad.
+### Treat skills as callable tools
+Rejected because skill inspection is memory lookup, not action execution.
 
-### Treat skills as built-in always-on tools
-Rejected because it bypasses concept-driven visibility and weakens the router-first design.
+### Treat skills as more submodules
+Rejected because skills are knowledge objects, not additional reasoning actors.
 
-### Add a separate skill visibility pipeline unrelated to MCP tooling
-Rejected because it creates duplicated runtime policy and another parallel orchestration path.
+### Store skill truth outside the concept graph
+Rejected because concept graph memory is intended to carry nearly all memory forms, and skills belong inside that model.
+
+### Encode usage situations inside summary
+Rejected because it freezes Decision behavior too early and pushes learned usage policy into static metadata.
 
 ## Rollout Plan
 
 ### Phase 1
-- Add capability abstractions and keep existing MCP behavior unchanged behind the new interface.
-- Introduce `SkillManifest` loading without executing skills yet.
+- Add skill node storage to the concept graph.
+- Add embedding and trigger relation support for skills.
 
 ### Phase 2
-- Add skill concept bootstrap and visibility resolution.
-- Expose visible skills to Decision as callable tools.
+- Extend Router to surface visible skill summaries.
+- Extend Decision context to receive visible skill summaries.
 
 ### Phase 3
-- Refine debug/event ownership and optional operator controls.
-- Evaluate whether selected skills need a later hard-trigger policy.
+- Add an internal skill body lookup path for Decision.
+- Tune when Decision should inspect a skill body versus rely on surfaced summaries alone.
 
 ## Success Criteria
-- Router determines visibility for both MCP tools and local skills through one capability-oriented model.
-- Decision sees only visible skills for the current turn.
-- Skill prompt bodies are not loaded in the normal routing path.
-- Submodules keep their current architectural meaning.
-- No new hidden fallback path is introduced for missing skill metadata or invalid execution contracts.
+- Skills are stored in the concept graph as memory nodes.
+- Router can surface visible skill summaries without loading every skill body each turn.
+- Decision can choose to inspect a skill body when needed.
+- Skill summaries remain abstract and do not hardcode situational usage.
+- Skills do not become callable pseudo-tools or pseudo-submodules.
