@@ -42,27 +42,68 @@ pub(crate) async fn latest_events(
     if limit == 0 {
         return Vec::new();
     }
-    match state.services.event_store.latest(limit).await {
-        Ok(events) => events
-            .into_iter()
-            .filter(|event| !is_debug_event(event))
-            .filter(|event| !is_observability_event(event))
-            .filter(|event| {
-                excluded_event_ids
-                    .map(|ids| !ids.contains(event.event_id.as_str()))
-                    .unwrap_or(true)
-            })
-            .filter(|event| {
-                cutoff_ts
-                    .map(|cutoff| event.ts.as_str() >= cutoff)
-                    .unwrap_or(true)
-            })
-            .collect(),
-        Err(err) => {
-            println!("EVENT_STORE_ERROR error={}", err);
-            Vec::new()
+    let batch_size = limit.saturating_mul(4).clamp(50, 500);
+    let max_scanned = 5_000usize;
+    let mut visible = Vec::<Event>::with_capacity(limit);
+    let mut scanned = 0usize;
+    let mut cursor: Option<(String, String)> = None;
+
+    while visible.len() < limit && scanned < max_scanned {
+        let batch = match &cursor {
+            Some((ts, event_id)) => {
+                state
+                    .services
+                    .event_store
+                    .list_before_anchor(ts.as_str(), event_id.as_str(), batch_size)
+                    .await
+            }
+            None => {
+                state
+                    .services
+                    .event_store
+                    .list(batch_size, None, true)
+                    .await
+            }
+        };
+        let batch = match batch {
+            Ok(events) => events,
+            Err(err) => {
+                println!("EVENT_STORE_ERROR error={}", err);
+                return Vec::new();
+            }
+        };
+        if batch.is_empty() {
+            break;
+        }
+        scanned += batch.len();
+        cursor = batch
+            .last()
+            .map(|event| (event.ts.clone(), event.event_id.clone()));
+
+        for event in batch {
+            if is_debug_event(&event) || is_observability_event(&event) {
+                continue;
+            }
+            if excluded_event_ids
+                .map(|ids| ids.contains(event.event_id.as_str()))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if cutoff_ts
+                .map(|cutoff| event.ts.as_str() < cutoff)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            visible.push(event);
+            if visible.len() >= limit {
+                break;
+            }
         }
     }
+    visible.reverse();
+    visible
 }
 
 pub(crate) fn is_user_input_event(event: &Event) -> bool {
