@@ -67,6 +67,17 @@ The feature reuses Memgraph only as a vector index for searchable conversation-e
 - Add `backfill-conversation-recall` CLI command to rebuild projections from canonical events.
 - Add `recalled_event_history` placeholder to the decision context template.
 
+## Integration Test Restore Policy
+- Integration tests may restore canonical conversation history from a `core-rust` SQLite backup.
+- The backup input is the canonical `core-rust.db` itself, not a separate legacy message export format.
+- The integration harness accepts either:
+  - a direct `core-rust.db` file
+  - a `.tar.gz` / `.tgz` backup archive containing `./core-rust.db`
+- The harness must restore canonical SQLite history before starting `core-rust`.
+- After restoring SQLite history, the harness must rebuild `ConversationEvent` projections in Memgraph before startup.
+  - Why: semantic recall ownership stays canonical in libSQL, while Memgraph remains a derived vector index.
+  - Why: the Memgraph snapshot and SQLite backup must not drift silently for recalled conversation history.
+
 ## Rejected Alternatives
 - Store conversation embeddings directly on libSQL `events`
   - rejected because canonical event storage and derived vector-index concerns would be mixed in one table contract

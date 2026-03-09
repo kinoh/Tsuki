@@ -72,6 +72,8 @@ struct CoreConfig {
     prompts_file: Option<String>,
     memgraph_uri: String,
     memgraph_backup_path: String,
+    #[serde(default)]
+    sqlite_backup_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -167,6 +169,7 @@ struct IntegrationResult {
     ws_url: String,
     memgraph_uri: String,
     memgraph_backup_path: String,
+    sqlite_backup_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +180,7 @@ struct RuntimeContext {
     auth_token: String,
     memgraph_uri: String,
     memgraph_backup_path: PathBuf,
+    sqlite_backup_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -255,7 +259,9 @@ async fn run() -> Result<(), String> {
     let assets = load_assets(&args, &secret_identity)?;
 
     let runtime = prepare_runtime(&assets.core)?;
+    restore_sqlite_backup(&runtime)?;
     restore_memgraph_snapshot(&runtime).await?;
+    rebuild_conversation_recall_index(&runtime).await?;
     let mut core = start_core(&runtime).await?;
     wait_for_ws(&runtime.ws_url, &mut core).await?;
 
@@ -694,6 +700,25 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
             memgraph_backup_path.display()
         ));
     }
+    let sqlite_backup_path = match core.sqlite_backup_path.as_deref() {
+        Some(raw) => {
+            let resolved = resolve_to_manifest_path(PathBuf::from(raw));
+            if !resolved.exists() {
+                return Err(format!(
+                    "core.sqlite_backup_path not found: {}",
+                    resolved.display()
+                ));
+            }
+            if !resolved.is_file() {
+                return Err(format!(
+                    "core.sqlite_backup_path must be a file: {}",
+                    resolved.display()
+                ));
+            }
+            Some(resolved)
+        }
+        None => None,
+    };
 
     Ok(RuntimeContext {
         temp_dir,
@@ -702,6 +727,7 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
         auth_token,
         memgraph_uri,
         memgraph_backup_path,
+        sqlite_backup_path,
     })
 }
 
@@ -807,6 +833,119 @@ async fn restore_memgraph_snapshot(runtime: &RuntimeContext) -> Result<(), Strin
         sleep(Duration::from_millis(1_000)).await;
     }
     Err("memgraph-test did not become ready after snapshot restore".to_string())
+}
+
+fn restore_sqlite_backup(runtime: &RuntimeContext) -> Result<(), String> {
+    let Some(backup_path) = runtime.sqlite_backup_path.as_ref() else {
+        return Ok(());
+    };
+    if let Some(name) = backup_path.file_name().and_then(|value| value.to_str()) {
+        if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+            return extract_core_rust_db_from_archive(backup_path, runtime.db_path.as_path());
+        }
+    }
+    fs::copy(backup_path, runtime.db_path.as_path()).map_err(|err| {
+        format!(
+            "failed to copy sqlite backup '{}' to '{}': {}",
+            backup_path.display(),
+            runtime.db_path.display(),
+            err
+        )
+    })?;
+    Ok(())
+}
+
+fn extract_core_rust_db_from_archive(
+    archive_path: &Path,
+    target_db_path: &Path,
+) -> Result<(), String> {
+    let extract_dir = target_db_path
+        .parent()
+        .ok_or_else(|| format!("target db has no parent dir: {}", target_db_path.display()))?;
+    let status = std::process::Command::new("tar")
+        .args([
+            "-xzf",
+            archive_path.to_string_lossy().as_ref(),
+            "-C",
+            extract_dir.to_string_lossy().as_ref(),
+            "./core-rust.db",
+        ])
+        .status()
+        .map_err(|err| {
+            format!(
+                "failed to spawn tar for '{}': {}",
+                archive_path.display(),
+                err
+            )
+        })?;
+    if !status.success() {
+        return Err(format!(
+            "tar extraction failed for '{}' with status {}",
+            archive_path.display(),
+            status
+        ));
+    }
+    let extracted_db_path = extract_dir.join("core-rust.db");
+    if !extracted_db_path.exists() {
+        return Err(format!(
+            "archive '{}' did not contain ./core-rust.db",
+            archive_path.display()
+        ));
+    }
+    fs::rename(&extracted_db_path, target_db_path).map_err(|err| {
+        format!(
+            "failed to move extracted db '{}' to '{}': {}",
+            extracted_db_path.display(),
+            target_db_path.display(),
+            err
+        )
+    })?;
+    Ok(())
+}
+
+async fn rebuild_conversation_recall_index(runtime: &RuntimeContext) -> Result<(), String> {
+    if runtime.sqlite_backup_path.is_none() {
+        return Ok(());
+    }
+    let compose_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("compose.test.yaml");
+    run_mgconsole_query(
+        &compose_file,
+        "MATCH (e:ConversationEvent) DETACH DELETE e;",
+    )
+    .await?;
+
+    let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let mut command = Command::new("cargo");
+    sanitize_cargo_env(&mut command);
+    command
+        .args([
+            "run",
+            "--manifest-path",
+            manifest_path.to_string_lossy().as_ref(),
+            "--bin",
+            "tsuki-core-rust",
+            "--",
+            "backfill-conversation-recall",
+        ])
+        .current_dir(&runtime.temp_dir)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Ok(password) = std::env::var("MEMGRAPH_PASSWORD") {
+        command.env("MEMGRAPH_PASSWORD", password);
+    }
+    let status = command
+        .status()
+        .await
+        .map_err(|err| format!("failed to run conversation recall backfill: {}", err))?;
+    if status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "conversation recall backfill failed with status {}",
+        status
+    ))
 }
 
 async fn run_docker_compose(compose_file: &Path, args: &[&str]) -> Result<(), String> {
@@ -1101,6 +1240,10 @@ async fn execute_runs(
         ws_url: runtime.ws_url.clone(),
         memgraph_uri: runtime.memgraph_uri.clone(),
         memgraph_backup_path: runtime.memgraph_backup_path.to_string_lossy().to_string(),
+        sqlite_backup_path: runtime
+            .sqlite_backup_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string()),
     })
 }
 

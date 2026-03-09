@@ -15,6 +15,8 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 - Runner config `[core]` must define:
   - `memgraph_uri`
   - `memgraph_backup_path`
+- Runner config `[core]` may additionally define:
+  - `sqlite_backup_path`
 - Setup command:
   - `task -t core-rust/Taskfile.yaml integration/prepare`
 - Run command:
@@ -25,6 +27,11 @@ This directory contains the rebuilt integration test assets for `core-rust`.
 ## Principles
 - Memgraph restore uses latest snapshot through `integration/memgraph/restore/latest`.
 - Integration harness restores the snapshot specified by `runner.toml` `core.memgraph_backup_path` before core startup.
+- When `core.sqlite_backup_path` is set, integration harness restores canonical `core-rust.db` history into the temp runtime DB before startup.
+- `core.sqlite_backup_path` supports:
+  - a direct `core-rust.db` file
+  - a `.tar.gz` / `.tgz` backup archive containing `./core-rust.db`
+- After SQLite restore, integration harness rebuilds `ConversationEvent` recall projections in Memgraph before starting `core-rust`.
 - Tester and judge configuration are file-based (not environment-variable based).
 - Runtime requires `OPENAI_API_KEY`.
 - Scenario text supports secret placeholders:
