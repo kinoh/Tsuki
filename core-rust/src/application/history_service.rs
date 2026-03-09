@@ -13,13 +13,7 @@ pub(crate) async fn format_event_history(
     excluded_event_ids: Option<&HashSet<String>>,
 ) -> String {
     let events = latest_events(state, limit, cutoff_ts, excluded_event_ids).await;
-    if events.is_empty() {
-        return "none".to_string();
-    }
-    let mut lines = Vec::with_capacity(events.len() + 1);
-    lines.push("ts | role | message".to_string());
-    lines.extend(events.iter().map(format_event_line));
-    lines.join("\n")
+    format_event_lines(&events)
 }
 
 pub(crate) async fn format_decision_debug_history(
@@ -36,13 +30,7 @@ pub(crate) async fn format_decision_debug_history(
     if !submodule_overrides.is_empty() {
         apply_submodule_output_overrides(&mut events, &submodule_overrides);
     }
-    if events.is_empty() {
-        return "none".to_string();
-    }
-    let mut lines = Vec::with_capacity(events.len() + 1);
-    lines.push("ts | role | message".to_string());
-    lines.extend(events.iter().map(format_event_line));
-    lines.join("\n")
+    format_event_lines(&events)
 }
 
 pub(crate) async fn latest_events(
@@ -176,7 +164,17 @@ fn format_event_line(event: &Event) -> String {
     format!("{} | {} | {}", ts, role, payload_text)
 }
 
-fn event_role(event: &Event) -> String {
+pub(crate) fn format_event_lines(events: &[Event]) -> String {
+    if events.is_empty() {
+        return "none".to_string();
+    }
+    let mut lines = Vec::with_capacity(events.len() + 1);
+    lines.push("ts | role | message".to_string());
+    lines.extend(events.iter().map(format_event_line));
+    lines.join("\n")
+}
+
+pub(crate) fn event_role(event: &Event) -> String {
     let tags = &event.meta.tags;
     if event.source == "user" {
         return "user".to_string();
@@ -207,7 +205,7 @@ fn event_role(event: &Event) -> String {
     event.source.clone()
 }
 
-fn format_local_ts_seconds(ts: &str) -> String {
+pub(crate) fn format_local_ts_seconds(ts: &str) -> String {
     let parsed = match OffsetDateTime::parse(ts, &Rfc3339) {
         Ok(value) => value,
         Err(_) => return ts.to_string(),
@@ -227,7 +225,7 @@ fn format_local_ts_seconds(ts: &str) -> String {
     )
 }
 
-fn truncate(value: &str, max: usize) -> String {
+pub(crate) fn truncate(value: &str, max: usize) -> String {
     if value.chars().count() <= max {
         return value.to_string();
     }

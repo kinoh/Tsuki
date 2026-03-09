@@ -1,6 +1,7 @@
 use crate::activation_concept_graph::ConceptGraphStore;
 use crate::application::module_bootstrap::Modules;
-use crate::config::{InputConfig, LimitsConfig, RouterConfig, TtsConfig};
+use crate::config::{ConversationRecallConfig, InputConfig, LimitsConfig, RouterConfig, TtsConfig};
+use crate::conversation_recall_store::ConversationRecallStore;
 use crate::db::Db;
 use crate::event::Event;
 use crate::event_store::EventStore;
@@ -33,6 +34,7 @@ pub(crate) struct AppServices {
     pub(crate) tx: broadcast::Sender<Event>,
     pub(crate) fcm_sender: Option<FcmNotificationSender>,
     pub(crate) activation_concept_graph: Arc<dyn ConceptGraphStore>,
+    pub(crate) conversation_recall_store: Arc<dyn ConversationRecallStore>,
     pub(crate) mcp_registry: Arc<McpRegistry>,
 }
 
@@ -47,6 +49,7 @@ pub(crate) struct AuthState {
 pub(crate) struct AppConfigState {
     pub(crate) limits: LimitsConfig,
     pub(crate) router: RouterConfig,
+    pub(crate) conversation_recall: ConversationRecallConfig,
     pub(crate) input: InputConfig,
     pub(crate) tts: TtsConfig,
 }

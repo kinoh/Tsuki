@@ -7,8 +7,11 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::runtime::Handle;
 
 use crate::app_state::AppState;
+use crate::application::conversation_recall_service::format_recalled_event_history;
 use crate::application::event_service::record_event;
-use crate::application::history_service::{format_decision_debug_history, format_event_history};
+use crate::application::history_service::{
+    format_decision_debug_history, format_event_history, format_event_lines, latest_events,
+};
 use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
@@ -47,6 +50,7 @@ struct DecisionContextTemplateVars<'a> {
     outputs_from_immediately_executed_submodules: &'a str,
     candidate_submodules_by_interest_match: &'a str,
     recent_event_history: &'a str,
+    recalled_event_history: &'a str,
 }
 
 #[derive(Clone)]
@@ -74,12 +78,20 @@ pub(crate) async fn run_decision(
         router_output.soft_recommendations.len()
     );
     let history_started = Instant::now();
-    let history =
-        format_event_history(state, state.config.limits.decision_history, None, None).await;
+    let recent_events =
+        latest_events(state, state.config.limits.decision_history, None, None).await;
+    let history = format_event_lines(&recent_events);
+    let excluded_event_ids = recent_events
+        .iter()
+        .map(|event| event.event_id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let recalled_event_history =
+        format_recalled_event_history(state, input_text, &excluded_event_ids).await;
     println!(
-        "PERF decision stage=history ms={} history_len={}",
+        "PERF decision stage=history ms={} history_len={} recalled_len={}",
         history_started.elapsed().as_millis(),
-        history.len()
+        history.len(),
+        recalled_event_history.len()
     );
     let base_instructions = state.prompts.base_or_default(&overrides);
     let decision_instructions = state.prompts.decision_or_default(&overrides);
@@ -139,6 +151,7 @@ pub(crate) async fn run_decision(
             outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
             candidate_submodules_by_interest_match: &submodule_candidates,
             recent_event_history: &history,
+            recalled_event_history: &recalled_event_history,
         },
     );
     let context = append_visible_mcp_tool_contracts(context, &visible_mcp_tools);
@@ -224,6 +237,17 @@ pub(crate) async fn run_decision_debug(
     module_instructions: &HashMap<String, String>,
     overrides: &PromptOverrides,
 ) -> Result<String, (StatusCode, String)> {
+    let mut recall_excluded_event_ids = excluded_event_ids.clone();
+    if context_override.is_none() && include_history {
+        let recent_events = latest_events(
+            state,
+            state.config.limits.decision_history,
+            history_cutoff_ts,
+            Some(excluded_event_ids),
+        )
+        .await;
+        recall_excluded_event_ids.extend(recent_events.into_iter().map(|event| event.event_id));
+    }
     let history = if context_override.is_some() {
         String::new()
     } else if include_history {
@@ -237,6 +261,11 @@ pub(crate) async fn run_decision_debug(
         .await
     } else {
         "none".to_string()
+    };
+    let recalled_event_history = if context_override.is_some() || !include_history {
+        "none".to_string()
+    } else {
+        format_recalled_event_history(state, input_text, &recall_excluded_event_ids).await
     };
     let base_instructions = state.prompts.base_or_default(&overrides);
     let decision_instructions = state.prompts.decision_or_default(&overrides);
@@ -297,6 +326,7 @@ pub(crate) async fn run_decision_debug(
                 outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
                 candidate_submodules_by_interest_match: &submodule_candidates,
                 recent_event_history: &history,
+                recalled_event_history: &recalled_event_history,
             },
         )
     });
@@ -564,6 +594,7 @@ fn render_decision_context_template(
             vars.candidate_submodules_by_interest_match,
         )
         .replace("{{recent_event_history}}", vars.recent_event_history)
+        .replace("{{recalled_event_history}}", vars.recalled_event_history)
 }
 
 fn append_visible_mcp_tool_contracts(

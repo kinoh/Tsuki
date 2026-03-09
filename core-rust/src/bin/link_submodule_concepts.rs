@@ -2,8 +2,81 @@
 #[path = "../activation_concept_graph.rs"]
 mod activation_concept_graph;
 #[allow(dead_code)]
+#[path = "../conversation_recall_store.rs"]
+mod conversation_recall_store;
+#[allow(dead_code)]
 #[path = "../llm.rs"]
 mod llm;
+
+#[allow(dead_code)]
+mod event {
+    use serde_json::Value;
+
+    #[derive(Debug, Clone)]
+    pub struct Event {
+        pub(crate) event_id: String,
+        pub(crate) ts: String,
+        pub(crate) source: String,
+        pub(crate) modality: String,
+        pub(crate) payload: Value,
+        pub(crate) meta: EventMeta,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct EventMeta {
+        pub(crate) tags: Vec<String>,
+    }
+
+    pub(crate) fn rehydrate_event(
+        event_id: String,
+        ts: String,
+        source: String,
+        modality: String,
+        payload: Value,
+        tags: Vec<String>,
+    ) -> Event {
+        Event {
+            event_id,
+            ts,
+            source,
+            modality,
+            payload,
+            meta: EventMeta { tags },
+        }
+    }
+
+    pub(crate) mod contracts {
+        use serde_json::json;
+
+        use super::{Event, EventMeta};
+
+        pub(crate) fn input_text(source: &str, kind: &str, text: &str) -> Event {
+            Event {
+                event_id: "stub-input".to_string(),
+                ts: "2026-03-09T00:00:00Z".to_string(),
+                source: source.to_string(),
+                modality: "text".to_string(),
+                payload: json!({ "text": text }),
+                meta: EventMeta {
+                    tags: vec!["input".to_string(), format!("type:{}", kind)],
+                },
+            }
+        }
+
+        pub(crate) fn response_text(text: String) -> Event {
+            Event {
+                event_id: "stub-response".to_string(),
+                ts: "2026-03-09T00:00:00Z".to_string(),
+                source: "assistant".to_string(),
+                modality: "text".to_string(),
+                payload: json!({ "text": text }),
+                meta: EventMeta {
+                    tags: vec!["response".to_string()],
+                },
+            }
+        }
+    }
+}
 
 use activation_concept_graph::{
     ActivationConceptGraphStore, ConceptGraphDebugReader, ConceptGraphOps,

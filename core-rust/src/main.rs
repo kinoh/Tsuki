@@ -5,6 +5,7 @@ mod cli;
 mod clock;
 mod commands;
 mod config;
+mod conversation_recall_store;
 mod db;
 mod debug_api;
 mod event;
@@ -35,5 +36,8 @@ async fn run() -> Result<(), String> {
             Ok(())
         }
         cli::CliCommand::Backfill { limit } => commands::backfill::run(limit).await,
+        cli::CliCommand::BackfillConversationRecall { limit } => {
+            commands::backfill_conversation_recall::run(limit).await
+        }
     }
 }

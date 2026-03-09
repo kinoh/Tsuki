@@ -36,6 +36,7 @@ use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{build_modules, sync_module_registry_from_prompts};
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config};
+use crate::conversation_recall_store::ConversationRecallStore;
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::debug_api::{
     DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest, DebugRunRequest,
@@ -262,11 +263,6 @@ pub(crate) async fn run_server() {
         prompts_path.as_path(),
     );
     let prompts = Arc::new(RwLock::new(prompt_overrides.clone()));
-    let emit_event = crate::application::event_service::build_emit_event_callback(
-        event_store.clone(),
-        tx.clone(),
-    );
-    let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
     let activation_concept_graph = Arc::new(
         ActivationConceptGraphStore::connect(
             config.concept_graph.memgraph_uri.clone(),
@@ -277,6 +273,14 @@ pub(crate) async fn run_server() {
         .await
         .expect("failed to connect activation concept graph store"),
     );
+    let conversation_recall_store: Arc<dyn ConversationRecallStore> =
+        activation_concept_graph.clone();
+    let emit_event = crate::application::event_service::build_emit_event_callback(
+        event_store.clone(),
+        tx.clone(),
+        conversation_recall_store.clone(),
+    );
+    let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
     let mcp_bootstrap = crate::mcp::McpRegistry::bootstrap(
         &config.mcp_servers,
         activation_concept_graph.as_ref(),
@@ -346,12 +350,14 @@ pub(crate) async fn run_server() {
             tx,
             fcm_sender,
             activation_concept_graph,
+            conversation_recall_store,
             mcp_registry,
         },
         AuthState::new(auth_token, admin_auth_password, admin_password_fingerprint),
         AppConfigState {
             limits: config.limits.clone(),
             router: config.router.clone(),
+            conversation_recall: config.conversation_recall.clone(),
             input: config.input.clone(),
             tts: config.tts.clone(),
         },
@@ -475,6 +481,17 @@ fn validate_required_config(config: &Config) {
     }
     if config.concept_graph.arousal_tau_ms <= 0.0 {
         panic!("config.toml [concept_graph].arousal_tau_ms must be > 0");
+    }
+    if config.conversation_recall.limit == 0 {
+        panic!("config.toml [conversation_recall].limit must be > 0");
+    }
+    if config.conversation_recall.recency_tau_ms <= 0.0 {
+        panic!("config.toml [conversation_recall].recency_tau_ms must be > 0");
+    }
+    if config.conversation_recall.semantic_weight <= 0.0
+        && config.conversation_recall.recency_weight <= 0.0
+    {
+        panic!("config.toml [conversation_recall] requires semantic_weight or recency_weight > 0");
     }
     if config.tts.ja_accent_url.trim().is_empty() {
         panic!("config.toml [tts].ja_accent_url must not be empty");

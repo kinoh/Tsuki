@@ -60,7 +60,7 @@ You will receive event messages:
 - A shared base personality prompt (Japanese) is prepended to all module instructions.
 - Internal state is exposed to the model as three function tools: `state_set`, `state_get`, `state_search`.
 - Submodules are registered in a ModuleRegistry (persisted in libSQL).
-- Decision uses recent event history from the event store.
+- Decision uses recent event history from the event store plus recalled past conversation events.
 - All outputs (input, submodules, decision, action) are emitted as events.
 - Events, state, and modules are persisted in libSQL (local when `db.remote_url` is unset).
 
@@ -70,6 +70,13 @@ cd core-rust
 CONCEPT_EMBEDDING_MODEL_DIR=/path/to/model \
 MEMGRAPH_URI=bolt://localhost:7687 \
 cargo run --bin tsuki-core-rust -- backfill --limit 1000
+```
+
+## Backfill conversation recall index
+```
+cd core-rust
+MEMGRAPH_PASSWORD=... \
+cargo run --bin tsuki-core-rust -- backfill-conversation-recall --limit 1000
 ```
 
 Production one-shot (snapshot before/after included):

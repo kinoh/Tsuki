@@ -9,6 +9,10 @@ use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
 use tokenizers::Tokenizer;
 
+use crate::conversation_recall_store::{
+    conversation_recall_text, ConversationRecallCandidate, ConversationRecallStore,
+};
+
 const DEFAULT_VALENCE: f64 = 0.0;
 const DEFAULT_AROUSAL_LEVEL: f64 = 0.0;
 const INITIAL_AROUSAL_UPSERT: f64 = 0.5;
@@ -21,6 +25,7 @@ const DEFAULT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER: usize = 4;
 const DEFAULT_VECTOR_SEARCH_SEMANTIC_WEIGHT: f64 = 0.75;
 const DEFAULT_VECTOR_SEARCH_AROUSAL_WEIGHT: f64 = 0.25;
 const DEFAULT_VECTOR_INDEX_NAME: &str = "concept_embedding_idx";
+const DEFAULT_CONVERSATION_VECTOR_INDEX_NAME: &str = "conversation_event_embedding_idx";
 const DEFAULT_VECTOR_INDEX_CAPACITY: usize = 200_000;
 const DEFAULT_VECTOR_INDEX_SCALAR_KIND: &str = "f32";
 const DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT: usize = 2;
@@ -397,7 +402,9 @@ impl ActivationConceptGraphStore {
         let embedding_dim = embedding.hidden_dim;
         let graph = Graph::new(uri, user, password).map_err(|err| err.to_string())?;
         Self::ensure_constraints(&graph).await?;
+        Self::ensure_conversation_event_constraints(&graph).await?;
         Self::ensure_vector_index(&graph, &embedding_config, embedding_dim).await?;
+        Self::ensure_conversation_event_vector_index(&graph, embedding_dim).await?;
         Ok(Self::new(
             Arc::new(graph),
             arousal_tau_ms,
@@ -493,10 +500,65 @@ impl ActivationConceptGraphStore {
         }
     }
 
+    async fn ensure_conversation_event_constraints(graph: &Graph) -> Result<(), String> {
+        let q = query("CREATE CONSTRAINT ON (e:ConversationEvent) ASSERT e.event_id IS UNIQUE");
+        match graph.execute(q).await {
+            Ok(mut result) => {
+                let _ = result.next().await;
+                Ok(())
+            }
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("already exists") {
+                    Ok(())
+                } else {
+                    Err(message)
+                }
+            }
+        }
+    }
+
     async fn ensure_vector_index(
         graph: &Graph,
         config: &EmbeddingConfig,
         dimension: usize,
+    ) -> Result<(), String> {
+        Self::ensure_named_vector_index(
+            graph,
+            config.vector_index_name.as_str(),
+            "Concept",
+            dimension,
+            config.vector_index_capacity,
+            config.vector_index_resize_coefficient,
+            config.vector_index_scalar_kind.as_str(),
+        )
+        .await
+    }
+
+    async fn ensure_conversation_event_vector_index(
+        graph: &Graph,
+        dimension: usize,
+    ) -> Result<(), String> {
+        Self::ensure_named_vector_index(
+            graph,
+            DEFAULT_CONVERSATION_VECTOR_INDEX_NAME,
+            "ConversationEvent",
+            dimension,
+            DEFAULT_VECTOR_INDEX_CAPACITY,
+            DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT,
+            DEFAULT_VECTOR_INDEX_SCALAR_KIND,
+        )
+        .await
+    }
+
+    async fn ensure_named_vector_index(
+        graph: &Graph,
+        index_name_raw: &str,
+        label: &str,
+        dimension: usize,
+        capacity: usize,
+        resize_coefficient: usize,
+        scalar_kind_raw: &str,
     ) -> Result<(), String> {
         let mut has_index = false;
         let mut result = graph
@@ -505,13 +567,13 @@ impl ActivationConceptGraphStore {
             .map_err(|err| format!("SHOW VECTOR INDEX INFO failed: {}", err))?;
         while let Ok(Some(row)) = result.next().await {
             let index_name: String = row.get("index_name").unwrap_or_default();
-            if index_name == config.vector_index_name {
+            if index_name == index_name_raw {
                 has_index = true;
                 let existing_dimension: i64 = row.get("dimension").unwrap_or(0);
                 if existing_dimension != dimension as i64 {
                     return Err(format!(
                         "vector index '{}' has incompatible dimension: expected {}, got {}",
-                        config.vector_index_name, dimension, existing_dimension
+                        index_name_raw, dimension, existing_dimension
                     ));
                 }
                 break;
@@ -520,15 +582,16 @@ impl ActivationConceptGraphStore {
         if has_index {
             return Ok(());
         }
-        let index_name = normalize_index_name(config.vector_index_name.as_str())
-            .ok_or_else(|| format!("invalid vector index name: {}", config.vector_index_name))?;
-        let scalar_kind = normalize_scalar_kind(config.vector_index_scalar_kind.as_str())?;
+        let index_name = normalize_index_name(index_name_raw)
+            .ok_or_else(|| format!("invalid vector index name: {}", index_name_raw))?;
+        let scalar_kind = normalize_scalar_kind(scalar_kind_raw)?;
         let cypher = format!(
-            "CREATE VECTOR INDEX {index_name} ON :Concept(embedding) WITH CONFIG {{\"dimension\": {dimension}, \"capacity\": {capacity}, \"metric\": \"cos\", \"resize_coefficient\": {resize_coefficient}, \"scalar_kind\": \"{scalar_kind}\"}};",
+            "CREATE VECTOR INDEX {index_name} ON :{label}(embedding) WITH CONFIG {{\"dimension\": {dimension}, \"capacity\": {capacity}, \"metric\": \"cos\", \"resize_coefficient\": {resize_coefficient}, \"scalar_kind\": \"{scalar_kind}\"}};",
             index_name = index_name,
+            label = label,
             dimension = dimension,
-            capacity = config.vector_index_capacity,
-            resize_coefficient = config.vector_index_resize_coefficient,
+            capacity = capacity,
+            resize_coefficient = resize_coefficient,
             scalar_kind = scalar_kind,
         );
         let mut stream = graph
@@ -1958,5 +2021,83 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             }
         }
         Ok(items)
+    }
+}
+
+#[async_trait]
+impl ConversationRecallStore for ActivationConceptGraphStore {
+    async fn upsert_event_projection(&self, event: &crate::event::Event) -> Result<(), String> {
+        let Some(text) = conversation_recall_text(event) else {
+            return Ok(());
+        };
+        let embedding = self.embedding.encode(text.as_str())?;
+        let embedding = Self::to_embedding_property_vector(&embedding);
+        let mut stream = self
+            .graph
+            .execute(
+                query(
+                    "MERGE (e:ConversationEvent {event_id: $event_id})
+                     SET e.ts = $ts, e.source = $source, e.embedding = $embedding
+                     RETURN e.event_id AS event_id",
+                )
+                .param("event_id", event.event_id.as_str())
+                .param("ts", event.ts.as_str())
+                .param("source", event.source.as_str())
+                .param("embedding", embedding),
+            )
+            .await
+            .map_err(|err| {
+                format!(
+                    "upsert conversation event projection failed for {}: {}",
+                    event.event_id, err
+                )
+            })?;
+        let _ = stream.next().await;
+        Ok(())
+    }
+
+    async fn search_event_projections(
+        &self,
+        input_text: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationRecallCandidate>, String> {
+        let query_text = input_text.trim();
+        if query_text.is_empty() {
+            return Ok(Vec::new());
+        }
+        let query_embedding = self.embedding.encode(query_text)?;
+        let query_embedding = Self::to_embedding_property_vector(&query_embedding);
+        let cypher = format!(
+            "CALL vector_search.search(\"{}\", $limit, $embedding) YIELD node, similarity
+             RETURN node.event_id AS event_id, similarity
+             ORDER BY similarity DESC",
+            DEFAULT_CONVERSATION_VECTOR_INDEX_NAME
+        );
+        let mut result = self
+            .graph
+            .execute(
+                query(cypher.as_str())
+                    .param("limit", limit.max(1) as i64)
+                    .param("embedding", query_embedding),
+            )
+            .await
+            .map_err(|err| format!("conversation vector_search.search failed: {}", err))?;
+        let mut out = Vec::<ConversationRecallCandidate>::new();
+        let mut seen = HashSet::<String>::new();
+        while let Ok(Some(row)) = result.next().await {
+            let event_id: String = row.get("event_id").unwrap_or_default();
+            if event_id.is_empty() || !seen.insert(event_id.clone()) {
+                continue;
+            }
+            let semantic_similarity = row.get::<f64>("similarity").unwrap_or(0.0).clamp(0.0, 1.0);
+            out.push(ConversationRecallCandidate {
+                event_id,
+                semantic_similarity,
+            });
+            if out.len() >= limit.max(1) {
+                break;
+            }
+        }
+        Ok(out)
     }
 }

@@ -9,6 +9,8 @@ pub struct Config {
     pub limits: LimitsConfig,
     #[serde(default)]
     pub router: RouterConfig,
+    #[serde(default)]
+    pub conversation_recall: ConversationRecallConfig,
     pub input: InputConfig,
     pub db: DbConfig,
     pub prompts: PromptsConfig,
@@ -81,6 +83,26 @@ fn default_recommendation_threshold() -> f32 {
     0.6
 }
 
+fn default_conversation_recall_enabled() -> bool {
+    true
+}
+
+fn default_conversation_recall_limit() -> usize {
+    6
+}
+
+fn default_conversation_recall_semantic_weight() -> f64 {
+    0.85
+}
+
+fn default_conversation_recall_recency_weight() -> f64 {
+    0.15
+}
+
+fn default_conversation_recall_recency_tau_ms() -> f64 {
+    1000.0 * 60.0 * 60.0 * 24.0 * 30.0
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct DbConfig {
     pub path: String,
@@ -92,6 +114,32 @@ pub struct InputConfig {
     pub router_context_template: String,
     pub decision_context_template: String,
     pub submodule_context_template: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConversationRecallConfig {
+    #[serde(default = "default_conversation_recall_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_conversation_recall_limit")]
+    pub limit: usize,
+    #[serde(default = "default_conversation_recall_semantic_weight")]
+    pub semantic_weight: f64,
+    #[serde(default = "default_conversation_recall_recency_weight")]
+    pub recency_weight: f64,
+    #[serde(default = "default_conversation_recall_recency_tau_ms")]
+    pub recency_tau_ms: f64,
+}
+
+impl Default for ConversationRecallConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_conversation_recall_enabled(),
+            limit: default_conversation_recall_limit(),
+            semantic_weight: default_conversation_recall_semantic_weight(),
+            recency_weight: default_conversation_recall_recency_weight(),
+            recency_tau_ms: default_conversation_recall_recency_tau_ms(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
