@@ -482,8 +482,8 @@ fn validate_required_config(config: &Config) {
     if config.concept_graph.arousal_tau_ms <= 0.0 {
         panic!("config.toml [concept_graph].arousal_tau_ms must be > 0");
     }
-    if config.conversation_recall.limit == 0 {
-        panic!("config.toml [conversation_recall].limit must be > 0");
+    if config.conversation_recall.top_k_hits == 0 {
+        panic!("config.toml [conversation_recall].top_k_hits must be > 0");
     }
     if config.conversation_recall.recency_tau_ms <= 0.0 {
         panic!("config.toml [conversation_recall].recency_tau_ms must be > 0");

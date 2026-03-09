@@ -60,7 +60,8 @@ The feature reuses Memgraph only as a vector index for searchable conversation-e
 ## Implementation Details
 - Add `conversation_recall` config for:
   - enable/disable
-  - result limit
+  - semantic anchor count (`top_k_hits`)
+  - neighboring conversation window width (`surrounding_event_window`)
   - semantic weight
   - recency weight
   - recency decay tau

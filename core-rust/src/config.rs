@@ -88,7 +88,11 @@ fn default_conversation_recall_enabled() -> bool {
 }
 
 fn default_conversation_recall_limit() -> usize {
-    6
+    5
+}
+
+fn default_conversation_recall_surrounding_event_window() -> usize {
+    5
 }
 
 fn default_conversation_recall_semantic_weight() -> f64 {
@@ -121,7 +125,9 @@ pub struct ConversationRecallConfig {
     #[serde(default = "default_conversation_recall_enabled")]
     pub enabled: bool,
     #[serde(default = "default_conversation_recall_limit")]
-    pub limit: usize,
+    pub top_k_hits: usize,
+    #[serde(default = "default_conversation_recall_surrounding_event_window")]
+    pub surrounding_event_window: usize,
     #[serde(default = "default_conversation_recall_semantic_weight")]
     pub semantic_weight: f64,
     #[serde(default = "default_conversation_recall_recency_weight")]
@@ -134,7 +140,8 @@ impl Default for ConversationRecallConfig {
     fn default() -> Self {
         Self {
             enabled: default_conversation_recall_enabled(),
-            limit: default_conversation_recall_limit(),
+            top_k_hits: default_conversation_recall_limit(),
+            surrounding_event_window: default_conversation_recall_surrounding_event_window(),
             semantic_weight: default_conversation_recall_semantic_weight(),
             recency_weight: default_conversation_recall_recency_weight(),
             recency_tau_ms: default_conversation_recall_recency_tau_ms(),
