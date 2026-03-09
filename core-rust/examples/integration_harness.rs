@@ -31,6 +31,7 @@ const SECRET_DIR_PATH: &str = "tests/integration/secrets";
 const SECRET_KEY_ENV_VAR: &str = "PROMPT_PRIVATE_KEY";
 const INCOMPLETE_SCENARIO_REQUIREMENT_CAP: f64 = 0.5;
 const DEFAULT_EMIT_WAIT_TIMEOUT_MS: u64 = 15_000;
+const POST_STEP_EVENT_DRAIN_IDLE_MS: u64 = 500;
 const DEFAULT_TRIGGER_WAIT_TAGS: [&str; 2] = [
     "self_improvement.module_processed",
     "self_improvement.trigger_processed",
@@ -1472,6 +1473,14 @@ async fn run_conversation_step(
             )
             .await?;
         }
+        drain_runtime_events_until_idle(
+            ws_stream,
+            POST_STEP_EVENT_DRAIN_IDLE_MS,
+            observed_event_ids,
+            observed_events,
+            format!("turn={}", turn_index).as_str(),
+        )
+        .await?;
         *global_turn_index += 1;
     }
     Ok(())
@@ -1505,6 +1514,14 @@ async fn run_emit_event_step(
         step_index,
         observed_event_ids,
         observed_events,
+    )
+    .await?;
+    drain_runtime_events_until_idle(
+        ws_stream,
+        POST_STEP_EVENT_DRAIN_IDLE_MS,
+        observed_event_ids,
+        observed_events,
+        format!("emit_step={}", step_index).as_str(),
     )
     .await
 }
@@ -1885,6 +1902,52 @@ async fn wait_for_decision_event(
             }
             Some(Err(err)) => return Err(format!("websocket receive failed: {}", err)),
             None => return Err("websocket stream ended before decision completion".to_string()),
+        }
+    }
+}
+
+async fn drain_runtime_events_until_idle(
+    ws_stream: &mut WsStream,
+    idle_timeout_ms: u64,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
+    label: &str,
+) -> Result<(), String> {
+    let idle_timeout = Duration::from_millis(idle_timeout_ms.max(1));
+    loop {
+        let message = match timeout(idle_timeout, ws_stream.next()).await {
+            Ok(value) => value,
+            Err(_) => return Ok(()),
+        };
+        match message {
+            Some(Ok(Message::Text(text))) => {
+                let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
+                maybe_record_runtime_event(&parsed, observed_event_ids, observed_events);
+                let summary = extract_event_summary(&parsed);
+                println!(
+                    "HARNESS_WS_DRAIN {} event_id={} source={} tags={}",
+                    label,
+                    summary
+                        .as_ref()
+                        .and_then(|value| value.event_id.as_deref())
+                        .unwrap_or("-"),
+                    summary
+                        .as_ref()
+                        .and_then(|value| value.source.as_deref())
+                        .unwrap_or("-"),
+                    summary
+                        .as_ref()
+                        .map(|value| value.tags.join(","))
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "-".to_string()),
+                );
+            }
+            Some(Ok(Message::Close(_))) => return Ok(()),
+            Some(Ok(_)) => {}
+            Some(Err(err)) => {
+                return Err(format!("websocket receive failed during drain: {}", err))
+            }
+            None => return Ok(()),
         }
     }
 }
