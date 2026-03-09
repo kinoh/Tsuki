@@ -22,28 +22,27 @@ metrics_definition:
 
   concept_discovery_quality:
     description: |
-      Judge whether router discovers concepts relevant to the required topics.
-      Prioritize high-score proposition lines.
-      Low-score off-topic lines are acceptable.
-      Consider it poor only when high-score lines are repeatedly off-topic.
+      Inspect router `concept_graph.query` events.
+      Score high when `selected_seeds` are clearly relevant to the current user topic.
+      Penalize only when many selected seeds are off-topic or generic.
 
   concept_score_separation:
     description: |
-      Judge whether concept scores show meaningful separation.
-      Focus on whether higher-ranked lines are clearly distinguishable from lower-ranked lines.
-      Penalize runs where most lines collapse into nearly identical scores without clear prioritization.
+      Inspect router `result_concepts`, `selected_seeds`, and `active_concepts_and_arousal`.
+      Score high when topic-relevant concepts clearly dominate the visible router state.
+      Penalize runs where off-topic or generic concepts overwhelm the topic-specific ones.
 
   concept_episode_coverage:
     description: |
-      Judge whether retrieved concept graph context contains both:
-      - concept-level relations (e.g., is-a / part-of style lines)
-      - episode-style recalled lines (descriptive evokes lines)
-      Partial coverage is acceptable, but sustained one-sided retrieval should score lower.
+      Across the certificate, generative-model, and ozone-policy turns,
+      score high when each topic produces at least some clearly corresponding router concepts.
+      Partial coverage is acceptable, but missing one of the required topic families should score lower.
 
   concept_information_richness:
     description: |
-      Judge whether top retrieved lines provide diverse and non-redundant information relevant to the active topic.
-      Favor runs with richer, varied propositions over repetitive paraphrases of the same fact.
+      Inspect `active_concepts_and_arousal`.
+      Score high when the active concept list contains multiple concrete concepts that support the user topic,
+      rather than only vague generic concepts or repetitive near-duplicates.
 
   identity:
     description: |
