@@ -21,6 +21,8 @@ This directory contains the rebuilt integration test assets for `core-rust`.
   - `task -t core-rust/Taskfile.yaml integration/prepare`
 - Run command:
   - `task -t core-rust/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/chitchat.yaml --run-count 1`
+- Recall-scenario example:
+  - `task -t core-rust/Taskfile.yaml integration/run -- --config tests/integration/config/runner.recall.toml --scenario tests/integration/scenarios/conversation_recall_kernel_wording.yaml --run-count 1`
 - Help:
   - `task -t core-rust/Taskfile.yaml integration/run -- --help`
 

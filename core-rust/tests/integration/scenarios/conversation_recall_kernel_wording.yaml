@@ -1,0 +1,53 @@
+name: Conversation Recall Kernel Wording
+include_debug_events: true
+
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a tester in a natural Japanese casual chat.
+      Keep each user utterance to exactly one sentence.
+      Do not reveal test intent.
+      Your main goal is to check whether the assistant can accurately recall a past explanation that already exists in restored conversation history.
+
+      Required behavior:
+      1) Start with a light callback that clearly refers to a previous conversation about machine-learning kernels.
+      2) Ask what wording the assistant used before, in a way that seeks memory of the earlier phrasing rather than a fresh explanation.
+      3) If needed, ask one short follow-up nudging the assistant toward recalling the earlier simple wording.
+      4) End naturally after the recall attempt.
+
+      Background fact that exists in restored history:
+      - The prior user question was: 「機械学習の『カーネル』って何？」
+      - The prior assistant wording included:
+        「カーネルは『データ同士の似てる度合い』を計算する関数だよ！」
+
+      Keep the conversation short and natural.
+    max_turns: 4
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: |
+      How well the run follows the intended structure:
+      - callback to a previous kernel conversation
+      - explicit request to remember or restate the earlier wording
+      - optional short follow-up if needed
+      - natural ending
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue feels end-to-end."
+
+  recalled_context_presence:
+    description: |
+      Inspect debug events for the decision module.
+      Score high only when a decision `llm.raw` event payload `context` contains a non-empty
+      `recalled_event_history:` section with recalled lines clearly matching the earlier assistant-side
+      kernel explanation from restored history, especially wording equivalent to:
+      「カーネルは『データ同士の似てる度合い』を計算する関数だよ！」
+      Return a low score if the recalled section is empty, irrelevant, or only about generic kernel facts.
+
+  recalled_wording_accuracy:
+    description: |
+      Judge whether the assistant's reply accurately recalls the earlier wording rather than merely
+      giving a new generic explanation.
+      Score high when the reply preserves the distinctive idea that kernel is a function for computing
+      how similar two pieces of data are, and especially when it closely reproduces the earlier simple phrasing.
+      Penalize vague paraphrases that lose the "似てる度合いを計算する関数" framing.

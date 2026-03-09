@@ -1,0 +1,22 @@
+# Runner-level defaults for recall-focused integration tests.
+
+[tester]
+model = "gpt-5.2"
+prompt_file = "tests/integration/prompts/tester.md"
+
+[judge]
+model = "gpt-5.2"
+prompt_file = "tests/integration/prompts/judge.md"
+
+[execution]
+run_count = 1
+max_turns = 6
+turn_timeout_ms = 60000
+scenario_timeout_ms = 600000
+transient_retry = 0
+
+[core]
+prompts_file = "data/prompts.md"
+memgraph_uri = "bolt://localhost:7697"
+memgraph_backup_path = "../backup/memgraph/max10_20260223130206842180_timestamp_48711"
+sqlite_backup_path = "../backup/tsuki-backup-20260307181021.tar.gz"
