@@ -1,6 +1,6 @@
 version: '3'
 
-dotenv: ['.env', 'core/.env']
+dotenv: ['.env']
 
 env:
   GIT_HASH:
@@ -20,7 +20,7 @@ tasks:
     cmds:
       - task -t Taskfile.yaml sandbox/restore/latest
       - task -t Taskfile.yaml memgraph/restore/latest
-      - task -t core/Taskfile.yaml reset-data
+      - task runtime/restore/latest
   memgraph/restore/latest:
     desc: Restore latest memgraph database
     vars:
@@ -58,20 +58,20 @@ tasks:
       - tar xzf {{.BACKUP_FILE_PATH}} -C /tmp/tsuki-backup-sandbox
       - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-sandbox/. sandbox:/memory'
       - rm -rf /tmp/tsuki-backup-sandbox
-  core/restore/latest:
-    desc: Restore latest core data
+  runtime/restore/latest:
+    desc: Restore latest runtime data
     vars:
       BACKUP_FILE_PATH:
         sh: 'find ./backup -name "tsuki-backup-*.tar.gz" | sort | tail -1'
     cmds:
-      - task: core/restore/{{.BACKUP_FILE_PATH}}
-  core/restore/*:
-    desc: Restore core data
+      - task: runtime/restore/{{.BACKUP_FILE_PATH}}
+  runtime/restore/*:
+    desc: Restore runtime data
     vars:
       BACKUP_FILE_PATH: '{{index .MATCH 0}}'
     cmds:
       - '{{.DOCKER_COMPOSE}} exec core rm -rf /data/*'
-      - mkdir -p /tmp/tsuki-backup-core
-      - tar xzf {{.BACKUP_FILE_PATH}} -C /tmp/tsuki-backup-core
-      - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-core/. core:/data'
-      - rm -rf /tmp/tsuki-backup-core
+      - mkdir -p /tmp/tsuki-backup-runtime
+      - tar xzf {{.BACKUP_FILE_PATH}} -C /tmp/tsuki-backup-runtime
+      - '{{.DOCKER_COMPOSE}} cp /tmp/tsuki-backup-runtime/. core:/data'
+      - rm -rf /tmp/tsuki-backup-runtime

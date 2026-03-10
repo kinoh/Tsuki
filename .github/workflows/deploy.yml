@@ -50,7 +50,6 @@ jobs:
       - name: Build and deploy
         env:
           DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
-          PROMPT_PRIVATE_KEY: ${{ secrets.PROMPT_PRIVATE_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
           ADMIN_AUTH_PASSWORD: ${{ secrets.ADMIN_AUTH_PASSWORD }}
@@ -65,11 +64,6 @@ jobs:
         env:
           DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
           WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
-          PROMPT_PRIVATE_KEY: dummy
-          OPENAI_API_KEY: dummy
-          DIFY_SANDBOX_API_KEY: dummy
-          GCP_SERVICE_ACCOUNT_KEY: dummy
-          FCM_PROJECT_ID: dummy
         run: task wait
         timeout-minutes: 5
       - name: Annotate deployment success

@@ -2,44 +2,43 @@
 
 ### Features
 
-- **TypeScript/Mastra Backend**: Modern AI agent framework with built-in memory
-- **WebSocket & HTTP APIs**: Real-time communication and RESTful endpoints
-- **Multi-channel Message Delivery**: WebSocket, FCM push notifications, and internal routing
-- **Smart Thread Management**: Automatic conversation continuation with timezone-aware daily thread IDs
-- **Cross-thread Semantic Recall**: Persistent memory across conversation sessions
-- **Self-editable Prompt Memory**: File-based prompt memory at `/memory/prompts/personality.md`
-- **Encrypted Prompts**: Secure agent instruction storage using Age encryption
-- **Unified MCP Integration (planned)**: Core MCP servers (concept-graph, rss, scheduler, shell-exec)
-- **Pre-conscious Router + Sensory Pipeline**: Router decides responses to sensory inputs; supports periodic polling and sensory messages
-- **Sandboxed Execution**: gVisor sandbox with shell-exec MCP for safe file/process access
-- **TTS**: VoiceVox synthesis with ja-accent support via `/tts` endpoint
+- **Rust Backend**: Event-stream based runtime in `core-rust/`
+- **WebSocket & HTTP APIs**: Real-time chat plus REST endpoints defined in `api-specs/`
+- **Multi-channel Message Delivery**: WebSocket, notifications, and internal event routing
+- **Prompt File Runtime**: Prompt state stored in `prompts.md` under runtime data
+- **MCP-first Architecture**: Runtime capabilities are provided by MCP servers
+- **TTS**: VoiceVox synthesis with ja-accent support via `/tts`
 - **GUI Client**: Cross-platform desktop and Android app built with [Tauri](https://tauri.app/) + Svelte
 
 ### Quick Start
 
 ```bash
 # Start the backend
-cd core/
-pnpm install
-pnpm start
+cd core-rust/
+cargo run
+
+# Optional WebSocket CLI
+WEB_AUTH_TOKEN=test-token WS_URL=ws://localhost:2953/ cargo run --example ws_client
 
 # Start the GUI client (optional, separate terminal)
 cd gui/
-npm run dev        # Vite web UI
+npm run dev
 # For desktop app:
 npm run tauri dev
 
 # Or deploy with Docker
-task deploy  # or docker compose up --build --detach
+task deploy
 ```
 
 ### Architecture
 
-- **Core Backend** (`core/`): TypeScript/Node.js server with Mastra agents and MCP integration
+- **Backend** (`core-rust/`): Rust runtime, event store, admin/auth surfaces, and MCP integration
 - **GUI Client** (`gui/`): Tauri + Svelte cross-platform application
-- **Docker Deployment**: Docker Compose stack for core, memgraph, sandbox, and voice services
+- **Docker Deployment**: Docker Compose stack for runtime, memgraph, sandbox, and voice services
 
 ### Documentation
 
-- **[AGENTS.md](AGENTS.md)**: Development guide and current codebase reference
-- **[docs/README.md](docs/README.md)**: Design decisions and historical documentation
+- **[AGENTS.md](AGENTS.md)**: Current codebase reference
+- **[docs/README.md](docs/README.md)**: Historical design decisions and change records
+- **[api-specs/openapi.yaml](api-specs/openapi.yaml)**: HTTP API contract
+- **[api-specs/asyncapi.yaml](api-specs/asyncapi.yaml)**: WebSocket protocol contract

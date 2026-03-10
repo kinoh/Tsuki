@@ -8,33 +8,32 @@ Guidance for coding agents working on Tsuki.
 - Liveliness > determinism; allow variability and small surprises.
 
 ## Directory Layout (high level)
-- `core/`: TypeScript backend on Mastra
-  - `src/agent/`: router, responder, ActiveUser orchestration
-  - `src/server/`: HTTP + WebSocket server, routes, middleware
-  - `src/mastra/`: Mastra setup, MCP wiring
-  - `src/storage/`: LibSQL and usage tracking
-  - `scripts/`: prompt encrypt/decrypt, manual checks
-- `core-rust/`: Rust backend to replace `core/` (WIP)
+- `core-rust/`: Rust backend runtime
+  - `src/application/`: application services and orchestration boundaries
+  - `src/server_app.rs`: HTTP + WebSocket server, admin/auth surfaces, route wiring
+  - `src/bin/`: operational and maintenance CLIs
+  - `tests/integration/`: integration harness, scenarios, and operator notes
+  - `static/`: runtime-served HTML/CSS assets
 - `mcp/`: MCP server/provider implementations and their tool contracts
   - Treat tool descriptions, schemas, and server-specific behavior as owned by each provider here
 - `gui/`: Tauri + Svelte client
-  - `src/`: Svelte routes/components (e.g., `routes/+page.svelte`, `Config.svelte`, `Status.svelte`, `Note.svelte`)
+  - `src/`: Svelte routes/components (e.g. `routes/+page.svelte`, `Config.svelte`, `Status.svelte`, `Note.svelte`)
   - `src-tauri/`: Tauri shell (Rust) with `src/main.rs`, `lib.rs`, `tauri.conf.json`, `capabilities/`, `icons/`
   - `static/`: packaged static assets
-- `api-specs/`: AsyncAPI for WebSocket protocol
-- `docs/`: design decisions and change logs (see docs/README.md for documentation strategy)
+- `api-specs/`: OpenAPI and AsyncAPI contracts
+- `docs/`: design decisions and change logs (see `docs/README.md` for documentation strategy)
 - `docker/`, `compose.yaml`, `Taskfile.yaml`: container and task runner configs
 
 ## System Shape
-- Core (in `core/`): Mastra/TypeScript backend; exposes HTTP + WebSocket; channels: websocket, FCM, internal.
+- Backend (in `core-rust/`): Rust runtime exposing HTTP + WebSocket, notifications, admin/auth, and MCP-backed execution.
 - Client (in `gui/`): Tauri + Svelte desktop/mobile client.
 - MCP-first: abilities come from MCP servers, not built-ins.
-- Per-user orchestration: `ActiveUser` holds conversation state, router, responder, and MCP client.
+- Per-user runtime state is stored in the event/database layer rather than in a TypeScript thread manager.
 
 ## Interfaces
-- HTTP API: see `core/src/server/routes` for endpoints and middleware.
-- WebSocket: see `api-specs/asyncapi.yaml` (AsyncAPI spec).
-- Admin UI: AdminJS at `/admin`, authenticated via `WEB_AUTH_TOKEN`.
+- HTTP API: see `api-specs/openapi.yaml`.
+- WebSocket: see `api-specs/asyncapi.yaml`.
+- Admin UI: `/admin` with login at `/admin/login`, authenticated by `ADMIN_AUTH_PASSWORD` session flow.
 
 ## Architecture Principles
 - Always prioritize responsibility separation.
@@ -69,14 +68,13 @@ Guidance for coding agents working on Tsuki.
 - When an MCP tool contract feels wrong (description, schema, examples, behavior), inspect the provider implementation under `mcp/` before patching a consumer such as `core-rust`.
 
 ## Runtime & Commands
-- Core dev
-  - `cd core && pnpm start` (tsx dev)
-  - `pnpm run start:prod`
-  - `pnpm run lint`
+- Backend dev
+  - `cd core-rust && cargo run`
+  - `cd core-rust && cargo test`
 - GUI dev
   - `cd gui && npm run dev`
 - Docker/Taskfile
-  - `task up`, `task deploy-core`
+  - `task up`
   - `docker compose up --build --detach`
 - Production deployment policy
   - Production rollout must go through CI/CD only; do not treat local `task`/`docker compose` execution as a production deployment path.
@@ -87,18 +85,14 @@ Guidance for coding agents working on Tsuki.
     - runtime wiring (`compose.yaml`, container runtime env)
     - CI/CD workflow env and secret mapping under `.github/workflows/`
     - operator-facing docs for required secrets/env
-  - Before finishing, verify there is no missing propagation using code search (e.g., `rg`) across runtime config and workflow files.
+  - Before finishing, verify there is no missing propagation using code search (e.g. `rg`) across runtime config and workflow files.
 
 ## Config & Data
-- Core env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `AGENT_NAME`, `PROMPT_PRIVATE_KEY`, `DATA_DIR` (default `./data`), `TZ`.
-- Optional env: `GCP_SERVICE_ACCOUNT_KEY`, `FCM_PROJECT_ID`, `PERMANENT_USERS`, `ADMIN_JS_TMP_DIR`, `SENSORY_POLL_SECONDS`, `ROUTER_HISTORY_LIMIT`.
-- Storage roots: Mastra DB `${DATA_DIR}/mastra.db`; RSS DB under `${DATA_DIR}`; encrypted prompts in `core/src/prompts/`; AdminJS temp dir default `/tmp/.adminjs`.
+- Required runtime env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `ADMIN_AUTH_PASSWORD`.
+- Optional runtime env: `FCM_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_KEY`, `MEMGRAPH_PASSWORD`, `TURSO_AUTH_TOKEN`.
+- Dev/test-only env may include `OPENAI_MODEL` and `PROMPT_PRIVATE_KEY` for auxiliary tools.
+- Storage roots: runtime DB `${DATA_DIR}/core-rust.db`, shared RSS data under `${DATA_DIR}`, prompt file `${DATA_DIR}/prompts.md`.
 
 ## Testing
-- Static checks: `pnpm run lint`.
-- Manual scripts (run only when requested; may consume API or external calls):
-  - `pnpm run test:agent`
-  - `node scripts/test_memory.js`
-  - `tsx scripts/test_reflection.ts`
-  - `node scripts/mcp_subscribe.js`
-  - `node scripts/ws_client.js`
+- Rust tests: `cd core-rust && cargo test`.
+- Integration harness: `task -t core-rust/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/chitchat.yaml --run-count 1`

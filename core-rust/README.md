@@ -1,38 +1,42 @@
-# Tsuki Rust Core (minimal)
+# Tsuki Rust Core
 
-Minimal Rust core for observing the event stream while sending user input over WebSocket.
-This uses a shared Event Format and emits every internal step as `type: "event"` messages.
+Rust runtime for Tsuki. It exposes HTTP and WebSocket interfaces, persists runtime state in libSQL, and emits internal processing as event-stream data.
 
 ## Run
-```
+```bash
 cd core-rust
 cargo run
 ```
 
 Config file:
 - `config.toml` (required, no defaults)
-- `llm.temperature_enabled` controls whether temperature is sent (some models reject it)
+- `llm.temperature_enabled` controls whether temperature is sent
 - `prompts.path` must be explicitly configured
 - `concept_graph.memgraph_uri` / `concept_graph.arousal_tau_ms` configure graph runtime
 - `tts.*` configures VoiceVox/ja-accent endpoints and timeout/speaker
 
-Environment variables (secrets only):
+Environment variables (runtime):
 - `WEB_AUTH_TOKEN` (required)
 - `ADMIN_AUTH_PASSWORD` (required)
 - `OPENAI_API_KEY` (required)
 - `MEMGRAPH_PASSWORD` (required when Memgraph auth is enabled)
 - `TURSO_AUTH_TOKEN` (required when `db.remote_url` is set)
 
-## CLI (reuse existing ws_client.js)
-```
-cd core
-WEB_AUTH_TOKEN=test-token WS_URL=ws://localhost:2953/ node scripts/ws_client.js
-```
-
-## CLI (Rust example)
-```
+## WebSocket CLI example
+```bash
 cd core-rust
 WEB_AUTH_TOKEN=test-token WS_URL=ws://localhost:2953/ cargo run --example ws_client
+```
+
+First message is auth: `USER_NAME:WEB_AUTH_TOKEN`.
+After auth, send JSON like:
+```json
+{"type":"message","text":"hello"}
+```
+
+You will receive event messages:
+```json
+{"type":"event","event":{...}}
 ```
 
 ## LLM-driven integration test assets
@@ -44,28 +48,14 @@ WEB_AUTH_TOKEN=test-token WS_URL=ws://localhost:2953/ cargo run --example ws_cli
 - Full run example:
   - `task -t core-rust/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/chitchat.yaml --run-count 1`
 
-First message is auth: `USER_NAME:WEB_AUTH_TOKEN`.
-After auth, send JSON like:
-```
-{"type":"message","text":"hello"}
-```
-
-You will receive event messages:
-```
-{"type":"event","event":{...}}
-```
-
 ## Notes
-- Three fixed prompt-like submodules (curiosity, self_preservation, social_approval) and one decision module call the OpenAI Response API.
-- A shared base personality prompt (Japanese) is prepended to all module instructions.
-- Internal state is exposed to the model as three function tools: `state_set`, `state_get`, `state_search`.
-- Submodules are registered in a ModuleRegistry (persisted in libSQL).
-- Decision uses recent event history from the event store plus recalled past conversation events.
-- All outputs (input, submodules, decision, action) are emitted as events.
-- Events, state, and modules are persisted in libSQL (local when `db.remote_url` is unset).
+- The runtime serves admin/auth surfaces under `/admin`.
+- Prompt state is loaded from `prompts.md`.
+- Events, state, and modules are persisted in libSQL.
+- Decision and routing paths reuse the same event stream rather than a separate thread abstraction.
 
 ## Backfill concept embeddings
-```
+```bash
 cd core-rust
 CONCEPT_EMBEDDING_MODEL_DIR=/path/to/model \
 MEMGRAPH_URI=bolt://localhost:7687 \
@@ -73,13 +63,13 @@ cargo run --bin tsuki-core-rust -- backfill --limit 1000
 ```
 
 ## Backfill conversation recall index
-```
+```bash
 cd core-rust
 MEMGRAPH_PASSWORD=... \
 cargo run --bin tsuki-core-rust -- backfill-conversation-recall --limit 1000
 ```
 
 Production one-shot (snapshot before/after included):
-```
+```bash
 DOCKER_HOST=ssh://<prod-host> task memgraph/backfill
 ```
