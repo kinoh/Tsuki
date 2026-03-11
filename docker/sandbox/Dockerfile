@@ -25,6 +25,7 @@ RUN apt-get update \
     openssl \
     patch \
     python3 \
+    python3-numpy \
     procps \
     sed \
     tar \
