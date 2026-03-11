@@ -2,6 +2,19 @@ name: Shell Exec NumPy Regression
 include_debug_events: true
 
 steps:
+  - kind: install_skill
+    key: shell_exec_numeric_regression
+    body: |
+      When a user asks for a medium-complexity local numeric computation, prefer shell_exec__execute with python3.
+      For multi-line Python, call the tool with command="python3", args=["-"], and pass the script through stdin.
+      Use numpy for least-squares regression or vector calculations when available.
+      After running the tool, inspect exit_code and stderr before describing the method.
+      Do not claim that python or numpy was used if the command failed.
+    summary: "Use local python3 plus numpy through shell-exec for medium-complexity numeric tasks"
+    trigger_concepts:
+      - "least-squares regression"
+      - "local numeric calculation"
+      - "python numpy shell execution"
   - kind: conversation
     tester_instructions: |
       You are a natural Japanese chat user.

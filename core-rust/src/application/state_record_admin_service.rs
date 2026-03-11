@@ -49,6 +49,10 @@ pub(crate) struct StateRecordUpsertPayload {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct SkillIndexUpsertPayload {
     pub(crate) enabled: bool,
+    #[serde(default)]
+    pub(crate) summary: Option<String>,
+    #[serde(default)]
+    pub(crate) trigger_concepts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,7 +67,10 @@ pub(crate) async fn list_state_records(
     query: Option<&str>,
     limit: Option<usize>,
 ) -> Result<Vec<StateRecordListItem>, (StatusCode, String)> {
-    let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).max(1).min(MAX_LIST_LIMIT);
+    let limit = limit
+        .unwrap_or(DEFAULT_LIST_LIMIT)
+        .max(1)
+        .min(MAX_LIST_LIMIT);
     let rows = match query.map(str::trim).filter(|value| !value.is_empty()) {
         Some(value) => state
             .services
@@ -130,28 +137,41 @@ pub(crate) async fn upsert_state_record(
         return Err((StatusCode::BAD_REQUEST, "content is required".to_string()));
     }
 
-    state.services.db.upsert_state_record(
-        trimmed_key,
-        payload.content.as_str(),
-        serde_json::to_string(&payload.related_keys)
-            .unwrap_or_else(|_| "[]".to_string())
-            .as_str(),
-        serde_json::to_string(&payload.metadata)
-            .unwrap_or_else(|_| "{}".to_string())
-            .as_str(),
-    ).await.map_err(internal_error)?;
+    state
+        .services
+        .db
+        .upsert_state_record(
+            trimmed_key,
+            payload.content.as_str(),
+            serde_json::to_string(&payload.related_keys)
+                .unwrap_or_else(|_| "[]".to_string())
+                .as_str(),
+            serde_json::to_string(&payload.metadata)
+                .unwrap_or_else(|_| "{}".to_string())
+                .as_str(),
+        )
+        .await
+        .map_err(internal_error)?;
 
     let skill_name = skill_name_for_key(trimmed_key);
     let existing_skill_index = load_skill_index(state, trimmed_key).await?;
-    let skill_index_enabled = payload.skill_index.as_ref().map(|item| item.enabled).unwrap_or(false);
+    let skill_index = payload.skill_index.as_ref();
+    validate_skill_index_payload(skill_index)?;
+    let skill_index_enabled = skill_index.map(|item| item.enabled).unwrap_or(false);
     if skill_index_enabled {
-        let generated = generate_skill_index(state, trimmed_key, payload.content.as_str()).await?;
+        let resolved = resolve_skill_index(
+            state,
+            trimmed_key,
+            payload.content.as_str(),
+            skill_index.unwrap(),
+        )
+        .await?;
         state
             .services
             .activation_concept_graph
             .skill_index_upsert(
                 skill_name.clone(),
-                generated.summary.clone(),
+                resolved.summary.clone(),
                 trimmed_key.to_string(),
                 true,
             )
@@ -160,7 +180,7 @@ pub(crate) async fn upsert_state_record(
         state
             .services
             .activation_concept_graph
-            .skill_index_replace_triggers(skill_name, generated.trigger_concepts)
+            .skill_index_replace_triggers(skill_name, resolved.trigger_concepts)
             .await
             .map_err(internal_error)?;
     } else if existing_skill_index.enabled {
@@ -169,7 +189,9 @@ pub(crate) async fn upsert_state_record(
             .activation_concept_graph
             .skill_index_upsert(
                 skill_name,
-                existing_skill_index.summary.unwrap_or_else(|| trimmed_key.to_string()),
+                existing_skill_index
+                    .summary
+                    .unwrap_or_else(|| trimmed_key.to_string()),
                 trimmed_key.to_string(),
                 false,
             )
@@ -179,7 +201,12 @@ pub(crate) async fn upsert_state_record(
 
     get_state_record_detail(state, trimmed_key)
         .await?
-        .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "saved record disappeared".to_string()))
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "saved record disappeared".to_string(),
+            )
+        })
 }
 
 fn internal_error(err: impl ToString) -> (StatusCode, String) {
@@ -287,10 +314,104 @@ body:\n{body}",
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))
 }
 
+async fn resolve_skill_index(
+    state: &AppState,
+    key: &str,
+    body: &str,
+    payload: &SkillIndexUpsertPayload,
+) -> Result<GeneratedSkillIndex, (StatusCode, String)> {
+    match explicit_skill_index(payload)? {
+        Some(index) => Ok(index),
+        None => generate_skill_index(state, key, body).await,
+    }
+}
+
+fn validate_skill_index_payload(
+    payload: Option<&SkillIndexUpsertPayload>,
+) -> Result<(), (StatusCode, String)> {
+    let Some(payload) = payload else {
+        return Ok(());
+    };
+    if payload.enabled {
+        return Ok(());
+    }
+    if payload.summary.is_some() || payload.trigger_concepts.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "skill_index summary/trigger_concepts require enabled=true".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn explicit_skill_index(
+    payload: &SkillIndexUpsertPayload,
+) -> Result<Option<GeneratedSkillIndex>, (StatusCode, String)> {
+    let summary = payload
+        .summary
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let trigger_concepts = match &payload.trigger_concepts {
+        Some(items) => Some(normalize_explicit_trigger_concepts(items)?),
+        None => None,
+    };
+
+    match (summary, trigger_concepts) {
+        (None, None) => Ok(None),
+        (Some(_), None) | (None, Some(_)) => Err((
+            StatusCode::BAD_REQUEST,
+            "skill_index summary and trigger_concepts must be provided together".to_string(),
+        )),
+        (Some(summary), Some(trigger_concepts)) => Ok(Some(GeneratedSkillIndex {
+            summary,
+            trigger_concepts,
+        })),
+    }
+}
+
+fn normalize_explicit_trigger_concepts(
+    items: &[String],
+) -> Result<Vec<String>, (StatusCode, String)> {
+    let mut deduped = Vec::<String>::new();
+    for item in items {
+        let value = item.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if deduped.iter().any(|existing| existing == value) {
+            continue;
+        }
+        if deduped.len() >= MAX_TRIGGER_CONCEPTS {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "skill_index trigger_concepts must contain at most {} unique items",
+                    MAX_TRIGGER_CONCEPTS
+                ),
+            ));
+        }
+        deduped.push(value.to_string());
+    }
+    if deduped.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "skill_index trigger_concepts must contain at least one non-empty item".to_string(),
+        ));
+    }
+    Ok(deduped)
+}
+
 fn parse_generated_skill_index(raw: &str) -> Result<GeneratedSkillIndex, String> {
     let text = raw.trim();
     let parsed = serde_json::from_str::<GeneratedSkillIndex>(text)
-        .or_else(|_| extract_first_json_object(text).and_then(|json| serde_json::from_str::<GeneratedSkillIndex>(json.as_str()).map_err(|err| err.to_string())))
+        .or_else(|_| {
+            extract_first_json_object(text).and_then(|json| {
+                serde_json::from_str::<GeneratedSkillIndex>(json.as_str())
+                    .map_err(|err| err.to_string())
+            })
+        })
         .map_err(|err| format!("skill index parse failed: {}", err))?;
     let summary = parsed.summary.trim().to_string();
     if summary.is_empty() {
@@ -314,8 +435,12 @@ fn parse_generated_skill_index(raw: &str) -> Result<GeneratedSkillIndex, String>
 }
 
 fn extract_first_json_object(raw: &str) -> Result<String, String> {
-    let start = raw.find('{').ok_or_else(|| "missing json object start".to_string())?;
-    let end = raw.rfind('}').ok_or_else(|| "missing json object end".to_string())?;
+    let start = raw
+        .find('{')
+        .ok_or_else(|| "missing json object start".to_string())?;
+    let end = raw
+        .rfind('}')
+        .ok_or_else(|| "missing json object end".to_string())?;
     if end < start {
         return Err("invalid json object range".to_string());
     }
@@ -338,6 +463,45 @@ mod tests {
         let raw = "noise\n{\"summary\":\"Abstract conversational guidance\",\"trigger_concepts\":[\"gentle talk\",\"comfort\"]}\nnoise";
         let parsed = parse_generated_skill_index(raw).expect("should parse");
         assert_eq!(parsed.summary, "Abstract conversational guidance");
-        assert_eq!(parsed.trigger_concepts, vec!["gentle talk".to_string(), "comfort".to_string()]);
+        assert_eq!(
+            parsed.trigger_concepts,
+            vec!["gentle talk".to_string(), "comfort".to_string()]
+        );
+    }
+
+    #[test]
+    fn explicit_skill_index_requires_both_summary_and_triggers() {
+        let payload = SkillIndexUpsertPayload {
+            enabled: true,
+            summary: Some("Numeric workflow".to_string()),
+            trigger_concepts: None,
+        };
+        let err = explicit_skill_index(&payload).expect_err("should fail");
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn explicit_skill_index_normalizes_unique_trimmed_triggers() {
+        let payload = SkillIndexUpsertPayload {
+            enabled: true,
+            summary: Some(" Numeric workflow ".to_string()),
+            trigger_concepts: Some(vec![
+                " numpy regression ".to_string(),
+                "numpy regression".to_string(),
+                "".to_string(),
+                "local shell exec".to_string(),
+            ]),
+        };
+        let parsed = explicit_skill_index(&payload)
+            .expect("should succeed")
+            .expect("should return explicit index");
+        assert_eq!(parsed.summary, "Numeric workflow");
+        assert_eq!(
+            parsed.trigger_concepts,
+            vec![
+                "numpy regression".to_string(),
+                "local shell exec".to_string()
+            ]
+        );
     }
 }
