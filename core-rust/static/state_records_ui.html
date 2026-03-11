@@ -66,6 +66,12 @@
         gap: 8px;
         margin-bottom: 8px;
       }
+      .editor-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
       input, textarea, button {
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -110,6 +116,25 @@
         border-radius: 999px;
         border: 1px solid var(--line);
         font-size: 12px;
+      }
+      .toggle-row {
+        display: flex;
+        align-items: center;
+      }
+      .toggle-row label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: transparent;
+        font-size: 12px;
+      }
+      .toggle-row input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        margin: 0;
       }
       .detail-grid { display: grid; gap: 12px; }
       .detail-meta { display: grid; gap: 4px; font-size: 13px; }
@@ -156,10 +181,6 @@
             <input id="searchInput" placeholder="Search keys or content" />
             <button id="searchBtn" type="button">Search</button>
           </div>
-          <div class="toolbar">
-            <input id="newKeyInput" placeholder="New key" />
-            <button id="newBtn" type="button">New</button>
-          </div>
           <div id="listStatus" class="status">Loading...</div>
           <div id="recordList" class="list"></div>
         </div>
@@ -167,8 +188,9 @@
         <div class="card">
           <div class="title-row">
             <h2>Editor</h2>
-            <div class="inline">
+            <div class="editor-actions">
               <span id="saveStatus" class="status"></span>
+              <button id="clearBtn" type="button">Clear</button>
               <button id="saveBtn" type="button">Save</button>
             </div>
           </div>
@@ -181,19 +203,14 @@
               <label class="muted" for="contentInput">Content</label>
               <textarea id="contentInput" placeholder="Record content"></textarea>
             </div>
-            <div class="inline">
-              <label class="pill"><input id="skillEnabledInput" type="checkbox" /> Index as skill</label>
-              <span id="skillStatePill" class="pill">not indexed</span>
+            <div class="toggle-row">
+              <label><input id="skillEnabledInput" type="checkbox" /> <span>Index as skill</span></label>
             </div>
             <div class="detail-meta">
               <div class="kv"><div class="k">Updated At</div><div id="updatedAtValue">-</div></div>
               <div class="kv"><div class="k">Summary</div><div id="summaryValue">-</div></div>
               <div class="kv"><div class="k">Body State Key</div><div id="bodyStateKeyValue">-</div></div>
               <div class="kv"><div class="k">Triggers</div><div id="triggersValue">-</div></div>
-            </div>
-            <div class="row">
-              <label class="muted">Metadata</label>
-              <pre id="metadataValue">{}</pre>
             </div>
           </div>
         </div>
@@ -210,21 +227,18 @@
       const els = {
         searchInput: document.getElementById("searchInput"),
         searchBtn: document.getElementById("searchBtn"),
-        newKeyInput: document.getElementById("newKeyInput"),
-        newBtn: document.getElementById("newBtn"),
         listStatus: document.getElementById("listStatus"),
         recordList: document.getElementById("recordList"),
         keyInput: document.getElementById("keyInput"),
         contentInput: document.getElementById("contentInput"),
         skillEnabledInput: document.getElementById("skillEnabledInput"),
-        skillStatePill: document.getElementById("skillStatePill"),
         updatedAtValue: document.getElementById("updatedAtValue"),
         summaryValue: document.getElementById("summaryValue"),
         bodyStateKeyValue: document.getElementById("bodyStateKeyValue"),
         triggersValue: document.getElementById("triggersValue"),
-        metadataValue: document.getElementById("metadataValue"),
         saveStatus: document.getElementById("saveStatus"),
         saveBtn: document.getElementById("saveBtn"),
+        clearBtn: document.getElementById("clearBtn"),
         topLogoutButton: document.getElementById("topLogoutButton"),
       };
 
@@ -280,8 +294,6 @@
         els.summaryValue.textContent = item.skill_index?.summary || "-";
         els.bodyStateKeyValue.textContent = item.skill_index?.body_state_key || "-";
         els.triggersValue.textContent = (item.skill_index?.trigger_concepts || []).join(", ") || "-";
-        els.metadataValue.textContent = JSON.stringify(item.metadata || {}, null, 2);
-        els.skillStatePill.textContent = item.skill_index?.enabled ? "indexed as skill" : "not indexed";
         renderList();
       }
 
@@ -296,8 +308,6 @@
         els.summaryValue.textContent = "-";
         els.bodyStateKeyValue.textContent = "-";
         els.triggersValue.textContent = "-";
-        els.metadataValue.textContent = "{}";
-        els.skillStatePill.textContent = "not indexed";
         renderList();
       }
 
@@ -370,7 +380,7 @@
       els.searchInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") loadList();
       });
-      els.newBtn.addEventListener("click", () => renderNewRecord(els.newKeyInput.value));
+      els.clearBtn.addEventListener("click", () => renderNewRecord(""));
       els.saveBtn.addEventListener("click", saveCurrent);
       els.topLogoutButton.addEventListener("click", logout);
 
