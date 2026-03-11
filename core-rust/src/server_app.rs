@@ -34,6 +34,10 @@ use crate::app_state::{
 };
 use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{build_modules, sync_module_registry_from_prompts};
+use crate::application::state_record_admin_service::{
+    get_state_record_detail, list_state_records, upsert_state_record, StateRecordDetail,
+    StateRecordListItem, StateRecordUpsertPayload,
+};
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config};
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
@@ -191,6 +195,22 @@ struct JaAccentResponse {
 struct DebugConceptSearchQuery {
     q: Option<String>,
     limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugStateRecordsQuery {
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugStateRecordsResponse {
+    items: Vec<StateRecordListItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugStateRecordDetailResponse {
+    item: StateRecordDetail,
 }
 
 #[derive(Debug, Deserialize)]
@@ -395,6 +415,7 @@ pub(crate) async fn run_server() {
     let admin_router = Router::new()
         .route("/styles/{name}", get(debug_style))
         .route("/prompts", get(debug_ui))
+        .route("/state-records", get(debug_state_records_ui))
         .route("/events", get(debug_monitor_ui))
         .route("/concept-graph", get(debug_concept_graph_ui))
         .route("/concept-graph/health", get(debug_concept_graph_health))
@@ -414,6 +435,11 @@ pub(crate) async fn run_server() {
             get(debug_concept_graph_relations),
         )
         .route("/concept-graph/queries", get(debug_concept_graph_queries))
+        .route("/state-records/data", get(debug_get_state_records))
+        .route(
+            "/state-records/data/{key}",
+            get(debug_get_state_record_detail).put(debug_upsert_state_record),
+        )
         .route(
             "/prompts/data",
             get(debug_get_prompts).post(debug_update_prompts),
@@ -929,6 +955,33 @@ async fn debug_update_prompts(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
     *state.prompts.overrides.write().await = overrides;
     Ok(Json(payload))
+}
+
+async fn debug_get_state_records(
+    State(state): State<AppState>,
+    Query(query): Query<DebugStateRecordsQuery>,
+) -> Result<Json<DebugStateRecordsResponse>, (StatusCode, String)> {
+    let items = list_state_records(&state, query.q.as_deref(), query.limit).await?;
+    Ok(Json(DebugStateRecordsResponse { items }))
+}
+
+async fn debug_get_state_record_detail(
+    Path(key): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<DebugStateRecordDetailResponse>, (StatusCode, String)> {
+    let item = get_state_record_detail(&state, key.as_str())
+        .await?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "state record not found".to_string()))?;
+    Ok(Json(DebugStateRecordDetailResponse { item }))
+}
+
+async fn debug_upsert_state_record(
+    Path(key): Path<String>,
+    State(state): State<AppState>,
+    Json(payload): Json<StateRecordUpsertPayload>,
+) -> Result<Json<DebugStateRecordDetailResponse>, (StatusCode, String)> {
+    let item = upsert_state_record(&state, key.as_str(), payload).await?;
+    Ok(Json(DebugStateRecordDetailResponse { item }))
 }
 
 async fn debug_run_module(
@@ -1806,6 +1859,23 @@ async fn debug_concept_graph_ui(
         Err(err) => {
             println!(
                 "CONCEPT_GRAPH_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                UI_PATH, err
+            );
+            Ok(Html(EMBEDDED.to_string()))
+        }
+    }
+}
+
+async fn debug_state_records_ui(
+    State(_state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    const EMBEDDED: &str = include_str!("../static/state_records_ui.html");
+    const UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/state_records_ui.html");
+    match tokio::fs::read_to_string(UI_PATH).await {
+        Ok(html) => Ok(Html(html)),
+        Err(err) => {
+            println!(
+                "STATE_RECORDS_UI_READ_ERROR path={} error={} (falling back to embedded html)",
                 UI_PATH, err
             );
             Ok(Html(EMBEDDED.to_string()))

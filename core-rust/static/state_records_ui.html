@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>State Records</title>
+    <link rel="stylesheet" href="/admin/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-base.css" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--page-bg);
+        color: var(--text);
+        font-family: "IBM Plex Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+      }
+      .page {
+        max-width: 1360px;
+        margin: 0 auto;
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 { margin: 0; font-size: 20px; }
+      h2 { margin: 0 0 8px; font-size: 15px; }
+      .muted { color: var(--muted); font-size: 12px; }
+      .title-right, .top-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .top-nav a {
+        color: var(--muted);
+        font-size: 12px;
+        text-decoration: none;
+        padding-bottom: 2px;
+        border-bottom: 1px solid transparent;
+      }
+      .top-nav a.active { color: var(--text); border-bottom-color: var(--accent); }
+      .logout-btn {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .logout-btn:hover { border-color: var(--accent); color: var(--text); }
+      .layout {
+        display: grid;
+        grid-template-columns: 420px 1fr;
+        gap: 12px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      input, textarea, button {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        font: inherit;
+        background: var(--surface-2);
+        color: var(--text);
+      }
+      input, textarea { width: 100%; }
+      button { cursor: pointer; }
+      button:hover { border-color: var(--accent); }
+      textarea {
+        min-height: 380px;
+        resize: vertical;
+        font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+        line-height: 1.45;
+      }
+      .list {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        max-height: 72vh;
+        overflow: auto;
+      }
+      .item {
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+        cursor: pointer;
+      }
+      .item:last-child { border-bottom: 0; }
+      .item.active { background: rgba(113, 74, 244, 0.22); }
+      .item:hover { background: rgba(255, 255, 255, 0.05); }
+      .item .name { font-weight: 700; }
+      .item .meta { margin-top: 4px; font-size: 12px; color: var(--muted); }
+      .item .summary { margin-top: 6px; font-size: 12px; color: var(--text); }
+      .row { display: grid; gap: 8px; margin-bottom: 10px; }
+      .inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .detail-grid { display: grid; gap: 12px; }
+      .detail-meta { display: grid; gap: 4px; font-size: 13px; }
+      .kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px; }
+      .k { color: var(--muted); }
+      .status { font-size: 12px; color: var(--muted); }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 12px;
+      }
+      @media (max-width: 980px) {
+        .layout { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="card">
+        <div class="title-row">
+          <h1>State Records</h1>
+          <div class="title-right">
+            <nav class="top-nav" aria-label="Admin Pages">
+              <a href="/admin/events">Events</a>
+              <a href="/admin/prompts">Prompts</a>
+              <a href="/admin/concept-graph">Concept Graph</a>
+              <a href="/admin/state-records" class="active">State</a>
+            </nav>
+            <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
+          </div>
+        </div>
+        <div class="muted">Edit state-backed content and optionally expose it as a skill index in the concept graph.</div>
+      </div>
+
+      <section class="layout">
+        <div class="card">
+          <h2>Records</h2>
+          <div class="toolbar">
+            <input id="searchInput" placeholder="Search keys or content" />
+            <button id="searchBtn" type="button">Search</button>
+          </div>
+          <div class="toolbar">
+            <input id="newKeyInput" placeholder="New key" />
+            <button id="newBtn" type="button">New</button>
+          </div>
+          <div id="listStatus" class="status">Loading...</div>
+          <div id="recordList" class="list"></div>
+        </div>
+
+        <div class="card">
+          <div class="title-row">
+            <h2>Editor</h2>
+            <div class="inline">
+              <span id="saveStatus" class="status"></span>
+              <button id="saveBtn" type="button">Save</button>
+            </div>
+          </div>
+          <div class="detail-grid">
+            <div class="row">
+              <label class="muted" for="keyInput">Key</label>
+              <input id="keyInput" placeholder="state key" />
+            </div>
+            <div class="row">
+              <label class="muted" for="contentInput">Content</label>
+              <textarea id="contentInput" placeholder="Record content"></textarea>
+            </div>
+            <div class="inline">
+              <label class="pill"><input id="skillEnabledInput" type="checkbox" /> Index as skill</label>
+              <span id="skillStatePill" class="pill">not indexed</span>
+            </div>
+            <div class="detail-meta">
+              <div class="kv"><div class="k">Updated At</div><div id="updatedAtValue">-</div></div>
+              <div class="kv"><div class="k">Summary</div><div id="summaryValue">-</div></div>
+              <div class="kv"><div class="k">Body State Key</div><div id="bodyStateKeyValue">-</div></div>
+              <div class="kv"><div class="k">Triggers</div><div id="triggersValue">-</div></div>
+            </div>
+            <div class="row">
+              <label class="muted">Metadata</label>
+              <pre id="metadataValue">{}</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        items: [],
+        selectedKey: null,
+        currentDetail: null,
+      };
+
+      const els = {
+        searchInput: document.getElementById("searchInput"),
+        searchBtn: document.getElementById("searchBtn"),
+        newKeyInput: document.getElementById("newKeyInput"),
+        newBtn: document.getElementById("newBtn"),
+        listStatus: document.getElementById("listStatus"),
+        recordList: document.getElementById("recordList"),
+        keyInput: document.getElementById("keyInput"),
+        contentInput: document.getElementById("contentInput"),
+        skillEnabledInput: document.getElementById("skillEnabledInput"),
+        skillStatePill: document.getElementById("skillStatePill"),
+        updatedAtValue: document.getElementById("updatedAtValue"),
+        summaryValue: document.getElementById("summaryValue"),
+        bodyStateKeyValue: document.getElementById("bodyStateKeyValue"),
+        triggersValue: document.getElementById("triggersValue"),
+        metadataValue: document.getElementById("metadataValue"),
+        saveStatus: document.getElementById("saveStatus"),
+        saveBtn: document.getElementById("saveBtn"),
+        topLogoutButton: document.getElementById("topLogoutButton"),
+      };
+
+      async function requestJson(path, options) {
+        const res = await fetch(path, options);
+        if (!res.ok) {
+          let message = `${res.status} ${res.statusText}`;
+          try { message = await res.text(); } catch (_) {}
+          throw new Error(message);
+        }
+        return res.json();
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function renderList() {
+        if (state.items.length === 0) {
+          els.recordList.innerHTML = '<div class="item"><div class="meta">No records.</div></div>';
+          return;
+        }
+        els.recordList.innerHTML = state.items.map((item) => {
+          const active = item.key === state.selectedKey ? " active" : "";
+          const skill = item.skill_index?.enabled
+            ? `<div class="summary">Skill: ${escapeHtml(item.skill_index.summary || "-")}</div>`
+            : "";
+          return `
+            <div class="item${active}" data-key="${encodeURIComponent(item.key)}">
+              <div class="name">${escapeHtml(item.key)}</div>
+              <div class="meta">${escapeHtml(item.updated_at)} · ${item.skill_index?.enabled ? "indexed" : "plain state"}</div>
+              <div class="meta">${escapeHtml(item.content_preview || "")}</div>
+              ${skill}
+            </div>
+          `;
+        }).join("");
+        document.querySelectorAll(".item[data-key]").forEach((el) => {
+          el.addEventListener("click", () => loadDetail(decodeURIComponent(el.dataset.key)));
+        });
+      }
+
+      function renderDetail(item) {
+        state.currentDetail = item;
+        state.selectedKey = item.key;
+        els.keyInput.value = item.key || "";
+        els.contentInput.value = item.content || "";
+        els.skillEnabledInput.checked = !!item.skill_index?.enabled;
+        els.updatedAtValue.textContent = item.updated_at || "-";
+        els.summaryValue.textContent = item.skill_index?.summary || "-";
+        els.bodyStateKeyValue.textContent = item.skill_index?.body_state_key || "-";
+        els.triggersValue.textContent = (item.skill_index?.trigger_concepts || []).join(", ") || "-";
+        els.metadataValue.textContent = JSON.stringify(item.metadata || {}, null, 2);
+        els.skillStatePill.textContent = item.skill_index?.enabled ? "indexed as skill" : "not indexed";
+        renderList();
+      }
+
+      function renderNewRecord(key) {
+        const cleanKey = (key || "").trim();
+        state.currentDetail = null;
+        state.selectedKey = cleanKey || null;
+        els.keyInput.value = cleanKey;
+        els.contentInput.value = "";
+        els.skillEnabledInput.checked = false;
+        els.updatedAtValue.textContent = "-";
+        els.summaryValue.textContent = "-";
+        els.bodyStateKeyValue.textContent = "-";
+        els.triggersValue.textContent = "-";
+        els.metadataValue.textContent = "{}";
+        els.skillStatePill.textContent = "not indexed";
+        renderList();
+      }
+
+      async function loadList() {
+        const q = els.searchInput.value.trim();
+        els.listStatus.textContent = "Loading...";
+        const path = q ? `/admin/state-records/data?q=${encodeURIComponent(q)}` : "/admin/state-records/data";
+        try {
+          const data = await requestJson(path);
+          state.items = Array.isArray(data.items) ? data.items : [];
+          els.listStatus.textContent = `${state.items.length} records`;
+          renderList();
+        } catch (err) {
+          els.listStatus.textContent = `Failed: ${err.message}`;
+        }
+      }
+
+      async function loadDetail(key) {
+        try {
+          const data = await requestJson(`/admin/state-records/data/${encodeURIComponent(key)}`);
+          renderDetail(data.item);
+        } catch (err) {
+          els.saveStatus.textContent = `Load failed: ${err.message}`;
+        }
+      }
+
+      async function saveCurrent() {
+        const key = els.keyInput.value.trim();
+        const content = els.contentInput.value;
+        if (!key) {
+          els.saveStatus.textContent = "Key is required";
+          return;
+        }
+        if (!content.trim()) {
+          els.saveStatus.textContent = "Content is required";
+          return;
+        }
+        els.saveStatus.textContent = "Saving...";
+        try {
+          const payload = {
+            content,
+            related_keys: state.currentDetail?.related_keys || [],
+            metadata: state.currentDetail?.metadata || {},
+            skill_index: {
+              enabled: !!els.skillEnabledInput.checked,
+            },
+          };
+          const data = await requestJson(`/admin/state-records/data/${encodeURIComponent(key)}`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          renderDetail(data.item);
+          await loadList();
+          els.saveStatus.textContent = "Saved";
+        } catch (err) {
+          els.saveStatus.textContent = `Save failed: ${err.message}`;
+        }
+      }
+
+      async function logout() {
+        try {
+          await fetch("/auth/logout", { method: "POST" });
+        } finally {
+          window.location.href = "/admin/login";
+        }
+      }
+
+      els.searchBtn.addEventListener("click", loadList);
+      els.searchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") loadList();
+      });
+      els.newBtn.addEventListener("click", () => renderNewRecord(els.newKeyInput.value));
+      els.saveBtn.addEventListener("click", saveCurrent);
+      els.topLogoutButton.addEventListener("click", logout);
+
+      loadList().then(() => {
+        if (state.items.length > 0) {
+          loadDetail(state.items[0].key);
+        } else {
+          renderNewRecord("");
+        }
+      });
+    </script>
+  </body>
+</html>

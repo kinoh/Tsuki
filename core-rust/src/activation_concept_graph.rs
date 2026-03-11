@@ -64,6 +64,18 @@ pub(crate) trait ConceptGraphDebugReader: Send + Sync {
 #[async_trait]
 pub(crate) trait ConceptGraphOps: Send + Sync {
     async fn concept_upsert(&self, concept: String) -> Result<Value, String>;
+    async fn skill_index_upsert(
+        &self,
+        skill_name: String,
+        summary: String,
+        body_state_key: String,
+        enabled: bool,
+    ) -> Result<Value, String>;
+    async fn skill_index_replace_triggers(
+        &self,
+        skill_name: String,
+        trigger_concepts: Vec<String>,
+    ) -> Result<Value, String>;
     async fn update_affect(&self, target: String, valence_delta: f64) -> Result<Value, String>;
     async fn activate_related_submodules(
         &self,
@@ -590,8 +602,12 @@ impl ActivationConceptGraphStore {
             .collect::<Vec<_>>()
     }
 
-    async fn upsert_concept_embedding(&self, concept: &str) -> Result<(), String> {
-        let embedding = self.embedding.encode(concept)?;
+    async fn upsert_concept_embedding_for_text(
+        &self,
+        concept: &str,
+        embedding_text: &str,
+    ) -> Result<(), String> {
+        let embedding = self.embedding.encode(embedding_text)?;
         let embedding = Self::to_embedding_property_vector(&embedding);
         let mut stream = self
             .graph
@@ -608,6 +624,10 @@ impl ActivationConceptGraphStore {
             .map_err(|err| format!("upsert concept embedding failed for {}: {}", concept, err))?;
         let _ = stream.next().await;
         Ok(())
+    }
+
+    async fn upsert_concept_embedding(&self, concept: &str) -> Result<(), String> {
+        self.upsert_concept_embedding_for_text(concept, concept).await
     }
 
     async fn vector_search_candidates(
@@ -1251,7 +1271,8 @@ impl ConceptGraphActivationReader for ActivationConceptGraphStore {
         let now = self.now_ms();
         let q = query(
             "MATCH (c:Concept)
-             WHERE c.kind = 'skill' OR c.name STARTS WITH 'skill:'
+             WHERE (c.kind = 'skill' OR c.name STARTS WITH 'skill:')
+               AND coalesce(c.disabled, false) = false
              RETURN c.name AS name,
                     c.summary AS summary,
                     c.body_state_key AS body_state_key,
@@ -1320,6 +1341,114 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         Ok(json!({
             "concept_id": concept,
             "created": created,
+        }))
+    }
+
+    async fn skill_index_upsert(
+        &self,
+        skill_name: String,
+        summary: String,
+        body_state_key: String,
+        enabled: bool,
+    ) -> Result<Value, String> {
+        let skill_name = Self::normalize_non_empty(skill_name.as_str())
+            .ok_or_else(|| "Error: skill_name: empty".to_string())?;
+        if !Self::is_skill_name(skill_name.as_str()) {
+            return Err("Error: skill_name: must start with skill:".to_string());
+        }
+        let summary = Self::skill_summary(skill_name.as_str(), summary.as_str());
+        let body_state_key = Self::skill_body_state_key(skill_name.as_str(), body_state_key.as_str());
+        let now = self.now_ms();
+        let q = query(
+            "MERGE (c:Concept {name: $name})
+             ON CREATE SET c.valence = $valence, c.arousal_level = $arousal_level, c.accessed_at = $accessed_at
+             SET c.kind = 'skill',
+                 c.summary = $summary,
+                 c.body_state_key = $body_state_key,
+                 c.disabled = $disabled,
+                 c.accessed_at = $accessed_at
+             RETURN c.name AS name",
+        )
+        .param("name", skill_name.as_str())
+        .param("summary", summary.as_str())
+        .param("body_state_key", body_state_key.as_str())
+        .param("disabled", !enabled)
+        .param("valence", DEFAULT_VALENCE)
+        .param("arousal_level", INITIAL_AROUSAL_UPSERT)
+        .param("accessed_at", now);
+        let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
+        let _ = result.next().await.map_err(|err| err.to_string())?;
+        self.upsert_concept_embedding_for_text(
+            skill_name.as_str(),
+            format!("{}\n{}", skill_name, summary).as_str(),
+        )
+        .await?;
+        Ok(json!({
+            "skill_name": skill_name,
+            "summary": summary,
+            "body_state_key": body_state_key,
+            "enabled": enabled,
+        }))
+    }
+
+    async fn skill_index_replace_triggers(
+        &self,
+        skill_name: String,
+        trigger_concepts: Vec<String>,
+    ) -> Result<Value, String> {
+        let skill_name = Self::normalize_non_empty(skill_name.as_str())
+            .ok_or_else(|| "Error: skill_name: empty".to_string())?;
+        if !Self::is_skill_name(skill_name.as_str()) {
+            return Err("Error: skill_name: must start with skill:".to_string());
+        }
+        let mut deduped = Vec::<String>::new();
+        let mut seen = HashSet::<String>::new();
+        for item in trigger_concepts {
+            let Some(value) = Self::normalize_non_empty(item.as_str()) else {
+                continue;
+            };
+            if seen.insert(value.clone()) {
+                deduped.push(value);
+            }
+        }
+        let mut cleanup = self
+            .graph
+            .execute(
+                query(
+                    "MATCH (:Concept)-[r:EVOKES]->(c:Concept {name: $name})
+                     WHERE r.managed_by = 'state_record_skill_index'
+                     DELETE r",
+                )
+                .param("name", skill_name.as_str()),
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+        let _ = cleanup.next().await;
+        for trigger in &deduped {
+            self.concept_upsert(trigger.clone()).await?;
+            let mut result = self
+                .graph
+                .execute(
+                    query(
+                        "MATCH (a:Concept {name: $from})
+                         MATCH (b:Concept {name: $to})
+                         MERGE (a)-[r:EVOKES]->(b)
+                         SET r.weight = CASE WHEN r.weight IS NULL THEN $weight ELSE 1 - (1 - r.weight) * (1 - $alpha) END,
+                             r.managed_by = 'state_record_skill_index'
+                         RETURN type(r) AS type",
+                    )
+                    .param("from", trigger.as_str())
+                    .param("to", skill_name.as_str())
+                    .param("weight", DEFAULT_RELATION_WEIGHT)
+                    .param("alpha", RELATION_WEIGHT_ALPHA),
+                )
+                .await
+                .map_err(|err| err.to_string())?;
+            let _ = result.next().await.map_err(|err| err.to_string())?;
+        }
+        Ok(json!({
+            "skill_name": skill_name,
+            "trigger_concepts": deduped,
         }))
     }
 
@@ -1777,6 +1906,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
              RETURN c.name AS name,
                     c.summary AS summary,
                     c.body_state_key AS body_state_key,
+                    c.disabled AS disabled,
                     c.valence AS valence,
                     c.arousal_level AS arousal_level,
                     c.accessed_at AS accessed_at",
@@ -1795,6 +1925,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             }
             let summary_raw: String = row.get("summary").unwrap_or_default();
             let body_state_key_raw: String = row.get("body_state_key").unwrap_or_default();
+            let disabled: bool = row.get("disabled").unwrap_or(false);
             let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
             let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
             let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
@@ -1805,6 +1936,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
                 "kind": if is_skill { "skill" } else { "concept" },
                 "summary": if is_skill { Self::skill_summary(name.as_str(), summary_raw.as_str()) } else { String::new() },
                 "body_state_key": if is_skill { Self::skill_body_state_key(name.as_str(), body_state_key_raw.as_str()) } else { String::new() },
+                "disabled": disabled,
                 "valence": valence,
                 "arousal": arousal,
                 "arousal_level": arousal_level,
@@ -1856,7 +1988,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             .execute(
                 query(
                     "MATCH (c:Concept {name: $name})
-                     RETURN c.summary AS summary, c.body_state_key AS body_state_key",
+                     RETURN c.summary AS summary, c.body_state_key AS body_state_key, c.disabled AS disabled",
                 )
                 .param("name", concept.as_str()),
             )
@@ -1864,9 +1996,11 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             .map_err(|err| err.to_string())?;
         let mut summary_raw = String::new();
         let mut body_state_key_raw = String::new();
+        let mut disabled = false;
         if let Ok(Some(row)) = meta_result.next().await {
             summary_raw = row.get("summary").unwrap_or_default();
             body_state_key_raw = row.get("body_state_key").unwrap_or_default();
+            disabled = row.get("disabled").unwrap_or(false);
         }
         let relations = self
             .fetch_relations(concept.as_str())
@@ -1905,6 +2039,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             "kind": if is_skill { "skill" } else { "concept" },
             "summary": if is_skill { Self::skill_summary(concept.as_str(), summary_raw.as_str()) } else { String::new() },
             "body_state_key": if is_skill { Self::skill_body_state_key(concept.as_str(), body_state_key_raw.as_str()) } else { String::new() },
+            "disabled": disabled,
             "valence": state.valence,
             "arousal": Self::round_score(self.arousal(state.arousal_level, state.accessed_at, now)),
             "arousal_level": state.arousal_level,
