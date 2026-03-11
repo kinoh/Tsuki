@@ -208,9 +208,6 @@
             </div>
             <div class="detail-meta">
               <div class="kv"><div class="k">Updated At</div><div id="updatedAtValue">-</div></div>
-              <div class="kv"><div class="k">Summary</div><div id="summaryValue">-</div></div>
-              <div class="kv"><div class="k">Body State Key</div><div id="bodyStateKeyValue">-</div></div>
-              <div class="kv"><div class="k">Triggers</div><div id="triggersValue">-</div></div>
             </div>
           </div>
         </div>
@@ -233,9 +230,6 @@
         contentInput: document.getElementById("contentInput"),
         skillEnabledInput: document.getElementById("skillEnabledInput"),
         updatedAtValue: document.getElementById("updatedAtValue"),
-        summaryValue: document.getElementById("summaryValue"),
-        bodyStateKeyValue: document.getElementById("bodyStateKeyValue"),
-        triggersValue: document.getElementById("triggersValue"),
         saveStatus: document.getElementById("saveStatus"),
         saveBtn: document.getElementById("saveBtn"),
         clearBtn: document.getElementById("clearBtn"),
@@ -291,9 +285,6 @@
         els.contentInput.value = item.content || "";
         els.skillEnabledInput.checked = !!item.skill_index?.enabled;
         els.updatedAtValue.textContent = item.updated_at || "-";
-        els.summaryValue.textContent = item.skill_index?.summary || "-";
-        els.bodyStateKeyValue.textContent = item.skill_index?.body_state_key || "-";
-        els.triggersValue.textContent = (item.skill_index?.trigger_concepts || []).join(", ") || "-";
         renderList();
       }
 
@@ -305,9 +296,6 @@
         els.contentInput.value = "";
         els.skillEnabledInput.checked = false;
         els.updatedAtValue.textContent = "-";
-        els.summaryValue.textContent = "-";
-        els.bodyStateKeyValue.textContent = "-";
-        els.triggersValue.textContent = "-";
         renderList();
       }
 
