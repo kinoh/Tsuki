@@ -537,7 +537,7 @@ impl Db {
       .execute(
         "INSERT INTO state_records (key, content, related_keys_json, metadata_json, updated_at)\
          VALUES (?, ?, ?, ?, ?)\
-         ON CONFLICT(key) DO UPDATE SET\
+         ON CONFLICT(key) DO UPDATE SET \
            content=excluded.content,\
            related_keys_json=excluded.related_keys_json,\
            metadata_json=excluded.metadata_json,\
