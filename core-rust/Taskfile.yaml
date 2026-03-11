@@ -9,6 +9,11 @@ vars:
   DOCKER_COMPOSE: docker compose -f ../compose.test.yaml
 
 tasks:
+  serve:
+    desc: Run core-rust locally with core-rust/.env
+    cmds:
+      - cargo run --bin tsuki-core-rust
+
   integration/memgraph/up:
     desc: Start isolated test memgraph service
     cmds:
