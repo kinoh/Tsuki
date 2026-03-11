@@ -6,6 +6,7 @@ use std::time::Instant;
 use std::{collections::HashMap, sync::Arc};
 use tokio::runtime::Handle;
 
+use crate::activation_concept_graph::VisibleSkill;
 use crate::app_state::AppState;
 use crate::application::event_service::record_event;
 use crate::application::history_service::{format_decision_debug_history, format_event_history};
@@ -13,7 +14,6 @@ use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
 };
-use crate::activation_concept_graph::VisibleSkill;
 use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::event::contracts::{decision_text, llm_error, llm_raw, role_text_output};
 use crate::llm::{

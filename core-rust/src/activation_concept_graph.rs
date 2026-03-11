@@ -34,8 +34,11 @@ pub(crate) trait ConceptGraphActivationReader: Send + Sync {
     async fn active_nodes(&self, limit: usize) -> Result<Vec<ActiveGraphNode>, String>;
     async fn concept_activation(&self, concepts: &[String])
         -> Result<HashMap<String, f64>, String>;
-    async fn visible_skills(&self, threshold: f64, limit: usize)
-        -> Result<Vec<VisibleSkill>, String>;
+    async fn visible_skills(
+        &self,
+        threshold: f64,
+        limit: usize,
+    ) -> Result<Vec<VisibleSkill>, String>;
 }
 
 #[async_trait]
@@ -627,7 +630,8 @@ impl ActivationConceptGraphStore {
     }
 
     async fn upsert_concept_embedding(&self, concept: &str) -> Result<(), String> {
-        self.upsert_concept_embedding_for_text(concept, concept).await
+        self.upsert_concept_embedding_for_text(concept, concept)
+            .await
     }
 
     async fn vector_search_candidates(
@@ -1357,7 +1361,8 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
             return Err("Error: skill_name: must start with skill:".to_string());
         }
         let summary = Self::skill_summary(skill_name.as_str(), summary.as_str());
-        let body_state_key = Self::skill_body_state_key(skill_name.as_str(), body_state_key.as_str());
+        let body_state_key =
+            Self::skill_body_state_key(skill_name.as_str(), body_state_key.as_str());
         let now = self.now_ms();
         let q = query(
             "MERGE (c:Concept {name: $name})
