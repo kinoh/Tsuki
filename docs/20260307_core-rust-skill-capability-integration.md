@@ -3,7 +3,7 @@
 ## Overview
 This document defines how `core-rust` should introduce agent skills without turning them into another callable module or tool system.
 
-`skill` is treated as knowledge, not as an execution unit. It belongs inside the concept graph memory model. Router surfaces candidate skills for the current turn, and Decision chooses whether it needs to inspect the skill body before composing the final response or tool usage plan.
+`skill` is treated as knowledge, not as an execution unit. The concept graph acts as the index for dynamic memory, while skill bodies live in the state DB as retrievable content. Router surfaces candidate skills for the current turn, and Decision chooses whether it needs to inspect the skill body before composing the final response or tool usage plan.
 
 Compatibility Impact: breaking-by-default (no compatibility layer)
 
@@ -31,9 +31,14 @@ Store skills directly in the concept graph as knowledge nodes.
 ## Responsibility Boundaries
 
 ### Concept Graph
-- Owns skill storage, embedding, and relations.
+- Owns skill indexing, embedding, and relations.
 - Treats skills as part of memory, not as external runtime plugins.
-- Must remain the source of truth for skill content.
+- Must remain the source of truth for skill relevance and retrieval links.
+
+### State DB
+- Owns skill body content.
+- Serves as the retrievable content store for dynamic memory bodies.
+- Must not take over relation or activation responsibilities from the concept graph.
 
 ### Router
 - Activates and ranks candidate skills through the concept graph.
@@ -58,18 +63,18 @@ Store skills directly in the concept graph as knowledge nodes.
 - Must not be used as the conceptual model for skills.
 
 ## Skill Model
-Each skill should exist in the concept graph as a node with durable memory properties.
+Each skill should exist in the concept graph as an indexed memory node.
 
 Minimum fields:
 
 - `name`
-- `kind = "skill"`
+- `name = "skill:{id}"`
 - `summary`
-- `body`
+- `body_state_key`
 - `embedding`
 - `updated_at`
 
-Optional operational metadata may be added later if justified, but the initial runtime model should stay minimal.
+The corresponding body is stored in the state DB under `body_state_key`.
 
 ## Why `summary` Exists
 `summary` is not a replacement for the skill body.
@@ -120,8 +125,9 @@ Trigger generation should prefer concise skill-identifying material, not arbitra
 ## Runtime Flow
 
 ### 1. Bootstrap / Import
+- Write the skill body into the state DB.
 - Write the skill node into the concept graph.
-- Store the skill `body`, `summary`, and embedding on the node.
+- Store the skill `summary`, `body_state_key`, and embedding on the node.
 - Generate or update trigger relations from relevant concepts to the skill node.
 
 ### 2. Router
@@ -182,9 +188,14 @@ Do not add a separate skill registry as the primary source of truth.
 
 The concept graph should store:
 
-- skill content
+- skill summary
+- skill body lookup key
 - skill embedding
 - trigger relations
+
+The state DB should store:
+
+- skill body content
 
 Any import helper, admin view, or editing interface should be secondary to the graph, not a competing runtime authority.
 
@@ -219,6 +230,7 @@ Rejected because it freezes Decision behavior too early and pushes learned usage
 
 ### Phase 1
 - Add skill node storage to the concept graph.
+- Store skill bodies in the state DB.
 - Add embedding and trigger relation support for skills.
 
 ### Phase 2

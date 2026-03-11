@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use neo4rs::{query, Graph};
 use safetensors::{tensor::TensorView, Dtype, SafeTensors};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -33,6 +34,8 @@ pub(crate) trait ConceptGraphActivationReader: Send + Sync {
     async fn active_nodes(&self, limit: usize) -> Result<Vec<ActiveGraphNode>, String>;
     async fn concept_activation(&self, concepts: &[String])
         -> Result<HashMap<String, f64>, String>;
+    async fn visible_skills(&self, threshold: f64, limit: usize)
+        -> Result<Vec<VisibleSkill>, String>;
 }
 
 #[async_trait]
@@ -63,6 +66,10 @@ pub(crate) trait ConceptGraphOps: Send + Sync {
     async fn concept_upsert(&self, concept: String) -> Result<Value, String>;
     async fn update_affect(&self, target: String, valence_delta: f64) -> Result<Value, String>;
     async fn activate_related_submodules(
+        &self,
+        concepts: Vec<String>,
+    ) -> Result<HashMap<String, f64>, String>;
+    async fn activate_related_skills(
         &self,
         concepts: Vec<String>,
     ) -> Result<HashMap<String, f64>, String>;
@@ -139,6 +146,14 @@ struct VectorCandidate {
 pub(crate) struct ActiveGraphNode {
     pub(crate) label: String,
     pub(crate) arousal: f64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub(crate) struct VisibleSkill {
+    pub(crate) name: String,
+    pub(crate) summary: String,
+    pub(crate) body_state_key: String,
+    pub(crate) score: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -370,6 +385,24 @@ pub(crate) struct ActivationConceptGraphStore {
 }
 
 impl ActivationConceptGraphStore {
+    fn is_skill_name(name: &str) -> bool {
+        name.starts_with("skill:")
+    }
+
+    fn skill_body_state_key(name: &str, body_state_key: &str) -> String {
+        Self::normalize_non_empty(body_state_key).unwrap_or_else(|| name.to_string())
+    }
+
+    fn skill_summary(name: &str, summary: &str) -> String {
+        if let Some(value) = Self::normalize_non_empty(summary) {
+            return value;
+        }
+        if let Some(value) = name.strip_prefix("skill:") {
+            return value.to_string();
+        }
+        name.to_string()
+    }
+
     fn new(
         graph: Arc<Graph>,
         arousal_tau_ms: f64,
@@ -1003,6 +1036,73 @@ impl ActivationConceptGraphStore {
         }
         Ok(())
     }
+
+    async fn activate_related_targets_by_prefix(
+        &self,
+        concepts: Vec<String>,
+        target_prefix: &str,
+    ) -> Result<HashMap<String, f64>, String> {
+        let now = self.now_ms();
+        let mut unique = Vec::<String>::new();
+        let mut seen = HashSet::<String>::new();
+        for raw in concepts {
+            let Some(name) = Self::normalize_non_empty(raw.as_str()) else {
+                continue;
+            };
+            if seen.insert(name.clone()) {
+                unique.push(name);
+            }
+        }
+        if unique.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut cache = HashMap::<String, ConceptState>::new();
+        let mut accumulated = HashMap::<String, f64>::new();
+        for concept in unique {
+            let Some(source_state) = self
+                .get_concept_state_cached(&mut cache, concept.as_str(), now)
+                .await?
+            else {
+                continue;
+            };
+            let source_arousal =
+                self.arousal(source_state.arousal_level, source_state.accessed_at, now);
+            if source_arousal <= 0.0 {
+                continue;
+            }
+            let relations = self.fetch_relations(concept.as_str()).await?;
+            for edge in relations {
+                if edge.from == edge.to {
+                    continue;
+                }
+                let forward = edge.from == concept;
+                let target = if forward {
+                    edge.to.clone()
+                } else {
+                    edge.from.clone()
+                };
+                if !target.starts_with(target_prefix) {
+                    continue;
+                }
+                let direction_penalty = if forward { 1.0 } else { REVERSE_PENALTY };
+                let next_level = (source_arousal * edge.weight * direction_penalty).clamp(0.0, 1.0);
+                if next_level <= 0.0 {
+                    continue;
+                }
+                let entry = accumulated.entry(target).or_insert(0.0);
+                *entry = (*entry + next_level).clamp(0.0, 1.0);
+            }
+        }
+        for (target, level) in &accumulated {
+            self.maybe_update_arousal(&mut cache, target.as_str(), *level, now)
+                .await?;
+        }
+        for value in accumulated.values_mut() {
+            *value = Self::round_score(*value);
+        }
+        Ok(accumulated)
+    }
 }
 
 #[async_trait]
@@ -1140,6 +1240,55 @@ impl ConceptGraphActivationReader for ActivationConceptGraphStore {
         }
         Ok(out)
     }
+
+    async fn visible_skills(
+        &self,
+        threshold: f64,
+        limit: usize,
+    ) -> Result<Vec<VisibleSkill>, String> {
+        let limit = limit.max(1).min(20);
+        let threshold = threshold.clamp(0.0, 1.0);
+        let now = self.now_ms();
+        let q = query(
+            "MATCH (c:Concept)
+             WHERE c.kind = 'skill' OR c.name STARTS WITH 'skill:'
+             RETURN c.name AS name,
+                    c.summary AS summary,
+                    c.body_state_key AS body_state_key,
+                    c.arousal_level AS arousal_level,
+                    c.accessed_at AS accessed_at",
+        );
+        let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
+        let mut items = Vec::<VisibleSkill>::new();
+        while let Ok(Some(row)) = result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if !Self::is_skill_name(name.as_str()) {
+                continue;
+            }
+            let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
+            let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+            let score = Self::round_score(self.arousal(arousal_level, accessed_at, now));
+            if score < threshold {
+                continue;
+            }
+            let summary: String = row.get("summary").unwrap_or_default();
+            let body_state_key: String = row.get("body_state_key").unwrap_or_default();
+            items.push(VisibleSkill {
+                name: name.clone(),
+                summary: Self::skill_summary(name.as_str(), summary.as_str()),
+                body_state_key: Self::skill_body_state_key(name.as_str(), body_state_key.as_str()),
+                score,
+            });
+        }
+        items.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        items.truncate(limit);
+        Ok(items)
+    }
 }
 
 #[async_trait]
@@ -1250,66 +1399,16 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         &self,
         concepts: Vec<String>,
     ) -> Result<HashMap<String, f64>, String> {
-        let now = self.now_ms();
-        let mut unique = Vec::<String>::new();
-        let mut seen = HashSet::<String>::new();
-        for raw in concepts {
-            let Some(name) = Self::normalize_non_empty(raw.as_str()) else {
-                continue;
-            };
-            if seen.insert(name.clone()) {
-                unique.push(name);
-            }
-        }
-        if unique.is_empty() {
-            return Ok(HashMap::new());
-        }
+        self.activate_related_targets_by_prefix(concepts, "submodule:")
+            .await
+    }
 
-        let mut cache = HashMap::<String, ConceptState>::new();
-        let mut accumulated = HashMap::<String, f64>::new();
-        for concept in unique {
-            let Some(source_state) = self
-                .get_concept_state_cached(&mut cache, concept.as_str(), now)
-                .await?
-            else {
-                continue;
-            };
-            let source_arousal =
-                self.arousal(source_state.arousal_level, source_state.accessed_at, now);
-            if source_arousal <= 0.0 {
-                continue;
-            }
-            let relations = self.fetch_relations(concept.as_str()).await?;
-            for edge in relations {
-                if edge.from == edge.to {
-                    continue;
-                }
-                let forward = edge.from == concept;
-                let target = if forward {
-                    edge.to.clone()
-                } else {
-                    edge.from.clone()
-                };
-                if !target.starts_with("submodule:") {
-                    continue;
-                }
-                let direction_penalty = if forward { 1.0 } else { REVERSE_PENALTY };
-                let next_level = (source_arousal * edge.weight * direction_penalty).clamp(0.0, 1.0);
-                if next_level <= 0.0 {
-                    continue;
-                }
-                let entry = accumulated.entry(target).or_insert(0.0);
-                *entry = (*entry + next_level).clamp(0.0, 1.0);
-            }
-        }
-        for (target, level) in &accumulated {
-            self.maybe_update_arousal(&mut cache, target.as_str(), *level, now)
-                .await?;
-        }
-        for value in accumulated.values_mut() {
-            *value = Self::round_score(*value);
-        }
-        Ok(accumulated)
+    async fn activate_related_skills(
+        &self,
+        concepts: Vec<String>,
+    ) -> Result<HashMap<String, f64>, String> {
+        self.activate_related_targets_by_prefix(concepts, "skill:")
+            .await
     }
 
     async fn dampen_concept_arousal(&self, concept: String, ratio: f64) -> Result<Value, String> {
@@ -1675,7 +1774,12 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
         let now = self.now_ms();
         let q = query(
             "MATCH (c:Concept)
-             RETURN c.name AS name, c.valence AS valence, c.arousal_level AS arousal_level, c.accessed_at AS accessed_at",
+             RETURN c.name AS name,
+                    c.summary AS summary,
+                    c.body_state_key AS body_state_key,
+                    c.valence AS valence,
+                    c.arousal_level AS arousal_level,
+                    c.accessed_at AS accessed_at",
         );
         let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
         let mut items = Vec::<Value>::new();
@@ -1689,12 +1793,18 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
                     continue;
                 }
             }
+            let summary_raw: String = row.get("summary").unwrap_or_default();
+            let body_state_key_raw: String = row.get("body_state_key").unwrap_or_default();
             let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
             let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
             let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
             let arousal = Self::round_score(self.arousal(arousal_level, accessed_at, now));
+            let is_skill = Self::is_skill_name(name.as_str());
             items.push(json!({
                 "name": name,
+                "kind": if is_skill { "skill" } else { "concept" },
+                "summary": if is_skill { Self::skill_summary(name.as_str(), summary_raw.as_str()) } else { String::new() },
+                "body_state_key": if is_skill { Self::skill_body_state_key(name.as_str(), body_state_key_raw.as_str()) } else { String::new() },
                 "valence": valence,
                 "arousal": arousal,
                 "arousal_level": arousal_level,
@@ -1741,6 +1851,23 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
         let Some(state) = self.fetch_concept_state(concept.as_str(), now).await? else {
             return Ok(None);
         };
+        let mut meta_result = self
+            .graph
+            .execute(
+                query(
+                    "MATCH (c:Concept {name: $name})
+                     RETURN c.summary AS summary, c.body_state_key AS body_state_key",
+                )
+                .param("name", concept.as_str()),
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+        let mut summary_raw = String::new();
+        let mut body_state_key_raw = String::new();
+        if let Ok(Some(row)) = meta_result.next().await {
+            summary_raw = row.get("summary").unwrap_or_default();
+            body_state_key_raw = row.get("body_state_key").unwrap_or_default();
+        }
         let relations = self
             .fetch_relations(concept.as_str())
             .await?
@@ -1772,8 +1899,12 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
                 })
             })
             .collect::<Vec<_>>();
+        let is_skill = Self::is_skill_name(concept.as_str());
         Ok(Some(json!({
             "name": concept,
+            "kind": if is_skill { "skill" } else { "concept" },
+            "summary": if is_skill { Self::skill_summary(concept.as_str(), summary_raw.as_str()) } else { String::new() },
+            "body_state_key": if is_skill { Self::skill_body_state_key(concept.as_str(), body_state_key_raw.as_str()) } else { String::new() },
             "valence": state.valence,
             "arousal": Self::round_score(self.arousal(state.arousal_level, state.accessed_at, now)),
             "arousal_level": state.arousal_level,
