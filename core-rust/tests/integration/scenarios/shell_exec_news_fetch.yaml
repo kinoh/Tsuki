@@ -2,47 +2,135 @@ name: Shell Exec News Fetch
 include_debug_events: true
 
 steps:
+  - kind: install_skill
+    key: web_page_extract
+    body: |
+      Use shell_exec__execute when the user wants information from a public website or an official news page.
+      Prefer the primary source page over secondary summaries when possible.
+      For a straightforward fetch, prefer curl with flags such as -LfsS and keep the fetched output bounded.
+      If a little parsing is needed, prefer python3 with command="python3", args=["-"], and pass the script through stdin.
+      Return the source URL with the answer, and do not claim details that were not actually fetched.
+    summary: "Fetch and extract information from public web pages with shell-exec"
+    trigger_concepts:
+      - "official web page lookup"
+      - "extract article title and url"
+      - "read a public news page"
+
+  - kind: install_skill
+    key: http_api_probe
+    body: |
+      Use shell_exec__execute to inspect HTTP APIs or structured endpoints.
+      This skill fits API status checks, response headers, JSON endpoints, and request/response debugging.
+      It is not the first choice for ordinary human-facing web pages when a webpage extraction skill is a better fit.
+      Summarize the status code, endpoint, and important response shape briefly.
+    summary: "Probe HTTP APIs and structured endpoints with shell-exec"
+    trigger_concepts:
+      - "api endpoint check"
+      - "http status and headers"
+      - "structured json endpoint"
+
+  - kind: install_skill
+    key: csv_json_data_inspection
+    body: |
+      Use shell_exec__execute with python3 to inspect already-obtained CSV or JSON data.
+      This skill fits summarizing records, checking keys, counting rows, or reshaping structured payloads.
+      It is not the first choice for fetching an ordinary HTML page from the web.
+      Keep outputs concise and return only the fields needed for the user's request.
+    summary: "Inspect CSV and JSON data locally with shell-exec"
+    trigger_concepts:
+      - "inspect json payload"
+      - "summarize csv rows"
+      - "structured data analysis"
+
+  - kind: install_skill
+    key: codebase_search_assistant
+    body: |
+      Use local repository search tools such as rg, find, ls, and git to inspect the current codebase.
+      This skill is for local files only.
+      Do not use it for internet lookup, public website reading, or news-fetch tasks.
+      Prefer narrow searches and answer from the inspected local files only.
+    summary: "Search the local codebase with shell and git tools"
+    trigger_concepts:
+      - "find code definition"
+      - "search local repository"
+      - "inspect project files"
+
+  - kind: install_skill
+    key: command_safety_and_grounding
+    body: |
+      Before describing any shell_exec__execute result, inspect exit_code, stderr, timed_out, and whether the output is actually relevant.
+      Do not claim success if the command failed, timed out, or returned empty/irrelevant content.
+      Keep command output bounded, avoid destructive commands, and prefer minimal read-only commands for information gathering.
+      If you retry, explain the retry briefly and keep the user-facing answer grounded in the final successful output only.
+    summary: "Use shell-exec safely and keep answers grounded in command results"
+    trigger_concepts:
+      - "check command exit code"
+      - "safe shell execution"
+      - "ground answer in command output"
+
   - kind: conversation
     tester_instructions: |
       You are a natural Japanese chat user.
-      Keep each turn short and conversational.
-      Do not reveal test intent.
+      Keep each utterance to exactly one short sentence.
+      Keep the flow casual and do not reveal test intent.
 
       Missions:
-      1) Ask the assistant to fetch one latest headline using shell-exec with curl.
-      2) Ask it to summarize the fetched headline in Japanese in 1-2 short sentences.
-      3) Ask what URL/source it used.
-      4) End naturally.
-    max_turns: 8
+      1) Spend the first 2 or 3 turns on unrelated casual chat only.
+      2) Then ask the assistant to check OpenAI's official news page on the web right now and tell you exactly one latest item.
+         Ask for:
+         - the headline/title
+         - the source URL
+         - a short Japanese summary in 1 or 2 sentences
+         Make it clear you want it checked from the website now, not from memory.
+      3) After it answers, ask one short follow-up about how it checked it.
+      4) End naturally once the news result and method are both covered.
+    max_turns: 6
 
 metrics_definition:
   scenario_requirement_fit:
     description: |
-      How well the run satisfies the scenario sequence:
-      - request news fetch
-      - fetch result summary
-      - source URL confirmation
+      How well the run satisfies the required progression:
+      - 2 or 3 turns of unrelated casual chat first
+      - one explicit request to check OpenAI's official news page now
+      - one short follow-up asking how it checked
 
   dialog_naturalness:
     description: "How natural and coherent the dialogue flow feels end-to-end."
 
+  relevant_skill_selection:
+    description: |
+      Using tool observation events, especially `tool:state_get`, verify the assistant looks up the relevant installed skill(s) for webpage fetching.
+      Score high when the lookup clearly favors `web_page_extract` and optionally `command_safety_and_grounding`.
+      Penalize runs that instead look up `codebase_search_assistant` as the main support for the news request.
+
+  irrelevant_skill_avoidance:
+    description: |
+      Verify the assistant avoids irrelevant local-repository behavior for the news request.
+      Score high only when the observed commands do not use repo-search patterns such as `rg`, `git`, or broad local file inspection as the retrieval path.
+      Penalize runs that drift into codebase exploration instead of web fetching.
+
   shell_exec_tool_log_coverage:
     description: |
       Using tool observation events (`source=tooling`, tags include `observe`, `tool`),
-      verify `shell_exec__execute` is observed at least once.
+      verify `shell_exec__execute` is observed at least once after the explicit news request.
       Judge from `tool:<name>` tags or `payload.tool_name`, not from debug `llm.raw`.
 
-  shell_exec_curl_contract_alignment:
+  web_fetch_contract_alignment:
     description: |
-      Verify `shell_exec__execute` arguments contain a curl-based invocation for HTTP fetch.
-      Accept either:
-      - command="curl"
-      - command="sh" with args including "-c" and a curl command string.
-      Score high only when an actual network fetch intent is visible in tool arguments.
+      Verify the observed `shell_exec__execute` arguments show an actual web-page fetch workflow suitable for this task.
+      Score high when command arguments indicate a public HTTP fetch of OpenAI's official news site or a directly linked official article page.
+      Accept patterns such as curl-based fetches or python3-based HTTP retrieval.
+      Penalize purely local shell usage, API-probing behavior without article/page retrieval, or unrelated commands.
 
   news_result_grounding:
     description: |
-      Verify assistant output is grounded in fetched content:
-      - includes at least one concrete headline/topic detail
-      - mentions or can answer source URL
-      Penalize generic/non-grounded summaries.
+      Verify the user-facing answer is grounded in fetched web content:
+      - includes one concrete latest-item title or headline
+      - includes a source URL
+      - provides a short Japanese summary aligned with the fetched content
+      Penalize vague answers that look memory-based or unsupported by the observed fetch workflow.
+
+  method_grounding:
+    description: |
+      Verify the assistant's follow-up explanation about how it checked the news matches the observed workflow.
+      Score high when it accurately describes a web fetch from OpenAI's official news page and stays consistent with observed commands and results.
