@@ -18,6 +18,7 @@ pub(crate) async fn run(limit: Option<usize>) -> Result<(), String> {
             config.concept_graph.memgraph_user.clone(),
             std::env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
             config.concept_graph.arousal_tau_ms,
+            None,
         )
         .await?,
     );

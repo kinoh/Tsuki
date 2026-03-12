@@ -10,6 +10,7 @@ pub(crate) async fn run(limit: Option<usize>) -> Result<(), String> {
         std::env::var("MEMGRAPH_USER").unwrap_or_default(),
         std::env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
         arousal_tau_ms,
+        None,
     )
     .await?;
 

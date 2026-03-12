@@ -5,8 +5,14 @@ mod activation_concept_graph;
 #[path = "../conversation_recall_store.rs"]
 mod conversation_recall_store;
 #[allow(dead_code)]
+#[path = "../input_ingress.rs"]
+mod input_ingress;
+#[allow(dead_code)]
 #[path = "../llm.rs"]
 mod llm;
+#[allow(dead_code)]
+#[path = "../multimodal_embedding.rs"]
+mod multimodal_embedding;
 
 #[allow(dead_code)]
 mod event {
@@ -428,6 +434,7 @@ async fn connect_store() -> Result<ActivationConceptGraphStore, String> {
         env::var("MEMGRAPH_USER").unwrap_or_default(),
         env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
         arousal_tau_ms,
+        None,
     )
     .await
 }

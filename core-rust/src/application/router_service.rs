@@ -14,6 +14,7 @@ use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::event::contracts::{concept_graph_query, llm_error, llm_raw, router_state};
+use crate::input_ingress::RouterInput;
 use crate::llm::{
     build_response_api_llm, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiConfig,
     ToolError,
@@ -56,6 +57,9 @@ pub(crate) struct ActivationSnapshot {
 #[derive(Debug, Clone)]
 struct RouterPreprocessOutput {
     candidate_concepts: Vec<String>,
+    text_candidate_concepts: Vec<String>,
+    multimodal_candidate_concepts: Vec<String>,
+    candidate_source: String,
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +69,7 @@ struct RouterConceptResolution {
 }
 
 pub(crate) async fn run_router<F, Fut>(
-    input_text: &str,
+    input: &RouterInput,
     module_instructions: &HashMap<String, String>,
     modules: &Modules,
     state: &AppState,
@@ -77,12 +81,13 @@ where
     Fut: Future<Output = Result<String, ToolError>> + Send,
 {
     let router_started = Instant::now();
+    let input_text = input.display_text();
     let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
     let concept_limit = state.config.router.query_terms_max.max(1);
     let active_state_limit = state.config.router.active_state_limit.max(1);
-    let preprocess = preprocess_router_activation(input_text, concept_limit, state).await;
+    let preprocess = preprocess_router_activation(input, concept_limit, state).await;
     let resolution = resolve_active_concepts_and_arousal(
-        input_text,
+        input_text.as_str(),
         &active_module_names,
         &preprocess,
         concept_limit,
@@ -94,9 +99,12 @@ where
     .await;
     emit_concept_graph_query_event(
         state,
-        input_text,
+        input_text.as_str(),
         active_state_limit,
+        &preprocess.text_candidate_concepts,
+        &preprocess.multimodal_candidate_concepts,
         &preprocess.candidate_concepts,
+        preprocess.candidate_source.as_str(),
         &resolution.selected_seeds,
         &resolution.active_concepts_and_arousal,
     )
@@ -474,14 +482,20 @@ async fn emit_concept_graph_query_event(
     state: &AppState,
     query_text: &str,
     active_state_limit: usize,
+    text_candidate_concepts: &[String],
+    multimodal_candidate_concepts: &[String],
     candidate_concepts: &[String],
+    candidate_source: &str,
     selected_seeds: &[String],
     active_concepts_and_arousal: &str,
 ) {
     let event = concept_graph_query(json!({
         "query_text": query_text,
         "active_state_limit": active_state_limit,
+        "text_result_concepts": text_candidate_concepts,
+        "multimodal_result_concepts": multimodal_candidate_concepts,
         "result_concepts": candidate_concepts,
+        "candidate_source": candidate_source,
         "selected_seeds": selected_seeds,
         "active_concepts_and_arousal": active_concepts_and_arousal,
     }));
@@ -489,23 +503,67 @@ async fn emit_concept_graph_query_event(
 }
 
 async fn preprocess_router_activation(
-    input_text: &str,
+    input: &RouterInput,
     concept_limit: usize,
     state: &AppState,
 ) -> RouterPreprocessOutput {
-    let query_text = input_text.trim();
+    let query_text = input.display_text();
+    let query_text = query_text.trim().to_string();
     if query_text.is_empty() {
         return RouterPreprocessOutput {
             candidate_concepts: Vec::new(),
+            text_candidate_concepts: Vec::new(),
+            multimodal_candidate_concepts: Vec::new(),
+            candidate_source: "none".to_string(),
         };
     }
-    let candidate_concepts = state
+    let text_candidate_concepts = state
         .services
         .activation_concept_graph
-        .concept_search(query_text, concept_limit)
+        .concept_search(query_text.as_str(), concept_limit)
         .await
         .unwrap_or_default();
-    RouterPreprocessOutput { candidate_concepts }
+    let multimodal_config = &state.config.router.multimodal_embedding;
+    let requested_multimodal = multimodal_config.enabled
+        && (multimodal_config.shadow_enabled
+            || !multimodal_config
+                .primary_source
+                .trim()
+                .eq_ignore_ascii_case("text"));
+    let multimodal_candidate_concepts = if requested_multimodal {
+        match state
+            .services
+            .activation_concept_graph
+            .concept_search_multimodal(input, concept_limit)
+            .await
+        {
+            Ok(items) => items,
+            Err(err) => {
+                emit_router_debug_error(state, "concept_search_multimodal", err.as_str()).await;
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let candidate_source = router_candidate_source(multimodal_config.primary_source.as_str());
+    let candidate_concepts = match candidate_source.as_str() {
+        "multimodal" => multimodal_candidate_concepts.clone(),
+        "hybrid" => merge_unique_concepts(&multimodal_candidate_concepts, &text_candidate_concepts),
+        _ => text_candidate_concepts.clone(),
+    };
+    RouterPreprocessOutput {
+        candidate_concepts,
+        text_candidate_concepts,
+        multimodal_candidate_concepts: if multimodal_config.shadow_enabled
+            || candidate_source != "text"
+        {
+            multimodal_candidate_concepts
+        } else {
+            Vec::new()
+        },
+        candidate_source,
+    }
 }
 
 async fn resolve_active_concepts_and_arousal(
@@ -644,6 +702,25 @@ fn render_list_for_prompt(values: &[String]) -> String {
         .map(|value| format!("- {}", value))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn router_candidate_source(configured: &str) -> String {
+    match configured.trim().to_ascii_lowercase().as_str() {
+        "multimodal" => "multimodal".to_string(),
+        "hybrid" => "hybrid".to_string(),
+        _ => "text".to_string(),
+    }
+}
+
+fn merge_unique_concepts(primary: &[String], secondary: &[String]) -> Vec<String> {
+    let mut merged = Vec::<String>::new();
+    let mut seen = HashSet::<String>::new();
+    for value in primary.iter().chain(secondary.iter()) {
+        if seen.insert(value.clone()) {
+            merged.push(value.clone());
+        }
+    }
+    merged
 }
 
 fn parse_recall_seeds(text: &str, max: usize) -> Vec<String> {

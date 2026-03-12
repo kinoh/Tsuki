@@ -51,6 +51,7 @@ jobs:
         env:
           DOCKER_HOST: ssh://${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WEB_AUTH_TOKEN: ${{ secrets.WEB_AUTH_TOKEN }}
           ADMIN_AUTH_PASSWORD: ${{ secrets.ADMIN_AUTH_PASSWORD }}
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}

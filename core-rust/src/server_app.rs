@@ -269,6 +269,13 @@ pub(crate) async fn run_server() {
             config.concept_graph.memgraph_user.clone(),
             std::env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
             config.concept_graph.arousal_tau_ms,
+            Some(
+                crate::multimodal_embedding::GeminiMultimodalEmbeddingConfig {
+                    enabled: config.router.multimodal_embedding.enabled,
+                    model: config.router.multimodal_embedding.model.clone(),
+                    output_dimensionality: config.router.multimodal_embedding.output_dimensionality,
+                },
+            ),
         )
         .await
         .expect("failed to connect activation concept graph store"),
@@ -492,6 +499,20 @@ fn validate_required_config(config: &Config) {
         && config.conversation_recall.recency_weight <= 0.0
     {
         panic!("config.toml [conversation_recall] requires semantic_weight or recency_weight > 0");
+    }
+    if !matches!(
+        config
+            .router
+            .multimodal_embedding
+            .primary_source
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "text" | "multimodal" | "hybrid"
+    ) {
+        panic!(
+            "config.toml [router.multimodal_embedding].primary_source must be one of: text, multimodal, hybrid"
+        );
     }
     if config.tts.ja_accent_url.trim().is_empty() {
         panic!("config.toml [tts].ja_accent_url must not be empty");

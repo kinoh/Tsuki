@@ -7,6 +7,13 @@ path = "/data/prompts.md"
 [concept_graph]
 memgraph_uri = "bolt://memgraph:7687"
 
+[router.multimodal_embedding]
+enabled = false
+shadow_enabled = true
+primary_source = "text"
+model = "gemini-embedding-2-preview"
+output_dimensionality = 512
+
 [tts]
 ja_accent_url = "http://ja-accent:2954"
 voicevox_url = "http://voicevox-engine:50021"

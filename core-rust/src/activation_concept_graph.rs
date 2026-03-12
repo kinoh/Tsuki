@@ -12,6 +12,10 @@ use tokenizers::Tokenizer;
 use crate::conversation_recall_store::{
     conversation_recall_text, ConversationRecallCandidate, ConversationRecallStore,
 };
+use crate::input_ingress::RouterInput;
+use crate::multimodal_embedding::{
+    EmbeddingTaskType, GeminiMultimodalEmbeddingClient, GeminiMultimodalEmbeddingConfig,
+};
 
 const DEFAULT_VALENCE: f64 = 0.0;
 const DEFAULT_AROUSAL_LEVEL: f64 = 0.0;
@@ -25,6 +29,7 @@ const DEFAULT_VECTOR_SEARCH_RAW_LIMIT_MULTIPLIER: usize = 4;
 const DEFAULT_VECTOR_SEARCH_SEMANTIC_WEIGHT: f64 = 0.75;
 const DEFAULT_VECTOR_SEARCH_AROUSAL_WEIGHT: f64 = 0.25;
 const DEFAULT_VECTOR_INDEX_NAME: &str = "concept_embedding_idx";
+const DEFAULT_MULTIMODAL_VECTOR_INDEX_NAME: &str = "concept_embedding_multimodal_idx";
 const DEFAULT_CONVERSATION_VECTOR_INDEX_NAME: &str = "conversation_event_embedding_idx";
 const DEFAULT_VECTOR_INDEX_CAPACITY: usize = 200_000;
 const DEFAULT_VECTOR_INDEX_SCALAR_KIND: &str = "f32";
@@ -35,6 +40,11 @@ const DEFAULT_CONCEPT_EMBEDDING_MODEL_DIR: &str =
 #[async_trait]
 pub(crate) trait ConceptGraphActivationReader: Send + Sync {
     async fn concept_search(&self, input_text: &str, limit: usize) -> Result<Vec<String>, String>;
+    async fn concept_search_multimodal(
+        &self,
+        input: &RouterInput,
+        limit: usize,
+    ) -> Result<Vec<String>, String>;
     async fn active_nodes(&self, limit: usize) -> Result<Vec<ActiveGraphNode>, String>;
     async fn concept_activation(&self, concepts: &[String])
         -> Result<HashMap<String, f64>, String>;
@@ -156,6 +166,12 @@ struct EmbeddingConfig {
     vector_search_raw_limit_multiplier: usize,
     vector_search_semantic_weight: f64,
     vector_search_arousal_weight: f64,
+}
+
+#[derive(Clone)]
+struct MultimodalEmbeddingState {
+    client: GeminiMultimodalEmbeddingClient,
+    vector_index_name: String,
 }
 
 #[derive(Debug)]
@@ -372,6 +388,7 @@ pub(crate) struct ActivationConceptGraphStore {
     arousal_tau_ms: f64,
     embedding: Arc<SseEmbeddingModel>,
     embedding_config: EmbeddingConfig,
+    multimodal_embedding: Option<MultimodalEmbeddingState>,
 }
 
 impl ActivationConceptGraphStore {
@@ -380,12 +397,14 @@ impl ActivationConceptGraphStore {
         arousal_tau_ms: f64,
         embedding: Arc<SseEmbeddingModel>,
         embedding_config: EmbeddingConfig,
+        multimodal_embedding: Option<MultimodalEmbeddingState>,
     ) -> Self {
         Self {
             graph,
             arousal_tau_ms: arousal_tau_ms.max(1.0),
             embedding,
             embedding_config,
+            multimodal_embedding,
         }
     }
 
@@ -394,6 +413,7 @@ impl ActivationConceptGraphStore {
         user: String,
         password: String,
         arousal_tau_ms: f64,
+        multimodal_config: Option<GeminiMultimodalEmbeddingConfig>,
     ) -> Result<Self, String> {
         let embedding_config = EmbeddingConfig::from_defaults()?;
         let embedding = Arc::new(SseEmbeddingModel::load(
@@ -405,12 +425,50 @@ impl ActivationConceptGraphStore {
         Self::ensure_conversation_event_constraints(&graph).await?;
         Self::ensure_vector_index(&graph, &embedding_config, embedding_dim).await?;
         Self::ensure_conversation_event_vector_index(&graph, embedding_dim).await?;
-        Ok(Self::new(
+        let multimodal_embedding = if let Some(config) = multimodal_config {
+            if let Some(client) = GeminiMultimodalEmbeddingClient::from_env(&config)? {
+                let probe = client
+                    .embed_text("concept probe", EmbeddingTaskType::RetrievalDocument)
+                    .await?;
+                if probe.is_empty() {
+                    return Err("gemini multimodal embedding returned empty vector".to_string());
+                }
+                Self::ensure_named_vector_index(
+                    &graph,
+                    DEFAULT_MULTIMODAL_VECTOR_INDEX_NAME,
+                    "Concept",
+                    "embedding_multimodal",
+                    probe.len(),
+                    DEFAULT_VECTOR_INDEX_CAPACITY,
+                    DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT,
+                    DEFAULT_VECTOR_INDEX_SCALAR_KIND,
+                )
+                .await?;
+                Some(MultimodalEmbeddingState {
+                    client,
+                    vector_index_name: DEFAULT_MULTIMODAL_VECTOR_INDEX_NAME.to_string(),
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let store = Self::new(
             Arc::new(graph),
             arousal_tau_ms,
             embedding,
             embedding_config,
-        ))
+            multimodal_embedding,
+        );
+        if store.multimodal_embedding.is_some() {
+            let (embedded, total) = store.backfill_multimodal_concept_embeddings(None).await?;
+            println!(
+                "MULTIMODAL_CONCEPT_BACKFILL embedded={} total={}",
+                embedded, total
+            );
+        }
+        Ok(store)
     }
 
     fn now_ms(&self) -> i64 {
@@ -527,6 +585,7 @@ impl ActivationConceptGraphStore {
             graph,
             config.vector_index_name.as_str(),
             "Concept",
+            "embedding",
             dimension,
             config.vector_index_capacity,
             config.vector_index_resize_coefficient,
@@ -543,6 +602,7 @@ impl ActivationConceptGraphStore {
             graph,
             DEFAULT_CONVERSATION_VECTOR_INDEX_NAME,
             "ConversationEvent",
+            "embedding",
             dimension,
             DEFAULT_VECTOR_INDEX_CAPACITY,
             DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT,
@@ -555,6 +615,7 @@ impl ActivationConceptGraphStore {
         graph: &Graph,
         index_name_raw: &str,
         label: &str,
+        property_name: &str,
         dimension: usize,
         capacity: usize,
         resize_coefficient: usize,
@@ -586,9 +647,10 @@ impl ActivationConceptGraphStore {
             .ok_or_else(|| format!("invalid vector index name: {}", index_name_raw))?;
         let scalar_kind = normalize_scalar_kind(scalar_kind_raw)?;
         let cypher = format!(
-            "CREATE VECTOR INDEX {index_name} ON :{label}(embedding) WITH CONFIG {{\"dimension\": {dimension}, \"capacity\": {capacity}, \"metric\": \"cos\", \"resize_coefficient\": {resize_coefficient}, \"scalar_kind\": \"{scalar_kind}\"}};",
+            "CREATE VECTOR INDEX {index_name} ON :{label}({property_name}) WITH CONFIG {{\"dimension\": {dimension}, \"capacity\": {capacity}, \"metric\": \"cos\", \"resize_coefficient\": {resize_coefficient}, \"scalar_kind\": \"{scalar_kind}\"}};",
             index_name = index_name,
             label = label,
+            property_name = property_name,
             dimension = dimension,
             capacity = capacity,
             resize_coefficient = resize_coefficient,
@@ -640,6 +702,37 @@ impl ActivationConceptGraphStore {
         Ok(())
     }
 
+    async fn upsert_concept_multimodal_embedding(&self, concept: &str) -> Result<(), String> {
+        let Some(multimodal) = &self.multimodal_embedding else {
+            return Ok(());
+        };
+        let embedding = multimodal
+            .client
+            .embed_text(concept, EmbeddingTaskType::RetrievalDocument)
+            .await?;
+        let embedding = Self::to_embedding_property_vector(&embedding);
+        let mut stream = self
+            .graph
+            .execute(
+                query(
+                    "MATCH (c:Concept {name: $name})
+                     SET c.embedding_multimodal = $embedding
+                     RETURN c.name AS name",
+                )
+                .param("name", concept)
+                .param("embedding", embedding),
+            )
+            .await
+            .map_err(|err| {
+                format!(
+                    "upsert concept multimodal embedding failed for {}: {}",
+                    concept, err
+                )
+            })?;
+        let _ = stream.next().await;
+        Ok(())
+    }
+
     async fn vector_search_candidates(
         &self,
         input_text: &str,
@@ -651,6 +744,41 @@ impl ActivationConceptGraphStore {
         }
         let query_embedding = self.embedding.encode(query_text)?;
         let query_embedding = Self::to_embedding_property_vector(&query_embedding);
+        self.vector_search_candidates_by_embedding(
+            self.embedding_config.vector_index_name.as_str(),
+            query_embedding,
+            limit,
+        )
+        .await
+    }
+
+    async fn vector_search_candidates_multimodal(
+        &self,
+        input: &RouterInput,
+        limit: usize,
+    ) -> Result<Vec<VectorCandidate>, String> {
+        let Some(multimodal) = &self.multimodal_embedding else {
+            return Ok(Vec::new());
+        };
+        let query_embedding = multimodal.client.embed_router_input(input).await?;
+        if query_embedding.is_empty() {
+            return Ok(Vec::new());
+        }
+        let query_embedding = Self::to_embedding_property_vector(&query_embedding);
+        self.vector_search_candidates_by_embedding(
+            multimodal.vector_index_name.as_str(),
+            query_embedding,
+            limit,
+        )
+        .await
+    }
+
+    async fn vector_search_candidates_by_embedding(
+        &self,
+        index_name: &str,
+        query_embedding: Vec<f64>,
+        limit: usize,
+    ) -> Result<Vec<VectorCandidate>, String> {
         let raw_limit = limit
             .max(1)
             .saturating_mul(self.embedding_config.vector_search_raw_limit_multiplier);
@@ -658,7 +786,7 @@ impl ActivationConceptGraphStore {
             "CALL vector_search.search(\"{}\", $limit, $embedding) YIELD node, similarity
              RETURN node.name AS name, similarity
              ORDER BY similarity DESC",
-            self.embedding_config.vector_index_name
+            index_name
         );
         let mut result = self
             .graph
@@ -686,6 +814,43 @@ impl ActivationConceptGraphStore {
             }
         }
         Ok(candidates)
+    }
+
+    async fn backfill_multimodal_concept_embeddings(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<(usize, usize), String> {
+        if self.multimodal_embedding.is_none() {
+            return Ok((0, 0));
+        }
+        let mut names = Vec::<String>::new();
+        let mut result = self
+            .graph
+            .execute(query(
+                "MATCH (c:Concept) RETURN c.name AS name ORDER BY name ASC",
+            ))
+            .await
+            .map_err(|err| format!("concept name scan failed: {}", err))?;
+        while let Ok(Some(row)) = result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            names.push(name);
+            if let Some(max) = limit {
+                if names.len() >= max {
+                    break;
+                }
+            }
+        }
+        let total = names.len();
+        let mut embedded = 0usize;
+        for name in names {
+            self.upsert_concept_multimodal_embedding(name.as_str())
+                .await?;
+            embedded += 1;
+        }
+        Ok((embedded, total))
     }
 
     #[allow(dead_code)]
@@ -1066,14 +1231,13 @@ impl ActivationConceptGraphStore {
         }
         Ok(())
     }
-}
 
-#[async_trait]
-impl ConceptGraphActivationReader for ActivationConceptGraphStore {
-    async fn concept_search(&self, input_text: &str, limit: usize) -> Result<Vec<String>, String> {
-        let limit = Self::clamp_limit(limit, 50, 200);
-        let now = self.now_ms();
-        let candidates = self.vector_search_candidates(input_text, limit).await?;
+    async fn rank_concept_candidates(
+        &self,
+        candidates: Vec<VectorCandidate>,
+        limit: usize,
+        now: i64,
+    ) -> Result<Vec<String>, String> {
         let mut ranked = Vec::<(String, f64)>::new();
         let mut seen = HashSet::<String>::new();
         for item in candidates {
@@ -1107,6 +1271,29 @@ impl ConceptGraphActivationReader for ActivationConceptGraphStore {
             }
         }
         Ok(concepts)
+    }
+}
+
+#[async_trait]
+impl ConceptGraphActivationReader for ActivationConceptGraphStore {
+    async fn concept_search(&self, input_text: &str, limit: usize) -> Result<Vec<String>, String> {
+        let limit = Self::clamp_limit(limit, 50, 200);
+        let now = self.now_ms();
+        let candidates = self.vector_search_candidates(input_text, limit).await?;
+        self.rank_concept_candidates(candidates, limit, now).await
+    }
+
+    async fn concept_search_multimodal(
+        &self,
+        input: &RouterInput,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let limit = Self::clamp_limit(limit, 50, 200);
+        let now = self.now_ms();
+        let candidates = self
+            .vector_search_candidates_multimodal(input, limit)
+            .await?;
+        self.rank_concept_candidates(candidates, limit, now).await
     }
 
     async fn active_nodes(&self, limit: usize) -> Result<Vec<ActiveGraphNode>, String> {
@@ -1231,6 +1418,8 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
             .ok_or_else(|| "Failed to upsert concept: empty result".to_string())?;
         let created: bool = row.get("created").unwrap_or(false);
         self.upsert_concept_embedding(concept.as_str()).await?;
+        self.upsert_concept_multimodal_embedding(concept.as_str())
+            .await?;
         Ok(json!({
             "concept_id": concept,
             "created": created,
@@ -1278,6 +1467,8 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         self.ensure_concept(target.as_str(), now, new_arousal_level)
             .await?;
         self.upsert_concept_embedding(target.as_str()).await?;
+        self.upsert_concept_multimodal_embedding(target.as_str())
+            .await?;
         let current = self
             .fetch_concept_state(target.as_str(), now)
             .await?
@@ -1447,6 +1638,8 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         let _ = result.next().await;
         for concept in &concepts {
             self.upsert_concept_embedding(concept.as_str()).await?;
+            self.upsert_concept_multimodal_embedding(concept.as_str())
+                .await?;
         }
         Ok(json!({
             "episode_id": episode_id,
@@ -1523,9 +1716,13 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         let _ = result.next().await;
         if !from_is_episode {
             self.upsert_concept_embedding(from.as_str()).await?;
+            self.upsert_concept_multimodal_embedding(from.as_str())
+                .await?;
         }
         if !to_is_episode {
             self.upsert_concept_embedding(to.as_str()).await?;
+            self.upsert_concept_multimodal_embedding(to.as_str())
+                .await?;
         }
         Ok(json!({
             "from": from,
