@@ -9,7 +9,7 @@ Compatibility Impact: No contract change is required by this document itself. It
 ## Problem Statement
 The multimodal activation work introduced several concerns into the router path:
 - external input interpretation
-- auxiliary verbalization
+- symbolization
 - embedding-based concept retrieval
 - concept activation state updates
 
@@ -22,7 +22,7 @@ It should not own downstream decision logic and should not introduce a separate 
 ## Responsibility Assignment
 ### `core-rust/src/application/router_service.rs`
 - Own router-local input interpretation from `RouterInput`
-- Call auxiliary verbalization
+- Call symbolization
 - Call concept retrieval
 - Call concept activation
 - Emit router state and debug events
@@ -41,17 +41,18 @@ Must not own:
 - LLM calls
 - graph access
 
-### `core-rust/src/application/auxiliary_verbalization_service.rs`
-- Own creation of auxiliary verbalization from `RouterInput`
-- Convert image, audio, and future sensory-text inputs into a common auxiliary verbalization shape
+### `core-rust/src/application/router_symbolization_service.rs`
+- Own creation of router symbolization from `RouterInput`
+- Convert image, audio, and future sensory-text inputs into a common router symbolization shape
+- Produce dictionary-like symbolic outputs rather than open-ended interpretation
 
 Must not own:
 - vector search
 - graph activation
 - router event emission
 
-### `core-rust/src/auxiliary_verbalizer.rs`
-- Own the vendor adapter for OpenAI-based auxiliary verbalization
+### `core-rust/src/router_symbolizer.rs`
+- Own the vendor adapter for OpenAI-based router symbolization
 - Translate service requests into API calls and responses back into typed outputs
 
 Must not own:
@@ -74,7 +75,7 @@ Must not own:
 
 Must not own:
 - raw input interpretation
-- auxiliary verbalization generation
+- symbolization generation
 - downstream decision behavior
 
 ### `core-rust/src/activation_concept_graph.rs`
@@ -99,12 +100,15 @@ This design is intentionally scoped to the router path ending at router event em
 ## Target Flow
 - raw payload
 - `RouterInput`
-- `AuxiliaryVerbalization`
+- `RouterSymbolization`
 - Gemini query vector
 - scored concept candidates
 - active concept snapshot
 - router activation/debug events
 
 ## Future Considerations
-- If auxiliary verbalization starts serving non-router consumers, it may justify its own domain interface package.
+- `symbolization` is intentionally contrasted with embedding-based retrieval:
+  - embedding captures connectionist similarity
+  - symbolization captures dictionary-like symbolic wording
+- If router symbolization starts serving non-router consumers, it may justify its own domain interface package.
 - If concept activation policy grows substantially, the activation service should expose its own typed policy inputs rather than passing graph-oriented primitives through router code.

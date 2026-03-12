@@ -58,6 +58,9 @@ Why:
 ## Future Considerations
 - The current evaluation still uses text summaries for downstream decision prompts.
   If multimodal activation proves useful, the next design step should decide whether decision/submodule prompts also need structured sensory context.
+- A future router split may pair:
+  - embedding-based retrieval for connectionist similarity
+  - symbolization for dictionary-like symbolic wording
 - Concept embeddings are still based on concept names only.
   If multimodal gains are weak, the next likely bottleneck is sparse concept-side representation rather than query-side embedding quality.
 - Production usage requires `GEMINI_API_KEY` wiring and operator validation before enabling the feature flag.
