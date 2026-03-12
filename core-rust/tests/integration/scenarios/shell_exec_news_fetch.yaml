@@ -9,6 +9,9 @@ steps:
       Prefer the primary source page over secondary summaries when possible.
       For a straightforward fetch, prefer curl with flags such as -LfsS and keep the fetched output bounded.
       If a little parsing is needed, prefer python3 with command="python3", args=["-"], and pass the script through stdin.
+      If the page is blocked, challenge-protected, JS-dependent, or does not yield the needed content through plain HTTP fetches,
+      switch to browser-based extraction with playwright-cli and prefer --browser firefox in this sandbox.
+      For browser extraction, open the page, inspect the rendered DOM with playwright-cli eval, and close the session afterward.
       Return the source URL with the answer, and do not claim details that were not actually fetched.
     summary: "Fetch and extract information from public web pages with shell-exec"
     trigger_concepts:
@@ -60,7 +63,9 @@ steps:
     body: |
       Before describing any shell_exec__execute result, inspect exit_code, stderr, timed_out, and whether the output is actually relevant.
       Do not claim success if the command failed, timed out, or returned empty/irrelevant content.
+      For browser-based retrieval, also verify the rendered page title and visible text indicate the intended page rather than a challenge or error page.
       Keep command output bounded, avoid destructive commands, and prefer minimal read-only commands for information gathering.
+      Close any browser session you opened once the needed data has been collected.
       If you retry, explain the retry briefly and keep the user-facing answer grounded in the final successful output only.
     summary: "Use shell-exec safely and keep answers grounded in command results"
     trigger_concepts:
@@ -76,7 +81,7 @@ steps:
 
       Missions:
       1) Spend the first 2 or 3 turns on unrelated casual chat only.
-      2) Then ask the assistant to check OpenAI's official news page on the web right now and tell you exactly one latest item.
+      2) Then ask the assistant to check OpenAI's official website news or announcement page on the web right now and tell you exactly one latest item.
          Ask for:
          - the headline/title
          - the source URL
@@ -119,18 +124,21 @@ metrics_definition:
     description: |
       Verify the observed `shell_exec__execute` arguments show an actual web-page fetch workflow suitable for this task.
       Score high when command arguments indicate a public HTTP fetch of OpenAI's official news site or a directly linked official article page.
-      Accept patterns such as curl-based fetches or python3-based HTTP retrieval.
+      Accept patterns such as curl-based fetches, python3-based HTTP retrieval, or browser-based extraction with `playwright-cli --browser firefox`.
+      Score especially high when the run adapts from blocked plain HTTP fetches to browser-based extraction and still returns grounded results.
       Penalize purely local shell usage, API-probing behavior without article/page retrieval, or unrelated commands.
 
   news_result_grounding:
     description: |
       Verify the user-facing answer is grounded in fetched web content:
-      - includes one concrete latest-item title or headline
-      - includes a source URL
+      - includes one concrete latest-item title or headline observed from the official site
+      - includes a source URL to the official page or directly linked official article
       - provides a short Japanese summary aligned with the fetched content
-      Penalize vague answers that look memory-based or unsupported by the observed fetch workflow.
+      Accept runs that had to use browser-based extraction because plain HTTP fetches were blocked, as long as the final answer is grounded.
+      Penalize vague answers that look memory-based, challenge-page based, or unsupported by the observed fetch workflow.
 
   method_grounding:
     description: |
       Verify the assistant's follow-up explanation about how it checked the news matches the observed workflow.
-      Score high when it accurately describes a web fetch from OpenAI's official news page and stays consistent with observed commands and results.
+      Score high when it accurately describes the actual workflow, including browser-based extraction when that was required,
+      and stays consistent with observed commands and results.
