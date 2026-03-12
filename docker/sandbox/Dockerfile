@@ -8,7 +8,11 @@ COPY mcp/shell-exec/src ./mcp/shell-exec/src
 WORKDIR /app/mcp/shell-exec
 RUN cargo build --release
 
+FROM node:20-bookworm-slim AS node-runtime
+
 FROM ubuntu:24.04
+
+COPY --from=node-runtime /usr/local/ /usr/local/
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -38,7 +42,14 @@ RUN apt-get update \
 
 RUN useradd -m -s /bin/bash sandbox \
   && mkdir -p /memory \
-  && chown -R sandbox:sandbox /memory
+  && mkdir -p /ms-playwright \
+  && chown -R sandbox:sandbox /memory /ms-playwright
+
+RUN npm install -g @playwright/cli@latest playwright@latest
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+RUN playwright install --with-deps firefox
 
 COPY --from=builder /app/mcp/shell-exec/target/release/shell-exec /usr/local/bin/shell-exec
 COPY docker/sandbox/entrypoint.sh /usr/local/bin/entrypoint.sh
