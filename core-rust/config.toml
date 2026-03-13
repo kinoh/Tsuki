@@ -48,25 +48,37 @@ seed_selection_rules:
 - if none satisfies the rules, return none
 - max {{router_query_terms_max}} lines"""
 
-decision_context_template = """latest_user_input:
-{{latest_user_input}}
-
-active_concepts_and_arousal:
-{{active_concepts_and_arousal}}
-
-outputs_from_immediately_executed_submodules:
-{{outputs_from_immediately_executed_submodules}}
-
-candidate_submodules_by_interest_match:
-{{candidate_submodules_by_interest_match}}
-
-recent_event_history:
+decision_context_template = """<recent_event_history>
 {{recent_event_history}}
+</recent_event_history>
 
-recalled_event_history:
+<supplemental_context>
+<latest_user_input>
+{{latest_user_input}}
+</latest_user_input>
+
+<outputs_from_immediately_executed_submodules>
+{{outputs_from_immediately_executed_submodules}}
+</outputs_from_immediately_executed_submodules>
+
+<active_concepts_and_arousal>
+{{active_concepts_and_arousal}}
+</active_concepts_and_arousal>
+
+<candidate_submodules_by_interest_match>
+{{candidate_submodules_by_interest_match}}
+</candidate_submodules_by_interest_match>
+
+<recalled_event_history>
+Use this only when it is consistent with recent_event_history.
 {{recalled_event_history}}
+</recalled_event_history>
+</supplemental_context>
 
-Return: decision=<respond|ignore> reason=<short>."""
+<output_contract>
+Return exactly one line:
+decision=<respond|ignore> reason=<short>
+</output_contract>."""
 
 submodule_context_template = """Latest user input: {{latest_user_input}}
 Active concepts and arousal:
