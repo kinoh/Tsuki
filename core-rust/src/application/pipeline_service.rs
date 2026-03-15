@@ -97,6 +97,7 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
     let decision_started = Instant::now();
     let _decision_output = run_decision(
         &input_text,
+        router_output,
         &state.runtime.modules,
         state,
         &module_instructions,

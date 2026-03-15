@@ -84,13 +84,13 @@ async fn read_latest_router_state(state: &AppState) -> RouterOutput {
 
 pub(crate) async fn run_decision(
     input_text: &str,
+    router_output: RouterOutput,
     modules: &Modules,
     state: &AppState,
     module_instructions: &HashMap<String, String>,
     overrides: &PromptOverrides,
 ) -> String {
     let decision_started = Instant::now();
-    let router_output = read_latest_router_state(state).await;
     println!(
         "PERF decision stage=start input_len={} hard_trigger_results={} soft_recommendations={}",
         input_text.len(),
