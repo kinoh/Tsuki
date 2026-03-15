@@ -19,6 +19,21 @@ active_state_limit = 16
 hard_trigger_threshold = 0.85
 recommendation_threshold = 0.2
 
+[router.multimodal_embedding]
+enabled = true
+shadow_enabled = true
+primary_source = "multimodal"
+model = "gemini-embedding-2-preview"
+output_dimensionality = 512
+
+[conversation_recall]
+enabled = true
+top_k_hits = 5
+surrounding_event_window = 5
+semantic_weight = 0.85
+recency_weight = 0.15
+recency_tau_ms = 2592000000
+
 [input]
 router_context_template = """User input:
 {{latest_user_input}}
@@ -40,22 +55,37 @@ seed_selection_rules:
 - if none satisfies the rules, return none
 - max {{router_query_terms_max}} lines"""
 
-decision_context_template = """latest_user_input:
-{{latest_user_input}}
-
-active_concepts_and_arousal:
-{{active_concepts_and_arousal}}
-
-outputs_from_immediately_executed_submodules:
-{{outputs_from_immediately_executed_submodules}}
-
-candidate_submodules_by_interest_match:
-{{candidate_submodules_by_interest_match}}
-
-recent_event_history:
+decision_context_template = """<recent_event_history>
 {{recent_event_history}}
+</recent_event_history>
 
-Return: decision=<respond|ignore> reason=<short>."""
+<supplemental_context>
+<latest_user_input>
+{{latest_user_input}}
+</latest_user_input>
+
+<outputs_from_immediately_executed_submodules>
+{{outputs_from_immediately_executed_submodules}}
+</outputs_from_immediately_executed_submodules>
+
+<active_concepts_and_arousal>
+{{active_concepts_and_arousal}}
+</active_concepts_and_arousal>
+
+<candidate_submodules_by_interest_match>
+{{candidate_submodules_by_interest_match}}
+</candidate_submodules_by_interest_match>
+
+<recalled_event_history>
+Use this only when it is consistent with recent_event_history.
+{{recalled_event_history}}
+</recalled_event_history>
+</supplemental_context>
+
+<output_contract>
+Return exactly one line:
+decision=<respond|ignore> reason=<short>
+</output_contract>."""
 
 submodule_context_template = """Latest user input: {{latest_user_input}}
 Active concepts and arousal:

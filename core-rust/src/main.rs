@@ -5,15 +5,19 @@ mod cli;
 mod clock;
 mod commands;
 mod config;
+mod conversation_recall_store;
 mod db;
 mod debug_api;
 mod event;
 mod event_store;
+mod input_ingress;
 mod llm;
 mod mcp;
 mod mcp_trigger_concepts;
 mod module_registry;
+mod multimodal_embedding;
 mod notification;
+mod router_symbolizer;
 mod prompts;
 mod scheduler;
 mod server_app;
@@ -35,5 +39,8 @@ async fn run() -> Result<(), String> {
             Ok(())
         }
         cli::CliCommand::Backfill { limit } => commands::backfill::run(limit).await,
+        cli::CliCommand::BackfillConversationRecall { limit } => {
+            commands::backfill_conversation_recall::run(limit).await
+        }
     }
 }

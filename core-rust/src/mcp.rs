@@ -27,7 +27,7 @@ pub(crate) struct McpToolDescriptor {
     pub(crate) llm_parameters: Value,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct McpToolVisibility {
     pub(crate) runtime_tool_name: String,
     pub(crate) concept_key: String,

@@ -40,6 +40,7 @@ use crate::application::state_record_admin_service::{
 };
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config};
+use crate::conversation_recall_store::ConversationRecallStore;
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::debug_api::{
     DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest, DebugRunRequest,
@@ -48,6 +49,7 @@ use crate::debug_api::{
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::llm::{build_response_api_llm, ResponseApiConfig};
+use crate::router_symbolizer::build_response_api_symbolizer;
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
@@ -282,21 +284,31 @@ pub(crate) async fn run_server() {
         prompts_path.as_path(),
     );
     let prompts = Arc::new(RwLock::new(prompt_overrides.clone()));
-    let emit_event = crate::application::event_service::build_emit_event_callback(
-        event_store.clone(),
-        tx.clone(),
-    );
-    let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
     let activation_concept_graph = Arc::new(
         ActivationConceptGraphStore::connect(
             config.concept_graph.memgraph_uri.clone(),
             config.concept_graph.memgraph_user.clone(),
             std::env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
             config.concept_graph.arousal_tau_ms,
+            Some(
+                crate::multimodal_embedding::GeminiMultimodalEmbeddingConfig {
+                    enabled: config.router.multimodal_embedding.enabled,
+                    model: config.router.multimodal_embedding.model.clone(),
+                    output_dimensionality: config.router.multimodal_embedding.output_dimensionality,
+                },
+            ),
         )
         .await
         .expect("failed to connect activation concept graph store"),
     );
+    let conversation_recall_store: Arc<dyn ConversationRecallStore> =
+        activation_concept_graph.clone();
+    let emit_event = crate::application::event_service::build_emit_event_callback(
+        event_store.clone(),
+        tx.clone(),
+        conversation_recall_store.clone(),
+    );
+    let state_store: Arc<dyn StateStore> = Arc::new(DbStateStore::new(db.clone()));
     let mcp_bootstrap = crate::mcp::McpRegistry::bootstrap(
         &config.mcp_servers,
         activation_concept_graph.as_ref(),
@@ -359,6 +371,13 @@ pub(crate) async fn run_server() {
         }
     };
 
+    let symbolizer_model = config
+        .router
+        .symbolizer_model
+        .clone()
+        .unwrap_or_else(|| config.llm.model.clone());
+    let router_symbolizer = Arc::new(build_response_api_symbolizer(symbolizer_model));
+
     let state = AppState::new(
         AppServices {
             db: db.clone(),
@@ -366,12 +385,15 @@ pub(crate) async fn run_server() {
             tx,
             fcm_sender,
             activation_concept_graph,
+            conversation_recall_store,
             mcp_registry,
+            router_symbolizer,
         },
         AuthState::new(auth_token, admin_auth_password, admin_password_fingerprint),
         AppConfigState {
             limits: config.limits.clone(),
             router: config.router.clone(),
+            conversation_recall: config.conversation_recall.clone(),
             input: config.input.clone(),
             tts: config.tts.clone(),
         },
@@ -501,6 +523,31 @@ fn validate_required_config(config: &Config) {
     }
     if config.concept_graph.arousal_tau_ms <= 0.0 {
         panic!("config.toml [concept_graph].arousal_tau_ms must be > 0");
+    }
+    if config.conversation_recall.top_k_hits == 0 {
+        panic!("config.toml [conversation_recall].top_k_hits must be > 0");
+    }
+    if config.conversation_recall.recency_tau_ms <= 0.0 {
+        panic!("config.toml [conversation_recall].recency_tau_ms must be > 0");
+    }
+    if config.conversation_recall.semantic_weight <= 0.0
+        && config.conversation_recall.recency_weight <= 0.0
+    {
+        panic!("config.toml [conversation_recall] requires semantic_weight or recency_weight > 0");
+    }
+    if !matches!(
+        config
+            .router
+            .multimodal_embedding
+            .primary_source
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "text" | "multimodal" | "hybrid"
+    ) {
+        panic!(
+            "config.toml [router.multimodal_embedding].primary_source must be one of: text, multimodal, hybrid"
+        );
     }
     if config.tts.ja_accent_url.trim().is_empty() {
         panic!("config.toml [tts].ja_accent_url must not be empty");

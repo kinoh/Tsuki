@@ -28,6 +28,15 @@ pub(crate) fn input_text(source: &str, kind: &str, text: &str) -> Event {
     )
 }
 
+pub(crate) fn input_sensory(source: &str, kind: &str, payload: Value) -> Event {
+    emit(
+        source,
+        "sensory",
+        payload,
+        vec!["input".to_string(), format!("type:{}", kind)],
+    )
+}
+
 pub(crate) fn response_text(text: String) -> Event {
     emit(
         "assistant",

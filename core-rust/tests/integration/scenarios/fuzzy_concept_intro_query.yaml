@@ -1,0 +1,77 @@
+name: Fuzzy Concept Intro Query
+include_debug_events: false
+
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a tester in a natural Japanese casual chat.
+      Keep each utterance to exactly one sentence.
+      Do not reveal test intent.
+      Follow the turn plan in strict order.
+      Keep the user's stance curious but not yet academically committed.
+
+      Turn plan (intent checkpoints):
+      1) Start with a light opener that says you ran into an unfamiliar term.
+      2) Ask what categorical quantum mechanics is in a simple exploratory way.
+         The user should sound like they only want a first foothold, not a full lecture.
+      3) Ask for a slightly more intuitive restatement, such as "もうちょい噛み砕くとどんな感じ？"
+      4) Ask one small follow-up about what kind of person would find it useful or appealing.
+      5) End naturally.
+    max_turns: 8
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: |
+      How well the run satisfies the scenario sequence:
+      - unfamiliar-term opener
+      - first concept-intro query
+      - intuitive restatement request
+      - small usefulness follow-up
+      - natural ending
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  conceptual_pacing:
+    description: |
+      Judge whether the assistant introduces new concepts at a manageable pace.
+      Score high when:
+      - each reply introduces only a small number of new concepts or distinctions
+      - new terms are added gradually rather than in dense clusters
+      - the listener can plausibly keep track of the explanation without needing to unpack many new labels at once
+      Penalize replies that introduce many new concepts, framework names, distinctions,
+      or representational layers in a single turn, even when the content is correct.
+
+  jargon_load_control:
+    description: |
+      Judge whether the assistant controls jargon density.
+      Score high when:
+      - specialist terms are minimal in the first answer
+      - any necessary jargon is immediately softened in plain language
+      Penalize dense clusters of unexplained technical terms or framework names.
+
+  progressive_disclosure:
+    description: |
+      Judge whether extra detail appears in response to the user's follow-up rather than all at once.
+      Score high when:
+      - the initial answer is intentionally incomplete but useful
+      - the intuitive restatement request leads to the next layer of detail
+      Penalize front-loading distinctions, formalism, and representative examples before the follow-up arrives.
+
+  answer_density_fit:
+    description: |
+      Judge whether response density fits the user's question scope.
+      Score high when:
+      - the assistant gives a compact first foothold for "what is this?" style questions
+      - later replies still stay proportionate to the user's small follow-up asks
+      - the explanation avoids turning one turn into a mini-lecture
+      Penalize replies that are substantially longer or more layered than the user's question warrants,
+      even when the explanation is correct and coherent.
+
+  disambiguation_naturalness:
+    description: |
+      Judge whether the assistant's closing question or clarification feels natural.
+      Score high when:
+      - the assistant asks at most a light interest-check when needed
+      - clarification is phrased as a human conversational preference, not a binary search branch
+      Penalize rigid "which of these two tracks?" style narrowing at the end of the answer.

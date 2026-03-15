@@ -1,0 +1,49 @@
+name: Image Atmosphere
+include_debug_events: true
+
+# Verify that multimodal embedding activates different concept graph nodes for
+# visually distinct images. The key question is not exact concept matching but
+# whether the embedding-based search produces meaningfully different concept sets.
+# Turn 1: western-style cafe with tea and strawberry cake (light, sweet, cafe)
+# Turn 2: salmon dish on a white plate with vegetables (meal, savory, restaurant)
+# These two images have clearly different content so differentiation should be detectable.
+
+steps:
+  - kind: sensory
+    images:
+      - path: "tests/integration/assets/western_cafe.jpg"
+        mime_type: "image/jpeg"
+    text: "この雰囲気どう思う？"
+
+  - kind: sensory
+    images:
+      - path: "tests/integration/assets/salmon_dish.jpg"
+        mime_type: "image/jpeg"
+    text: "こっちは？"
+
+metrics_definition:
+  dialog_naturalness:
+    description: >
+      Responses are natural Japanese conversation appropriate to the persona.
+      Both turns should feel like genuine reactions to the images.
+
+  scenario_requirement_fit:
+    description: >
+      The assistant responds to both images with content that reflects the visual atmosphere.
+      Turn 1 should evoke cafe/sweet/tea themes; turn 2 should evoke food/meal/savory themes.
+
+  image_concept_relevance:
+    description: >
+      Inspect the concept_graph.query debug events. The multimodal_result_concepts should
+      contain concepts semantically related to each image.
+      Turn 1 (cafe/tea/cake): concepts like 紅茶, 軽食, カフェ巡り, クリームティー, ナッツ, or similar.
+      Turn 2 (salmon/meal): concepts like 肉料理, 軽食, 満腹感, 排骨, or food/meal-related concepts.
+      Score 1.0 if both turns show relevant concept activation, 0.5 if only one turn does, 0.0 if neither.
+    exclude_from_pass: true
+
+  cross_image_differentiation:
+    description: >
+      Inspect the concept_graph.query debug events for both turns.
+      The multimodal_result_concepts for turn 1 and turn 2 should differ meaningfully —
+      at least 4 concepts should appear in one turn but not the other.
+      Score 1.0 if clearly differentiated, 0.5 if partially, 0.0 if nearly identical.

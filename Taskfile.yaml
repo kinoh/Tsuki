@@ -1,6 +1,6 @@
 version: '3'
 
-dotenv: ['.env', 'core/.env']
+dotenv: ['.env']
 
 env:
   GIT_HASH:
@@ -45,14 +45,14 @@ tasks:
     cmds:
       - '{{.DOCKER_COMPOSE}} restart'
   wait:
-    desc: Wait for core service health
+    desc: Wait for runtime service health
     cmds:
       - |
         until [ "$({{.DOCKER_COMPOSE}} ps --format json | jq -r .Health)" == "healthy" ]; do
-          echo "waiting for core service to be healthy..."
+          echo "waiting for runtime service to be healthy..."
           sleep 5
         done
-      - echo "Core service is healthy!"
+      - echo "Runtime service is healthy!"
   ps:
     desc: Do ps in production
     cmds:
@@ -77,14 +77,6 @@ tasks:
       SERVICE: '{{index .MATCH 0}}'
     cmds:
       - '{{.DOCKER_COMPOSE}} logs --tail=100 {{.SERVICE}}'
-  decrypt_prompt:
-    desc: Decrypt prompt file
-    cmds:
-      - cd core && node --env-file .env scripts/decrypt_prompt.js
-  encrypt_prompt:
-    desc: Encrypt prompt file
-    cmds:
-      - cd core && node --env-file .env scripts/encrypt_prompt.js
   mcp/build:
     desc: Build all MCP servers
     deps:
@@ -98,28 +90,27 @@ tasks:
     vars:
       NAME: '{{index .MATCH 0}}'
     cmds:
-      - mkdir -p core/bin
+      - mkdir -p /tmp/tsuki-mcp-bin
       - cd mcp/{{.NAME}} && cargo build --release
-      - cp mcp/{{.NAME}}/target/release/{{.NAME}} core/bin/
+      - cp mcp/{{.NAME}}/target/release/{{.NAME}} /tmp/tsuki-mcp-bin/{{.NAME}}
   mcp/inspect-*:
     desc: Inspect a MCP server
     vars:
       NAME: '{{index .MATCH 0}}'
     cmds:
-      - npx @modelcontextprotocol/inspector -e TZ=Asia/Tokyo -e DATA_DIR=/tmp/data core/bin/{{.NAME}}
+      - npx @modelcontextprotocol/inspector -e TZ=Asia/Tokyo -e DATA_DIR=/tmp/data /tmp/tsuki-mcp-bin/{{.NAME}}
   setup:
     desc: Setup development environment
     cmds:
-      - cd core && pnpm install
       - task: mcp/build
   backup:
     desc: Backup all data
     cmds:
-      - task core/backup
+      - task runtime/backup
       - task sandbox/backup
       - task memgraph/backup
-  core/backup:
-    desc: Backup core data
+  runtime/backup:
+    desc: Backup runtime data
     vars:
       DOCKER_HOST: ${DOCKER_HOST}
       TIMESTAMP:

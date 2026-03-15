@@ -125,6 +125,10 @@ It captures stable implementation rules and clearly marks active WIP areas.
 - Missing, delayed, duplicated, or out-of-order observations must be treated as valid stream behavior unless a specific API contract states otherwise.
 - Runtime behavior must not rely on stream order as a control-plane guarantee; stream consumers should interpret events as best-effort facts.
 
+## Multimodal embedding
+- `GEMINI_API_KEY` is required when `router.multimodal_embedding.enabled = true`; add it to `compose.yaml` env and CI secret mapping before deploying.
+- Set `router.multimodal_embedding.output_dimensionality > 0` to skip the Gemini startup probe call; omitting this hits the API on every boot and fails on free-tier rate limits.
+
 ## Configuration policy
 - Non-secret runtime settings belong in `config.toml`.
 - Secrets belong to environment variables.
@@ -167,6 +171,10 @@ It captures stable implementation rules and clearly marks active WIP areas.
   - default expectation: `breaking-by-default (no compatibility layer)`.
   - if compatibility is introduced, the document must justify why replacement/removal was not acceptable.
 - Keep one decision goal in one document. If several code changes serve the same design goal, extend the existing same-day doc instead of splitting it into local implementation fragments.
+
+## Integration harness
+- The `--scenario` flag accepts only one path per invocation; run multiple scenarios as separate `task integration/run` calls.
+- `overall_pass` requires mean > 0.7 and min > 0.5 for every non-excluded metric; single-run results have high variance — one failure is not a regression signal without multiple runs.
 
 ## Test-scope separation
 - Treat scenario-spec changes and test-harness changes as different scopes.

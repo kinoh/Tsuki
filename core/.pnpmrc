@@ -1,4 +1,0 @@
-enable-pre-post-scripts=true
-side-effects-cache=false
-unsafe-perm=true
-ignore-scripts=false

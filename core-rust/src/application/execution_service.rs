@@ -9,7 +9,9 @@ use tokio::runtime::Handle;
 use crate::activation_concept_graph::VisibleSkill;
 use crate::app_state::AppState;
 use crate::application::event_service::record_event;
-use crate::application::history_service::{format_decision_debug_history, format_event_history};
+use crate::application::history_service::{
+    format_decision_debug_history, format_event_history, format_event_lines, latest_events,
+};
 use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
@@ -48,6 +50,7 @@ struct DecisionContextTemplateVars<'a> {
     outputs_from_immediately_executed_submodules: &'a str,
     candidate_submodules_by_interest_match: &'a str,
     recent_event_history: &'a str,
+    recalled_event_history: &'a str,
 }
 
 #[derive(Clone)]
@@ -59,15 +62,35 @@ struct DecisionToolHandler {
     module_instructions: HashMap<String, String>,
 }
 
+async fn read_latest_router_state(state: &AppState) -> RouterOutput {
+    state
+        .services
+        .event_store
+        .latest(20)
+        .await
+        .ok()
+        .and_then(|events| {
+            events
+                .into_iter()
+                .find(|e| {
+                    e.source == "router"
+                        && e.modality == "state"
+                        && e.meta.tags.iter().any(|t| t == "router")
+                })
+        })
+        .and_then(|e| serde_json::from_value(e.payload).ok())
+        .unwrap_or_default()
+}
+
 pub(crate) async fn run_decision(
     input_text: &str,
-    router_output: &RouterOutput,
     modules: &Modules,
     state: &AppState,
     module_instructions: &HashMap<String, String>,
     overrides: &PromptOverrides,
 ) -> String {
     let decision_started = Instant::now();
+    let router_output = read_latest_router_state(state).await;
     println!(
         "PERF decision stage=start input_len={} hard_trigger_results={} soft_recommendations={}",
         input_text.len(),
@@ -76,7 +99,7 @@ pub(crate) async fn run_decision(
     );
     let history_started = Instant::now();
     let history =
-        format_event_history(state, state.config.limits.decision_history, None, None).await;
+        format_event_lines(&latest_events(state, state.config.limits.decision_history, None, None).await);
     println!(
         "PERF decision stage=history ms={} history_len={}",
         history_started.elapsed().as_millis(),
@@ -84,7 +107,7 @@ pub(crate) async fn run_decision(
     );
     let base_instructions = state.prompts.base_or_default(&overrides);
     let decision_instructions = state.prompts.decision_or_default(&overrides);
-    let activation_snapshot = activation_snapshot_from_router_output(router_output);
+    let activation_snapshot = activation_snapshot_from_router_output(&router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
@@ -133,14 +156,17 @@ pub(crate) async fn run_decision(
         format_hard_trigger_results(&router_output.hard_trigger_results);
     let submodule_candidates =
         format_soft_recommendations(&activation_snapshot.soft_recommendations);
+    let decision_input_text =
+        build_decision_input_text(input_text, &activation_snapshot.symbolized_text);
     let context = render_decision_context_template(
         &state.config.input.decision_context_template,
         DecisionContextTemplateVars {
-            latest_user_input: input_text,
+            latest_user_input: &decision_input_text,
             active_concepts_and_arousal: &activation_concepts,
             outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
             candidate_submodules_by_interest_match: &submodule_candidates,
             recent_event_history: &history,
+            recalled_event_history: &router_output.recalled_event_history,
         },
     );
     let context = append_visible_mcp_tool_contracts(context, &visible_mcp_tools);
@@ -223,10 +249,10 @@ pub(crate) async fn run_decision_debug(
     history_cutoff_ts: Option<&str>,
     excluded_event_ids: &std::collections::HashSet<String>,
     state: &AppState,
-    router_output: &RouterOutput,
     module_instructions: &HashMap<String, String>,
     overrides: &PromptOverrides,
 ) -> Result<String, (StatusCode, String)> {
+    let router_output = read_latest_router_state(state).await;
     let history = if context_override.is_some() {
         String::new()
     } else if include_history {
@@ -243,7 +269,7 @@ pub(crate) async fn run_decision_debug(
     };
     let base_instructions = state.prompts.base_or_default(&overrides);
     let decision_instructions = state.prompts.decision_or_default(&overrides);
-    let activation_snapshot = activation_snapshot_from_router_output(router_output);
+    let activation_snapshot = activation_snapshot_from_router_output(&router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
@@ -293,14 +319,17 @@ pub(crate) async fn run_decision_debug(
             format_hard_trigger_results(&router_output.hard_trigger_results);
         let submodule_candidates =
             format_soft_recommendations(&activation_snapshot.soft_recommendations);
+        let decision_input_text =
+            build_decision_input_text(input_text, &activation_snapshot.symbolized_text);
         render_decision_context_template(
             &state.config.input.decision_context_template,
             DecisionContextTemplateVars {
-                latest_user_input: input_text,
+                latest_user_input: &decision_input_text,
                 active_concepts_and_arousal: &activation_concepts,
                 outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
                 candidate_submodules_by_interest_match: &submodule_candidates,
                 recent_event_history: &history,
+                recalled_event_history: &router_output.recalled_event_history,
             },
         )
     });
@@ -550,6 +579,24 @@ fn extract_field(text: &str, key: &str, end_keys: &[&str]) -> Option<String> {
     }
 }
 
+/// Builds the `latest_user_input` string for the decision context.
+/// When symbolized_text differs from input_text (i.e. the input contained media),
+/// appends a `[sensory transcription]` block so the LLM is aware of the media content.
+fn build_decision_input_text(input_text: &str, symbolized_text: &str) -> String {
+    if symbolized_text.trim() == input_text.trim() || symbolized_text.trim().is_empty() {
+        return input_text.to_string();
+    }
+    if input_text.trim().is_empty() {
+        format!("[sensory transcription]\n{}", symbolized_text.trim())
+    } else {
+        format!(
+            "{}\n\n[sensory transcription]\n{}",
+            input_text.trim(),
+            symbolized_text.trim()
+        )
+    }
+}
+
 fn render_decision_context_template(
     template: &str,
     vars: DecisionContextTemplateVars<'_>,
@@ -569,6 +616,7 @@ fn render_decision_context_template(
             vars.candidate_submodules_by_interest_match,
         )
         .replace("{{recent_event_history}}", vars.recent_event_history)
+        .replace("{{recalled_event_history}}", vars.recalled_event_history)
 }
 
 fn append_visible_mcp_tool_contracts(
@@ -696,7 +744,7 @@ fn tool_name(tool: &async_openai::types::responses::Tool) -> Option<&str> {
     }
 }
 
-fn format_activation_context(raw: &str) -> String {
+pub(crate) fn format_activation_context(raw: &str) -> String {
     let value = raw.trim();
     if value.is_empty() {
         return "none".to_string();
@@ -704,7 +752,7 @@ fn format_activation_context(raw: &str) -> String {
     value.to_string()
 }
 
-fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {
+pub(crate) fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {
     if outputs.is_empty() {
         return "none".to_string();
     }
@@ -715,7 +763,7 @@ fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {
         .join("\n")
 }
 
-fn format_soft_recommendations(recommendations: &[String]) -> String {
+pub(crate) fn format_soft_recommendations(recommendations: &[String]) -> String {
     if recommendations.is_empty() {
         return "none".to_string();
     }

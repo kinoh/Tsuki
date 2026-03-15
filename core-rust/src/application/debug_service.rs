@@ -6,13 +6,17 @@ use std::collections::HashSet;
 use crate::app_state::AppState;
 use crate::application::event_service::record_event;
 use crate::application::execution_service::{
-    current_prompt_overrides, load_active_module_instructions, run_all_submodules_debug,
+    current_prompt_overrides, format_activation_context, format_hard_trigger_results,
+    format_soft_recommendations, load_active_module_instructions, run_all_submodules_debug,
     run_decision_debug, run_submodule_debug, run_submodule_tool,
 };
 use crate::application::history_service::{is_decision_event, is_user_input_event, latest_events};
 use crate::application::router_service::run_router;
 use crate::debug_api::{DebugRunRequest, DebugRunResponse};
-use crate::event::contracts::{input_text as emit_input_text, named_trigger, parse_error};
+use crate::event::contracts::{
+    input_sensory as emit_input_sensory, input_text as emit_input_text, named_trigger, parse_error,
+};
+use crate::input_ingress::{MediaAttachment, RouterInput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppendInputMode {
@@ -36,6 +40,10 @@ struct InputMessage {
     #[serde(default)]
     text: String,
     #[serde(default)]
+    images: Vec<MediaAttachment>,
+    #[serde(default)]
+    audio: Vec<MediaAttachment>,
+    #[serde(default)]
     event: Option<String>,
     #[serde(default)]
     payload: Option<Value>,
@@ -44,7 +52,7 @@ struct InputMessage {
 #[derive(Debug, Clone, PartialEq)]
 enum ParsedIngress {
     Trigger { event: String, payload: Value },
-    Input { kind: String, text: String },
+    Input { input: RouterInput },
 }
 
 pub(crate) async fn run_debug_module(
@@ -74,7 +82,8 @@ pub(crate) async fn run_debug_module(
         .into_iter()
         .collect::<HashSet<_>>();
     let append_mode = AppendInputMode::from_request(payload.append_input_mode.as_deref());
-    if context_override.is_none() {
+    let dry_run = payload.dry_run.unwrap_or(false);
+    if context_override.is_none() && !dry_run {
         maybe_append_debug_input_event(
             state,
             payload.input.trim(),
@@ -89,12 +98,14 @@ pub(crate) async fn run_debug_module(
     let overrides = current_prompt_overrides(state).await;
     let module_instructions = load_active_module_instructions(state, &overrides).await;
     let input_text = payload.input.clone();
+    let router_input = RouterInput::from_text("message", input_text.clone());
     let router_output = run_router(
-        &input_text,
+        &router_input,
         &module_instructions,
         &state.runtime.modules,
         state,
         &overrides,
+        dry_run,
         |module_name, activation_snapshot, instructions, focus| {
             let module_name = module_name.to_string();
             let activation_snapshot = activation_snapshot.clone();
@@ -116,7 +127,15 @@ pub(crate) async fn run_debug_module(
     )
     .await;
 
-    let output = if name == "decision" {
+    let output = if name == "router" {
+        format!(
+            "<active_concepts_and_arousal>\n{}\n</active_concepts_and_arousal>\n\n<outputs_from_immediately_executed_submodules>\n{}\n</outputs_from_immediately_executed_submodules>\n\n<candidate_submodules_by_interest_match>\n{}\n</candidate_submodules_by_interest_match>\n\n<recalled_event_history>\n{}\n</recalled_event_history>",
+            format_activation_context(&router_output.active_concepts_and_arousal),
+            format_hard_trigger_results(&router_output.hard_trigger_results),
+            format_soft_recommendations(&router_output.soft_recommendations),
+            router_output.recalled_event_history,
+        )
+    } else if name == "decision" {
         run_decision_debug(
             &payload.input,
             context_override,
@@ -125,7 +144,6 @@ pub(crate) async fn run_debug_module(
             history_cutoff_ts,
             &excluded_event_ids,
             state,
-            &router_output,
             &module_instructions,
             &overrides,
         )
@@ -154,7 +172,7 @@ pub(crate) async fn run_debug_module(
     Ok(DebugRunResponse { output })
 }
 
-pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Result<String, ()> {
+pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Result<RouterInput, ()> {
     let ingress = match parse_input_message(raw) {
         Ok(value) => value,
         Err(message) => {
@@ -170,22 +188,21 @@ pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Resul
             record_event(state, trigger_event).await;
             return Err(());
         }
-        ParsedIngress::Input { kind, text } => {
-            let source = if kind == "scheduler_notice" {
+        ParsedIngress::Input { input } => {
+            let source = if input.kind == "scheduler_notice" {
                 "system"
             } else {
                 "user"
             };
-            let input_event = emit_input_text(source, &kind, &text);
+            let display_text = input.display_text();
+            let input_event = if input.has_media() || input.kind == "sensory" {
+                emit_input_sensory(source, input.kind.as_str(), input.event_payload())
+            } else {
+                emit_input_text(source, input.kind.as_str(), display_text.as_str())
+            };
             record_event(state, input_event.clone()).await;
 
-            Ok(input_event
-                .payload
-                .get("text")
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string())
+            Ok(input)
         }
     }
 }
@@ -222,9 +239,12 @@ fn parse_input_message(raw: &str) -> Result<ParsedIngress, &'static str> {
         return Err("invalid input type");
     }
 
+    let router_input = RouterInput::new(kind, input.text, input.images, input.audio);
+    if router_input.display_text().is_empty() {
+        return Err("input text or sensory media is required");
+    }
     Ok(ParsedIngress::Input {
-        kind,
-        text: input.text,
+        input: router_input,
     })
 }
 
@@ -288,6 +308,7 @@ fn should_append_debug_input_for_reuse_open(
 #[cfg(test)]
 mod tests {
     use super::{parse_input_message, ParsedIngress};
+    use crate::input_ingress::{MediaAttachment, RouterInput};
     use serde_json::json;
 
     #[test]
@@ -296,8 +317,7 @@ mod tests {
         assert_eq!(
             parsed,
             ParsedIngress::Input {
-                kind: "message".to_string(),
-                text: "hello".to_string(),
+                input: RouterInput::from_text("message", "hello"),
             }
         );
     }
@@ -309,8 +329,29 @@ mod tests {
         assert_eq!(
             parsed,
             ParsedIngress::Input {
-                kind: "sensory".to_string(),
-                text: "rain".to_string(),
+                input: RouterInput::from_text("sensory", "rain"),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_input_accepts_sensory_media_without_text() {
+        let parsed = parse_input_message(
+            r#"{"type":"sensory","images":[{"data":"abc","mimeType":"image/png"}]}"#,
+        )
+        .expect("must parse");
+        assert_eq!(
+            parsed,
+            ParsedIngress::Input {
+                input: RouterInput::new(
+                    "sensory",
+                    "",
+                    vec![MediaAttachment {
+                        data: "abc".to_string(),
+                        mime_type: "image/png".to_string(),
+                    }],
+                    Vec::new(),
+                ),
             }
         );
     }

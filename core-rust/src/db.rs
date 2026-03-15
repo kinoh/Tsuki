@@ -332,6 +332,78 @@ impl Db {
         Ok(events)
     }
 
+    pub async fn load_events_before_anchor(
+        &self,
+        anchor_ts: &str,
+        anchor_event_id: &str,
+        limit: usize,
+    ) -> DbResult<Vec<Event>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT event_id, ts, source, modality, payload_json, tags_json FROM events \
+                 WHERE ts < ? OR (ts = ? AND event_id < ?) \
+                 ORDER BY ts DESC, event_id DESC \
+                 LIMIT ?",
+                params![anchor_ts, anchor_ts, anchor_event_id, limit as i64],
+            )
+            .await?;
+        let mut events = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let event_id: String = row.get(0)?;
+            let ts: String = row.get(1)?;
+            let source: String = row.get(2)?;
+            let modality: String = row.get(3)?;
+            let payload_json: String = row.get(4)?;
+            let tags_json: String = row.get(5)?;
+            let payload: Value = serde_json::from_str(&payload_json)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_json)?;
+            events.push(crate::event::rehydrate_event(
+                event_id, ts, source, modality, payload, tags,
+            ));
+        }
+        Ok(events)
+    }
+
+    pub async fn load_events_after_anchor(
+        &self,
+        anchor_ts: &str,
+        anchor_event_id: &str,
+        limit: usize,
+    ) -> DbResult<Vec<Event>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT event_id, ts, source, modality, payload_json, tags_json FROM events \
+                 WHERE ts > ? OR (ts = ? AND event_id > ?) \
+                 ORDER BY ts ASC, event_id ASC \
+                 LIMIT ?",
+                params![anchor_ts, anchor_ts, anchor_event_id, limit as i64],
+            )
+            .await?;
+        let mut events = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let event_id: String = row.get(0)?;
+            let ts: String = row.get(1)?;
+            let source: String = row.get(2)?;
+            let modality: String = row.get(3)?;
+            let payload_json: String = row.get(4)?;
+            let tags_json: String = row.get(5)?;
+            let payload: Value = serde_json::from_str(&payload_json)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_json)?;
+            events.push(crate::event::rehydrate_event(
+                event_id, ts, source, modality, payload, tags,
+            ));
+        }
+        Ok(events)
+    }
+
     pub async fn get_event_by_id(&self, event_id: &str) -> DbResult<Option<Event>> {
         let conn = self.conn.lock().await;
         let mut rows = conn

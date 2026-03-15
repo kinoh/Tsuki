@@ -32,4 +32,26 @@ impl EventStore {
     ) -> DbResult<Vec<Event>> {
         self.db.load_events(limit, before_ts, desc).await
     }
+
+    pub async fn list_before_anchor(
+        &self,
+        anchor_ts: &str,
+        anchor_event_id: &str,
+        limit: usize,
+    ) -> DbResult<Vec<Event>> {
+        self.db
+            .load_events_before_anchor(anchor_ts, anchor_event_id, limit)
+            .await
+    }
+
+    pub async fn list_after_anchor(
+        &self,
+        anchor_ts: &str,
+        anchor_event_id: &str,
+        limit: usize,
+    ) -> DbResult<Vec<Event>> {
+        self.db
+            .load_events_after_anchor(anchor_ts, anchor_event_id, limit)
+            .await
+    }
 }

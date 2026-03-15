@@ -30,7 +30,7 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
     );
 
     let parse_started = Instant::now();
-    let Ok(input_text) = debug_service::parse_and_append_input(&raw, state).await else {
+    let Ok(input) = debug_service::parse_and_append_input(&raw, state).await else {
         println!(
             "PERF pipeline trace={} stage=parse_input ok=false ms={}",
             trace_id,
@@ -38,6 +38,7 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
         );
         return;
     };
+    let input_text = input.display_text();
     println!(
         "PERF pipeline trace={} stage=parse_input ok=true ms={} input_len={}",
         trace_id,
@@ -54,21 +55,22 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
         prep_started.elapsed().as_millis(),
         module_instructions.len()
     );
-    let input_text_for_router = input_text.clone();
+    let input_for_router = input.clone();
 
     let router_started = Instant::now();
     let router_output = run_router(
-        &input_text,
+        &input_for_router,
         &module_instructions,
         &state.runtime.modules,
         state,
         &overrides,
+        false,
         |module_name, activation_snapshot, instructions, focus| {
             let module_name = module_name.to_string();
             let activation_snapshot = activation_snapshot.clone();
             let instructions = instructions.to_string();
             let focus = focus.map(str::to_string);
-            let input_text = input_text_for_router.clone();
+            let input_text = input_text.clone();
             async move {
                 run_submodule_tool(
                     state,
@@ -95,7 +97,6 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
     let decision_started = Instant::now();
     let _decision_output = run_decision(
         &input_text,
-        &router_output,
         &state.runtime.modules,
         state,
         &module_instructions,

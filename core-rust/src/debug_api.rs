@@ -16,6 +16,8 @@ pub(crate) struct DebugRunRequest {
     pub(crate) exclude_event_ids: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) append_input_mode: Option<String>,
+    #[serde(default)]
+    pub(crate) dry_run: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]

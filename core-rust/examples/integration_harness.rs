@@ -3,7 +3,7 @@ use async_openai::{
     types::responses::{CreateResponseArgs, InputParam},
     Client,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine};
 use bech32::{ToBase32, Variant};
 use futures::{SinkExt, StreamExt};
 use reqwest::header::{COOKIE, ORIGIN, SET_COOKIE};
@@ -33,6 +33,7 @@ const SECRET_KEY_ENV_VAR: &str = "PROMPT_PRIVATE_KEY";
 const ADMIN_PASSWORD_ENV_VAR: &str = "ADMIN_AUTH_PASSWORD";
 const INCOMPLETE_SCENARIO_REQUIREMENT_CAP: f64 = 0.5;
 const DEFAULT_EMIT_WAIT_TIMEOUT_MS: u64 = 15_000;
+const POST_STEP_EVENT_DRAIN_IDLE_MS: u64 = 500;
 const DEFAULT_TRIGGER_WAIT_TAGS: [&str; 2] = [
     "self_improvement.module_processed",
     "self_improvement.trigger_processed",
@@ -74,6 +75,8 @@ struct CoreConfig {
     prompts_file: Option<String>,
     memgraph_uri: String,
     memgraph_backup_path: String,
+    #[serde(default)]
+    sqlite_backup_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,6 +115,18 @@ enum ScenarioStep {
         #[serde(default)]
         wait_for: Option<WaitForSpec>,
     },
+    /// Send a sensory message (images + optional text) and wait for a reply.
+    Sensory {
+        images: Vec<ScenarioImage>,
+        #[serde(default)]
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ScenarioImage {
+    path: String,
+    mime_type: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -175,6 +190,7 @@ struct IntegrationResult {
     ws_url: String,
     memgraph_uri: String,
     memgraph_backup_path: String,
+    sqlite_backup_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +203,7 @@ struct RuntimeContext {
     admin_password: String,
     memgraph_uri: String,
     memgraph_backup_path: PathBuf,
+    sqlite_backup_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -233,10 +250,18 @@ struct EmitEventRuntimeStep {
 }
 
 #[derive(Debug, Clone)]
+struct SensoryRuntimeStep {
+    /// base64-encoded image data with mime_type, ready to send
+    images: Vec<(String, String)>,
+    text: String,
+}
+
+#[derive(Debug, Clone)]
 enum RuntimeScenarioStep {
     InstallSkill(InstallSkillRuntimeStep),
     Conversation(ConversationRuntimeStep),
     EmitEvent(EmitEventRuntimeStep),
+    Sensory(SensoryRuntimeStep),
 }
 
 #[derive(Debug, Clone)]
@@ -274,7 +299,9 @@ async fn run() -> Result<(), String> {
     let assets = load_assets(&args, &secret_identity)?;
 
     let runtime = prepare_runtime(&assets.core)?;
+    restore_sqlite_backup(&runtime)?;
     restore_memgraph_snapshot(&runtime).await?;
+    rebuild_conversation_recall_index(&runtime).await?;
     let mut core = start_core(&runtime).await?;
     wait_for_ws(&runtime.ws_url, &mut core).await?;
 
@@ -629,6 +656,14 @@ fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
                     ));
                 }
             }
+            ScenarioStep::Sensory { images, .. } => {
+                if images.is_empty() {
+                    return Err(format!(
+                        "steps[{}] sensory requires at least one image",
+                        index
+                    ));
+                }
+            }
             ScenarioStep::EmitEvent { event, wait_for } => {
                 if !event.kind.eq_ignore_ascii_case("trigger") {
                     return Err(format!(
@@ -772,6 +807,25 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
             memgraph_backup_path.display()
         ));
     }
+    let sqlite_backup_path = match core.sqlite_backup_path.as_deref() {
+        Some(raw) => {
+            let resolved = resolve_to_manifest_path(PathBuf::from(raw));
+            if !resolved.exists() {
+                return Err(format!(
+                    "core.sqlite_backup_path not found: {}",
+                    resolved.display()
+                ));
+            }
+            if !resolved.is_file() {
+                return Err(format!(
+                    "core.sqlite_backup_path must be a file: {}",
+                    resolved.display()
+                ));
+            }
+            Some(resolved)
+        }
+        None => None,
+    };
 
     Ok(RuntimeContext {
         temp_dir,
@@ -782,6 +836,7 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
         admin_password,
         memgraph_uri,
         memgraph_backup_path,
+        sqlite_backup_path,
     })
 }
 
@@ -888,6 +943,119 @@ async fn restore_memgraph_snapshot(runtime: &RuntimeContext) -> Result<(), Strin
         sleep(Duration::from_millis(1_000)).await;
     }
     Err("memgraph-test did not become ready after snapshot restore".to_string())
+}
+
+fn restore_sqlite_backup(runtime: &RuntimeContext) -> Result<(), String> {
+    let Some(backup_path) = runtime.sqlite_backup_path.as_ref() else {
+        return Ok(());
+    };
+    if let Some(name) = backup_path.file_name().and_then(|value| value.to_str()) {
+        if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+            return extract_core_rust_db_from_archive(backup_path, runtime.db_path.as_path());
+        }
+    }
+    fs::copy(backup_path, runtime.db_path.as_path()).map_err(|err| {
+        format!(
+            "failed to copy sqlite backup '{}' to '{}': {}",
+            backup_path.display(),
+            runtime.db_path.display(),
+            err
+        )
+    })?;
+    Ok(())
+}
+
+fn extract_core_rust_db_from_archive(
+    archive_path: &Path,
+    target_db_path: &Path,
+) -> Result<(), String> {
+    let extract_dir = target_db_path
+        .parent()
+        .ok_or_else(|| format!("target db has no parent dir: {}", target_db_path.display()))?;
+    let status = std::process::Command::new("tar")
+        .args([
+            "-xzf",
+            archive_path.to_string_lossy().as_ref(),
+            "-C",
+            extract_dir.to_string_lossy().as_ref(),
+            "./core-rust.db",
+        ])
+        .status()
+        .map_err(|err| {
+            format!(
+                "failed to spawn tar for '{}': {}",
+                archive_path.display(),
+                err
+            )
+        })?;
+    if !status.success() {
+        return Err(format!(
+            "tar extraction failed for '{}' with status {}",
+            archive_path.display(),
+            status
+        ));
+    }
+    let extracted_db_path = extract_dir.join("core-rust.db");
+    if !extracted_db_path.exists() {
+        return Err(format!(
+            "archive '{}' did not contain ./core-rust.db",
+            archive_path.display()
+        ));
+    }
+    fs::rename(&extracted_db_path, target_db_path).map_err(|err| {
+        format!(
+            "failed to move extracted db '{}' to '{}': {}",
+            extracted_db_path.display(),
+            target_db_path.display(),
+            err
+        )
+    })?;
+    Ok(())
+}
+
+async fn rebuild_conversation_recall_index(runtime: &RuntimeContext) -> Result<(), String> {
+    if runtime.sqlite_backup_path.is_none() {
+        return Ok(());
+    }
+    let compose_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("compose.test.yaml");
+    run_mgconsole_query(
+        &compose_file,
+        "MATCH (e:ConversationEvent) DETACH DELETE e;",
+    )
+    .await?;
+
+    let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let mut command = Command::new("cargo");
+    sanitize_cargo_env(&mut command);
+    command
+        .args([
+            "run",
+            "--manifest-path",
+            manifest_path.to_string_lossy().as_ref(),
+            "--bin",
+            "tsuki-core-rust",
+            "--",
+            "backfill-conversation-recall",
+        ])
+        .current_dir(&runtime.temp_dir)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Ok(password) = std::env::var("MEMGRAPH_PASSWORD") {
+        command.env("MEMGRAPH_PASSWORD", password);
+    }
+    let status = command
+        .status()
+        .await
+        .map_err(|err| format!("failed to run conversation recall backfill: {}", err))?;
+    if status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "conversation recall backfill failed with status {}",
+        status
+    ))
 }
 
 async fn run_docker_compose(compose_file: &Path, args: &[&str]) -> Result<(), String> {
@@ -1182,6 +1350,10 @@ async fn execute_runs(
         ws_url: runtime.ws_url.clone(),
         memgraph_uri: runtime.memgraph_uri.clone(),
         memgraph_backup_path: runtime.memgraph_backup_path.to_string_lossy().to_string(),
+        sqlite_backup_path: runtime
+            .sqlite_backup_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string()),
     })
 }
 
@@ -1334,6 +1506,21 @@ async fn run_tester_dialogue(
                 )
                 .await?;
             }
+            RuntimeScenarioStep::Sensory(sensory) => {
+                run_sensory_step(
+                    &mut ws_stream,
+                    sensory,
+                    assets.execution.turn_timeout_ms,
+                    &mut transcript,
+                    &mut response_times_ms,
+                    &mut processed_reply_event_ids,
+                    &mut processed_decision_event_ids,
+                    &mut observed_event_ids,
+                    &mut observed_events,
+                    &mut global_turn_index,
+                )
+                .await?;
+            }
         }
     }
 
@@ -1422,6 +1609,14 @@ async fn run_conversation_step(
             )
             .await?;
         }
+        drain_runtime_events_until_idle(
+            ws_stream,
+            POST_STEP_EVENT_DRAIN_IDLE_MS,
+            observed_event_ids,
+            observed_events,
+            format!("turn={}", turn_index).as_str(),
+        )
+        .await?;
         *global_turn_index += 1;
     }
     Ok(())
@@ -1545,6 +1740,14 @@ async fn run_emit_event_step(
         observed_event_ids,
         observed_events,
     )
+    .await?;
+    drain_runtime_events_until_idle(
+        ws_stream,
+        POST_STEP_EVENT_DRAIN_IDLE_MS,
+        observed_event_ids,
+        observed_events,
+        format!("emit_step={}", step_index).as_str(),
+    )
     .await
 }
 
@@ -1589,6 +1792,27 @@ fn build_runtime_scenario_steps(
                 out.push(RuntimeScenarioStep::Conversation(ConversationRuntimeStep {
                     tester_instructions: tester_instructions.clone(),
                     max_turns: resolved_max_turns,
+                }));
+            }
+            ScenarioStep::Sensory { images, text } => {
+                let mut encoded = Vec::with_capacity(images.len());
+                for (img_index, img) in images.iter().enumerate() {
+                    let abs_path = resolve_to_manifest_path(PathBuf::from(&img.path));
+                    let bytes = fs::read(&abs_path).map_err(|err| {
+                        format!(
+                            "steps[{}] sensory images[{}]: failed to read {}: {}",
+                            index,
+                            img_index,
+                            abs_path.display(),
+                            err
+                        )
+                    })?;
+                    let b64 = STANDARD.encode(&bytes);
+                    encoded.push((b64, img.mime_type.clone()));
+                }
+                out.push(RuntimeScenarioStep::Sensory(SensoryRuntimeStep {
+                    images: encoded,
+                    text: text.clone(),
                 }));
             }
             ScenarioStep::EmitEvent { event, wait_for } => {
@@ -1767,6 +1991,76 @@ fn response_time_stats(values: &[u64]) -> (Option<f64>, Option<u64>, Option<u64>
     let min = values.iter().copied().min();
     let max = values.iter().copied().max();
     (Some(mean), min, max)
+}
+
+async fn run_sensory_step(
+    ws_stream: &mut WsStream,
+    step: &SensoryRuntimeStep,
+    turn_timeout_ms: u64,
+    transcript: &mut Vec<TranscriptTurn>,
+    response_times_ms: &mut Vec<u64>,
+    processed_reply_event_ids: &mut HashSet<String>,
+    processed_decision_event_ids: &mut HashSet<String>,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
+    global_turn_index: &mut usize,
+) -> Result<(), String> {
+    let turn_index = *global_turn_index;
+    let images_json: Vec<Value> = step
+        .images
+        .iter()
+        .map(|(data, mime_type)| json!({"data": data, "mimeType": mime_type}))
+        .collect();
+    println!(
+        "HARNESS_WS_SEND turn={} sensory images={} text={}",
+        turn_index,
+        step.images.len(),
+        preview_text(&step.text, 100)
+    );
+    let payload = json!({
+        "type": "sensory",
+        "images": images_json,
+        "text": step.text,
+    });
+    let turn_started = Instant::now();
+    ws_stream
+        .send(Message::Text(payload.to_string().into()))
+        .await
+        .map_err(|err| format!("sensory send failed: {}", err))?;
+
+    let turn_reply = wait_for_reply_text(
+        ws_stream,
+        turn_timeout_ms,
+        processed_reply_event_ids,
+        processed_decision_event_ids,
+        observed_event_ids,
+        observed_events,
+        turn_index,
+    )
+    .await?;
+    response_times_ms.push(turn_started.elapsed().as_millis() as u64);
+    let user_label = if step.text.trim().is_empty() {
+        format!("[sensory: {} image(s)]", step.images.len())
+    } else {
+        format!("[sensory: {} image(s)] {}", step.images.len(), step.text)
+    };
+    transcript.push(TranscriptTurn {
+        user: user_label,
+        assistant: turn_reply.assistant,
+    });
+    if !turn_reply.saw_decision {
+        wait_for_decision_event(
+            ws_stream,
+            turn_timeout_ms,
+            processed_decision_event_ids,
+            observed_event_ids,
+            observed_events,
+            turn_index,
+        )
+        .await?;
+    }
+    *global_turn_index += 1;
+    Ok(())
 }
 
 async fn generate_tester_utterance(
@@ -1988,6 +2282,52 @@ async fn wait_for_decision_event(
     }
 }
 
+async fn drain_runtime_events_until_idle(
+    ws_stream: &mut WsStream,
+    idle_timeout_ms: u64,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
+    label: &str,
+) -> Result<(), String> {
+    let idle_timeout = Duration::from_millis(idle_timeout_ms.max(1));
+    loop {
+        let message = match timeout(idle_timeout, ws_stream.next()).await {
+            Ok(value) => value,
+            Err(_) => return Ok(()),
+        };
+        match message {
+            Some(Ok(Message::Text(text))) => {
+                let parsed = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| Value::Null);
+                maybe_record_runtime_event(&parsed, observed_event_ids, observed_events);
+                let summary = extract_event_summary(&parsed);
+                println!(
+                    "HARNESS_WS_DRAIN {} event_id={} source={} tags={}",
+                    label,
+                    summary
+                        .as_ref()
+                        .and_then(|value| value.event_id.as_deref())
+                        .unwrap_or("-"),
+                    summary
+                        .as_ref()
+                        .and_then(|value| value.source.as_deref())
+                        .unwrap_or("-"),
+                    summary
+                        .as_ref()
+                        .map(|value| value.tags.join(","))
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "-".to_string()),
+                );
+            }
+            Some(Ok(Message::Close(_))) => return Ok(()),
+            Some(Ok(_)) => {}
+            Some(Err(err)) => {
+                return Err(format!("websocket receive failed during drain: {}", err))
+            }
+            None => return Ok(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct EventSummary {
     event_id: Option<String>,
@@ -2205,21 +2545,36 @@ fn extract_reply_text(message: &Value) -> String {
 }
 
 fn filter_events(events: Vec<Value>, include_debug_events: bool) -> Vec<Value> {
-    if include_debug_events {
-        return events;
-    }
+    let filtered: Vec<Value> = if include_debug_events {
+        events
+    } else {
+        events
+            .into_iter()
+            .filter(|event| {
+                let tags = event
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                !tags
+                    .iter()
+                    .any(|tag| *tag == "debug" || tag.starts_with("llm."))
+            })
+            .collect()
+    };
 
-    events
+    // Strip binary image data from sensory events to avoid exceeding judge context limits.
+    filtered
         .into_iter()
-        .filter(|event| {
-            let tags = event
-                .get("tags")
-                .and_then(Value::as_array)
-                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>())
-                .unwrap_or_default();
-            !tags
-                .iter()
-                .any(|tag| *tag == "debug" || tag.starts_with("llm."))
+        .map(|mut event| {
+            if let Some(payload) = event.get_mut("payload") {
+                if let Some(obj) = payload.as_object_mut() {
+                    if obj.contains_key("images") {
+                        obj.remove("images");
+                    }
+                }
+            }
+            event
         })
         .collect()
 }
@@ -2312,6 +2667,14 @@ fn scenario_instructions_for_judge(scenario: &Scenario) -> String {
                     payload,
                     tags_text,
                     timeout_ms
+                ));
+            }
+            ScenarioStep::Sensory { images, text } => {
+                lines.push(format!(
+                    "{}. sensory images={} text={}",
+                    index + 1,
+                    images.len(),
+                    text.trim()
                 ));
             }
         }
