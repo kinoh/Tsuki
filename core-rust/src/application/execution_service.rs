@@ -143,10 +143,12 @@ pub(crate) async fn run_decision(
         format_hard_trigger_results(&router_output.hard_trigger_results);
     let submodule_candidates =
         format_soft_recommendations(&activation_snapshot.soft_recommendations);
+    let decision_input_text =
+        build_decision_input_text(input_text, &activation_snapshot.symbolized_text);
     let context = render_decision_context_template(
         &state.config.input.decision_context_template,
         DecisionContextTemplateVars {
-            latest_user_input: input_text,
+            latest_user_input: &decision_input_text,
             active_concepts_and_arousal: &activation_concepts,
             outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
             candidate_submodules_by_interest_match: &submodule_candidates,
@@ -318,10 +320,12 @@ pub(crate) async fn run_decision_debug(
             format_hard_trigger_results(&router_output.hard_trigger_results);
         let submodule_candidates =
             format_soft_recommendations(&activation_snapshot.soft_recommendations);
+        let decision_input_text =
+            build_decision_input_text(input_text, &activation_snapshot.symbolized_text);
         render_decision_context_template(
             &state.config.input.decision_context_template,
             DecisionContextTemplateVars {
-                latest_user_input: input_text,
+                latest_user_input: &decision_input_text,
                 active_concepts_and_arousal: &activation_concepts,
                 outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
                 candidate_submodules_by_interest_match: &submodule_candidates,
@@ -572,6 +576,24 @@ fn extract_field(text: &str, key: &str, end_keys: &[&str]) -> Option<String> {
         None
     } else {
         Some(value.to_string())
+    }
+}
+
+/// Builds the `latest_user_input` string for the decision context.
+/// When symbolized_text differs from input_text (i.e. the input contained media),
+/// appends a `[sensory transcription]` block so the LLM is aware of the media content.
+fn build_decision_input_text(input_text: &str, symbolized_text: &str) -> String {
+    if symbolized_text.trim() == input_text.trim() || symbolized_text.trim().is_empty() {
+        return input_text.to_string();
+    }
+    if input_text.trim().is_empty() {
+        format!("[sensory transcription]\n{}", symbolized_text.trim())
+    } else {
+        format!(
+            "{}\n\n[sensory transcription]\n{}",
+            input_text.trim(),
+            symbolized_text.trim()
+        )
     }
 }
 

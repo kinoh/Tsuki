@@ -34,6 +34,7 @@ pub(crate) struct HardTriggerResult {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RouterOutput {
     pub(crate) active_concepts_and_arousal: String,
+    pub(crate) symbolized_text: String,
     pub(crate) module_scores: BTreeMap<String, f64>,
     pub(crate) saturation_penalties: BTreeMap<String, f64>,
     pub(crate) hard_effective_scores: BTreeMap<String, f64>,
@@ -49,6 +50,9 @@ pub(crate) struct ActivationSnapshot {
     pub(crate) active_concepts_and_arousal: String,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
+    /// Symbolized text of the input. For text-only input this equals the user text;
+    /// for sensory input it includes the literal transcription of media.
+    pub(crate) symbolized_text: String,
 }
 
 pub(crate) async fn run_router<F, Fut>(
@@ -105,6 +109,7 @@ where
         retrieval.candidate_source.as_str(),
         &retrieval.candidate_concepts,
         &activation.active_concepts_and_arousal,
+        &symbolization.text,
     )
     .await;
 
@@ -149,6 +154,7 @@ where
         active_concepts_and_arousal: activation.active_concepts_and_arousal.clone(),
         hard_triggers: hard_triggers.clone(),
         soft_recommendations: soft_recommendations.clone(),
+        symbolized_text: symbolization.text.clone(),
     };
     let hard_trigger_results = run_hard_triggers(
         &activation_snapshot,
@@ -161,6 +167,7 @@ where
 
     let router_output = RouterOutput {
         active_concepts_and_arousal: activation.active_concepts_and_arousal,
+        symbolized_text: symbolization.text,
         module_scores,
         saturation_penalties,
         hard_effective_scores,
@@ -194,6 +201,7 @@ pub(crate) fn activation_snapshot_from_router_output(
         active_concepts_and_arousal: router_output.active_concepts_and_arousal.clone(),
         hard_triggers: router_output.hard_triggers.clone(),
         soft_recommendations: router_output.soft_recommendations.clone(),
+        symbolized_text: router_output.symbolized_text.clone(),
     }
 }
 
@@ -429,9 +437,11 @@ async fn emit_concept_graph_query_event(
     candidate_source: &str,
     selected_seeds: &[String],
     active_concepts_and_arousal: &str,
+    symbolized_text: &str,
 ) {
     let event = concept_graph_query(json!({
         "query_text": query_text,
+        "symbolized_text": symbolized_text,
         "active_state_limit": active_state_limit,
         "text_result_concepts": text_candidate_concepts,
         "multimodal_result_concepts": multimodal_candidate_concepts,
