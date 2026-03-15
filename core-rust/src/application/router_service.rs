@@ -10,6 +10,7 @@ use std::{
 
 use crate::activation_concept_graph::ActiveGraphNode;
 use crate::app_state::AppState;
+use crate::application::conversation_recall_service::format_recalled_event_history;
 use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{ModuleRuntime, Modules};
 use crate::application::usage_service::DbLlmUsageRecorder;
@@ -36,6 +37,7 @@ pub(crate) struct HardTriggerResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct RouterOutput {
     pub(crate) active_concepts_and_arousal: String,
+    pub(crate) recalled_event_history: String,
     pub(crate) module_scores: BTreeMap<String, f64>,
     pub(crate) saturation_penalties: BTreeMap<String, f64>,
     pub(crate) hard_effective_scores: BTreeMap<String, f64>,
@@ -162,8 +164,12 @@ where
         dampen_hard_triggered_submodule_arousal(state, &hard_triggers).await;
     }
 
+    let recalled_event_history =
+        format_recalled_event_history(state, input_text, &std::collections::HashSet::new()).await;
+
     let router_output = RouterOutput {
         active_concepts_and_arousal: resolution.active_concepts_and_arousal,
+        recalled_event_history,
         module_scores,
         saturation_penalties,
         hard_effective_scores,
