@@ -1,5 +1,5 @@
 use futures::future::join_all;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -27,13 +27,13 @@ const SATURATION_MAX: f64 = 0.72;
 const SATURATION_RECOVERY: f64 = 0.06;
 const POST_HARD_DAMPEN_RATIO: f64 = 0.35;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct HardTriggerResult {
     pub(crate) module: String,
     pub(crate) text: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct RouterOutput {
     pub(crate) active_concepts_and_arousal: String,
     pub(crate) module_scores: BTreeMap<String, f64>,
@@ -70,6 +70,7 @@ pub(crate) async fn run_router<F, Fut>(
     modules: &Modules,
     state: &AppState,
     overrides: &PromptOverrides,
+    dry_run: bool,
     execute_submodule: F,
 ) -> RouterOutput
 where
@@ -90,6 +91,7 @@ where
         modules,
         state,
         overrides,
+        dry_run,
     )
     .await;
     emit_concept_graph_query_event(
@@ -101,15 +103,17 @@ where
         &resolution.active_concepts_and_arousal,
     )
     .await;
-    let activation_sources = collect_submodule_activation_sources(&resolution.selected_seeds);
-    if !activation_sources.is_empty() {
-        if let Err(err) = state
-            .services
-            .activation_concept_graph
-            .activate_related_submodules(activation_sources)
-            .await
-        {
-            emit_router_debug_error(state, "activate_related_submodules", &err).await;
+    if !dry_run {
+        let activation_sources = collect_submodule_activation_sources(&resolution.selected_seeds);
+        if !activation_sources.is_empty() {
+            if let Err(err) = state
+                .services
+                .activation_concept_graph
+                .activate_related_submodules(activation_sources)
+                .await
+            {
+                emit_router_debug_error(state, "activate_related_submodules", &err).await;
+            }
         }
     }
 
@@ -143,14 +147,20 @@ where
         hard_triggers: hard_triggers.clone(),
         soft_recommendations: soft_recommendations.clone(),
     };
-    let hard_trigger_results = run_hard_triggers(
-        &activation_snapshot,
-        module_instructions,
-        &execute_submodule,
-    )
-    .await;
-    update_saturation_levels(state, &active_module_names, &hard_triggers).await;
-    dampen_hard_triggered_submodule_arousal(state, &hard_triggers).await;
+    let hard_trigger_results = if dry_run {
+        vec![]
+    } else {
+        run_hard_triggers(
+            &activation_snapshot,
+            module_instructions,
+            &execute_submodule,
+        )
+        .await
+    };
+    if !dry_run {
+        update_saturation_levels(state, &active_module_names, &hard_triggers).await;
+        dampen_hard_triggered_submodule_arousal(state, &hard_triggers).await;
+    }
 
     let router_output = RouterOutput {
         active_concepts_and_arousal: resolution.active_concepts_and_arousal,
@@ -163,11 +173,13 @@ where
         mcp_tool_visibility,
         hard_trigger_results,
     };
-    let router_event = router_state(
-        serde_json::to_value(&router_output)
-            .unwrap_or_else(|_| json!({ "error": "router_output_serialize_failed" })),
-    );
-    record_event(state, router_event).await;
+    if !dry_run {
+        let router_event = router_state(
+            serde_json::to_value(&router_output)
+                .unwrap_or_else(|_| json!({ "error": "router_output_serialize_failed" })),
+        );
+        record_event(state, router_event).await;
+    }
     println!(
         "PERF router stage=end total_ms={} active_modules={} hard_triggers={} hard_results={} soft_recommendations={} concepts_len={}",
         router_started.elapsed().as_millis(),
@@ -517,6 +529,7 @@ async fn resolve_active_concepts_and_arousal(
     modules: &Modules,
     state: &AppState,
     overrides: &PromptOverrides,
+    dry_run: bool,
 ) -> RouterConceptResolution {
     let started = Instant::now();
     let module_lines = if active_module_names.is_empty() {
@@ -591,12 +604,12 @@ async fn resolve_active_concepts_and_arousal(
     .await;
     let selected_seeds = parse_recall_seeds(&response.text, concept_limit);
     if !selected_seeds.is_empty() {
-        if let Err(err) = state
+        let recall_result = state
             .services
             .activation_concept_graph
-            .recall_query(selected_seeds.clone(), ROUTER_RECALL_MAX_HOP)
-            .await
-        {
+            .recall_query(selected_seeds.clone(), ROUTER_RECALL_MAX_HOP, dry_run)
+            .await;
+        if let Err(err) = recall_result {
             emit_router_debug_error(
                 state,
                 &format!("recall_query seeds={:?}", selected_seeds),

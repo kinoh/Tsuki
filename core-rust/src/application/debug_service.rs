@@ -6,7 +6,8 @@ use std::collections::HashSet;
 use crate::app_state::AppState;
 use crate::application::event_service::record_event;
 use crate::application::execution_service::{
-    current_prompt_overrides, load_active_module_instructions, run_all_submodules_debug,
+    current_prompt_overrides, format_activation_context, format_hard_trigger_results,
+    format_soft_recommendations, load_active_module_instructions, run_all_submodules_debug,
     run_decision_debug, run_submodule_debug, run_submodule_tool,
 };
 use crate::application::history_service::{is_decision_event, is_user_input_event, latest_events};
@@ -89,12 +90,14 @@ pub(crate) async fn run_debug_module(
     let overrides = current_prompt_overrides(state).await;
     let module_instructions = load_active_module_instructions(state, &overrides).await;
     let input_text = payload.input.clone();
+    let dry_run = payload.dry_run.unwrap_or(false);
     let router_output = run_router(
         &input_text,
         &module_instructions,
         &state.runtime.modules,
         state,
         &overrides,
+        dry_run,
         |module_name, activation_snapshot, instructions, focus| {
             let module_name = module_name.to_string();
             let activation_snapshot = activation_snapshot.clone();
@@ -116,7 +119,14 @@ pub(crate) async fn run_debug_module(
     )
     .await;
 
-    let output = if name == "decision" {
+    let output = if name == "router" {
+        format!(
+            "<active_concepts_and_arousal>\n{}\n</active_concepts_and_arousal>\n\n<outputs_from_immediately_executed_submodules>\n{}\n</outputs_from_immediately_executed_submodules>\n\n<candidate_submodules_by_interest_match>\n{}\n</candidate_submodules_by_interest_match>",
+            format_activation_context(&router_output.active_concepts_and_arousal),
+            format_hard_trigger_results(&router_output.hard_trigger_results),
+            format_soft_recommendations(&router_output.soft_recommendations),
+        )
+    } else if name == "decision" {
         run_decision_debug(
             &payload.input,
             context_override,
@@ -125,7 +135,6 @@ pub(crate) async fn run_debug_module(
             history_cutoff_ts,
             &excluded_event_ids,
             state,
-            &router_output,
             &module_instructions,
             &overrides,
         )

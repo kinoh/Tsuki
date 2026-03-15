@@ -79,7 +79,8 @@ pub(crate) trait ConceptGraphOps: Send + Sync {
         to: String,
         relation_type: String,
     ) -> Result<Value, String>;
-    async fn recall_query(&self, seeds: Vec<String>, max_hop: u32) -> Result<Value, String>;
+    /// When `dry_run` is true, arousal updates are skipped. For debug/testing only.
+    async fn recall_query(&self, seeds: Vec<String>, max_hop: u32, dry_run: bool) -> Result<Value, String>;
 }
 
 pub(crate) trait ConceptGraphStore:
@@ -1538,7 +1539,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         }))
     }
 
-    async fn recall_query(&self, seeds: Vec<String>, max_hop: u32) -> Result<Value, String> {
+    async fn recall_query(&self, seeds: Vec<String>, max_hop: u32, dry_run: bool) -> Result<Value, String> {
         if max_hop == 0 {
             return Ok(json!({ "propositions": [] }));
         }
@@ -1610,7 +1611,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
                         queue.push_back((target.clone(), next_hop));
                     }
                     // Keep submodule trigger nodes from self-sustaining activation across turns.
-                    if !target.starts_with("submodule:") {
+                    if !dry_run && !target.starts_with("submodule:") {
                         self.maybe_update_arousal(&mut cache, target.as_str(), hop_decay, now)
                             .await?;
                     }
@@ -1662,6 +1663,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
                 .collect::<Vec<_>>(),
         }))
     }
+
 }
 
 #[async_trait]

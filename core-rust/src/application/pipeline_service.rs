@@ -63,6 +63,7 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
         &state.runtime.modules,
         state,
         &overrides,
+        false,
         |module_name, activation_snapshot, instructions, focus| {
             let module_name = module_name.to_string();
             let activation_snapshot = activation_snapshot.clone();
@@ -95,7 +96,6 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
     let decision_started = Instant::now();
     let _decision_output = run_decision(
         &input_text,
-        &router_output,
         &state.runtime.modules,
         state,
         &module_instructions,

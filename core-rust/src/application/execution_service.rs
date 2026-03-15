@@ -62,15 +62,35 @@ struct DecisionToolHandler {
     module_instructions: HashMap<String, String>,
 }
 
+async fn read_latest_router_state(state: &AppState) -> RouterOutput {
+    state
+        .services
+        .event_store
+        .latest(20)
+        .await
+        .ok()
+        .and_then(|events| {
+            events
+                .into_iter()
+                .find(|e| {
+                    e.source == "router"
+                        && e.modality == "state"
+                        && e.meta.tags.iter().any(|t| t == "router")
+                })
+        })
+        .and_then(|e| serde_json::from_value(e.payload).ok())
+        .unwrap_or_default()
+}
+
 pub(crate) async fn run_decision(
     input_text: &str,
-    router_output: &RouterOutput,
     modules: &Modules,
     state: &AppState,
     module_instructions: &HashMap<String, String>,
     overrides: &PromptOverrides,
 ) -> String {
     let decision_started = Instant::now();
+    let router_output = read_latest_router_state(state).await;
     println!(
         "PERF decision stage=start input_len={} hard_trigger_results={} soft_recommendations={}",
         input_text.len(),
@@ -95,7 +115,7 @@ pub(crate) async fn run_decision(
     );
     let base_instructions = state.prompts.base_or_default(&overrides);
     let decision_instructions = state.prompts.decision_or_default(&overrides);
-    let activation_snapshot = activation_snapshot_from_router_output(router_output);
+    let activation_snapshot = activation_snapshot_from_router_output(&router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
@@ -233,10 +253,10 @@ pub(crate) async fn run_decision_debug(
     history_cutoff_ts: Option<&str>,
     excluded_event_ids: &std::collections::HashSet<String>,
     state: &AppState,
-    router_output: &RouterOutput,
     module_instructions: &HashMap<String, String>,
     overrides: &PromptOverrides,
 ) -> Result<String, (StatusCode, String)> {
+    let router_output = read_latest_router_state(state).await;
     let mut recall_excluded_event_ids = excluded_event_ids.clone();
     if context_override.is_none() && include_history {
         let recent_events = latest_events(
@@ -269,7 +289,7 @@ pub(crate) async fn run_decision_debug(
     };
     let base_instructions = state.prompts.base_or_default(&overrides);
     let decision_instructions = state.prompts.decision_or_default(&overrides);
-    let activation_snapshot = activation_snapshot_from_router_output(router_output);
+    let activation_snapshot = activation_snapshot_from_router_output(&router_output);
     let handler = DecisionToolHandler {
         state: state.clone(),
         input_text: input_text.to_string(),
@@ -701,7 +721,7 @@ fn tool_name(tool: &async_openai::types::responses::Tool) -> Option<&str> {
     }
 }
 
-fn format_activation_context(raw: &str) -> String {
+pub(crate) fn format_activation_context(raw: &str) -> String {
     let value = raw.trim();
     if value.is_empty() {
         return "none".to_string();
@@ -709,7 +729,7 @@ fn format_activation_context(raw: &str) -> String {
     value.to_string()
 }
 
-fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {
+pub(crate) fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {
     if outputs.is_empty() {
         return "none".to_string();
     }
@@ -720,7 +740,7 @@ fn format_hard_trigger_results(outputs: &[HardTriggerResult]) -> String {
         .join("\n")
 }
 
-fn format_soft_recommendations(recommendations: &[String]) -> String {
+pub(crate) fn format_soft_recommendations(recommendations: &[String]) -> String {
     if recommendations.is_empty() {
         return "none".to_string();
     }
