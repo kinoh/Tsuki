@@ -22,7 +22,7 @@ recommendation_threshold = 0.2
 [router.multimodal_embedding]
 enabled = true
 shadow_enabled = true
-primary_source = "text"
+primary_source = "multimodal"
 model = "gemini-embedding-2-preview"
 output_dimensionality = 512
 
