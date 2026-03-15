@@ -8,7 +8,7 @@ Guidance for coding agents working on Tsuki.
 - Liveliness > determinism; allow variability and small surprises.
 
 ## Directory Layout (high level)
-- `core-rust/`: Rust backend runtime
+- `core-rust/`: Rust backend runtime — see `core-rust/AGENTS.md` for implementation rules
   - `src/application/`: application services and orchestration boundaries
   - `src/server_app.rs`: HTTP + WebSocket server, admin/auth surfaces, route wiring
   - `src/bin/`: operational and maintenance CLIs
@@ -86,6 +86,12 @@ Guidance for coding agents working on Tsuki.
     - CI/CD workflow env and secret mapping under `.github/workflows/`
     - operator-facing docs for required secrets/env
   - Before finishing, verify there is no missing propagation using code search (e.g. `rg`) across runtime config and workflow files.
+
+## Infrastructure & Operations
+- Production `DOCKER_HOST` is defined in `.env`; `task` picks it up automatically via `dotenv`; never read or hardcode the value directly.
+- Stop the `core` container before restoring a Memgraph snapshot to prevent concurrent writes during restore.
+- Memgraph vector index creation retroactively scans existing nodes, but aborts on the first dimension mismatch and leaves the index partially populated with no client-visible error; always verify `SHOW VECTOR INDEX INFO` size equals the expected node count after creation.
+- Bulk-loading vector properties via `SET` before a vector index exists stores the data but does not index it; drop and recreate the index after bulk load to force full indexing.
 
 ## Config & Data
 - Required runtime env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `ADMIN_AUTH_PASSWORD`.
