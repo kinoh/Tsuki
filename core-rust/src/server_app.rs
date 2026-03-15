@@ -45,6 +45,7 @@ use crate::debug_api::{
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::llm::{build_response_api_llm, ResponseApiConfig};
+use crate::router_symbolizer::build_response_api_symbolizer;
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
@@ -350,6 +351,13 @@ pub(crate) async fn run_server() {
         }
     };
 
+    let symbolizer_model = config
+        .router
+        .symbolizer_model
+        .clone()
+        .unwrap_or_else(|| config.llm.model.clone());
+    let router_symbolizer = Arc::new(build_response_api_symbolizer(symbolizer_model));
+
     let state = AppState::new(
         AppServices {
             db: db.clone(),
@@ -359,6 +367,7 @@ pub(crate) async fn run_server() {
             activation_concept_graph,
             conversation_recall_store,
             mcp_registry,
+            router_symbolizer,
         },
         AuthState::new(auth_token, admin_auth_password, admin_password_fingerprint),
         AppConfigState {

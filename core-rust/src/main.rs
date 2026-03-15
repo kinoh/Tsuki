@@ -17,6 +17,7 @@ mod mcp_trigger_concepts;
 mod module_registry;
 mod multimodal_embedding;
 mod notification;
+mod router_symbolizer;
 mod prompts;
 mod scheduler;
 mod server_app;

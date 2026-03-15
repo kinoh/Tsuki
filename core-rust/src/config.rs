@@ -56,6 +56,7 @@ pub struct RouterConfig {
     pub recommendation_threshold: f32,
     #[serde(default)]
     pub multimodal_embedding: RouterMultimodalEmbeddingConfig,
+    pub symbolizer_model: Option<String>,
 }
 
 impl Default for RouterConfig {
@@ -66,6 +67,7 @@ impl Default for RouterConfig {
             hard_trigger_threshold: default_hard_trigger_threshold(),
             recommendation_threshold: default_recommendation_threshold(),
             multimodal_embedding: RouterMultimodalEmbeddingConfig::default(),
+            symbolizer_model: None,
         }
     }
 }
@@ -152,7 +154,6 @@ pub struct DbConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputConfig {
-    pub router_context_template: String,
     pub decision_context_template: String,
     pub submodule_context_template: String,
 }
