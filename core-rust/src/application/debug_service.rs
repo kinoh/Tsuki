@@ -121,10 +121,11 @@ pub(crate) async fn run_debug_module(
 
     let output = if name == "router" {
         format!(
-            "<active_concepts_and_arousal>\n{}\n</active_concepts_and_arousal>\n\n<outputs_from_immediately_executed_submodules>\n{}\n</outputs_from_immediately_executed_submodules>\n\n<candidate_submodules_by_interest_match>\n{}\n</candidate_submodules_by_interest_match>",
+            "<active_concepts_and_arousal>\n{}\n</active_concepts_and_arousal>\n\n<outputs_from_immediately_executed_submodules>\n{}\n</outputs_from_immediately_executed_submodules>\n\n<candidate_submodules_by_interest_match>\n{}\n</candidate_submodules_by_interest_match>\n\n<recalled_event_history>\n{}\n</recalled_event_history>",
             format_activation_context(&router_output.active_concepts_and_arousal),
             format_hard_trigger_results(&router_output.hard_trigger_results),
             format_soft_recommendations(&router_output.soft_recommendations),
+            router_output.recalled_event_history,
         )
     } else if name == "decision" {
         run_decision_debug(
