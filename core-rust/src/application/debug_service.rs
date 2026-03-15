@@ -75,7 +75,8 @@ pub(crate) async fn run_debug_module(
         .into_iter()
         .collect::<HashSet<_>>();
     let append_mode = AppendInputMode::from_request(payload.append_input_mode.as_deref());
-    if context_override.is_none() {
+    let dry_run = payload.dry_run.unwrap_or(false);
+    if context_override.is_none() && !dry_run {
         maybe_append_debug_input_event(
             state,
             payload.input.trim(),
@@ -90,7 +91,6 @@ pub(crate) async fn run_debug_module(
     let overrides = current_prompt_overrides(state).await;
     let module_instructions = load_active_module_instructions(state, &overrides).await;
     let input_text = payload.input.clone();
-    let dry_run = payload.dry_run.unwrap_or(false);
     let router_output = run_router(
         &input_text,
         &module_instructions,
