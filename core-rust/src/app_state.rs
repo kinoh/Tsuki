@@ -1,5 +1,6 @@
 use crate::activation_concept_graph::ConceptGraphStore;
 use crate::application::module_bootstrap::Modules;
+use crate::router_symbolizer::RouterSymbolizer;
 use crate::config::{ConversationRecallConfig, InputConfig, LimitsConfig, RouterConfig, TtsConfig};
 use crate::conversation_recall_store::ConversationRecallStore;
 use crate::db::Db;
@@ -36,6 +37,7 @@ pub(crate) struct AppServices {
     pub(crate) activation_concept_graph: Arc<dyn ConceptGraphStore>,
     pub(crate) conversation_recall_store: Arc<dyn ConversationRecallStore>,
     pub(crate) mcp_registry: Arc<McpRegistry>,
+    pub(crate) router_symbolizer: Arc<dyn RouterSymbolizer>,
 }
 
 #[derive(Clone)]

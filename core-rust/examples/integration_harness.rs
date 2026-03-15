@@ -3,7 +3,7 @@ use async_openai::{
     types::responses::{CreateResponseArgs, InputParam},
     Client,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine};
 use bech32::{ToBase32, Variant};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -107,6 +107,18 @@ enum ScenarioStep {
         #[serde(default)]
         wait_for: Option<WaitForSpec>,
     },
+    /// Send a sensory message (images + optional text) and wait for a reply.
+    Sensory {
+        images: Vec<ScenarioImage>,
+        #[serde(default)]
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ScenarioImage {
+    path: String,
+    mime_type: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -220,9 +232,17 @@ struct EmitEventRuntimeStep {
 }
 
 #[derive(Debug, Clone)]
+struct SensoryRuntimeStep {
+    /// base64-encoded image data with mime_type, ready to send
+    images: Vec<(String, String)>,
+    text: String,
+}
+
+#[derive(Debug, Clone)]
 enum RuntimeScenarioStep {
     Conversation(ConversationRuntimeStep),
     EmitEvent(EmitEventRuntimeStep),
+    Sensory(SensoryRuntimeStep),
 }
 
 #[derive(Debug, Clone)]
@@ -560,6 +580,14 @@ fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
                 if matches!(max_turns, Some(0)) {
                     return Err(format!(
                         "steps[{}] conversation max_turns must be >= 1 when specified",
+                        index
+                    ));
+                }
+            }
+            ScenarioStep::Sensory { images, .. } => {
+                if images.is_empty() {
+                    return Err(format!(
+                        "steps[{}] sensory requires at least one image",
                         index
                     ));
                 }
@@ -1385,6 +1413,21 @@ async fn run_tester_dialogue(
                 )
                 .await?;
             }
+            RuntimeScenarioStep::Sensory(sensory) => {
+                run_sensory_step(
+                    &mut ws_stream,
+                    sensory,
+                    assets.execution.turn_timeout_ms,
+                    &mut transcript,
+                    &mut response_times_ms,
+                    &mut processed_reply_event_ids,
+                    &mut processed_decision_event_ids,
+                    &mut observed_event_ids,
+                    &mut observed_events,
+                    &mut global_turn_index,
+                )
+                .await?;
+            }
         }
     }
 
@@ -1553,6 +1596,27 @@ fn build_runtime_scenario_steps(
                     max_turns: resolved_max_turns,
                 }));
             }
+            ScenarioStep::Sensory { images, text } => {
+                let mut encoded = Vec::with_capacity(images.len());
+                for (img_index, img) in images.iter().enumerate() {
+                    let abs_path = resolve_to_manifest_path(PathBuf::from(&img.path));
+                    let bytes = fs::read(&abs_path).map_err(|err| {
+                        format!(
+                            "steps[{}] sensory images[{}]: failed to read {}: {}",
+                            index,
+                            img_index,
+                            abs_path.display(),
+                            err
+                        )
+                    })?;
+                    let b64 = STANDARD.encode(&bytes);
+                    encoded.push((b64, img.mime_type.clone()));
+                }
+                out.push(RuntimeScenarioStep::Sensory(SensoryRuntimeStep {
+                    images: encoded,
+                    text: text.clone(),
+                }));
+            }
             ScenarioStep::EmitEvent { event, wait_for } => {
                 let wait_for_tags_any = wait_for
                     .as_ref()
@@ -1685,6 +1749,76 @@ fn response_time_stats(values: &[u64]) -> (Option<f64>, Option<u64>, Option<u64>
     let min = values.iter().copied().min();
     let max = values.iter().copied().max();
     (Some(mean), min, max)
+}
+
+async fn run_sensory_step(
+    ws_stream: &mut WsStream,
+    step: &SensoryRuntimeStep,
+    turn_timeout_ms: u64,
+    transcript: &mut Vec<TranscriptTurn>,
+    response_times_ms: &mut Vec<u64>,
+    processed_reply_event_ids: &mut HashSet<String>,
+    processed_decision_event_ids: &mut HashSet<String>,
+    observed_event_ids: &mut HashSet<String>,
+    observed_events: &mut Vec<Value>,
+    global_turn_index: &mut usize,
+) -> Result<(), String> {
+    let turn_index = *global_turn_index;
+    let images_json: Vec<Value> = step
+        .images
+        .iter()
+        .map(|(data, mime_type)| json!({"data": data, "mimeType": mime_type}))
+        .collect();
+    println!(
+        "HARNESS_WS_SEND turn={} sensory images={} text={}",
+        turn_index,
+        step.images.len(),
+        preview_text(&step.text, 100)
+    );
+    let payload = json!({
+        "type": "sensory",
+        "images": images_json,
+        "text": step.text,
+    });
+    let turn_started = Instant::now();
+    ws_stream
+        .send(Message::Text(payload.to_string().into()))
+        .await
+        .map_err(|err| format!("sensory send failed: {}", err))?;
+
+    let turn_reply = wait_for_reply_text(
+        ws_stream,
+        turn_timeout_ms,
+        processed_reply_event_ids,
+        processed_decision_event_ids,
+        observed_event_ids,
+        observed_events,
+        turn_index,
+    )
+    .await?;
+    response_times_ms.push(turn_started.elapsed().as_millis() as u64);
+    let user_label = if step.text.trim().is_empty() {
+        format!("[sensory: {} image(s)]", step.images.len())
+    } else {
+        format!("[sensory: {} image(s)] {}", step.images.len(), step.text)
+    };
+    transcript.push(TranscriptTurn {
+        user: user_label,
+        assistant: turn_reply.assistant,
+    });
+    if !turn_reply.saw_decision {
+        wait_for_decision_event(
+            ws_stream,
+            turn_timeout_ms,
+            processed_decision_event_ids,
+            observed_event_ids,
+            observed_events,
+            turn_index,
+        )
+        .await?;
+    }
+    *global_turn_index += 1;
+    Ok(())
 }
 
 async fn generate_tester_utterance(
@@ -2169,21 +2303,36 @@ fn extract_reply_text(message: &Value) -> String {
 }
 
 fn filter_events(events: Vec<Value>, include_debug_events: bool) -> Vec<Value> {
-    if include_debug_events {
-        return events;
-    }
+    let filtered: Vec<Value> = if include_debug_events {
+        events
+    } else {
+        events
+            .into_iter()
+            .filter(|event| {
+                let tags = event
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                !tags
+                    .iter()
+                    .any(|tag| *tag == "debug" || tag.starts_with("llm."))
+            })
+            .collect()
+    };
 
-    events
+    // Strip binary image data from sensory events to avoid exceeding judge context limits.
+    filtered
         .into_iter()
-        .filter(|event| {
-            let tags = event
-                .get("tags")
-                .and_then(Value::as_array)
-                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>())
-                .unwrap_or_default();
-            !tags
-                .iter()
-                .any(|tag| *tag == "debug" || tag.starts_with("llm."))
+        .map(|mut event| {
+            if let Some(payload) = event.get_mut("payload") {
+                if let Some(obj) = payload.as_object_mut() {
+                    if obj.contains_key("images") {
+                        obj.remove("images");
+                    }
+                }
+            }
+            event
         })
         .collect()
 }
@@ -2261,6 +2410,14 @@ fn scenario_instructions_for_judge(scenario: &Scenario) -> String {
                     payload,
                     tags_text,
                     timeout_ms
+                ));
+            }
+            ScenarioStep::Sensory { images, text } => {
+                lines.push(format!(
+                    "{}. sensory images={} text={}",
+                    index + 1,
+                    images.len(),
+                    text.trim()
                 ));
             }
         }

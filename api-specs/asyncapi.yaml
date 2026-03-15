@@ -53,9 +53,23 @@ components:
               mimeType:
                 type: string
                 example: image/png
+        audio:
+          type: array
+          description: "Base64 (no data: prefix)"
+          items:
+            type: object
+            required: [data]
+            properties:
+              data:
+                type: string
+                description: raw base64 audio bytes
+              mimeType:
+                type: string
+                example: audio/wav
       oneOf:
         - required: [text]
         - required: [images]
+        - required: [audio]
 
     ServerMessage:
       type: object

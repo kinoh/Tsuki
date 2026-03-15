@@ -4,25 +4,23 @@ use serde_json::json;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     future::Future,
-    sync::Arc,
     time::Instant,
 };
 
 use crate::activation_concept_graph::ActiveGraphNode;
 use crate::app_state::AppState;
+use crate::application::concept_activation_service::activate_concepts;
+use crate::application::concept_retrieval_service::retrieve_concepts;
 use crate::application::conversation_recall_service::format_recalled_event_history;
 use crate::application::event_service::record_event;
-use crate::application::module_bootstrap::{ModuleRuntime, Modules};
-use crate::application::usage_service::DbLlmUsageRecorder;
-use crate::event::contracts::{concept_graph_query, llm_error, llm_raw, router_state};
-use crate::llm::{
-    build_response_api_llm, LlmRequest, LlmUsageContext, LlmUsageRecorder, ResponseApiConfig,
-    ToolError,
-};
+use crate::application::module_bootstrap::Modules;
+use crate::application::router_symbolization_service::symbolize;
+use crate::event::contracts::{concept_graph_query, llm_error, router_state};
+use crate::input_ingress::RouterInput;
+use crate::llm::ToolError;
 use crate::mcp::McpToolVisibility;
 use crate::prompts::PromptOverrides;
 
-const ROUTER_RECALL_MAX_HOP: u32 = 2;
 const SATURATION_STEP: f64 = 0.24;
 const SATURATION_MAX: f64 = 0.72;
 const SATURATION_RECOVERY: f64 = 0.06;
@@ -38,6 +36,7 @@ pub(crate) struct HardTriggerResult {
 pub(crate) struct RouterOutput {
     pub(crate) active_concepts_and_arousal: String,
     pub(crate) recalled_event_history: String,
+    pub(crate) symbolized_text: String,
     pub(crate) module_scores: BTreeMap<String, f64>,
     pub(crate) saturation_penalties: BTreeMap<String, f64>,
     pub(crate) hard_effective_scores: BTreeMap<String, f64>,
@@ -53,25 +52,17 @@ pub(crate) struct ActivationSnapshot {
     pub(crate) active_concepts_and_arousal: String,
     pub(crate) hard_triggers: Vec<String>,
     pub(crate) soft_recommendations: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct RouterPreprocessOutput {
-    candidate_concepts: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct RouterConceptResolution {
-    selected_seeds: Vec<String>,
-    active_concepts_and_arousal: String,
+    /// Symbolized text of the input. For text-only input this equals the user text;
+    /// for sensory input it includes the literal transcription of media.
+    pub(crate) symbolized_text: String,
 }
 
 pub(crate) async fn run_router<F, Fut>(
-    input_text: &str,
+    input: &RouterInput,
     module_instructions: &HashMap<String, String>,
-    modules: &Modules,
+    _modules: &Modules,
     state: &AppState,
-    overrides: &PromptOverrides,
+    _overrides: &PromptOverrides,
     dry_run: bool,
     execute_submodule: F,
 ) -> RouterOutput
@@ -83,39 +74,58 @@ where
     let active_module_names = module_instructions.keys().cloned().collect::<Vec<_>>();
     let concept_limit = state.config.router.query_terms_max.max(1);
     let active_state_limit = state.config.router.active_state_limit.max(1);
-    let preprocess = preprocess_router_activation(input_text, concept_limit, state).await;
-    let resolution = resolve_active_concepts_and_arousal(
-        input_text,
-        &active_module_names,
-        &preprocess,
+
+    let symbolization = symbolize(input, state.services.router_symbolizer.as_ref()).await;
+    if let Some(err) = &symbolization.error {
+        emit_router_debug_error(state, "symbolize", err).await;
+    }
+
+    let retrieval = retrieve_concepts(
+        &symbolization.text,
+        input,
         concept_limit,
+        &state.config.router.multimodal_embedding,
+        state.services.activation_concept_graph.as_ref(),
+    )
+    .await;
+    for err in &retrieval.errors {
+        emit_router_debug_error(state, "concept_retrieval", err).await;
+    }
+
+    let activation = activate_concepts(
+        &retrieval.candidate_concepts,
         active_state_limit,
-        modules,
-        state,
-        overrides,
+        state.services.activation_concept_graph.as_ref(),
         dry_run,
     )
     .await;
+    for err in &activation.errors {
+        emit_router_debug_error(state, "concept_activation", err).await;
+    }
+
     emit_concept_graph_query_event(
         state,
-        input_text,
+        &symbolization.text,
         active_state_limit,
-        &preprocess.candidate_concepts,
-        &resolution.selected_seeds,
-        &resolution.active_concepts_and_arousal,
+        &retrieval.text_candidate_concepts,
+        &retrieval.multimodal_candidate_concepts,
+        &retrieval.candidate_concepts,
+        retrieval.candidate_source.as_str(),
+        &retrieval.candidate_concepts,
+        &activation.active_concepts_and_arousal,
+        &symbolization.text,
     )
     .await;
-    if !dry_run {
-        let activation_sources = collect_submodule_activation_sources(&resolution.selected_seeds);
-        if !activation_sources.is_empty() {
-            if let Err(err) = state
-                .services
-                .activation_concept_graph
-                .activate_related_submodules(activation_sources)
-                .await
-            {
-                emit_router_debug_error(state, "activate_related_submodules", &err).await;
-            }
+
+    let activation_sources = collect_submodule_activation_sources(&retrieval.candidate_concepts);
+    if !dry_run && !activation_sources.is_empty() {
+        if let Err(err) = state
+            .services
+            .activation_concept_graph
+            .activate_related_submodules(activation_sources)
+            .await
+        {
+            emit_router_debug_error(state, "activate_related_submodules", &err).await;
         }
     }
 
@@ -145,9 +155,10 @@ where
         .map(|item| item.runtime_tool_name.clone())
         .collect::<Vec<_>>();
     let activation_snapshot = ActivationSnapshot {
-        active_concepts_and_arousal: resolution.active_concepts_and_arousal.clone(),
+        active_concepts_and_arousal: activation.active_concepts_and_arousal.clone(),
         hard_triggers: hard_triggers.clone(),
         soft_recommendations: soft_recommendations.clone(),
+        symbolized_text: symbolization.text.clone(),
     };
     let hard_trigger_results = if dry_run {
         vec![]
@@ -165,11 +176,12 @@ where
     }
 
     let recalled_event_history =
-        format_recalled_event_history(state, input_text, &std::collections::HashSet::new()).await;
+        format_recalled_event_history(state, &input.text, &std::collections::HashSet::new()).await;
 
     let router_output = RouterOutput {
-        active_concepts_and_arousal: resolution.active_concepts_and_arousal,
+        active_concepts_and_arousal: activation.active_concepts_and_arousal,
         recalled_event_history,
+        symbolized_text: symbolization.text,
         module_scores,
         saturation_penalties,
         hard_effective_scores,
@@ -205,6 +217,7 @@ pub(crate) fn activation_snapshot_from_router_output(
         active_concepts_and_arousal: router_output.active_concepts_and_arousal.clone(),
         hard_triggers: router_output.hard_triggers.clone(),
         soft_recommendations: router_output.soft_recommendations.clone(),
+        symbolized_text: router_output.symbolized_text.clone(),
     }
 }
 
@@ -264,23 +277,6 @@ where
         outputs.len()
     );
     outputs
-}
-
-fn render_router_context_template(
-    template: &str,
-    latest_user_input: &str,
-    active_submodules: &str,
-    candidate_concepts: &str,
-    router_query_terms_max: usize,
-) -> String {
-    template
-        .replace("{{latest_user_input}}", latest_user_input)
-        .replace("{{active_submodules}}", active_submodules)
-        .replace("{{candidate_concepts}}", candidate_concepts)
-        .replace(
-            "{{router_query_terms_max}}",
-            &router_query_terms_max.to_string(),
-        )
 }
 
 async fn compute_module_scores_from_concept_activation(
@@ -434,47 +430,6 @@ fn collect_submodule_activation_sources(selected_seeds: &[String]) -> Vec<String
     out
 }
 
-fn build_router_config(
-    instructions: String,
-    runtime: &ModuleRuntime,
-    router_model: &str,
-    usage_context: Option<LlmUsageContext>,
-    usage_recorder: Option<Arc<dyn LlmUsageRecorder>>,
-) -> ResponseApiConfig {
-    ResponseApiConfig {
-        model: router_model.to_string(),
-        instructions,
-        temperature: runtime.temperature,
-        max_output_tokens: runtime.max_output_tokens,
-        tools: Vec::new(),
-        tool_handler: None,
-        usage_recorder,
-        usage_context,
-        max_tool_rounds: 0,
-    }
-}
-
-async fn emit_router_debug_raw(
-    state: &AppState,
-    context: &str,
-    raw: &serde_json::Value,
-    output_text: &str,
-    tool_calls: &[crate::llm::ToolCallTrace],
-) {
-    let event = llm_raw(
-        "router",
-        json!({
-            "raw": raw,
-            "context": context,
-            "output_text": output_text,
-            "tool_calls": tool_calls,
-            "mode": "runtime",
-        }),
-        vec!["mode:runtime".to_string()],
-    );
-    record_event(state, event).await;
-}
-
 async fn emit_router_debug_error(state: &AppState, context: &str, error: &str) {
     let event = llm_error(
         "router",
@@ -492,179 +447,29 @@ async fn emit_concept_graph_query_event(
     state: &AppState,
     query_text: &str,
     active_state_limit: usize,
+    text_candidate_concepts: &[String],
+    multimodal_candidate_concepts: &[String],
     candidate_concepts: &[String],
+    candidate_source: &str,
     selected_seeds: &[String],
     active_concepts_and_arousal: &str,
+    symbolized_text: &str,
 ) {
     let event = concept_graph_query(json!({
         "query_text": query_text,
+        "symbolized_text": symbolized_text,
         "active_state_limit": active_state_limit,
+        "text_result_concepts": text_candidate_concepts,
+        "multimodal_result_concepts": multimodal_candidate_concepts,
         "result_concepts": candidate_concepts,
+        "candidate_source": candidate_source,
         "selected_seeds": selected_seeds,
         "active_concepts_and_arousal": active_concepts_and_arousal,
     }));
     record_event(state, event).await;
 }
 
-async fn preprocess_router_activation(
-    input_text: &str,
-    concept_limit: usize,
-    state: &AppState,
-) -> RouterPreprocessOutput {
-    let query_text = input_text.trim();
-    if query_text.is_empty() {
-        return RouterPreprocessOutput {
-            candidate_concepts: Vec::new(),
-        };
-    }
-    let candidate_concepts = state
-        .services
-        .activation_concept_graph
-        .concept_search(query_text, concept_limit)
-        .await
-        .unwrap_or_default();
-    RouterPreprocessOutput { candidate_concepts }
-}
-
-async fn resolve_active_concepts_and_arousal(
-    input_text: &str,
-    active_module_names: &[String],
-    preprocess: &RouterPreprocessOutput,
-    concept_limit: usize,
-    active_state_limit: usize,
-    modules: &Modules,
-    state: &AppState,
-    overrides: &PromptOverrides,
-    dry_run: bool,
-) -> RouterConceptResolution {
-    let started = Instant::now();
-    let module_lines = if active_module_names.is_empty() {
-        "none".to_string()
-    } else {
-        active_module_names
-            .iter()
-            .map(|name| format!("- {}", name))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let candidate_lines = render_list_for_prompt(&preprocess.candidate_concepts);
-    let context = render_router_context_template(
-        &state.config.input.router_context_template,
-        input_text,
-        &module_lines,
-        &candidate_lines,
-        state.config.router.query_terms_max.max(1),
-    );
-    let base_instructions = state.prompts.base_or_default(overrides);
-    let router_instructions = state.prompts.router_or_default(overrides);
-    let instructions = format!(
-        "{}\n\n{}\n\nYou are the router preconscious module. Select recall seed concepts only.",
-        base_instructions, router_instructions
-    );
-    let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
-    let adapter = build_response_api_llm(build_router_config(
-        instructions,
-        &modules.runtime,
-        state.runtime.router_model.as_str(),
-        Some(LlmUsageContext::new("user", "router")),
-        Some(usage_recorder),
-    ));
-    let llm_started = Instant::now();
-    let response = match adapter
-        .respond(LlmRequest {
-            input: context.clone(),
-        })
-        .await
-    {
-        Ok(response) => {
-            println!(
-                "PERF router.llm stage=respond ms={} ok=true output_len={} tool_calls={}",
-                llm_started.elapsed().as_millis(),
-                response.text.len(),
-                response.tool_calls.len()
-            );
-            response
-        }
-        Err(err) => {
-            let detail = err.to_string();
-            println!(
-                "PERF router.llm stage=respond ms={} ok=false error={}",
-                llm_started.elapsed().as_millis(),
-                detail
-            );
-            emit_router_debug_error(state, &context, &detail).await;
-            return RouterConceptResolution {
-                selected_seeds: Vec::new(),
-                active_concepts_and_arousal: "none".to_string(),
-            };
-        }
-    };
-    emit_router_debug_raw(
-        state,
-        &context,
-        &response.raw,
-        &response.text,
-        &response.tool_calls,
-    )
-    .await;
-    let selected_seeds = parse_recall_seeds(&response.text, concept_limit);
-    if !selected_seeds.is_empty() {
-        let recall_result = state
-            .services
-            .activation_concept_graph
-            .recall_query(selected_seeds.clone(), ROUTER_RECALL_MAX_HOP, dry_run)
-            .await;
-        if let Err(err) = recall_result {
-            emit_router_debug_error(
-                state,
-                &format!("recall_query seeds={:?}", selected_seeds),
-                &err,
-            )
-            .await;
-        }
-    }
-    let active_concepts_and_arousal = match state
-        .services
-        .activation_concept_graph
-        .active_nodes(active_state_limit)
-        .await
-    {
-        Ok(nodes) => render_active_nodes_as_text(&nodes),
-        Err(err) => {
-            emit_router_debug_error(state, "active_nodes", &err).await;
-            "none".to_string()
-        }
-    };
-    if active_concepts_and_arousal == "none" {
-        println!(
-            "PERF router stage=resolve_concepts total_ms={} output=none_empty",
-            started.elapsed().as_millis()
-        );
-    } else {
-        println!(
-            "PERF router stage=resolve_concepts total_ms={} output_len={}",
-            started.elapsed().as_millis(),
-            active_concepts_and_arousal.len()
-        );
-    }
-    RouterConceptResolution {
-        selected_seeds,
-        active_concepts_and_arousal,
-    }
-}
-
-fn render_list_for_prompt(values: &[String]) -> String {
-    if values.is_empty() {
-        return "none".to_string();
-    }
-    values
-        .iter()
-        .map(|value| format!("- {}", value))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
+#[allow(dead_code)]
 fn parse_recall_seeds(text: &str, max: usize) -> Vec<String> {
     let mut seeds = Vec::<String>::new();
     let mut seen = HashSet::<String>::new();
@@ -704,6 +509,7 @@ fn parse_recall_seeds(text: &str, max: usize) -> Vec<String> {
     seeds
 }
 
+#[allow(dead_code)]
 fn render_active_nodes_as_text(nodes: &[ActiveGraphNode]) -> String {
     let lines = nodes
         .iter()

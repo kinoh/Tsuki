@@ -95,7 +95,7 @@ Guidance for coding agents working on Tsuki.
 
 ## Config & Data
 - Required runtime env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `ADMIN_AUTH_PASSWORD`.
-- Optional runtime env: `FCM_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_KEY`, `MEMGRAPH_PASSWORD`, `TURSO_AUTH_TOKEN`.
+- Optional runtime env: `FCM_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_KEY`, `GEMINI_API_KEY`, `MEMGRAPH_PASSWORD`, `TURSO_AUTH_TOKEN`.
 - Dev/test-only env may include `OPENAI_MODEL` and `PROMPT_PRIVATE_KEY` for auxiliary tools.
 - Storage roots: runtime DB `${DATA_DIR}/core-rust.db`, shared RSS data under `${DATA_DIR}`, prompt file `${DATA_DIR}/prompts.md`.
 

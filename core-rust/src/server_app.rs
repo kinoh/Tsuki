@@ -45,6 +45,7 @@ use crate::debug_api::{
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::llm::{build_response_api_llm, ResponseApiConfig};
+use crate::router_symbolizer::build_response_api_symbolizer;
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
@@ -269,6 +270,13 @@ pub(crate) async fn run_server() {
             config.concept_graph.memgraph_user.clone(),
             std::env::var("MEMGRAPH_PASSWORD").unwrap_or_default(),
             config.concept_graph.arousal_tau_ms,
+            Some(
+                crate::multimodal_embedding::GeminiMultimodalEmbeddingConfig {
+                    enabled: config.router.multimodal_embedding.enabled,
+                    model: config.router.multimodal_embedding.model.clone(),
+                    output_dimensionality: config.router.multimodal_embedding.output_dimensionality,
+                },
+            ),
         )
         .await
         .expect("failed to connect activation concept graph store"),
@@ -343,6 +351,13 @@ pub(crate) async fn run_server() {
         }
     };
 
+    let symbolizer_model = config
+        .router
+        .symbolizer_model
+        .clone()
+        .unwrap_or_else(|| config.llm.model.clone());
+    let router_symbolizer = Arc::new(build_response_api_symbolizer(symbolizer_model));
+
     let state = AppState::new(
         AppServices {
             db: db.clone(),
@@ -352,6 +367,7 @@ pub(crate) async fn run_server() {
             activation_concept_graph,
             conversation_recall_store,
             mcp_registry,
+            router_symbolizer,
         },
         AuthState::new(auth_token, admin_auth_password, admin_password_fingerprint),
         AppConfigState {
@@ -492,6 +508,20 @@ fn validate_required_config(config: &Config) {
         && config.conversation_recall.recency_weight <= 0.0
     {
         panic!("config.toml [conversation_recall] requires semantic_weight or recency_weight > 0");
+    }
+    if !matches!(
+        config
+            .router
+            .multimodal_embedding
+            .primary_source
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "text" | "multimodal" | "hybrid"
+    ) {
+        panic!(
+            "config.toml [router.multimodal_embedding].primary_source must be one of: text, multimodal, hybrid"
+        );
     }
     if config.tts.ja_accent_url.trim().is_empty() {
         panic!("config.toml [tts].ja_accent_url must not be empty");
