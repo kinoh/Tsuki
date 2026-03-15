@@ -427,18 +427,25 @@ impl ActivationConceptGraphStore {
         Self::ensure_conversation_event_vector_index(&graph, embedding_dim).await?;
         let multimodal_embedding = if let Some(config) = multimodal_config {
             if let Some(client) = GeminiMultimodalEmbeddingClient::from_env(&config)? {
-                let probe = client
-                    .embed_text("concept probe", EmbeddingTaskType::RetrievalDocument)
-                    .await?;
-                if probe.is_empty() {
-                    return Err("gemini multimodal embedding returned empty vector".to_string());
-                }
+                let dim = if config.output_dimensionality > 0 {
+                    config.output_dimensionality
+                } else {
+                    let probe = client
+                        .embed_text("concept probe", EmbeddingTaskType::RetrievalDocument)
+                        .await?;
+                    if probe.is_empty() {
+                        return Err(
+                            "gemini multimodal embedding returned empty vector".to_string(),
+                        );
+                    }
+                    probe.len()
+                };
                 Self::ensure_named_vector_index(
                     &graph,
                     DEFAULT_MULTIMODAL_VECTOR_INDEX_NAME,
                     "Concept",
                     "embedding_multimodal",
-                    probe.len(),
+                    dim,
                     DEFAULT_VECTOR_INDEX_CAPACITY,
                     DEFAULT_VECTOR_INDEX_RESIZE_COEFFICIENT,
                     DEFAULT_VECTOR_INDEX_SCALAR_KIND,
@@ -827,7 +834,7 @@ impl ActivationConceptGraphStore {
         let mut result = self
             .graph
             .execute(query(
-                "MATCH (c:Concept) RETURN c.name AS name ORDER BY name ASC",
+                "MATCH (c:Concept) WHERE c.embedding_multimodal IS NULL RETURN c.name AS name ORDER BY name ASC",
             ))
             .await
             .map_err(|err| format!("concept name scan failed: {}", err))?;
