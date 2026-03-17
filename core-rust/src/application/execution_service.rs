@@ -70,13 +70,11 @@ async fn read_latest_router_state(state: &AppState) -> RouterOutput {
         .await
         .ok()
         .and_then(|events| {
-            events
-                .into_iter()
-                .find(|e| {
-                    e.source == "router"
-                        && e.modality == "state"
-                        && e.meta.tags.iter().any(|t| t == "router")
-                })
+            events.into_iter().find(|e| {
+                e.source == "router"
+                    && e.modality == "state"
+                    && e.meta.tags.iter().any(|t| t == "router")
+            })
         })
         .and_then(|e| serde_json::from_value(e.payload).ok())
         .unwrap_or_default()
@@ -98,8 +96,9 @@ pub(crate) async fn run_decision(
         router_output.soft_recommendations.len()
     );
     let history_started = Instant::now();
-    let history =
-        format_event_lines(&latest_events(state, state.config.limits.decision_history, None, None).await);
+    let history = format_event_lines(
+        &latest_events(state, state.config.limits.decision_history, None, None).await,
+    );
     println!(
         "PERF decision stage=history ms={} history_len={}",
         history_started.elapsed().as_millis(),
@@ -120,7 +119,7 @@ pub(crate) async fn run_decision(
     let visible_mcp_tools = build_decision_mcp_tools(
         &state,
         &router_output.mcp_visible_tools,
-        !router_output.visible_skills.is_empty(),
+        &router_output.visible_skills,
     );
     let adapter = build_response_api_llm(build_config_with_tools_and_handler(
         compose_decision_instructions(
@@ -271,7 +270,7 @@ pub(crate) async fn run_decision_debug(
     let visible_mcp_tools = build_decision_mcp_tools(
         &state,
         &router_output.mcp_visible_tools,
-        !router_output.visible_skills.is_empty(),
+        &router_output.visible_skills,
     );
     let adapter = build_response_api_llm(build_config_with_tools_and_handler(
         compose_decision_instructions(
@@ -621,7 +620,7 @@ fn append_visible_skill_summaries(mut context: String, visible_skills: &[Visible
     context.push_str("\n\nvisible_skills:\n");
     context.push_str(&summaries);
     context.push_str(
-        "\n\nVisible skill summaries are memory index hints only. If you need a skill's full content, read it with state_get using body_state_key before relying on it. Do not treat the summary itself as a binding instruction.",
+        "\n\nVisible skill summaries are memory index hints only. If you need a skill's full content, read it with shell_exec__skill_read using body_state_key as the key before relying on it. Do not treat the summary itself as a binding instruction.",
     );
     context
 }
@@ -674,7 +673,7 @@ Do not ask for an extra confirmation just to restate a source that is already av
         instructions.push_str(
             "\n\nVisible skill summaries may be present for this turn.\n\
 Treat them as memory index hints, not as direct instructions.\n\
-If a visible skill seems relevant, read its full body with state_get using body_state_key before relying on it.\n\
+If a visible skill seems relevant, read its full body with shell_exec__skill_read using body_state_key as the key before relying on it.\n\
 Do not assume the summary alone is enough when the detailed skill body is needed.",
         );
     }
@@ -716,15 +715,11 @@ fn decision_tools(
 }
 
 const SKILL_READ_TOOL: &str = "shell_exec__skill_read";
-// shell_exec__execute is the action tool that skills instruct the LLM to use.
-// It is added explicitly when skills are surfaced because skill trigger concepts
-// do not overlap with the concept-graph activation path for shell_exec__execute.
-const SKILL_EXEC_TOOL: &str = "shell_exec__execute";
 
 fn build_decision_mcp_tools(
     state: &AppState,
     mcp_visible_tools: &[String],
-    has_visible_skills: bool,
+    visible_skills: &[VisibleSkill],
 ) -> Vec<async_openai::types::responses::Tool> {
     let all = state.services.mcp_registry.available_tools();
     let mut tools: Vec<_> = all
@@ -736,19 +731,39 @@ fn build_decision_mcp_tools(
         })
         .cloned()
         .collect();
-    // skill_read and the skill action tool are not concept-graph-activated;
-    // add them explicitly when skills are surfaced.
-    if has_visible_skills {
-        for extra in [SKILL_READ_TOOL, SKILL_EXEC_TOOL] {
-            let already = tools.iter().any(|t| tool_name(t).map(|n| n == extra).unwrap_or(false));
+    // skill_read is not concept-graph-activated; skill-declared MCP requirements are also injected
+    // explicitly once a visible skill is present.
+    if !visible_skills.is_empty() {
+        let mut extras = vec![SKILL_READ_TOOL.to_string()];
+        extras.extend(collect_required_mcp_tools(visible_skills));
+        for extra in extras {
+            let already = tools
+                .iter()
+                .any(|t| tool_name(t).map(|n| n == extra.as_str()).unwrap_or(false));
             if !already {
-                if let Some(tool) = all.iter().find(|t| tool_name(t).map(|n| n == extra).unwrap_or(false)) {
+                if let Some(tool) = all
+                    .iter()
+                    .find(|t| tool_name(t).map(|n| n == extra.as_str()).unwrap_or(false))
+                {
                     tools.push(tool.clone());
                 }
             }
         }
     }
     tools
+}
+
+fn collect_required_mcp_tools(visible_skills: &[VisibleSkill]) -> Vec<String> {
+    let mut deduped = std::collections::BTreeSet::<String>::new();
+    for skill in visible_skills {
+        for tool_name in &skill.required_mcp_tools {
+            let value = tool_name.trim();
+            if !value.is_empty() {
+                deduped.insert(value.to_string());
+            }
+        }
+    }
+    deduped.into_iter().collect()
 }
 
 fn tool_name(tool: &async_openai::types::responses::Tool) -> Option<&str> {
@@ -807,9 +822,14 @@ fn format_visible_mcp_tool_contracts(tools: &[async_openai::types::responses::To
 fn format_visible_skill_summaries(skills: &[VisibleSkill]) -> String {
     let mut lines = Vec::<String>::new();
     for skill in skills {
+        let required_mcp_tools = if skill.required_mcp_tools.is_empty() {
+            "none".to_string()
+        } else {
+            skill.required_mcp_tools.join(", ")
+        };
         lines.push(format!(
-            "- name: {}\n  summary: {}\n  body_state_key: {}",
-            skill.name, skill.summary, skill.body_state_key
+            "- name: {}\n  summary: {}\n  body_state_key: {}\n  required_mcp_tools: {}",
+            skill.name, skill.summary, skill.body_state_key, required_mcp_tools
         ));
     }
     if lines.is_empty() {
@@ -1078,11 +1098,40 @@ mod tests {
             name: "skill:gentle_conversation_guidance".to_string(),
             summary: "Low-pressure supportive conversational guidance".to_string(),
             body_state_key: "skill:gentle_conversation_guidance".to_string(),
+            required_mcp_tools: vec!["shell_exec__execute".to_string()],
             score: 0.83,
         }];
         let rendered = format_visible_skill_summaries(&skills);
         assert!(rendered.contains("name: skill:gentle_conversation_guidance"));
         assert!(rendered.contains("summary: Low-pressure supportive conversational guidance"));
         assert!(rendered.contains("body_state_key: skill:gentle_conversation_guidance"));
+        assert!(rendered.contains("required_mcp_tools: shell_exec__execute"));
+    }
+
+    #[test]
+    fn collect_required_mcp_tools_dedupes_and_sorts() {
+        let tools = collect_required_mcp_tools(&[
+            VisibleSkill {
+                name: "skill:one".to_string(),
+                summary: "one".to_string(),
+                body_state_key: "one".to_string(),
+                required_mcp_tools: vec![
+                    "shell_exec__execute".to_string(),
+                    "rss__fetch".to_string(),
+                ],
+                score: 0.8,
+            },
+            VisibleSkill {
+                name: "skill:two".to_string(),
+                summary: "two".to_string(),
+                body_state_key: "two".to_string(),
+                required_mcp_tools: vec!["shell_exec__execute".to_string(), " ".to_string()],
+                score: 0.7,
+            },
+        ]);
+        assert_eq!(
+            tools,
+            vec!["rss__fetch".to_string(), "shell_exec__execute".to_string()]
+        );
     }
 }

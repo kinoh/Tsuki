@@ -214,9 +214,6 @@ names in addition to the normal concept-graph-visible MCP tools.
 
 `skill_install` is never included in any LLM tool list. It is only called by core-rust internals.
 
-The `required_mcp_tools` union behavior described below is a planned change to the Decision tool
-selection path. The current runtime does not yet implement it.
-
 ---
 
 ## core-rust Integration Points
@@ -229,10 +226,10 @@ body: { "content": "...", "summary": "...", "trigger_concepts": [...] }
 ```
 
 `summary` and `trigger_concepts` are optional; if omitted, they are generated via LLM.
-`required_mcp_tools` is not supplied through the admin payload. In the planned design, it is parsed
-from `SKILL.md` frontmatter in `content`.
+`required_mcp_tools` is not supplied through the admin payload. It is parsed from `SKILL.md`
+frontmatter in `content`.
 
-The `skill_admin_service` flow will be:
+The `skill_admin_service` flow is:
 1. `mcp_registry.call_tool("shell_exec__skill_install", {key, files: [{path: "SKILL.md", body: content}]})`
 2. Parse `required_mcp_tools` from `SKILL.md` frontmatter
 3. `activation_concept_graph.skill_index_upsert(skill_name, summary, key, required_mcp_tools, true)`
@@ -255,8 +252,7 @@ The `body_state_key` shown in the visible_skills context is the key to pass dire
 
 ### Visible Skill Metadata Flow
 
-In the planned design, when Router surfaces a skill, the lightweight skill metadata passed to
-Decision includes:
+When Router surfaces a skill, the lightweight skill metadata passed to Decision includes:
 
 - `name`
 - `summary`
@@ -274,7 +270,7 @@ visible_skills:
     - shell_exec__execute
 ```
 
-Decision will use this metadata in two separate ways:
+Decision uses this metadata in two separate ways:
 
 - `body_state_key` controls whether it should read the full skill body with `skill_read`
 - `required_mcp_tools` controls which MCP runtime tools must be available alongside the skill

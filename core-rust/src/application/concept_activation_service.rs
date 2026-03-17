@@ -1,5 +1,5 @@
-use crate::activation_concept_graph::{ActiveGraphNode, ConceptGraphActivationReader};
 use crate::activation_concept_graph::ConceptGraphOps;
+use crate::activation_concept_graph::{ActiveGraphNode, ConceptGraphActivationReader};
 
 const RECALL_MAX_HOP: u32 = 2;
 
@@ -20,7 +20,10 @@ where
     let mut errors = Vec::<String>::new();
 
     if !seeds.is_empty() {
-        if let Err(err) = graph.recall_query(seeds.to_vec(), RECALL_MAX_HOP, dry_run).await {
+        if let Err(err) = graph
+            .recall_query(seeds.to_vec(), RECALL_MAX_HOP, dry_run)
+            .await
+        {
             errors.push(format!("recall_query seeds={:?}: {}", seeds, err));
         }
     }
@@ -69,6 +72,7 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+    use crate::activation_concept_graph::VisibleSkill;
     use crate::input_ingress::RouterInput;
 
     struct MockGraph {
@@ -104,11 +108,36 @@ mod tests {
         ) -> Result<HashMap<String, f64>, String> {
             Ok(HashMap::new())
         }
+
+        async fn visible_skills(
+            &self,
+            _threshold: f64,
+            _limit: usize,
+        ) -> Result<Vec<VisibleSkill>, String> {
+            Ok(Vec::new())
+        }
     }
 
     #[async_trait]
     impl ConceptGraphOps for MockGraph {
         async fn concept_upsert(&self, _concept: String) -> Result<Value, String> {
+            Ok(Value::Null)
+        }
+        async fn skill_index_upsert(
+            &self,
+            _skill_name: String,
+            _summary: String,
+            _body_state_key: String,
+            _required_mcp_tools: Vec<String>,
+            _enabled: bool,
+        ) -> Result<Value, String> {
+            Ok(Value::Null)
+        }
+        async fn skill_index_replace_triggers(
+            &self,
+            _skill_name: String,
+            _trigger_concepts: Vec<String>,
+        ) -> Result<Value, String> {
             Ok(Value::Null)
         }
         async fn update_affect(
@@ -119,6 +148,12 @@ mod tests {
             Ok(Value::Null)
         }
         async fn activate_related_submodules(
+            &self,
+            _concepts: Vec<String>,
+        ) -> Result<HashMap<String, f64>, String> {
+            Ok(HashMap::new())
+        }
+        async fn activate_related_skills(
             &self,
             _concepts: Vec<String>,
         ) -> Result<HashMap<String, f64>, String> {
@@ -175,7 +210,10 @@ mod tests {
             recall_error: None,
         };
         let result = activate_concepts(&["好奇心".to_string()], 8, &graph, false).await;
-        assert_eq!(result.active_concepts_and_arousal, "好奇心\tarousal=0.85\n音楽\tarousal=0.50");
+        assert_eq!(
+            result.active_concepts_and_arousal,
+            "好奇心\tarousal=0.85\n音楽\tarousal=0.50"
+        );
         assert!(result.errors.is_empty());
     }
 

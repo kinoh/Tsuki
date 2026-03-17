@@ -87,6 +87,7 @@ pub(crate) trait ConceptGraphOps: Send + Sync {
         skill_name: String,
         summary: String,
         body_state_key: String,
+        required_mcp_tools: Vec<String>,
         enabled: bool,
     ) -> Result<Value, String>;
     async fn skill_index_replace_triggers(
@@ -112,7 +113,12 @@ pub(crate) trait ConceptGraphOps: Send + Sync {
         relation_type: String,
     ) -> Result<Value, String>;
     /// When `dry_run` is true, arousal updates are skipped. For debug/testing only.
-    async fn recall_query(&self, seeds: Vec<String>, max_hop: u32, dry_run: bool) -> Result<Value, String>;
+    async fn recall_query(
+        &self,
+        seeds: Vec<String>,
+        max_hop: u32,
+        dry_run: bool,
+    ) -> Result<Value, String>;
 }
 
 pub(crate) trait ConceptGraphStore:
@@ -184,6 +190,7 @@ pub(crate) struct VisibleSkill {
     pub(crate) name: String,
     pub(crate) summary: String,
     pub(crate) body_state_key: String,
+    pub(crate) required_mcp_tools: Vec<String>,
     pub(crate) score: f64,
 }
 
@@ -483,9 +490,7 @@ impl ActivationConceptGraphStore {
                         .embed_text("concept probe", EmbeddingTaskType::RetrievalDocument)
                         .await?;
                     if probe.is_empty() {
-                        return Err(
-                            "gemini multimodal embedding returned empty vector".to_string(),
-                        );
+                        return Err("gemini multimodal embedding returned empty vector".to_string());
                     }
                     probe.len()
                 };
@@ -1538,6 +1543,7 @@ impl ConceptGraphActivationReader for ActivationConceptGraphStore {
              RETURN c.name AS name,
                     c.summary AS summary,
                     c.body_state_key AS body_state_key,
+                    c.required_mcp_tools AS required_mcp_tools,
                     c.arousal_level AS arousal_level,
                     c.accessed_at AS accessed_at",
         );
@@ -1556,10 +1562,12 @@ impl ConceptGraphActivationReader for ActivationConceptGraphStore {
             }
             let summary: String = row.get("summary").unwrap_or_default();
             let body_state_key: String = row.get("body_state_key").unwrap_or_default();
+            let required_mcp_tools: Vec<String> = row.get("required_mcp_tools").unwrap_or_default();
             items.push(VisibleSkill {
                 name: name.clone(),
                 summary: Self::skill_summary(name.as_str(), summary.as_str()),
                 body_state_key: Self::skill_body_state_key(name.as_str(), body_state_key.as_str()),
+                required_mcp_tools,
                 score,
             });
         }
@@ -1613,6 +1621,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         skill_name: String,
         summary: String,
         body_state_key: String,
+        required_mcp_tools: Vec<String>,
         enabled: bool,
     ) -> Result<Value, String> {
         let skill_name = Self::normalize_non_empty(skill_name.as_str())
@@ -1623,6 +1632,16 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         let summary = Self::skill_summary(skill_name.as_str(), summary.as_str());
         let body_state_key =
             Self::skill_body_state_key(skill_name.as_str(), body_state_key.as_str());
+        let mut normalized_required_mcp_tools = Vec::<String>::new();
+        let mut seen_required_mcp_tools = HashSet::<String>::new();
+        for item in required_mcp_tools {
+            let Some(value) = Self::normalize_non_empty(item.as_str()) else {
+                continue;
+            };
+            if seen_required_mcp_tools.insert(value.clone()) {
+                normalized_required_mcp_tools.push(value);
+            }
+        }
         let now = self.now_ms();
         let q = query(
             "MERGE (c:Concept {name: $name})
@@ -1630,12 +1649,14 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
              SET c.kind = 'skill',
                  c.summary = $summary,
                  c.body_state_key = $body_state_key,
+                 c.required_mcp_tools = $required_mcp_tools,
                  c.disabled = $disabled
              RETURN c.name AS name",
         )
         .param("name", skill_name.as_str())
         .param("summary", summary.as_str())
         .param("body_state_key", body_state_key.as_str())
+        .param("required_mcp_tools", normalized_required_mcp_tools.clone())
         .param("disabled", !enabled)
         .param("valence", DEFAULT_VALENCE)
         .param("arousal_level", DEFAULT_AROUSAL_LEVEL)
@@ -1651,6 +1672,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
             "skill_name": skill_name,
             "summary": summary,
             "body_state_key": body_state_key,
+            "required_mcp_tools": normalized_required_mcp_tools,
             "enabled": enabled,
         }))
     }
@@ -1975,7 +1997,12 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         }))
     }
 
-    async fn recall_query(&self, seeds: Vec<String>, max_hop: u32, dry_run: bool) -> Result<Value, String> {
+    async fn recall_query(
+        &self,
+        seeds: Vec<String>,
+        max_hop: u32,
+        dry_run: bool,
+    ) -> Result<Value, String> {
         if max_hop == 0 {
             return Ok(json!({ "propositions": [] }));
         }
@@ -2099,7 +2126,6 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
                 .collect::<Vec<_>>(),
         }))
     }
-
 }
 
 #[async_trait]

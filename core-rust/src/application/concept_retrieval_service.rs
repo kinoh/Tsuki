@@ -106,7 +106,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::activation_concept_graph::ActiveGraphNode;
+    use crate::activation_concept_graph::{ActiveGraphNode, VisibleSkill};
 
     struct MockGraph {
         text_results: Vec<String>,
@@ -140,6 +140,14 @@ mod tests {
             _concepts: &[String],
         ) -> Result<HashMap<String, f64>, String> {
             Ok(HashMap::new())
+        }
+
+        async fn visible_skills(
+            &self,
+            _threshold: f64,
+            _limit: usize,
+        ) -> Result<Vec<VisibleSkill>, String> {
+            Ok(Vec::new())
         }
     }
 
