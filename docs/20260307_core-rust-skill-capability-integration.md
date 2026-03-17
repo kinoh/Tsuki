@@ -1,9 +1,14 @@
 # Core-Rust Skill Integration Into Concept Graph Memory
 
+> **Storage design revised.** The section below that assigns skill body storage to the state DB is
+> superseded by `20260317_skill-architecture.md`. Skill bodies and auxiliary files are now owned by
+> the sandbox (`shell-exec` MCP server). The concept graph, Router, and Decision responsibility
+> sections remain accurate.
+
 ## Overview
 This document defines how `core-rust` should introduce agent skills without turning them into another callable module or tool system.
 
-`skill` is treated as knowledge, not as an execution unit. The concept graph acts as the index for dynamic memory, while skill bodies live in the state DB as retrievable content. Router surfaces candidate skills for the current turn, and Decision chooses whether it needs to inspect the skill body before composing the final response or tool usage plan.
+`skill` is treated as knowledge, not as an execution unit. The concept graph acts as the index for dynamic memory, while skill bodies live in the sandbox as retrievable content. Router surfaces candidate skills for the current turn, and Decision chooses whether it needs to inspect the skill body before composing the final response or tool usage plan.
 
 Compatibility Impact: breaking-by-default (no compatibility layer)
 
