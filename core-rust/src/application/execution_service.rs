@@ -716,6 +716,10 @@ fn decision_tools(
 }
 
 const SKILL_READ_TOOL: &str = "shell_exec__skill_read";
+// shell_exec__execute is the action tool that skills instruct the LLM to use.
+// It is added explicitly when skills are surfaced because skill trigger concepts
+// do not overlap with the concept-graph activation path for shell_exec__execute.
+const SKILL_EXEC_TOOL: &str = "shell_exec__execute";
 
 fn build_decision_mcp_tools(
     state: &AppState,
@@ -732,13 +736,16 @@ fn build_decision_mcp_tools(
         })
         .cloned()
         .collect();
-    // skill_read is not concept-graph-activated; add it explicitly when skills are surfaced.
+    // skill_read and the skill action tool are not concept-graph-activated;
+    // add them explicitly when skills are surfaced.
     if has_visible_skills {
-        if let Some(tool) = all
-            .iter()
-            .find(|t| tool_name(t).map(|n| n == SKILL_READ_TOOL).unwrap_or(false))
-        {
-            tools.push(tool.clone());
+        for extra in [SKILL_READ_TOOL, SKILL_EXEC_TOOL] {
+            let already = tools.iter().any(|t| tool_name(t).map(|n| n == extra).unwrap_or(false));
+            if !already {
+                if let Some(tool) = all.iter().find(|t| tool_name(t).map(|n| n == extra).unwrap_or(false)) {
+                    tools.push(tool.clone());
+                }
+            }
         }
     }
     tools

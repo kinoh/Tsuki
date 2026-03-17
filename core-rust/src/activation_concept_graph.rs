@@ -1630,8 +1630,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
              SET c.kind = 'skill',
                  c.summary = $summary,
                  c.body_state_key = $body_state_key,
-                 c.disabled = $disabled,
-                 c.accessed_at = $accessed_at
+                 c.disabled = $disabled
              RETURN c.name AS name",
         )
         .param("name", skill_name.as_str())
@@ -1639,7 +1638,7 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         .param("body_state_key", body_state_key.as_str())
         .param("disabled", !enabled)
         .param("valence", DEFAULT_VALENCE)
-        .param("arousal_level", INITIAL_AROUSAL_UPSERT)
+        .param("arousal_level", DEFAULT_AROUSAL_LEVEL)
         .param("accessed_at", now);
         let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
         let _ = result.next().await.map_err(|err| err.to_string())?;
