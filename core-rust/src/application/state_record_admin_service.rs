@@ -57,13 +57,13 @@ pub(crate) async fn list_state_records(
     };
     let items = rows
         .into_iter()
-        .map(|(key, content, _related_keys_json, _metadata_json, updated_at)| {
-            StateRecordListItem {
+        .map(
+            |(key, content, _related_keys_json, _metadata_json, updated_at)| StateRecordListItem {
                 key,
                 content_preview: truncate(content.as_str(), 160),
                 updated_at,
-            }
-        })
+            },
+        )
         .collect();
     Ok(items)
 }

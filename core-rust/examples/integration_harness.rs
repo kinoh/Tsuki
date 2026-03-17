@@ -3,7 +3,10 @@ use async_openai::{
     types::responses::{CreateResponseArgs, InputParam},
     Client,
 };
-use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine,
+};
 use bech32::{ToBase32, Variant};
 use futures::{SinkExt, StreamExt};
 use reqwest::header::{COOKIE, ORIGIN, SET_COOKIE};
@@ -1633,10 +1636,7 @@ async fn run_install_skill_step(
         *admin_session_cookie = Some(admin_login(runtime, http_client).await?);
     }
     let encoded_key = url_encode_path_segment(step.key.as_str());
-    let url = format!(
-        "{}/admin/skills/{}",
-        runtime.http_base_url, encoded_key
-    );
+    let url = format!("{}/admin/skills/{}", runtime.http_base_url, encoded_key);
     let payload = json!({
         "content": step.body,
         "summary": step.summary,
@@ -1680,7 +1680,10 @@ async fn run_install_skill_step(
             step.key, err
         )
     })?;
-    let saved_key = result.get("key").and_then(Value::as_str).unwrap_or_default();
+    let saved_key = result
+        .get("key")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if saved_key != step.key {
         return Err(format!(
             "install_skill response key mismatch for '{}': got '{}'",
