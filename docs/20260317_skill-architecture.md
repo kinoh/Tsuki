@@ -5,6 +5,8 @@
 This document defines the responsibility split for agent skills across the system boundary between
 `core-rust` (the cognitive runtime) and `shell-exec` (the sandbox MCP server).
 
+Compatibility Impact: breaking-by-default (no compatibility layer)
+
 The central principle:
 
 > **Sandbox is responsible for holding skill content. core-rust is responsible for knowing about it.**
@@ -36,9 +38,8 @@ A skill is a **directory** with the following structure:
 name: web_page_extract
 description: Extract readable text from a web page URL.
 license: MIT
-compatibility:
-  shell: bash
-  tools: [curl, node]
+required_mcp_tools:
+  - shell_exec__execute
 ---
 
 # Web Page Extract
@@ -46,9 +47,29 @@ compatibility:
 ...skill body...
 ```
 
-The YAML frontmatter provides the lightweight summary (name + description, ~100 tokens).
+The YAML frontmatter provides the lightweight summary (name + description, ~100 tokens) and any
+Decision-visible capability requirements.
 The markdown body provides full operational detail (<5000 tokens, read on demand).
 Referenced files provide supporting material (loaded only when needed).
+
+### Frontmatter Scope
+
+`SKILL.md` frontmatter is for skill metadata that `core-rust` needs to surface without reading the
+full body.
+
+Adopted fields:
+
+- `name`
+- `description`
+- `license`
+- `required_mcp_tools`
+
+`required_mcp_tools` is a list of MCP runtime tool names that must be visible to Decision when the
+skill is surfaced, for example `shell_exec__execute`.
+
+Do not use frontmatter to describe sandbox image capabilities such as installed binaries,
+interpreters, or package managers. Those are properties of the sandbox platform, not per-skill
+runtime metadata. A `compatibility` field is therefore out of scope for this design.
 
 ### Progressive Disclosure
 
@@ -80,7 +101,7 @@ Does not own:
 ### core-rust
 
 Owns:
-- Concept graph indexing: skill summaries, embeddings, trigger relations
+- Concept graph indexing: skill summaries, embeddings, trigger relations, `required_mcp_tools`
 - Routing: activating and ranking candidate skills through the graph
 - Surfacing: selecting lightweight visible skills for each Decision turn
 - Admin API: `PUT /admin/skills/{key}` endpoint for skill installation
@@ -89,6 +110,7 @@ Owns:
 Does not own:
 - The actual content of skill bodies or auxiliary files
 - File paths inside the sandbox
+- Sandbox image capability declarations
 
 ### Why not state DB for skill bodies?
 
@@ -123,6 +145,9 @@ The state DB was the original skill body store. It was replaced for three reason
 
 Writes the provided files into `/memory/skills/{key}/`. `SKILL.md` is required.
 Key must match `[a-z0-9-]+`.
+
+`skill_install` is a storage contract only. It does not parse or validate `required_mcp_tools`.
+`core-rust` reads skill metadata from `SKILL.md` and decides how that metadata affects Decision.
 
 Returns:
 ```json
@@ -184,7 +209,13 @@ independent of concept graph activation. This is intentional: skill body reading
 available to Decision when a visible skill summary is present, without requiring the skill_read
 tool itself to have a concept graph footprint.
 
+When visible skills declare `required_mcp_tools`, Decision also receives the union of those tool
+names in addition to the normal concept-graph-visible MCP tools.
+
 `skill_install` is never included in any LLM tool list. It is only called by core-rust internals.
+
+The `required_mcp_tools` union behavior described below is a planned change to the Decision tool
+selection path. The current runtime does not yet implement it.
 
 ---
 
@@ -198,11 +229,14 @@ body: { "content": "...", "summary": "...", "trigger_concepts": [...] }
 ```
 
 `summary` and `trigger_concepts` are optional; if omitted, they are generated via LLM.
+`required_mcp_tools` is not supplied through the admin payload. In the planned design, it is parsed
+from `SKILL.md` frontmatter in `content`.
 
-The `skill_admin_service` handles:
+The `skill_admin_service` flow will be:
 1. `mcp_registry.call_tool("shell_exec__skill_install", {key, files: [{path: "SKILL.md", body: content}]})`
-2. `activation_concept_graph.skill_index_upsert(skill_name, summary, key, true)`
-3. `activation_concept_graph.skill_index_replace_triggers(skill_name, trigger_concepts)`
+2. Parse `required_mcp_tools` from `SKILL.md` frontmatter
+3. `activation_concept_graph.skill_index_upsert(skill_name, summary, key, required_mcp_tools, true)`
+4. `activation_concept_graph.skill_index_replace_triggers(skill_name, trigger_concepts)`
 
 Skills are **not** installed through the state record endpoint (`PUT /admin/state-records/data/{key}`).
 State records and skills are separate domains.
@@ -218,6 +252,34 @@ Decision LLM calls: shell_exec__skill_read({ key: "<body_state_key from visible_
 
 The `body_state_key` shown in the visible_skills context is the key to pass directly to
 `skill_read`. No `state_get` indirection is involved.
+
+### Visible Skill Metadata Flow
+
+In the planned design, when Router surfaces a skill, the lightweight skill metadata passed to
+Decision includes:
+
+- `name`
+- `summary`
+- `body_state_key`
+- `required_mcp_tools`
+
+Example:
+
+```text
+visible_skills:
+- name: skill:web_page_extract
+  summary: Extract readable text from a web page URL.
+  body_state_key: web_page_extract
+  required_mcp_tools:
+    - shell_exec__execute
+```
+
+Decision will use this metadata in two separate ways:
+
+- `body_state_key` controls whether it should read the full skill body with `skill_read`
+- `required_mcp_tools` controls which MCP runtime tools must be available alongside the skill
+
+This keeps memory lookup and action capability as separate contracts.
 
 ---
 
