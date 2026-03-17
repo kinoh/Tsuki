@@ -175,6 +175,21 @@ impl StateToolHandler {
             STATE_GET_TOOL => {
                 let args: StateGetArgs = serde_json::from_str(arguments)
                     .map_err(|err| ToolError::new(format!("invalid args: {}", err)))?;
+                // Try sandbox skill_read first; fall back to state DB on miss.
+                let sandbox_result = tokio::task::block_in_place(|| {
+                    Handle::current().block_on(self.mcp_registry.call_tool_direct(
+                        "shell_exec",
+                        "skill_read",
+                        json!({"key": args.key}),
+                    ))
+                });
+                if let Ok(text) = sandbox_result {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
+                        if parsed.get("found").and_then(Value::as_bool).unwrap_or(false) {
+                            return Ok(text);
+                        }
+                    }
+                }
                 let result = self.store.get(&args.key);
                 Ok(to_json_string(&state_get_result(result)))
             }

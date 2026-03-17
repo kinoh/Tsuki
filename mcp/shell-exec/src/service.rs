@@ -1,4 +1,4 @@
-use std::{env, process::Stdio, time::Duration};
+use std::{env, path::PathBuf, process::Stdio, time::Duration};
 
 use rmcp::{
     ErrorData, ServerHandler,
@@ -11,13 +11,41 @@ use rmcp::{
 };
 use serde::Deserialize;
 use tokio::{
+    fs,
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::Command,
     time,
 };
 
+const SKILLS_ROOT: &str = "skills";
+const SKILL_MD: &str = "SKILL.md";
+
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 40_000;
 const DEFAULT_LOG_OUTPUT_BYTES: usize = 2048;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SkillFile {
+    #[schemars(description = "Relative path within the skill directory (e.g. \"SKILL.md\", \"scripts/fetch.js\"). Must not contain \"..\" or start with \"/\".")]
+    pub path: String,
+    #[schemars(description = "Text content of the file.")]
+    pub body: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SkillInstallRequest {
+    #[schemars(description = "Skill key. Lowercase letters, numbers, and hyphens only.")]
+    pub key: String,
+    #[schemars(description = "Files to write. Must include a SKILL.md entry.")]
+    pub files: Vec<SkillFile>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SkillReadRequest {
+    #[schemars(description = "Skill key.")]
+    pub key: String,
+    #[schemars(description = "File path relative to skill root. Defaults to SKILL.md when omitted.")]
+    pub path: Option<String>,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ExecuteRequest {
@@ -276,6 +304,131 @@ impl ShellExecService {
     ) -> Result<CallToolResult, ErrorData> {
         self.execute_command(request).await
     }
+
+    #[tool(description = "Install an agent skill by writing its files to the skill directory. Each skill must include a SKILL.md file.")]
+    pub async fn skill_install(
+        &self,
+        Parameters(request): Parameters<SkillInstallRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let key = request.key.trim().to_string();
+        if !is_valid_skill_key(&key) {
+            return Err(ErrorData::invalid_params(
+                "Error: skill_install: invalid key (lowercase letters, numbers, hyphens only)",
+                None,
+            ));
+        }
+        if request.files.is_empty() {
+            return Err(ErrorData::invalid_params(
+                "Error: skill_install: files must not be empty",
+                None,
+            ));
+        }
+        let has_skill_md = request.files.iter().any(|f| f.path == SKILL_MD);
+        if !has_skill_md {
+            return Err(ErrorData::invalid_params(
+                "Error: skill_install: files must include SKILL.md",
+                None,
+            ));
+        }
+
+        let skill_dir = PathBuf::from(SKILLS_ROOT).join(&key);
+        fs::create_dir_all(&skill_dir).await.map_err(|err| {
+            ErrorData::internal_error(
+                "Error: skill_install: failed to create skill directory",
+                Some(json!({"reason": err.to_string()})),
+            )
+        })?;
+
+        let mut written = Vec::new();
+        for file in &request.files {
+            let path = file.path.trim();
+            if path.is_empty() || path.contains("..") || path.starts_with('/') {
+                return Err(ErrorData::invalid_params(
+                    "Error: skill_install: invalid file path",
+                    Some(json!({"path": path})),
+                ));
+            }
+            let dest = skill_dir.join(path);
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent).await.map_err(|err| {
+                    ErrorData::internal_error(
+                        "Error: skill_install: failed to create parent directory",
+                        Some(json!({"reason": err.to_string()})),
+                    )
+                })?;
+            }
+            fs::write(&dest, file.body.as_bytes()).await.map_err(|err| {
+                ErrorData::internal_error(
+                    "Error: skill_install: failed to write file",
+                    Some(json!({"path": path, "reason": err.to_string()})),
+                )
+            })?;
+            written.push(path.to_string());
+        }
+
+        let result = json!({"ok": true, "key": key, "files": written});
+        Ok(CallToolResult {
+            content: vec![Content::text(result.to_string())],
+            structured_content: Some(result),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
+
+    #[tool(description = "Read a file from an installed agent skill. Returns SKILL.md by default when path is omitted, along with a listing of all files in the skill directory.")]
+    pub async fn skill_read(
+        &self,
+        Parameters(request): Parameters<SkillReadRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let key = request.key.trim().to_string();
+        if !is_valid_skill_key(&key) {
+            return Err(ErrorData::invalid_params(
+                "Error: skill_read: invalid key",
+                None,
+            ));
+        }
+        let skill_dir = PathBuf::from(SKILLS_ROOT).join(&key);
+        if !skill_dir.exists() {
+            let result = json!({"found": false});
+            return Ok(CallToolResult {
+                content: vec![Content::text(result.to_string())],
+                structured_content: Some(result),
+                is_error: Some(false),
+                meta: None,
+            });
+        }
+
+        let rel_path = request.path.as_deref().unwrap_or(SKILL_MD).trim().to_string();
+        if rel_path.contains("..") || rel_path.starts_with('/') {
+            return Err(ErrorData::invalid_params(
+                "Error: skill_read: invalid path",
+                None,
+            ));
+        }
+
+        let file_path = skill_dir.join(&rel_path);
+        let content = match fs::read_to_string(&file_path).await {
+            Ok(text) => text,
+            Err(_) => {
+                let result = json!({"found": false, "key": key, "path": rel_path});
+                return Ok(CallToolResult {
+                    content: vec![Content::text(result.to_string())],
+                    structured_content: Some(result),
+                    is_error: Some(false),
+                    meta: None,
+                });
+            }
+        };
+
+        let files = collect_skill_files(&skill_dir).await;
+        let result = json!({"found": true, "key": key, "path": rel_path, "content": content, "files": files});
+        Ok(CallToolResult {
+            content: vec![Content::text(result.to_string())],
+            structured_content: Some(result),
+            is_error: Some(false),
+            meta: None,
+        })
+    }
 }
 
 #[tool_handler]
@@ -338,4 +491,32 @@ fn preview_bytes(bytes: &[u8], limit: usize) -> String {
         out.push_str("...");
     }
     out
+}
+
+fn is_valid_skill_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+async fn collect_skill_files(dir: &PathBuf) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut stack = vec![dir.clone()];
+    while let Some(current) = stack.pop() {
+        let mut read_dir = match fs::read_dir(&current).await {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(rel) = path.strip_prefix(dir) {
+                files.push(rel.to_string_lossy().to_string());
+            }
+        }
+    }
+    files.sort();
+    files
 }

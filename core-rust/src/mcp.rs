@@ -113,6 +113,11 @@ impl McpRegistry {
             };
 
             for discovered_tool in discovered {
+                // skill_* tools are sandbox-internal; exclude from concept graph and LLM tool list.
+                if discovered_tool.name.starts_with("skill_") {
+                    continue;
+                }
+
                 let mapping = match map_tool(server_id, cfg.url.as_str(), &discovered_tool) {
                     Ok(mapping) => mapping,
                     Err(err) => {
@@ -238,6 +243,21 @@ impl McpRegistry {
 
     pub(crate) fn contains_runtime_tool(&self, runtime_tool_name: &str) -> bool {
         self.tools_by_runtime.contains_key(runtime_tool_name)
+    }
+
+    /// Call a tool directly on a server by server_id, bypassing the concept graph registry.
+    /// Used for sandbox-internal tools such as `skill_install` and `skill_read`.
+    pub(crate) async fn call_tool_direct(
+        &self,
+        server_id: &str,
+        tool_name: &str,
+        arguments: Value,
+    ) -> Result<String, String> {
+        let endpoint = self
+            .servers
+            .get(server_id)
+            .ok_or_else(|| format!("unknown MCP server: {}", server_id))?;
+        call_tool(endpoint.as_str(), tool_name, arguments).await
     }
 
     pub(crate) async fn call_tool(
