@@ -5,6 +5,13 @@ steps:
   - kind: install_skill
     key: web_page_extract
     body: |
+      ---
+      name: web_page_extract
+      description: Fetch and extract information from public web pages with shell-exec.
+      required_mcp_tools:
+        - shell_exec__execute
+      ---
+
       Use shell_exec__execute when the user wants information from a public website or an official news page.
       Prefer the primary source page over secondary summaries when possible.
       For a straightforward fetch, prefer curl with flags such as -LfsS and keep the fetched output bounded.
@@ -22,6 +29,13 @@ steps:
   - kind: install_skill
     key: http_api_probe
     body: |
+      ---
+      name: http_api_probe
+      description: Probe HTTP APIs and structured endpoints with shell-exec.
+      required_mcp_tools:
+        - shell_exec__execute
+      ---
+
       Use shell_exec__execute to inspect HTTP APIs or structured endpoints.
       This skill fits API status checks, response headers, JSON endpoints, and request/response debugging.
       It is not the first choice for ordinary human-facing web pages when a webpage extraction skill is a better fit.
@@ -35,6 +49,13 @@ steps:
   - kind: install_skill
     key: csv_json_data_inspection
     body: |
+      ---
+      name: csv_json_data_inspection
+      description: Inspect CSV and JSON data locally with shell-exec.
+      required_mcp_tools:
+        - shell_exec__execute
+      ---
+
       Use shell_exec__execute with python3 to inspect already-obtained CSV or JSON data.
       This skill fits summarizing records, checking keys, counting rows, or reshaping structured payloads.
       It is not the first choice for fetching an ordinary HTML page from the web.
@@ -61,6 +82,13 @@ steps:
   - kind: install_skill
     key: command_safety_and_grounding
     body: |
+      ---
+      name: command_safety_and_grounding
+      description: Use shell-exec safely and keep answers grounded in command results.
+      required_mcp_tools:
+        - shell_exec__execute
+      ---
+
       Before describing any shell_exec__execute result, inspect exit_code, stderr, timed_out, and whether the output is actually relevant.
       Do not claim success if the command failed, timed out, or returned empty/irrelevant content.
       For browser-based retrieval, also verify the rendered page title and visible text indicate the intended page rather than a challenge or error page.

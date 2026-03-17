@@ -5,6 +5,13 @@ steps:
   - kind: install_skill
     key: shell_exec_numeric_regression
     body: |
+      ---
+      name: shell_exec_numeric_regression
+      description: Use local python3 plus numpy through shell-exec for medium-complexity numeric tasks.
+      required_mcp_tools:
+        - shell_exec__execute
+      ---
+
       When a user asks for a medium-complexity local numeric computation, prefer shell_exec__execute with python3.
       For multi-line Python, call the tool with command="python3", args=["-"], and pass the script through stdin.
       Use numpy for least-squares regression or vector calculations when available.
