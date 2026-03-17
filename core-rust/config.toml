@@ -34,27 +34,14 @@ semantic_weight = 0.85
 recency_weight = 0.15
 recency_tau_ms = 2592000000
 
-[input]
-router_context_template = """User input:
-{{latest_user_input}}
+[db]
+path = "./data/core-rust.db"
+# remote_url = "libsql://..."
 
-Active submodules:
-{{active_submodules}}
+[prompts]
+path = "./data/prompts.md"
 
-router_preprocessing:
-candidate_concepts:
-{{candidate_concepts}}
-
-seed_selection_rules:
-- return recall seed concepts only
-- one seed per line
-- no explanations
-- select only concepts/episodes clearly relevant to the latest user utterance
-- select only concepts/episodes that should be activated now for this turn
-- avoid generic always-on concepts unless directly grounded in the utterance
-- if none satisfies the rules, return none
-- max {{router_query_terms_max}} lines"""
-
+[internal_prompts]
 decision_context_template = """<recent_event_history>
 {{recent_event_history}}
 </recent_event_history>
@@ -80,6 +67,14 @@ decision_context_template = """<recent_event_history>
 Use this only when it is consistent with recent_event_history.
 {{recalled_event_history}}
 </recalled_event_history>
+
+<visible_mcp_tool_contracts>
+{{visible_mcp_tool_contracts}}
+</visible_mcp_tool_contracts>
+
+<visible_skills>
+{{visible_skills}}
+</visible_skills>
 </supplemental_context>
 
 <output_contract>
@@ -96,12 +91,76 @@ Recent events:
 {{recent_event_history}}
 Execution reason: {{execution_reason}}"""
 
-[db]
-path = "./data/core-rust.db"
-# remote_url = "libsql://..."
+mcp_trigger_extract_instructions = "Extract trigger concepts for MCP tools. Return strict JSON only."
 
-[prompts]
-path = "./data/prompts.md"
+mcp_trigger_extract_prompt_template = """Extract trigger concepts for an MCP tool.
+Return strict JSON only with this shape: {"trigger_concepts": ["..."]}.
+No markdown. No explanation.
+Use natural language concepts directly (no prefixes).
+Return at most {{max_trigger_concepts}} trigger concepts.
+Prefer precision over recall.
+Choose generic action concepts that describe the tool category a user is explicitly asking for.
+Prefer stable action-family concepts over downstream use cases.
+Avoid concrete subcommands, protocols, domains, file formats, or task examples such as curl, jq, RSS, JSON, XML, URL, download, or news fetch.
+Avoid near-duplicates and paraphrase lists.
+If fewer than {{max_trigger_concepts}} concepts are justified, return fewer.
+
+server_id: {{server_id}}
+tool_name: {{tool_name}}
+description: {{description}}
+input_schema_json: {{input_schema_json}}"""
+
+mcp_trigger_extract_retry_prompt_template = """{{base_prompt}}
+
+IMPORTANT: Output exactly one JSON object. Example:
+{"trigger_concepts":["run a command","use the shell","execute a terminal command"]}"""
+
+skill_index_instructions = "Generate skill index metadata. Return strict JSON only."
+
+skill_index_prompt_template = """Create abstract index metadata for a skill body.
+Return strict JSON only with this shape:
+{"summary":"...","trigger_concepts":["..."]}
+Rules:
+- summary must be short and abstract
+- summary must not encode concrete situations or step-by-step instructions
+- trigger_concepts must contain at most {{max_trigger_concepts}} concise natural-language concepts
+- trigger_concepts should help retrieve this skill from related user intents
+- no markdown
+- no explanation
+
+skill_key: {{skill_key}}
+body:
+{{skill_body}}"""
+
+decision_repair_instructions_template = """Decision contract repair:
+You already decided to respond but failed to call emit_user_reply.
+You must call emit_user_reply exactly once using the available tool.
+Do not call any other tool.
+After the tool call, output exactly one line: decision=respond reason=contract_repair."""
+
+decision_repair_context_template = """{{original_context}}
+
+tool_call_results_from_previous_attempt:
+{{tool_call_results}}
+
+Repair requirement:
+Call emit_user_reply now using the gathered tool results."""
+
+concept_link_selection_instructions = "You are a strict JSON selector for concept-graph curation tasks."
+
+concept_link_selection_prompt_template = """Target submodule: {{submodule}}
+Submodule instructions:
+{{instructions}}
+
+Candidate concepts (existing concept graph nodes):
+{{concept_lines}}
+
+Task:
+- Select concept names that should trigger this submodule.
+- Keep precision high and avoid broad or generic concepts.
+- Select at most {{max_selected}} concepts.
+- Return JSON only:
+{"selected":["concept1","concept2"]}"""
 
 [concept_graph]
 memgraph_uri = "bolt://localhost:7687"

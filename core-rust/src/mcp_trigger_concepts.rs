@@ -19,36 +19,21 @@ struct TriggerConceptsOutput {
 
 pub(crate) fn build_trigger_concept_prompts(
     input: &TriggerConceptExtractionInput<'_>,
+    prompt_template: &str,
+    retry_prompt_template: &str,
 ) -> [String; 2] {
     let schema_text =
         serde_json::to_string(input.input_schema).unwrap_or_else(|_| "{}".to_string());
-    let base_prompt = format!(
-        "Extract trigger concepts for an MCP tool.\n\
-Return strict JSON only with this shape: {{\"trigger_concepts\": [\"...\"]}}.\n\
-No markdown. No explanation.\n\
-Use natural language concepts directly (no prefixes).\n\
-Return at most {max_trigger_concepts} trigger concepts.\n\
-Prefer precision over recall.\n\
-Choose generic action concepts that describe the tool category a user is explicitly asking for.\n\
-Prefer stable action-family concepts over downstream use cases.\n\
-Avoid concrete subcommands, protocols, domains, file formats, or task examples such as curl, jq, RSS, JSON, XML, URL, download, or news fetch.\n\
-Avoid near-duplicates and paraphrase lists.\n\
-If fewer than {max_trigger_concepts} concepts are justified, return fewer.\n\
-\n\
-server_id: {server_id}\n\
-tool_name: {tool_name}\n\
-description: {description}\n\
-input_schema_json: {schema}",
-        max_trigger_concepts = MAX_TRIGGER_CONCEPTS,
-        server_id = input.server_id,
-        tool_name = input.tool_name,
-        description = input.description.unwrap_or("none"),
-        schema = schema_text,
-    );
-    let retry_prompt = format!(
-        "{base}\n\nIMPORTANT: Output exactly one JSON object. Example:\n{{\"trigger_concepts\":[\"run a command\",\"use the shell\",\"execute a terminal command\"]}}",
-        base = base_prompt
-    );
+    let base_prompt = prompt_template
+        .replace(
+            "{{max_trigger_concepts}}",
+            &MAX_TRIGGER_CONCEPTS.to_string(),
+        )
+        .replace("{{server_id}}", input.server_id)
+        .replace("{{tool_name}}", input.tool_name)
+        .replace("{{description}}", input.description.unwrap_or("none"))
+        .replace("{{input_schema_json}}", &schema_text);
+    let retry_prompt = retry_prompt_template.replace("{{base_prompt}}", &base_prompt);
     [base_prompt, retry_prompt]
 }
 

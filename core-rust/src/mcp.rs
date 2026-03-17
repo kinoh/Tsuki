@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::activation_concept_graph::ConceptGraphStore;
-use crate::config::McpServerConfig;
+use crate::config::{InternalPromptConfig, McpServerConfig};
 use crate::event::contracts::{llm_error, llm_raw};
 use crate::event::Event;
 use crate::llm::{LlmAdapter, LlmRequest};
@@ -91,6 +91,7 @@ impl McpRegistry {
         servers: &BTreeMap<String, McpServerConfig>,
         concept_graph: &dyn ConceptGraphStore,
         llm: Arc<dyn LlmAdapter>,
+        internal_prompts: &InternalPromptConfig,
         emit_event: Arc<dyn Fn(Event) + Send + Sync>,
     ) -> McpBootstrapResult {
         let mut out = Self::empty();
@@ -136,7 +137,8 @@ impl McpRegistry {
 
                 // skill_* tools: register for call_tool but skip concept graph processing.
                 if discovered_tool.name.starts_with("skill_") {
-                    out.tools_by_runtime.insert(mapping.runtime_tool_name.clone(), mapping);
+                    out.tools_by_runtime
+                        .insert(mapping.runtime_tool_name.clone(), mapping);
                     continue;
                 }
 
@@ -165,6 +167,7 @@ impl McpRegistry {
                     .insert(mapping.runtime_tool_name.clone(), mapping.clone());
                 let extracted = match extract_trigger_concepts_with_llm(
                     llm.clone(),
+                    internal_prompts,
                     mapping.server_id.as_str(),
                     &discovered_tool,
                     emit_event.clone(),
@@ -433,17 +436,26 @@ async fn call_tool(url: &str, remote_tool_name: &str, arguments: Value) -> Resul
 
 async fn extract_trigger_concepts_with_llm(
     llm: Arc<dyn LlmAdapter>,
+    internal_prompts: &InternalPromptConfig,
     server_id: &str,
     tool: &ToolObject,
     emit_event: Arc<dyn Fn(Event) + Send + Sync>,
 ) -> Result<Vec<String>, String> {
     let schema = tool.input_schema.clone().unwrap_or_else(|| json!({}));
-    let prompts = build_trigger_concept_prompts(&TriggerConceptExtractionInput {
-        server_id,
-        tool_name: tool.name.as_str(),
-        description: tool.description.as_deref(),
-        input_schema: &schema,
-    });
+    let prompts = build_trigger_concept_prompts(
+        &TriggerConceptExtractionInput {
+            server_id,
+            tool_name: tool.name.as_str(),
+            description: tool.description.as_deref(),
+            input_schema: &schema,
+        },
+        internal_prompts
+            .mcp_trigger_extract_prompt_template
+            .as_str(),
+        internal_prompts
+            .mcp_trigger_extract_retry_prompt_template
+            .as_str(),
+    );
     let mut last_error = "llm parse check failed: empty output".to_string();
 
     for prompt in prompts {

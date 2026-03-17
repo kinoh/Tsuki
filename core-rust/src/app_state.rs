@@ -1,7 +1,8 @@
 use crate::activation_concept_graph::ConceptGraphStore;
 use crate::application::module_bootstrap::Modules;
-use crate::router_symbolizer::RouterSymbolizer;
-use crate::config::{ConversationRecallConfig, InputConfig, LimitsConfig, RouterConfig, TtsConfig};
+use crate::config::{
+    ConversationRecallConfig, InternalPromptConfig, LimitsConfig, RouterConfig, TtsConfig,
+};
 use crate::conversation_recall_store::ConversationRecallStore;
 use crate::db::Db;
 use crate::event::Event;
@@ -9,6 +10,7 @@ use crate::event_store::EventStore;
 use crate::mcp::McpRegistry;
 use crate::notification::FcmNotificationSender;
 use crate::prompts::PromptOverrides;
+use crate::router_symbolizer::RouterSymbolizer;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, RwLock};
 
@@ -52,7 +54,7 @@ pub(crate) struct AppConfigState {
     pub(crate) limits: LimitsConfig,
     pub(crate) router: RouterConfig,
     pub(crate) conversation_recall: ConversationRecallConfig,
-    pub(crate) input: InputConfig,
+    pub(crate) internal_prompts: InternalPromptConfig,
     pub(crate) tts: TtsConfig,
 }
 

@@ -50,10 +50,10 @@ use crate::debug_api::{
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::llm::{build_response_api_llm, ResponseApiConfig};
-use crate::router_symbolizer::build_response_api_symbolizer;
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
+use crate::router_symbolizer::build_response_api_symbolizer;
 use crate::scheduler::ScheduleStore;
 use crate::state::{DbStateStore, StateStore};
 
@@ -315,8 +315,10 @@ pub(crate) async fn run_server() {
         activation_concept_graph.as_ref(),
         build_response_api_llm(ResponseApiConfig {
             model: config.llm.model.clone(),
-            instructions: "Extract trigger concepts for MCP tools. Return strict JSON only."
-                .to_string(),
+            instructions: config
+                .internal_prompts
+                .mcp_trigger_extract_instructions
+                .clone(),
             temperature: None,
             max_output_tokens: Some(200),
             tools: Vec::new(),
@@ -325,6 +327,7 @@ pub(crate) async fn run_server() {
             usage_context: None,
             max_tool_rounds: 0,
         }),
+        &config.internal_prompts,
         emit_event.clone(),
     )
     .await;
@@ -395,7 +398,7 @@ pub(crate) async fn run_server() {
             limits: config.limits.clone(),
             router: config.router.clone(),
             conversation_recall: config.conversation_recall.clone(),
-            input: config.input.clone(),
+            internal_prompts: config.internal_prompts.clone(),
             tts: config.tts.clone(),
         },
         PromptState::new(

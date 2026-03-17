@@ -112,6 +112,7 @@ struct Cli {
 #[derive(Debug, Deserialize)]
 struct RootConfig {
     llm: LlmConfig,
+    internal_prompts: InternalPromptConfig,
     #[serde(default)]
     modules: Vec<ModuleConfig>,
 }
@@ -119,6 +120,12 @@ struct RootConfig {
 #[derive(Debug, Deserialize)]
 struct LlmConfig {
     model: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalPromptConfig {
+    concept_link_selection_instructions: String,
+    concept_link_selection_prompt_template: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,6 +220,7 @@ async fn run() -> Result<(), String> {
             &concepts,
             cli.max_selected,
             &model,
+            &config.internal_prompts,
         )
         .await?;
         println!(
@@ -492,32 +500,23 @@ async fn select_concepts_for_submodule(
     concepts: &[String],
     max_selected: usize,
     model: &str,
+    internal_prompts: &InternalPromptConfig,
 ) -> Result<Vec<String>, String> {
     let concept_lines = concepts
         .iter()
         .map(|name| format!("- {}", name))
         .collect::<Vec<_>>()
         .join("\n");
-    let prompt = format!(
-        "Target submodule: {submodule}
-Submodule instructions:
-{instructions}
-
-Candidate concepts (existing concept graph nodes):
-{concept_lines}
-
-Task:
-- Select concept names that should trigger this submodule.
-- Keep precision high and avoid broad or generic concepts.
-- Select at most {max_selected} concepts.
-- Return JSON only:
-{{\"selected\":[\"concept1\",\"concept2\"]}}"
-    );
+    let prompt = internal_prompts
+        .concept_link_selection_prompt_template
+        .replace("{{submodule}}", submodule)
+        .replace("{{instructions}}", instructions)
+        .replace("{{concept_lines}}", &concept_lines)
+        .replace("{{max_selected}}", &max_selected.to_string());
 
     let adapter = build_response_api_llm(ResponseApiConfig {
         model: model.to_string(),
-        instructions: "You are a strict JSON selector for concept-graph curation tasks."
-            .to_string(),
+        instructions: internal_prompts.concept_link_selection_instructions.clone(),
         temperature: None,
         max_output_tokens: Some(4_000),
         tools: Vec::new(),

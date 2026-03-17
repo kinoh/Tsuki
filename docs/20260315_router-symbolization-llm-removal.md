@@ -112,7 +112,7 @@ Removed:
 - `build_router_config`, `emit_router_debug_raw`, `render_list_for_prompt`
 - `router_candidate_source`, `merge_unique_concepts`
 - All LLM-related imports: `llm_raw`, `build_response_api_llm`, `LlmRequest`, `LlmUsageContext`, etc.
-- `router_context_template` from `InputConfig` (no longer used)
+- `router_context_template` from the old `input` config section (no longer used)
 
 The `_modules` and `_overrides` parameters in `run_router` are now unused (prefixed with `_`).
 `parse_recall_seeds` and `render_active_nodes_as_text` are retained with `#[allow(dead_code)]`

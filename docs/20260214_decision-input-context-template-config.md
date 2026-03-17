@@ -1,7 +1,7 @@
 # Configurable Decision Input Context Template
 
 ## Decision
-- Add `input.decision_context_template` to `core-rust/config.toml`.
+- Add `internal_prompts.decision_context_template` to `core-rust/config.toml`.
 - Move the full decision input context structure into config and render it via placeholders at runtime.
 - Keep only fact-style sections in the template:
   - `latest_user_input`
@@ -21,3 +21,7 @@
 - Keep semantic labels explicit and fact-only.
 - Keep `latest_user_input` as the user-input section name.
 - Use `recent_event_history` (not timeline wording).
+
+## Follow-up Clarification
+- The template belongs under `internal_prompts`, not a generic `input` section.
+- Reason: decision/submodule context templates are LLM-facing wording assets, so they share responsibility with other internal prompt templates.

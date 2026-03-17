@@ -11,9 +11,9 @@ pub struct Config {
     pub router: RouterConfig,
     #[serde(default)]
     pub conversation_recall: ConversationRecallConfig,
-    pub input: InputConfig,
     pub db: DbConfig,
     pub prompts: PromptsConfig,
+    pub internal_prompts: InternalPromptConfig,
     pub concept_graph: ConceptGraphConfig,
     pub tts: TtsConfig,
     #[serde(default)]
@@ -153,12 +153,6 @@ pub struct DbConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct InputConfig {
-    pub decision_context_template: String,
-    pub submodule_context_template: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct ConversationRecallConfig {
     #[serde(default = "default_conversation_recall_enabled")]
     pub enabled: bool,
@@ -190,6 +184,21 @@ impl Default for ConversationRecallConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PromptsConfig {
     pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InternalPromptConfig {
+    pub decision_context_template: String,
+    pub submodule_context_template: String,
+    pub mcp_trigger_extract_instructions: String,
+    pub mcp_trigger_extract_prompt_template: String,
+    pub mcp_trigger_extract_retry_prompt_template: String,
+    pub skill_index_instructions: String,
+    pub skill_index_prompt_template: String,
+    pub decision_repair_instructions_template: String,
+    pub decision_repair_context_template: String,
+    pub concept_link_selection_instructions: String,
+    pub concept_link_selection_prompt_template: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

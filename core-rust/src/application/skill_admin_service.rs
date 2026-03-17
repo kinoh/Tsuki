@@ -237,7 +237,11 @@ async fn generate_skill_index(
 ) -> Result<(String, Vec<String>), (StatusCode, String)> {
     let adapter = build_response_api_llm(ResponseApiConfig {
         model: state.runtime.modules.runtime.model.clone(),
-        instructions: "Generate skill index metadata. Return strict JSON only.".to_string(),
+        instructions: state
+            .config
+            .internal_prompts
+            .skill_index_instructions
+            .clone(),
         temperature: state.runtime.modules.runtime.temperature,
         max_output_tokens: Some(500),
         tools: Vec::new(),
@@ -246,24 +250,16 @@ async fn generate_skill_index(
         usage_context: None,
         max_tool_rounds: 0,
     });
-    let prompt = format!(
-        "Create abstract index metadata for a skill body.\n\
-Return strict JSON only with this shape:\n\
-{{\"summary\":\"...\",\"trigger_concepts\":[\"...\"]}}\n\
-Rules:\n\
-- summary must be short and abstract\n\
-- summary must not encode concrete situations or step-by-step instructions\n\
-- trigger_concepts must contain at most {max_trigger_concepts} concise natural-language concepts\n\
-- trigger_concepts should help retrieve this skill from related user intents\n\
-- no markdown\n\
-- no explanation\n\
-\n\
-skill_key: {key}\n\
-body:\n{body}",
-        max_trigger_concepts = MAX_TRIGGER_CONCEPTS,
-        key = key,
-        body = body
-    );
+    let prompt = state
+        .config
+        .internal_prompts
+        .skill_index_prompt_template
+        .replace(
+            "{{max_trigger_concepts}}",
+            &MAX_TRIGGER_CONCEPTS.to_string(),
+        )
+        .replace("{{skill_key}}", key)
+        .replace("{{skill_body}}", body);
     let response = adapter
         .respond(LlmRequest { input: prompt })
         .await
