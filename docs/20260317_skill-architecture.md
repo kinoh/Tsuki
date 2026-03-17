@@ -83,7 +83,8 @@ Owns:
 - Concept graph indexing: skill summaries, embeddings, trigger relations
 - Routing: activating and ranking candidate skills through the graph
 - Surfacing: selecting lightweight visible skills for each Decision turn
-- Wiring: calling `skill_install` on sandbox during upsert, proxying `state_get` to `skill_read`
+- Admin API: `PUT /admin/skills/{key}` endpoint for skill installation
+- Wiring: calling `skill_install` via `McpRegistry.call_tool` during skill upsert
 
 Does not own:
 - The actual content of skill bodies or auxiliary files
@@ -155,55 +156,68 @@ Returns:
 
 `files` is always the full directory listing, regardless of which file was read.
 
-### Bootstrap exclusion
+---
 
-Tools whose names start with `skill_` are excluded from:
-- The concept graph (no concept node, no trigger relation)
-- The LLM tool list (not visible to Decision)
+## McpRegistry and Skill Tools
 
-They are reachable only via `McpRegistry::call_tool_direct`, which bypasses `tools_by_runtime`.
-This ensures skill management tooling never appears as callable actions for the agent.
+### LLM tools vs core-rust callable tools
+
+`McpRegistry` is the routing table for **all** MCP tools that core-rust can call. What the LLM
+sees is a separate concern: each call site (Decision, Router, etc.) specifies its own tool list
+explicitly. The registry does not dictate LLM visibility.
+
+### Bootstrap behavior for `skill_*` tools
+
+During bootstrap, tools whose names start with `skill_` are treated differently from regular tools:
+
+- **Registered in `tools_by_runtime`**: yes — so they are callable via `call_tool`
+- **Concept graph processing**: skipped — no concept node, no trigger concept generation, no
+  activation-based surfacing
+
+This means `skill_install` and `skill_read` are callable by core-rust but will never appear
+in the concept-graph-filtered tool list passed to the LLM through the normal activation path.
+
+### Decision LLM tool list
+
+The Decision module explicitly adds `shell_exec__skill_read` to the tools it passes to the LLM,
+independent of concept graph activation. This is intentional: skill body reading is always
+available to Decision when a visible skill summary is present, without requiring the skill_read
+tool itself to have a concept graph footprint.
+
+`skill_install` is never included in any LLM tool list. It is only called by core-rust internals.
 
 ---
 
 ## core-rust Integration Points
 
-### Skill upsert → sandbox sync
-
-When a skill is upserted with `skill_index.enabled = true`, `state_record_admin_service` calls
-`skill_install` on the sandbox after updating the concept graph:
+### Skill admin endpoint
 
 ```
-PUT /admin/state-records/data/{key}
-  → state DB write (backward compat for list/view endpoints)
-  → concept graph upsert + trigger relations
-  → mcp_registry.call_tool_direct("shell_exec", "skill_install", {key, files})
+PUT /admin/skills/{key}
+body: { "content": "...", "summary": "...", "trigger_concepts": [...] }
 ```
 
-Sandbox sync failure is non-fatal (logged, does not fail the upsert). The state DB remains the
-fallback for reads until the sandbox is populated.
+`summary` and `trigger_concepts` are optional; if omitted, they are generated via LLM.
 
-### `state_get` proxy
+The `skill_admin_service` handles:
+1. `mcp_registry.call_tool("shell_exec__skill_install", {key, files: [{path: "SKILL.md", body: content}]})`
+2. `activation_concept_graph.skill_index_upsert(skill_name, summary, key, true)`
+3. `activation_concept_graph.skill_index_replace_triggers(skill_name, trigger_concepts)`
 
-When Decision calls `state_get` with a skill key, the handler tries the sandbox first:
+Skills are **not** installed through the state record endpoint (`PUT /admin/state-records/data/{key}`).
+State records and skills are separate domains.
+
+### Decision skill read flow
+
+When Decision determines a visible skill body is needed:
 
 ```
-state_get({key})
-  → mcp_registry.call_tool_direct("shell_exec", "skill_read", {key})
-      found=true  → return sandbox response (content + files listing)
-      found=false → fall through
-  → state DB lookup (fallback)
+Decision LLM calls: shell_exec__skill_read({ key: "<body_state_key from visible_skills>" })
+  → sandbox returns: { found: true, content: "...", files: [...] }
 ```
 
-The sandbox response format (`content`, `files`) differs from the state DB format (`record`).
-Decision receives whichever is available. The concept graph surface always shows `body_state_key`
-as the key to pass to `state_get`.
-
-### `call_tool_direct`
-
-`McpRegistry::call_tool_direct(server_id, tool_name, args)` bypasses `tools_by_runtime` and looks
-up the server URL directly from `self.servers`. Used exclusively for sandbox-internal tools that
-must not be exposed to the LLM.
+The `body_state_key` shown in the visible_skills context is the key to pass directly to
+`skill_read`. No `state_get` indirection is involved.
 
 ---
 
@@ -261,16 +275,23 @@ is minimal.
 ### Why skill_install is a tool and not a sidecar write
 
 If only sandbox knew where skills live, skill installation would have no callable API. Making
-`skill_install` a tool means: (a) core-rust can call it via `call_tool_direct`, (b) future
+`skill_install` a tool means: (a) core-rust can call it via `McpRegistry.call_tool`, (b) future
 scenarios or tests can install skills through the same path, and (c) the sandbox's file layout
 remains an internal detail not leaked to callers.
 
-### Why the sandbox proxy in state_get rather than a new tool
+### Why skill_read is explicitly added to Decision tools
 
-The model already knows `state_get`. Adding a new `skill_read` tool visible to the LLM would
-require rewriting Decision instructions and re-educating existing behavior. Proxying inside
-`state_get` is transparent: the model calls `state_get` as before; the runtime upgrades the
-response when sandbox has the content.
+The LLM tool list for each module is specified at the call site, not derived from the registry.
+`skill_read` is not activated by the concept graph (no concept node), so it would never appear
+in the activation-filtered tool list. Decision adds it explicitly because reading a surfaced skill
+body is always a legitimate action when visible skills are present, regardless of what the concept
+graph has activated for the current turn.
+
+### Why skills are not installed through state records
+
+State records are general-purpose key-value memory. Skills are a distinct domain with their own
+storage (sandbox), indexing (concept graph), and access pattern (progressive disclosure). Mixing
+them couples two unrelated concerns and creates a misleading API surface.
 
 ---
 
@@ -283,6 +304,7 @@ Router/Decision responsibility sections, but its Storage section is superseded b
 | Component | Old | New |
 |-----------|-----|-----|
 | Skill body storage | state DB | sandbox `/memory/skills/{key}/` |
-| Body read path | `state_get` → state DB | `state_get` → sandbox → state DB fallback |
+| Skill admin endpoint | `PUT /admin/state-records/data/{key}` | `PUT /admin/skills/{key}` |
+| Body read path for Decision | `state_get` → state DB | `shell_exec__skill_read` directly |
 | Auxiliary files | not supported | `skills/{key}/scripts/` etc. |
-| Installation | state DB write only | state DB write + `skill_install` on sandbox |
+| Installation call | `call_tool_direct` (removed) | `call_tool("shell_exec__skill_install", ...)` |
