@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::app_state::AppState;
 use crate::llm::{build_response_api_llm, LlmRequest, ResponseApiConfig};
@@ -183,23 +183,6 @@ pub(crate) async fn upsert_state_record(
             .skill_index_replace_triggers(skill_name, resolved.trigger_concepts)
             .await
             .map_err(internal_error)?;
-
-        // Mirror skill body to sandbox so skill_read can serve it without hitting core-rust.
-        if let Err(err) = state
-            .services
-            .mcp_registry
-            .call_tool_direct(
-                "shell_exec",
-                "skill_install",
-                json!({
-                    "key": trimmed_key,
-                    "files": [{"path": "SKILL.md", "body": payload.content}]
-                }),
-            )
-            .await
-        {
-            eprintln!("skill_install sandbox sync failed key={} err={}", trimmed_key, err);
-        }
     } else if existing_skill_index.enabled {
         state
             .services
