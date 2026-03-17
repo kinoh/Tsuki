@@ -1634,18 +1634,13 @@ async fn run_install_skill_step(
     }
     let encoded_key = url_encode_path_segment(step.key.as_str());
     let url = format!(
-        "{}/admin/state-records/data/{}",
+        "{}/admin/skills/{}",
         runtime.http_base_url, encoded_key
     );
     let payload = json!({
         "content": step.body,
-        "related_keys": [],
-        "metadata": {},
-        "skill_index": {
-            "enabled": true,
-            "summary": step.summary,
-            "trigger_concepts": step.trigger_concepts,
-        },
+        "summary": step.summary,
+        "trigger_concepts": step.trigger_concepts,
     });
     println!(
         "HARNESS_INSTALL_SKILL step={} key={} trigger_count={}",
@@ -1679,33 +1674,17 @@ async fn run_install_skill_step(
             step.key, status, response_text
         ));
     }
-    let detail: Value = serde_json::from_str(&response_text).map_err(|err| {
+    let result: Value = serde_json::from_str(&response_text).map_err(|err| {
         format!(
             "install_skill response for '{}' was not valid json: {}",
             step.key, err
         )
     })?;
-    let saved_key = detail
-        .get("item")
-        .and_then(|item| item.get("key"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let saved_key = result.get("key").and_then(Value::as_str).unwrap_or_default();
     if saved_key != step.key {
         return Err(format!(
             "install_skill response key mismatch for '{}': got '{}'",
             step.key, saved_key
-        ));
-    }
-    let enabled = detail
-        .get("item")
-        .and_then(|item| item.get("skill_index"))
-        .and_then(|item| item.get("enabled"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if !enabled {
-        return Err(format!(
-            "install_skill response reported disabled skill_index for '{}'",
-            step.key
         ));
     }
     Ok(())

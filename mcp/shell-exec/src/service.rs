@@ -497,7 +497,7 @@ fn is_valid_skill_key(key: &str) -> bool {
     !key.is_empty()
         && key
             .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
 async fn collect_skill_files(dir: &PathBuf) -> Vec<String> {
