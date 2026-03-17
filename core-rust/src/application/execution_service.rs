@@ -117,22 +117,11 @@ pub(crate) async fn run_decision(
     };
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
-    let visible_mcp_tools = state
-        .services
-        .mcp_registry
-        .available_tools()
-        .into_iter()
-        .filter(|tool| {
-            tool_name(tool)
-                .map(|name| {
-                    router_output
-                        .mcp_visible_tools
-                        .iter()
-                        .any(|item| item == name)
-                })
-                .unwrap_or(false)
-        })
-        .collect::<Vec<_>>();
+    let visible_mcp_tools = build_decision_mcp_tools(
+        &state,
+        &router_output.mcp_visible_tools,
+        !router_output.visible_skills.is_empty(),
+    );
     let adapter = build_response_api_llm(build_config_with_tools_and_handler(
         compose_decision_instructions(
             &base_instructions,
@@ -279,22 +268,11 @@ pub(crate) async fn run_decision_debug(
     };
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
-    let visible_mcp_tools = state
-        .services
-        .mcp_registry
-        .available_tools()
-        .into_iter()
-        .filter(|tool| {
-            tool_name(tool)
-                .map(|name| {
-                    router_output
-                        .mcp_visible_tools
-                        .iter()
-                        .any(|item| item == name)
-                })
-                .unwrap_or(false)
-        })
-        .collect::<Vec<_>>();
+    let visible_mcp_tools = build_decision_mcp_tools(
+        &state,
+        &router_output.mcp_visible_tools,
+        !router_output.visible_skills.is_empty(),
+    );
     let adapter = build_response_api_llm(build_config_with_tools_and_handler(
         compose_decision_instructions(
             &base_instructions,
@@ -733,6 +711,35 @@ fn decision_tools(
             })),
             strict: Some(true),
         }));
+    }
+    tools
+}
+
+const SKILL_READ_TOOL: &str = "shell_exec__skill_read";
+
+fn build_decision_mcp_tools(
+    state: &AppState,
+    mcp_visible_tools: &[String],
+    has_visible_skills: bool,
+) -> Vec<async_openai::types::responses::Tool> {
+    let all = state.services.mcp_registry.available_tools();
+    let mut tools: Vec<_> = all
+        .iter()
+        .filter(|tool| {
+            tool_name(tool)
+                .map(|name| mcp_visible_tools.iter().any(|item| item == name))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+    // skill_read is not concept-graph-activated; add it explicitly when skills are surfaced.
+    if has_visible_skills {
+        if let Some(tool) = all
+            .iter()
+            .find(|t| tool_name(t).map(|n| n == SKILL_READ_TOOL).unwrap_or(false))
+        {
+            tools.push(tool.clone());
+        }
     }
     tools
 }
