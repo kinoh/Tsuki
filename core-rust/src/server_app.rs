@@ -34,6 +34,7 @@ use crate::app_state::{
 };
 use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{build_modules, sync_module_registry_from_prompts};
+use crate::application::skill_admin_service::{upsert_skill, SkillUpsertPayload};
 use crate::application::state_record_admin_service::{
     get_state_record_detail, list_state_records, upsert_state_record, StateRecordDetail,
     StateRecordListItem, StateRecordUpsertPayload,
@@ -457,6 +458,7 @@ pub(crate) async fn run_server() {
             get(debug_concept_graph_relations),
         )
         .route("/concept-graph/queries", get(debug_concept_graph_queries))
+        .route("/skills/{key}", put(admin_upsert_skill))
         .route("/state-records/data", get(debug_get_state_records))
         .route(
             "/state-records/data/{key}",
@@ -1029,6 +1031,16 @@ async fn debug_upsert_state_record(
 ) -> Result<Json<DebugStateRecordDetailResponse>, (StatusCode, String)> {
     let item = upsert_state_record(&state, key.as_str(), payload).await?;
     Ok(Json(DebugStateRecordDetailResponse { item }))
+}
+
+async fn admin_upsert_skill(
+    Path(key): Path<String>,
+    State(state): State<AppState>,
+    Json(payload): Json<SkillUpsertPayload>,
+) -> Result<Json<crate::application::skill_admin_service::SkillUpsertResult>, (StatusCode, String)>
+{
+    let result = upsert_skill(&state, key.as_str(), payload).await?;
+    Ok(Json(result))
 }
 
 async fn debug_run_module(

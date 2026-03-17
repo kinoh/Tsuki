@@ -13,6 +13,7 @@ pub mod pipeline_service;
 pub mod router_service;
 pub mod scheduler_notice_service;
 pub mod scheduler_service;
+pub mod skill_admin_service;
 pub mod state_record_admin_service;
 pub mod trigger_ingress_api;
 pub mod usage_service;
