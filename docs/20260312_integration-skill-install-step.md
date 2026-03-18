@@ -3,7 +3,7 @@
 ## Overview
 
 `core-rust/examples/integration_harness.rs` now supports an `install_skill` scenario step.
-The step installs a state-backed skill before conversation steps begin.
+The step installs a sandbox-backed skill before conversation steps begin.
 
 ## Problem Statement
 
@@ -18,10 +18,10 @@ That was insufficient for scenario tests that need a specific skill body and ski
 
 ## Solution
 
-The harness now installs skills through the existing admin state-record route:
+The harness now installs skills through the existing admin skill route:
 
 - `POST /auth/login`
-- `PUT /admin/state-records/data/{key}`
+- `PUT /admin/skills/{key}`
 
 The scenario step requires:
 
@@ -29,16 +29,18 @@ The scenario step requires:
 - `body`
 - `summary`
 - `trigger_concepts`
+- `files` (optional auxiliary files such as `scripts/fetch.js`)
 
 The application service accepts explicit `summary` and `trigger_concepts` when `skill_index.enabled=true`.
 If those fields are absent, the existing LLM-generated metadata path remains unchanged.
+The `body` is written as `SKILL.md`; auxiliary `files` are forwarded alongside it.
 
 ## Design Decisions
 
 ### Reuse the admin route instead of direct fixtures
 
 The harness must not write directly to SQLite or Memgraph.
-Skill installation belongs to application code because it updates both the state record and the activation concept graph.
+Skill installation belongs to application code because it updates both the sandbox skill directory and the activation concept graph.
 
 Using the admin route keeps that responsibility boundary intact.
 

@@ -222,15 +222,17 @@ names in addition to the normal concept-graph-visible MCP tools.
 
 ```
 PUT /admin/skills/{key}
-body: { "content": "...", "summary": "...", "trigger_concepts": [...] }
+body: { "content": "...", "summary": "...", "trigger_concepts": [...], "files": [...] }
 ```
 
 `summary` and `trigger_concepts` are optional; if omitted, they are generated via LLM.
+`files` is optional and contains auxiliary skill files such as `scripts/fetch.js`.
+`SKILL.md` is always derived from `content`.
 `required_mcp_tools` is not supplied through the admin payload. It is parsed from `SKILL.md`
 frontmatter in `content`.
 
 The `skill_admin_service` flow is:
-1. `mcp_registry.call_tool("shell_exec__skill_install", {key, files: [{path: "SKILL.md", body: content}]})`
+1. `mcp_registry.call_tool("shell_exec__skill_install", {key, files: [{path: "SKILL.md", body: content}, ...files]})`
 2. Parse `required_mcp_tools` from `SKILL.md` frontmatter
 3. `activation_concept_graph.skill_index_upsert(skill_name, summary, key, required_mcp_tools, true)`
 4. `activation_concept_graph.skill_index_replace_triggers(skill_name, trigger_concepts)`

@@ -10,12 +10,20 @@ const MAX_TRIGGER_CONCEPTS: usize = 3;
 const SKILL_INSTALL_TOOL: &str = "shell_exec__skill_install";
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SkillInstallFile {
+    pub(crate) path: String,
+    pub(crate) body: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct SkillUpsertPayload {
     pub(crate) content: String,
     #[serde(default)]
     pub(crate) summary: Option<String>,
     #[serde(default)]
     pub(crate) trigger_concepts: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) files: Vec<SkillInstallFile>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,14 +52,21 @@ pub(crate) async fn upsert_skill(
     key: &str,
     payload: SkillUpsertPayload,
 ) -> Result<SkillUpsertResult, (StatusCode, String)> {
+    let SkillUpsertPayload {
+        content,
+        summary,
+        trigger_concepts,
+        files,
+    } = payload;
     let key = key.trim().to_string();
     if key.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "key is required".to_string()));
     }
-    if payload.content.trim().is_empty() {
+    if content.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "content is required".to_string()));
     }
-    let required_mcp_tools = parse_required_mcp_tools(&payload.content, state)?;
+    let required_mcp_tools = parse_required_mcp_tools(&content, state)?;
+    let install_files = build_skill_install_files(&content, &files)?;
 
     // 1. Install files in sandbox.
     state
@@ -61,7 +76,7 @@ pub(crate) async fn upsert_skill(
             SKILL_INSTALL_TOOL,
             json!({
                 "key": key,
-                "files": [{"path": "SKILL.md", "body": payload.content}]
+                "files": install_files
             }),
         )
         .await
@@ -73,14 +88,8 @@ pub(crate) async fn upsert_skill(
         })?;
 
     // 2. Resolve summary and trigger_concepts (explicit or LLM-generated).
-    let (summary, trigger_concepts) = resolve_skill_index(
-        state,
-        &key,
-        &payload.content,
-        payload.summary,
-        payload.trigger_concepts,
-    )
-    .await?;
+    let (summary, trigger_concepts) =
+        resolve_skill_index(state, &key, &content, summary, trigger_concepts).await?;
 
     let skill_name = format!("skill:{}", key);
 
@@ -110,6 +119,49 @@ pub(crate) async fn upsert_skill(
         trigger_concepts,
         required_mcp_tools,
     })
+}
+
+fn build_skill_install_files(
+    content: &str,
+    auxiliary_files: &[SkillInstallFile],
+) -> Result<Vec<serde_json::Value>, (StatusCode, String)> {
+    let mut files = vec![json!({
+        "path": "SKILL.md",
+        "body": content,
+    })];
+    let mut seen_paths = BTreeSet::<String>::new();
+    for file in auxiliary_files {
+        let path = file.path.trim();
+        if path.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "files contains empty path".to_string(),
+            ));
+        }
+        if path == "SKILL.md" {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "files must not include SKILL.md; use content for the skill body".to_string(),
+            ));
+        }
+        if path.contains("..") || path.starts_with('/') {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("files contains invalid path: {}", path),
+            ));
+        }
+        if !seen_paths.insert(path.to_string()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("files contains duplicate path: {}", path),
+            ));
+        }
+        files.push(json!({
+            "path": path,
+            "body": file.body,
+        }));
+    }
+    Ok(files)
 }
 
 fn parse_required_mcp_tools(
@@ -344,5 +396,34 @@ mod tests {
             extract_skill_frontmatter("---\nrequired_mcp_tools:\n  - shell_exec__execute\n# Skill")
                 .expect_err("unclosed frontmatter should fail");
         assert!(error.contains("missing closing"));
+    }
+
+    #[test]
+    fn build_skill_install_files_includes_auxiliary_files() {
+        let files = build_skill_install_files(
+            "# Skill\nbody",
+            &[SkillInstallFile {
+                path: "scripts/fetch.js".to_string(),
+                body: "console.log('ok');".to_string(),
+            }],
+        )
+        .expect("file payload should be valid");
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0]["path"], "SKILL.md");
+        assert_eq!(files[1]["path"], "scripts/fetch.js");
+    }
+
+    #[test]
+    fn build_skill_install_files_rejects_skill_md_auxiliary_file() {
+        let error = build_skill_install_files(
+            "# Skill\nbody",
+            &[SkillInstallFile {
+                path: "SKILL.md".to_string(),
+                body: "duplicate".to_string(),
+            }],
+        )
+        .expect_err("SKILL.md auxiliary file should be rejected");
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert!(error.1.contains("must not include SKILL.md"));
     }
 }

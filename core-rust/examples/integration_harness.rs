@@ -100,6 +100,12 @@ struct MetricDefinition {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct ScenarioSkillFile {
+    path: String,
+    body: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ScenarioStep {
     InstallSkill {
@@ -107,6 +113,8 @@ enum ScenarioStep {
         body: String,
         summary: String,
         trigger_concepts: Vec<String>,
+        #[serde(default)]
+        files: Vec<ScenarioSkillFile>,
     },
     Conversation {
         tester_instructions: String,
@@ -243,6 +251,7 @@ struct InstallSkillRuntimeStep {
     body: String,
     summary: String,
     trigger_concepts: Vec<String>,
+    files: Vec<ScenarioSkillFile>,
 }
 
 #[derive(Debug, Clone)]
@@ -594,6 +603,7 @@ fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
                 body,
                 summary,
                 trigger_concepts,
+                files,
             } => {
                 if key.trim().is_empty() {
                     return Err(format!(
@@ -637,6 +647,40 @@ fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
                     if !unique.insert(trimmed.to_string()) {
                         return Err(format!(
                             "steps[{}] install_skill trigger_concepts must be unique after trimming",
+                            index
+                        ));
+                    }
+                }
+                let mut unique_files = HashSet::new();
+                for file in files {
+                    let path = file.path.trim();
+                    if path.is_empty() {
+                        return Err(format!(
+                            "steps[{}] install_skill files must not contain empty paths",
+                            index
+                        ));
+                    }
+                    if path == "SKILL.md" {
+                        return Err(format!(
+                            "steps[{}] install_skill files must not include SKILL.md",
+                            index
+                        ));
+                    }
+                    if path.contains("..") || path.starts_with('/') {
+                        return Err(format!(
+                            "steps[{}] install_skill files contain invalid path '{}'",
+                            index, path
+                        ));
+                    }
+                    if file.body.trim().is_empty() {
+                        return Err(format!(
+                            "steps[{}] install_skill files must not contain empty bodies",
+                            index
+                        ));
+                    }
+                    if !unique_files.insert(path.to_string()) {
+                        return Err(format!(
+                            "steps[{}] install_skill files must be unique after trimming",
                             index
                         ));
                     }
@@ -1637,16 +1681,28 @@ async fn run_install_skill_step(
     }
     let encoded_key = url_encode_path_segment(step.key.as_str());
     let url = format!("{}/admin/skills/{}", runtime.http_base_url, encoded_key);
+    let files = step
+        .files
+        .iter()
+        .map(|file| {
+            json!({
+                "path": file.path,
+                "body": file.body,
+            })
+        })
+        .collect::<Vec<_>>();
     let payload = json!({
         "content": step.body,
         "summary": step.summary,
         "trigger_concepts": step.trigger_concepts,
+        "files": files,
     });
     println!(
-        "HARNESS_INSTALL_SKILL step={} key={} trigger_count={}",
+        "HARNESS_INSTALL_SKILL step={} key={} trigger_count={} file_count={}",
         step_index,
         step.key,
-        step.trigger_concepts.len()
+        step.trigger_concepts.len(),
+        step.files.len()
     );
     let response = http_client
         .put(url)
@@ -1749,6 +1805,7 @@ fn build_runtime_scenario_steps(
                 body,
                 summary,
                 trigger_concepts,
+                files,
             } => {
                 out.push(RuntimeScenarioStep::InstallSkill(InstallSkillRuntimeStep {
                     key: key.trim().to_string(),
@@ -1757,6 +1814,13 @@ fn build_runtime_scenario_steps(
                     trigger_concepts: trigger_concepts
                         .iter()
                         .map(|item| item.trim().to_string())
+                        .collect(),
+                    files: files
+                        .iter()
+                        .map(|file| ScenarioSkillFile {
+                            path: file.path.trim().to_string(),
+                            body: file.body.clone(),
+                        })
                         .collect(),
                 }));
             }
@@ -2602,13 +2666,19 @@ fn scenario_instructions_for_judge(scenario: &Scenario) -> String {
                 body,
                 summary,
                 trigger_concepts,
+                files,
             } => {
                 lines.push(format!(
-                    "{}. install_skill key={} summary={} trigger_concepts={} body={}",
+                    "{}. install_skill key={} summary={} trigger_concepts={} files={} body={}",
                     index + 1,
                     key.trim(),
                     summary.trim(),
                     trigger_concepts.join(","),
+                    files
+                        .iter()
+                        .map(|file| file.path.trim())
+                        .collect::<Vec<_>>()
+                        .join(","),
                     body.trim()
                 ));
             }
