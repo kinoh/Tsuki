@@ -7,20 +7,16 @@ steps:
     body: |
       ---
       name: web_page_extract
-      description: Fetch and extract information from public web pages with shell-exec.
+      description: Fetch and extract public web pages through the checked-in Playwright helper.
       required_mcp_tools:
         - shell_exec__execute
       ---
 
-      Use shell_exec__execute when the user wants information from a public website or an official news page.
-      Prefer the primary source page over secondary summaries when possible.
-      For a straightforward fetch, prefer curl with flags such as -LfsS and keep the fetched output bounded.
-      If a little parsing is needed, prefer python3 with command="python3", args=["-"], and pass the script through stdin.
-      If the page is blocked, challenge-protected, JS-dependent, or does not yield the needed content through plain HTTP fetches,
-      run node scripts/fetch.js <url> to extract the rendered page text with Playwright.
-      Use the checked-in helper script instead of ad hoc browser commands.
+      For this skill, the only supported path for public web pages is node /memory/skills/web_page_extract/scripts/fetch.js <url>.
+      Do not use python3 or curl for page retrieval or post-processing in this skill.
+      The helper returns structured JSON with the page url, page title, and page text, so answer from those fields directly and do not add a separate parsing step.
       Return the source URL with the answer, and do not claim details that were not actually fetched.
-    summary: "Fetch and extract information from public web pages with shell-exec"
+    summary: "Fetch public web pages via the checked-in Playwright helper"
     trigger_concepts:
       - "official web page lookup"
       - "extract article title and url"
@@ -30,6 +26,8 @@ steps:
         body: |
           #!/usr/bin/env node
           const { firefox } = require('playwright');
+
+          const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
 
           async function main() {
             const url = process.argv[2];
@@ -46,11 +44,10 @@ steps:
 
               const result = {
                 url: page.url(),
-                title: (await page.title()).trim(),
-                text: (await page.locator('body').innerText({ timeout: 15000 }).catch(() => ''))
-                  .replace(/\r\n/g, '\n')
-                  .trim()
-                  .slice(0, 12000),
+                title: clean(await page.title()),
+                text: clean(
+                  await page.locator('body').innerText({ timeout: 15000 }).catch(() => '')
+                ).slice(0, 12000),
               };
 
               console.log(JSON.stringify(result, null, 2));
