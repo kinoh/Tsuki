@@ -81,7 +81,7 @@ pub(crate) async fn latest_events(
             .map(|event| (event.ts.clone(), event.event_id.clone()));
 
         for event in batch {
-            if is_debug_event(&event) || is_observability_event(&event) {
+            if is_debug_event(&event) {
                 continue;
             }
             if excluded_event_ids
@@ -194,6 +194,13 @@ fn event_submodule_name(event: &Event) -> Option<&str> {
 }
 
 fn format_event_line(event: &Event) -> String {
+    if is_observability_event(event) {
+        return format!(
+            "{} | observe | {}",
+            format_local_ts_seconds(&event.ts),
+            format_observability_event_summary(event)
+        );
+    }
     let role = event_role(event);
     let ts = format_local_ts_seconds(&event.ts);
     let payload_text = event
@@ -203,6 +210,47 @@ fn format_event_line(event: &Event) -> String {
         .map(|value| truncate(value, 160))
         .unwrap_or_else(|| truncate(&event.payload.to_string(), 160));
     format!("{} | {} | {}", ts, role, payload_text)
+}
+
+fn format_observability_event_summary(event: &Event) -> String {
+    let tool_name = event
+        .meta
+        .tags
+        .iter()
+        .find_map(|tag| tag.strip_prefix("tool:"))
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    let status = event
+        .payload
+        .get("outcome")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            if event.meta.tags.iter().any(|tag| tag == "error") {
+                Some("error")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("unknown");
+    let args = event
+        .payload
+        .get("arguments")
+        .map(|value| truncate(&value.to_string(), 120))
+        .unwrap_or_else(|| "none".to_string());
+    let output = event
+        .payload
+        .get("output")
+        .map(|value| {
+            value
+                .as_str()
+                .map(|text| truncate(text, 120))
+                .unwrap_or_else(|| truncate(&value.to_string(), 120))
+        })
+        .unwrap_or_else(|| "none".to_string());
+    format!(
+        "tool={} status={} args={} output={}",
+        tool_name, status, args, output
+    )
 }
 
 pub(crate) fn format_event_lines(events: &[Event]) -> String {
@@ -285,6 +333,28 @@ fn is_observability_event(event: &Event) -> bool {
 mod tests {
     use super::*;
     use crate::event::contracts::{decision_text, input_text};
+    use crate::event::{rehydrate_event, Event};
+    use serde_json::json;
+
+    fn observe_event() -> Event {
+        rehydrate_event(
+            "observe-1".to_string(),
+            "2026-03-19T14:33:45.000000000Z".to_string(),
+            "tooling".to_string(),
+            "state".to_string(),
+            json!({
+                "outcome": "ok",
+                "arguments": { "command": "node", "args": ["/memory/skills/web_page_extract/scripts/fetch.js", "https://openai.com/news/"] },
+                "output": { "elapsed_ms": 123, "stdout": "{ \"url\": \"https://openai.com/news/\" }" }
+            }),
+            vec![
+                "observe".to_string(),
+                "tool".to_string(),
+                "tool:shell_exec__execute".to_string(),
+                "outcome:ok".to_string(),
+            ],
+        )
+    }
 
     #[test]
     fn apply_submodule_output_overrides_replaces_and_inserts() {
@@ -329,5 +399,19 @@ mod tests {
                 .unwrap_or(""),
             "new social"
         );
+    }
+
+    #[test]
+    fn format_event_lines_includes_compressed_observability_event() {
+        let events = vec![
+            input_text("user", "message", "hello"),
+            observe_event(),
+            decision_text("decision=respond reason=test".to_string(), false),
+        ];
+        let rendered = format_event_lines(&events);
+
+        assert!(rendered.contains("observe | tool=shell_exec__execute status=ok"));
+        assert!(rendered.contains("args="));
+        assert!(rendered.contains("output="));
     }
 }
