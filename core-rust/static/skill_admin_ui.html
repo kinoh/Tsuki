@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skill Packages</title>
+    <link rel="stylesheet" href="/admin/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-base.css" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--page-bg);
+        color: var(--text);
+        font-family: "IBM Plex Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+      }
+      .page {
+        max-width: 1500px;
+        margin: 0 auto;
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 { margin: 0; font-size: 20px; }
+      h2 { margin: 0 0 8px; font-size: 15px; }
+      .muted { color: var(--muted); font-size: 12px; }
+      .title-right, .top-nav {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-nav a {
+        color: var(--muted);
+        font-size: 12px;
+        text-decoration: none;
+        padding-bottom: 2px;
+        border-bottom: 1px solid transparent;
+      }
+      .top-nav a.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+      .logout-btn {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .logout-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1.3fr) minmax(320px, 0.9fr);
+        gap: 12px;
+      }
+      .list-pane, .detail-pane { min-width: 0; }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+      input, textarea, button {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        font: inherit;
+        background: var(--surface-2);
+        color: var(--text);
+      }
+      input, textarea { width: 100%; }
+      button { cursor: pointer; }
+      button:hover { border-color: var(--accent); }
+      textarea {
+        min-height: 240px;
+        resize: vertical;
+        font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+        line-height: 1.45;
+      }
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .list {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        max-height: 74vh;
+        overflow: auto;
+      }
+      .item {
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+        cursor: pointer;
+      }
+      .item:last-child { border-bottom: 0; }
+      .item:hover { background: rgba(255, 255, 255, 0.05); }
+      .item.active { background: rgba(113, 74, 244, 0.22); }
+      .item .name { font-weight: 700; }
+      .item .meta { margin-top: 4px; font-size: 12px; color: var(--muted); }
+      .item .summary { margin-top: 6px; font-size: 12px; color: var(--text); }
+      .editor-grid {
+        display: grid;
+        gap: 10px;
+      }
+      .field-label {
+        display: grid;
+        gap: 6px;
+      }
+      .field-label small {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .editor-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .section-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .file-list {
+        display: grid;
+        gap: 10px;
+      }
+      .file-row {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.02);
+        padding: 10px;
+        display: grid;
+        gap: 8px;
+      }
+      .file-row-head {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .file-row-head input {
+        min-width: 0;
+        flex: 1;
+      }
+      .file-row-head button {
+        flex: 0 0 auto;
+      }
+      .detail-grid {
+        display: grid;
+        gap: 10px;
+      }
+      .kv {
+        display: grid;
+        grid-template-columns: 160px 1fr;
+        gap: 6px;
+        font-size: 13px;
+      }
+      .k { color: var(--muted); }
+      .pill-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .relations {
+        display: grid;
+        gap: 6px;
+        max-height: 240px;
+        overflow: auto;
+      }
+      .relation {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .json {
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.02);
+        font-size: 12px;
+        max-height: 220px;
+        overflow: auto;
+      }
+      @media (max-width: 1200px) {
+        .layout { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <div class="card">
+        <div class="title-row">
+          <h1>Skill Packages</h1>
+          <div class="title-right">
+            <nav class="top-nav" aria-label="Admin Pages">
+              <a href="/admin/events">Events</a>
+              <a href="/admin/prompts">Prompts</a>
+              <a href="/admin/skills" class="active">Skills</a>
+              <a href="/admin/concept-graph">Concept Graph</a>
+              <a href="/admin/state-records">State</a>
+            </nav>
+            <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
+          </div>
+        </div>
+        <div class="muted">Manage installed skill packages at the sandbox boundary. This page edits SKILL.md plus auxiliary files and installs them through the existing skill upsert path.</div>
+      </div>
+
+      <section class="layout">
+        <aside class="card list-pane">
+          <h2>Installed Skills</h2>
+          <div class="toolbar">
+            <input id="searchInput" placeholder="Search skill key" />
+            <button id="searchBtn" type="button">Search</button>
+            <button id="refreshBtn" type="button">Refresh</button>
+            <button id="newBtn" type="button">New</button>
+          </div>
+          <div id="listStatus" class="status">Loading...</div>
+          <div id="skillList" class="list"></div>
+        </aside>
+
+        <section class="card editor-pane">
+          <div class="title-row">
+            <h2>Package Editor</h2>
+            <div class="editor-actions">
+              <span id="saveStatus" class="status"></span>
+              <button id="clearBtn" type="button">Clear</button>
+              <button id="saveBtn" type="button">Install / Update</button>
+            </div>
+          </div>
+          <div class="editor-grid">
+            <label class="field-label">
+              <small>Key</small>
+              <input id="keyInput" placeholder="web_page_extract" />
+            </label>
+            <label class="field-label">
+              <small>Summary
+                <span class="muted">Optional. Leave blank with trigger concepts blank to let the backend generate.</span>
+              </small>
+              <textarea id="summaryInput" rows="3" placeholder="Short summary"></textarea>
+            </label>
+            <label class="field-label">
+              <small>Trigger concepts
+                <span class="muted">Comma or newline separated. Leave blank with summary blank to auto-generate.</span>
+              </small>
+              <textarea id="triggerInput" rows="3" placeholder="concept one, concept two"></textarea>
+            </label>
+            <label class="field-label">
+              <small>SKILL.md</small>
+              <textarea id="contentInput" rows="14" placeholder="---&#10;required_mcp_tools: []&#10;---&#10;# Skill"></textarea>
+            </label>
+            <div class="section-title">
+              <h2 style="margin: 0;">Auxiliary Files</h2>
+              <button id="addFileBtn" type="button">Add File</button>
+            </div>
+            <div id="fileList" class="file-list"></div>
+          </div>
+        </section>
+
+        <aside class="card detail-pane">
+          <h2>Skill Detail</h2>
+          <div id="detailStatus" class="status">Select a skill.</div>
+          <div id="detailBody" class="detail-grid"></div>
+        </aside>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        items: [],
+        selectedKey: null,
+        currentDetail: null,
+      };
+
+      const els = {
+        searchInput: document.getElementById("searchInput"),
+        searchBtn: document.getElementById("searchBtn"),
+        refreshBtn: document.getElementById("refreshBtn"),
+        newBtn: document.getElementById("newBtn"),
+        listStatus: document.getElementById("listStatus"),
+        skillList: document.getElementById("skillList"),
+        keyInput: document.getElementById("keyInput"),
+        summaryInput: document.getElementById("summaryInput"),
+        triggerInput: document.getElementById("triggerInput"),
+        contentInput: document.getElementById("contentInput"),
+        fileList: document.getElementById("fileList"),
+        addFileBtn: document.getElementById("addFileBtn"),
+        saveStatus: document.getElementById("saveStatus"),
+        saveBtn: document.getElementById("saveBtn"),
+        clearBtn: document.getElementById("clearBtn"),
+        detailStatus: document.getElementById("detailStatus"),
+        detailBody: document.getElementById("detailBody"),
+        topLogoutButton: document.getElementById("topLogoutButton"),
+      };
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function requestJson(path, options) {
+        return fetch(path, options).then(async (res) => {
+          if (!res.ok) {
+            let message = `${res.status} ${res.statusText}`;
+            try {
+              message = await res.text();
+            } catch (_) {}
+            throw new Error(message);
+          }
+          return res.json();
+        });
+      }
+
+      function splitConcepts(value) {
+        return String(value || "")
+          .split(/[\n,]/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+
+      function unique(values) {
+        return [...new Set(values.filter(Boolean))];
+      }
+
+      function formatList(items, fallback = "-") {
+        if (!items || items.length === 0) {
+          return `<span class="muted">${escapeHtml(fallback)}</span>`;
+        }
+        return `<div class="pill-list">${items.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join("")}</div>`;
+      }
+
+      function setFileRows(files) {
+        els.fileList.innerHTML = "";
+        const rows = Array.isArray(files) && files.length > 0 ? files : [{ path: "", body: "" }];
+        rows.forEach((file) => addFileRow(file.path || "", file.body || ""));
+      }
+
+      function addFileRow(path = "", body = "") {
+        const row = document.createElement("div");
+        row.className = "file-row";
+        row.innerHTML = `
+          <div class="file-row-head">
+            <input class="file-path" placeholder="scripts/fetch.js" value="${escapeHtml(path)}" />
+            <button class="remove-file-btn" type="button">Remove</button>
+          </div>
+          <textarea class="file-body" rows="8" placeholder="File body">${escapeHtml(body)}</textarea>
+        `;
+        row.querySelector(".remove-file-btn").addEventListener("click", () => {
+          row.remove();
+          if (els.fileList.children.length === 0) {
+            setFileRows([]);
+          }
+        });
+        els.fileList.appendChild(row);
+      }
+
+      function collectFiles() {
+        return Array.from(els.fileList.querySelectorAll(".file-row")).map((row) => {
+          const path = row.querySelector(".file-path").value.trim();
+          const body = row.querySelector(".file-body").value;
+          return { path, body };
+        }).filter((file) => file.path || file.body.trim());
+      }
+
+      function renderList() {
+        if (state.items.length === 0) {
+          els.skillList.innerHTML = '<div class="item"><div class="meta">No skills found.</div></div>';
+          return;
+        }
+        els.skillList.innerHTML = state.items.map((item) => {
+          const active = item.key === state.selectedKey ? " active" : "";
+          const required = Array.isArray(item.required_mcp_tools) && item.required_mcp_tools.length > 0
+            ? item.required_mcp_tools.join(", ")
+            : "-";
+          return `
+            <div class="item${active}" data-key="${escapeHtml(item.key)}">
+              <div class="name">${escapeHtml(item.key)}</div>
+              <div class="meta">${escapeHtml(item.summary || "-")}</div>
+              <div class="meta">tools: ${escapeHtml(required)}</div>
+            </div>
+          `;
+        }).join("");
+        document.querySelectorAll(".item[data-key]").forEach((el) => {
+          el.addEventListener("click", () => loadDetail(el.dataset.key));
+        });
+      }
+
+      function renderNewSkill(key = "") {
+        state.currentDetail = null;
+        state.selectedKey = key || null;
+        els.keyInput.value = key;
+        els.summaryInput.value = "";
+        els.triggerInput.value = "";
+        els.contentInput.value = "";
+        setFileRows([]);
+        els.detailStatus.textContent = "New skill package.";
+        els.detailBody.innerHTML = "";
+        renderList();
+      }
+
+      function renderDetail(item) {
+        state.currentDetail = item;
+        state.selectedKey = item.key || null;
+        els.keyInput.value = item.key || "";
+        els.summaryInput.value = item.summary || "";
+        els.triggerInput.value = Array.isArray(item.trigger_concepts) ? item.trigger_concepts.join(", ") : "";
+        els.contentInput.value = item.package?.content || "";
+        setFileRows(Array.isArray(item.package?.files) ? item.package.files : []);
+
+        const concept = item.concept || {};
+        const relations = Array.isArray(concept.relations) ? concept.relations : [];
+        const packageFiles = Array.isArray(item.package?.files) ? item.package.files : [];
+        const triggerConcepts = unique(Array.isArray(item.trigger_concepts) ? item.trigger_concepts : []);
+        const requiredTools = unique(Array.isArray(item.required_mcp_tools) ? item.required_mcp_tools : []);
+        const incomingRelations = relations.filter((rel) => rel.direction === "incoming" && rel.type === "evokes");
+        const relationHtml = incomingRelations.length === 0
+          ? '<div class="muted">No incoming evoke relations.</div>'
+          : `<div class="relations">${incomingRelations.map((rel) => `
+              <div class="relation">
+                <div><strong>${escapeHtml(rel.from || "-")}</strong> → ${escapeHtml(rel.to || "-")}</div>
+                <div class="muted">${escapeHtml(rel.type || "-")} · ${escapeHtml(String(rel.weight ?? "-"))}</div>
+              </div>
+            `).join("")}</div>`;
+
+        els.detailStatus.textContent = item.installed ? "Installed skill package." : "Package not found in sandbox.";
+        els.detailBody.innerHTML = `
+          <div class="kv"><div class="k">Installed</div><div>${item.installed ? "yes" : "no"}</div></div>
+          <div class="kv"><div class="k">Key</div><div>${escapeHtml(item.key || "-")}</div></div>
+          <div class="kv"><div class="k">Concept name</div><div>${escapeHtml(concept.name || `skill:${item.key || "-"}`)}</div></div>
+          <div class="kv"><div class="k">Summary</div><div>${escapeHtml(item.summary || "-")}</div></div>
+          <div class="kv"><div class="k">Body state key</div><div>${escapeHtml(item.body_state_key || "-")}</div></div>
+          <div class="kv"><div class="k">Required tools</div><div>${formatList(requiredTools)}</div></div>
+          <div class="kv"><div class="k">Trigger concepts</div><div>${formatList(triggerConcepts)}</div></div>
+          <div class="kv"><div class="k">Aux files</div><div>${packageFiles.length}</div></div>
+          <div class="kv"><div class="k">Concept arousal</div><div>${escapeHtml(concept.arousal != null ? String(concept.arousal) : "-")}</div></div>
+          <div class="kv"><div class="k">Concept disabled</div><div>${concept.disabled ? "yes" : "no"}</div></div>
+          <div class="kv"><div class="k">Incoming relations</div><div>${relationHtml}</div></div>
+          <div>
+            <div class="muted" style="margin-bottom: 6px;">Concept detail</div>
+            <pre class="json">${escapeHtml(JSON.stringify(concept, null, 2))}</pre>
+          </div>
+        `;
+        renderList();
+      }
+
+      async function loadList() {
+        const q = els.searchInput.value.trim();
+        els.listStatus.textContent = "Loading...";
+        const path = q ? `/admin/skills/list?q=${encodeURIComponent(q)}` : "/admin/skills/list";
+        try {
+          const data = await requestJson(path);
+          state.items = Array.isArray(data.items) ? data.items : [];
+          els.listStatus.textContent = `${state.items.length} skills`;
+          renderList();
+        } catch (err) {
+          els.listStatus.textContent = `Failed: ${err.message}`;
+        }
+      }
+
+      async function loadDetail(key) {
+        try {
+          const data = await requestJson(`/admin/skills/${encodeURIComponent(key)}`);
+          renderDetail(data.item);
+        } catch (err) {
+          els.saveStatus.textContent = `Load failed: ${err.message}`;
+        }
+      }
+
+      async function saveCurrent() {
+        const key = els.keyInput.value.trim();
+        const content = els.contentInput.value;
+        const summary = els.summaryInput.value.trim();
+        const triggerConcepts = splitConcepts(els.triggerInput.value);
+        const files = collectFiles();
+        if (!key) {
+          els.saveStatus.textContent = "Key is required";
+          return;
+        }
+        if (!content.trim()) {
+          els.saveStatus.textContent = "SKILL.md content is required";
+          return;
+        }
+        if ((summary && triggerConcepts.length === 0) || (!summary && triggerConcepts.length > 0)) {
+          els.saveStatus.textContent = "Summary and trigger concepts must be provided together or both left blank";
+          return;
+        }
+        els.saveStatus.textContent = "Saving...";
+        try {
+          const payload = {
+            content,
+            files,
+          };
+          if (summary && triggerConcepts.length > 0) {
+            payload.summary = summary;
+            payload.trigger_concepts = triggerConcepts;
+          }
+          const data = await requestJson(`/admin/skills/${encodeURIComponent(key)}`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          els.saveStatus.textContent = "Saved";
+          await loadList();
+          await loadDetail(data.key || key);
+        } catch (err) {
+          els.saveStatus.textContent = `Save failed: ${err.message}`;
+        }
+      }
+
+      async function logout() {
+        try {
+          await fetch("/auth/logout", { method: "POST" });
+        } finally {
+          window.location.href = "/admin/login";
+        }
+      }
+
+      els.searchBtn.addEventListener("click", loadList);
+      els.refreshBtn.addEventListener("click", loadList);
+      els.newBtn.addEventListener("click", () => renderNewSkill(""));
+      els.searchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") loadList();
+      });
+      els.clearBtn.addEventListener("click", () => renderNewSkill(els.keyInput.value.trim()));
+      els.addFileBtn.addEventListener("click", () => addFileRow());
+      els.saveBtn.addEventListener("click", saveCurrent);
+      els.topLogoutButton.addEventListener("click", logout);
+
+      loadList().then(() => {
+        if (state.items.length > 0) {
+          loadDetail(state.items[0].key);
+        } else {
+          renderNewSkill("");
+        }
+      });
+    </script>
+  </body>
+</html>

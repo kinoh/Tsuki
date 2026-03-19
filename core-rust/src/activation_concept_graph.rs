@@ -2205,6 +2205,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
              RETURN c.name AS name,
                     c.summary AS summary,
                     c.body_state_key AS body_state_key,
+                    c.required_mcp_tools AS required_mcp_tools,
                     c.disabled AS disabled,
                     c.valence AS valence,
                     c.arousal_level AS arousal_level,
@@ -2224,6 +2225,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             }
             let summary_raw: String = row.get("summary").unwrap_or_default();
             let body_state_key_raw: String = row.get("body_state_key").unwrap_or_default();
+            let required_mcp_tools: Vec<String> = row.get("required_mcp_tools").unwrap_or_default();
             let disabled: bool = row.get("disabled").unwrap_or(false);
             let valence: f64 = row.get("valence").unwrap_or(DEFAULT_VALENCE);
             let arousal_level: f64 = row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL);
@@ -2235,6 +2237,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
                 "kind": if is_skill { "skill" } else { "concept" },
                 "summary": if is_skill { Self::skill_summary(name.as_str(), summary_raw.as_str()) } else { String::new() },
                 "body_state_key": if is_skill { Self::skill_body_state_key(name.as_str(), body_state_key_raw.as_str()) } else { String::new() },
+                "required_mcp_tools": if is_skill { required_mcp_tools } else { Vec::<String>::new() },
                 "disabled": disabled,
                 "valence": valence,
                 "arousal": arousal,
@@ -2287,7 +2290,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             .execute(
                 query(
                     "MATCH (c:Concept {name: $name})
-                     RETURN c.summary AS summary, c.body_state_key AS body_state_key, c.disabled AS disabled",
+                     RETURN c.summary AS summary, c.body_state_key AS body_state_key, c.required_mcp_tools AS required_mcp_tools, c.disabled AS disabled",
                 )
                 .param("name", concept.as_str()),
             )
@@ -2295,10 +2298,12 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             .map_err(|err| err.to_string())?;
         let mut summary_raw = String::new();
         let mut body_state_key_raw = String::new();
+        let mut required_mcp_tools = Vec::<String>::new();
         let mut disabled = false;
         if let Ok(Some(row)) = meta_result.next().await {
             summary_raw = row.get("summary").unwrap_or_default();
             body_state_key_raw = row.get("body_state_key").unwrap_or_default();
+            required_mcp_tools = row.get("required_mcp_tools").unwrap_or_default();
             disabled = row.get("disabled").unwrap_or(false);
         }
         let relations = self
@@ -2338,6 +2343,7 @@ impl ConceptGraphDebugReader for ActivationConceptGraphStore {
             "kind": if is_skill { "skill" } else { "concept" },
             "summary": if is_skill { Self::skill_summary(concept.as_str(), summary_raw.as_str()) } else { String::new() },
             "body_state_key": if is_skill { Self::skill_body_state_key(concept.as_str(), body_state_key_raw.as_str()) } else { String::new() },
+            "required_mcp_tools": if is_skill { required_mcp_tools } else { Vec::<String>::new() },
             "disabled": disabled,
             "valence": state.valence,
             "arousal": Self::round_score(self.arousal(state.arousal_level, state.accessed_at, now)),

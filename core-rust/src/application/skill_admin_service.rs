@@ -1,18 +1,51 @@
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 use crate::app_state::AppState;
 use crate::llm::{build_response_api_llm, LlmRequest, ResponseApiConfig};
 
 const MAX_TRIGGER_CONCEPTS: usize = 3;
+const DEFAULT_LIST_LIMIT: usize = 80;
+const MAX_LIST_LIMIT: usize = 200;
 const SKILL_INSTALL_TOOL: &str = "shell_exec__skill_install";
+const SKILL_READ_TOOL: &str = "shell_exec__skill_read";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct SkillInstallFile {
     pub(crate) path: String,
     pub(crate) body: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SkillCatalogItem {
+    pub(crate) key: String,
+    pub(crate) summary: String,
+    pub(crate) body_state_key: String,
+    pub(crate) required_mcp_tools: Vec<String>,
+    pub(crate) disabled: bool,
+    pub(crate) valence: f64,
+    pub(crate) arousal: f64,
+    pub(crate) accessed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SkillPackageDetail {
+    pub(crate) content: String,
+    pub(crate) files: Vec<SkillInstallFile>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SkillAdminDetail {
+    pub(crate) key: String,
+    pub(crate) installed: bool,
+    pub(crate) concept: Option<Value>,
+    pub(crate) summary: String,
+    pub(crate) body_state_key: String,
+    pub(crate) required_mcp_tools: Vec<String>,
+    pub(crate) trigger_concepts: Vec<String>,
+    pub(crate) package: Option<SkillPackageDetail>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,6 +152,150 @@ pub(crate) async fn upsert_skill(
         trigger_concepts,
         required_mcp_tools,
     })
+}
+
+pub(crate) async fn list_skills(
+    state: &AppState,
+    query: Option<&str>,
+    limit: Option<usize>,
+) -> Result<Vec<SkillCatalogItem>, (StatusCode, String)> {
+    let limit = limit
+        .unwrap_or(DEFAULT_LIST_LIMIT)
+        .max(1)
+        .min(MAX_LIST_LIMIT);
+    let query = query
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value.starts_with("skill:") {
+                value.to_string()
+            } else {
+                format!("skill:{}", value)
+            }
+        })
+        .or_else(|| Some("skill:".to_string()));
+    let rows = state
+        .services
+        .activation_concept_graph
+        .debug_concept_search(query, limit)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    let mut items = Vec::<SkillCatalogItem>::new();
+    for row in rows {
+        let Some(name) = row.get("name").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if row.get("kind").and_then(|value| value.as_str()) != Some("skill") {
+            continue;
+        }
+        let key = name
+            .strip_prefix("skill:")
+            .unwrap_or(name)
+            .trim()
+            .to_string();
+        if key.is_empty() {
+            continue;
+        }
+        let summary = row
+            .get("summary")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let body_state_key = row
+            .get("body_state_key")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let required_mcp_tools = row
+            .get("required_mcp_tools")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|value| value.as_str().map(str::trim))
+                    .filter(|value| !value.is_empty())
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let disabled = row
+            .get("disabled")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        let valence = row
+            .get("valence")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0);
+        let arousal = row
+            .get("arousal")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0);
+        let accessed_at = row
+            .get("accessed_at")
+            .and_then(|value| value.as_i64())
+            .unwrap_or_default();
+        items.push(SkillCatalogItem {
+            key,
+            summary,
+            body_state_key,
+            required_mcp_tools,
+            disabled,
+            valence,
+            arousal,
+            accessed_at,
+        });
+    }
+    Ok(items)
+}
+
+pub(crate) async fn get_skill_detail(
+    state: &AppState,
+    key: &str,
+) -> Result<Option<SkillAdminDetail>, (StatusCode, String)> {
+    let key = key
+        .trim()
+        .strip_prefix("skill:")
+        .unwrap_or(key.trim())
+        .trim();
+    if key.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "key is required".to_string()));
+    }
+
+    let concept_name = format!("skill:{}", key);
+    let concept = state
+        .services
+        .activation_concept_graph
+        .debug_concept_detail(concept_name.clone())
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    let package = read_skill_package(state, key).await?;
+
+    if concept.is_none() && package.is_none() {
+        return Ok(None);
+    }
+
+    let (summary, body_state_key, required_mcp_tools, trigger_concepts) = concept
+        .as_ref()
+        .map(extract_skill_metadata)
+        .unwrap_or_else(|| {
+            (
+                String::new(),
+                key.to_string(),
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            )
+        });
+
+    Ok(Some(SkillAdminDetail {
+        key: key.to_string(),
+        installed: package.is_some(),
+        concept,
+        summary,
+        body_state_key,
+        required_mcp_tools,
+        trigger_concepts,
+        package,
+    }))
 }
 
 fn build_skill_install_files(
@@ -282,6 +459,149 @@ fn normalize_trigger_concepts(items: &[String]) -> Result<Vec<String>, (StatusCo
     Ok(deduped)
 }
 
+#[derive(Debug, Deserialize)]
+struct SkillReadResult {
+    found: bool,
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    files: Vec<String>,
+}
+
+async fn read_skill_package(
+    state: &AppState,
+    key: &str,
+) -> Result<Option<SkillPackageDetail>, (StatusCode, String)> {
+    let root = read_skill_file(state, key, None).await?;
+    let Some(root) = root else {
+        return Ok(None);
+    };
+
+    let mut files = Vec::<SkillInstallFile>::new();
+    for path in root.files.into_iter().filter(|path| path != "SKILL.md") {
+        let Some(file) = read_skill_file(state, key, Some(path.as_str())).await? else {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("skill_read missing file: {}", path),
+            ));
+        };
+        files.push(SkillInstallFile {
+            path,
+            body: file.content,
+        });
+    }
+
+    Ok(Some(SkillPackageDetail {
+        content: root.content,
+        files,
+    }))
+}
+
+async fn read_skill_file(
+    state: &AppState,
+    key: &str,
+    path: Option<&str>,
+) -> Result<Option<SkillReadResult>, (StatusCode, String)> {
+    let mut payload = json!({ "key": key });
+    if let Some(path) = path {
+        payload["path"] = json!(path);
+    }
+    let raw = state
+        .services
+        .mcp_registry
+        .call_tool(SKILL_READ_TOOL, payload)
+        .await
+        .map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("skill_read failed: {}", err),
+            )
+        })?;
+    let parsed = serde_json::from_str::<SkillReadResult>(raw.as_str()).map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("skill_read parse failed: {}", err),
+        )
+    })?;
+    if !parsed.found {
+        return Ok(None);
+    }
+    Ok(Some(parsed))
+}
+
+fn extract_skill_metadata(concept: &Value) -> (String, String, Vec<String>, Vec<String>) {
+    let summary = concept
+        .get("summary")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let body_state_key = concept
+        .get("body_state_key")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let required_mcp_tools = concept
+        .get("required_mcp_tools")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|value| value.as_str().map(str::trim))
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let trigger_concepts = concept
+        .get("relations")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let direction = item.get("direction").and_then(|value| value.as_str())?;
+                    let relation_type = item.get("type").and_then(|value| value.as_str())?;
+                    let from = item.get("from").and_then(|value| value.as_str())?;
+                    let to = item.get("to").and_then(|value| value.as_str())?;
+                    if direction != "incoming"
+                        || relation_type != "evokes"
+                        || !to.starts_with("skill:")
+                    {
+                        return None;
+                    }
+                    let trigger = from.strip_prefix("skill:").unwrap_or(from).trim();
+                    if trigger.is_empty() {
+                        None
+                    } else {
+                        Some(trigger.to_string())
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    (
+        summary,
+        body_state_key,
+        required_mcp_tools,
+        dedupe_strings(trigger_concepts),
+    )
+}
+
+fn dedupe_strings(values: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::<String>::new();
+    let mut deduped = Vec::<String>::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            deduped.push(trimmed.to_string());
+        }
+    }
+    deduped
+}
+
 async fn generate_skill_index(
     state: &AppState,
     key: &str,
@@ -367,6 +687,7 @@ fn parse_generated(raw: &str) -> Result<GeneratedSkillIndex, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn extract_skill_frontmatter_returns_none_without_header() {
@@ -425,5 +746,37 @@ mod tests {
         .expect_err("SKILL.md auxiliary file should be rejected");
         assert_eq!(error.0, StatusCode::BAD_REQUEST);
         assert!(error.1.contains("must not include SKILL.md"));
+    }
+
+    #[test]
+    fn extract_skill_metadata_reads_required_tools_and_triggers() {
+        let concept = json!({
+            "summary": "Extract news page text",
+            "body_state_key": "web_page_extract",
+            "required_mcp_tools": ["shell_exec__execute"],
+            "relations": [
+                {
+                    "direction": "incoming",
+                    "from": "news_fetch",
+                    "to": "skill:web_page_extract",
+                    "type": "evokes",
+                    "weight": 0.4
+                },
+                {
+                    "direction": "outgoing",
+                    "from": "skill:web_page_extract",
+                    "to": "article",
+                    "type": "evokes",
+                    "weight": 0.2
+                }
+            ]
+        });
+
+        let (summary, body_state_key, required_mcp_tools, trigger_concepts) =
+            extract_skill_metadata(&concept);
+        assert_eq!(summary, "Extract news page text");
+        assert_eq!(body_state_key, "web_page_extract");
+        assert_eq!(required_mcp_tools, vec!["shell_exec__execute".to_string()]);
+        assert_eq!(trigger_concepts, vec!["news_fetch".to_string()]);
     }
 }

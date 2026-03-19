@@ -165,13 +165,14 @@
             <nav class="top-nav" aria-label="Admin Pages">
               <a href="/admin/events">Events</a>
               <a href="/admin/prompts">Prompts</a>
+              <a href="/admin/skills">Skills</a>
               <a href="/admin/concept-graph">Concept Graph</a>
               <a href="/admin/state-records" class="active">State</a>
             </nav>
             <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
           </div>
         </div>
-        <div class="muted">Edit state-backed content and optionally expose it as a skill index in the concept graph.</div>
+        <div class="muted">Edit state-backed content without mixing in skill package indexing concerns.</div>
       </div>
 
       <section class="layout">
@@ -203,9 +204,6 @@
               <label class="muted" for="contentInput">Content</label>
               <textarea id="contentInput" placeholder="Record content"></textarea>
             </div>
-            <div class="toggle-row">
-              <label><input id="skillEnabledInput" type="checkbox" /> <span>Index as skill</span></label>
-            </div>
             <div class="detail-meta">
               <div class="kv"><div class="k">Updated At</div><div id="updatedAtValue">-</div></div>
             </div>
@@ -228,7 +226,6 @@
         recordList: document.getElementById("recordList"),
         keyInput: document.getElementById("keyInput"),
         contentInput: document.getElementById("contentInput"),
-        skillEnabledInput: document.getElementById("skillEnabledInput"),
         updatedAtValue: document.getElementById("updatedAtValue"),
         saveStatus: document.getElementById("saveStatus"),
         saveBtn: document.getElementById("saveBtn"),
@@ -261,15 +258,11 @@
         }
         els.recordList.innerHTML = state.items.map((item) => {
           const active = item.key === state.selectedKey ? " active" : "";
-          const skill = item.skill_index?.enabled
-            ? `<div class="summary">Skill: ${escapeHtml(item.skill_index.summary || "-")}</div>`
-            : "";
           return `
             <div class="item${active}" data-key="${encodeURIComponent(item.key)}">
               <div class="name">${escapeHtml(item.key)}</div>
-              <div class="meta">${escapeHtml(item.updated_at)} · ${item.skill_index?.enabled ? "indexed" : "plain state"}</div>
+              <div class="meta">${escapeHtml(item.updated_at)} · plain state</div>
               <div class="meta">${escapeHtml(item.content_preview || "")}</div>
-              ${skill}
             </div>
           `;
         }).join("");
@@ -283,7 +276,6 @@
         state.selectedKey = item.key;
         els.keyInput.value = item.key || "";
         els.contentInput.value = item.content || "";
-        els.skillEnabledInput.checked = !!item.skill_index?.enabled;
         els.updatedAtValue.textContent = item.updated_at || "-";
         renderList();
       }
@@ -294,7 +286,6 @@
         state.selectedKey = cleanKey || null;
         els.keyInput.value = cleanKey;
         els.contentInput.value = "";
-        els.skillEnabledInput.checked = false;
         els.updatedAtValue.textContent = "-";
         renderList();
       }
@@ -339,9 +330,6 @@
             content,
             related_keys: state.currentDetail?.related_keys || [],
             metadata: state.currentDetail?.metadata || {},
-            skill_index: {
-              enabled: !!els.skillEnabledInput.checked,
-            },
           };
           const data = await requestJson(`/admin/state-records/data/${encodeURIComponent(key)}`, {
             method: "PUT",

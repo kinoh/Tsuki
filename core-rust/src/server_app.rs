@@ -34,7 +34,10 @@ use crate::app_state::{
 };
 use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{build_modules, sync_module_registry_from_prompts};
-use crate::application::skill_admin_service::{upsert_skill, SkillUpsertPayload};
+use crate::application::skill_admin_service::{
+    get_skill_detail, list_skills, upsert_skill, SkillAdminDetail, SkillCatalogItem,
+    SkillUpsertPayload,
+};
 use crate::application::state_record_admin_service::{
     get_state_record_detail, list_state_records, upsert_state_record, StateRecordDetail,
     StateRecordListItem, StateRecordUpsertPayload,
@@ -214,6 +217,22 @@ struct DebugStateRecordsResponse {
 #[derive(Debug, Serialize)]
 struct DebugStateRecordDetailResponse {
     item: StateRecordDetail,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugSkillsQuery {
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugSkillsResponse {
+    items: Vec<SkillCatalogItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugSkillDetailResponse {
+    item: SkillAdminDetail,
 }
 
 #[derive(Debug, Deserialize)]
@@ -441,6 +460,12 @@ pub(crate) async fn run_server() {
     let admin_router = Router::new()
         .route("/styles/{name}", get(debug_style))
         .route("/prompts", get(debug_ui))
+        .route("/skills", get(debug_skill_admin_ui))
+        .route("/skills/list", get(debug_get_skills))
+        .route(
+            "/skills/{key}",
+            get(debug_get_skill_detail).put(admin_upsert_skill),
+        )
         .route("/state-records", get(debug_state_records_ui))
         .route("/events", get(debug_monitor_ui))
         .route("/concept-graph", get(debug_concept_graph_ui))
@@ -461,7 +486,6 @@ pub(crate) async fn run_server() {
             get(debug_concept_graph_relations),
         )
         .route("/concept-graph/queries", get(debug_concept_graph_queries))
-        .route("/skills/{key}", put(admin_upsert_skill))
         .route("/state-records/data", get(debug_get_state_records))
         .route(
             "/state-records/data/{key}",
@@ -1928,6 +1952,23 @@ async fn debug_concept_graph_ui(
     }
 }
 
+async fn debug_skill_admin_ui(
+    State(_state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    const EMBEDDED: &str = include_str!("../static/skill_admin_ui.html");
+    const UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/skill_admin_ui.html");
+    match tokio::fs::read_to_string(UI_PATH).await {
+        Ok(html) => Ok(Html(html)),
+        Err(err) => {
+            println!(
+                "SKILL_ADMIN_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                UI_PATH, err
+            );
+            Ok(Html(EMBEDDED.to_string()))
+        }
+    }
+}
+
 async fn debug_state_records_ui(
     State(_state): State<AppState>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -1943,6 +1984,24 @@ async fn debug_state_records_ui(
             Ok(Html(EMBEDDED.to_string()))
         }
     }
+}
+
+async fn debug_get_skills(
+    State(state): State<AppState>,
+    Query(query): Query<DebugSkillsQuery>,
+) -> Result<Json<DebugSkillsResponse>, (StatusCode, String)> {
+    let items = list_skills(&state, query.q.as_deref(), query.limit).await?;
+    Ok(Json(DebugSkillsResponse { items }))
+}
+
+async fn debug_get_skill_detail(
+    Path(key): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<DebugSkillDetailResponse>, (StatusCode, String)> {
+    let item = get_skill_detail(&state, key.as_str())
+        .await?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "skill not found".to_string()))?;
+    Ok(Json(DebugSkillDetailResponse { item }))
 }
 
 fn admin_password_fingerprint(password: &str) -> String {
