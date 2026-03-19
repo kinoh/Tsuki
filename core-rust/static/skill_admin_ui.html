@@ -96,6 +96,9 @@
         font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
         line-height: 1.45;
       }
+      textarea.compact {
+        min-height: 90px;
+      }
       .status {
         font-size: 12px;
         color: var(--muted);
@@ -273,13 +276,13 @@
               <small>Summary
                 <span class="muted">Optional. Leave blank with trigger concepts blank to let the backend generate.</span>
               </small>
-              <textarea id="summaryInput" rows="3" placeholder="Short summary"></textarea>
+              <textarea id="summaryInput" class="compact" rows="3" placeholder="Short summary"></textarea>
             </label>
             <label class="field-label">
               <small>Trigger concepts
-                <span class="muted">Comma or newline separated. Leave blank with summary blank to auto-generate.</span>
+                <span class="muted">One concept per line. Leave blank with summary blank to let the backend generate.</span>
               </small>
-              <textarea id="triggerInput" rows="3" placeholder="concept one, concept two"></textarea>
+              <textarea id="triggerInput" class="compact" rows="3" placeholder="concept one&#10;concept two"></textarea>
             </label>
             <label class="field-label">
               <small>SKILL.md</small>
@@ -352,7 +355,8 @@
 
       function splitConcepts(value) {
         return String(value || "")
-          .split(/[\n,]/)
+          .replaceAll(",", "\n")
+          .split(/\n+/)
           .map((item) => item.trim())
           .filter(Boolean);
       }
@@ -442,7 +446,7 @@
         state.selectedKey = item.key || null;
         els.keyInput.value = item.key || "";
         els.summaryInput.value = item.summary || "";
-        els.triggerInput.value = Array.isArray(item.trigger_concepts) ? item.trigger_concepts.join(", ") : "";
+        els.triggerInput.value = Array.isArray(item.trigger_concepts) ? item.trigger_concepts.join("\n") : "";
         els.contentInput.value = item.package?.content || "";
         setFileRows(Array.isArray(item.package?.files) ? item.package.files : []);
 
