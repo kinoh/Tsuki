@@ -1,8 +1,0 @@
-- Added a `UserContext` facade interface to expose only per-user state needed for response generation (thread lookup, memory load, toolsets, runtime context accessor).
-- Added a `Responder` interface and `MastraResponder` implementation that own Mastra agent + usage storage while depending on the `UserContext` facade for per-user inputs.
-- Updated `ActiveUser` to implement `UserContext` and delegate response generation (including scheduler notifications) to `MastraResponder`, keeping channel management/notification subscription in `ActiveUser` and agent invocation/usage logging inside the responder.
-- Extended WebSocket payload handling to accept structured `{ type: 'message', text?, images[] }` JSON; `MessageInput` now carries `text` and optional base64 images, and `MastraResponder` maps them to Mastra `CoreUserMessage` parts for multimodal requests.
-- Added `api-specs/asyncapi.yaml` for WS protocol (AsyncAPI 3.0). `core/src/shared/wsSchema.ts` mirrors the client payload schema in Zod for now; hook up generation later.
-- Updated `core/scripts/ws_client.js` to send the new `{ type: 'message', text }` payload format (no image support).
-- Introduced routing layer: `MessageRouter` interface and `AIRouter` (AI SDK, lightweight model via ROUTER_MODEL env) to decide respond/skip. `ActiveUser.processMessage` now routes first; on skip it returns a system ack, otherwise delegates to `MastraResponder`.
-- Added sensory ingestion: WebSocket `ClientMessage` supports `type: sensory`; `AIRouter` keeps a fixed-length in-memory sensory buffer per user-instance and uses it in routing prompts. Sensory payloads flow through the same WebSocket->processMessage path.
