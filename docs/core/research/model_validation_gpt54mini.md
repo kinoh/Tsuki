@@ -20,7 +20,9 @@ Primary motivation: gpt-5.4-mini is cheaper than gpt-5.2, and tester has no tool
 
 Config change: `config.toml [llm].model` edited directly. No harness code changes required.
 
-Scenarios: Chitchat, Schedule_Setup, Fuzzy_Concept_Intro_Query, Self_Improvement_Trigger.
+Initial scenarios: Chitchat, Schedule_Setup, Fuzzy_Concept_Intro_Query, Self_Improvement_Trigger.
+Extended scenarios: Fuzzy_Style_Name_Query, Image_Atmosphere, Router_Concept_Discovery,
+Shell_Exec_News_Fetch, Shell_Exec_NumPy_Regression, Submodule, Conversation_Recall_Kernel_Wording.
 Run count: 3 per scenario.
 
 ## Phase 1 Results: Core = gpt-5.4-mini
@@ -57,6 +59,61 @@ After fix: 3/3 pass, `disambiguation_naturalness` mean=1.00.
 | Self_Improvement_Trigger | 1/1 (100%) | overall_pass=true |
 
 **Conclusion: Core replacement with gpt-5.4-mini is viable.**
+
+## Extended Scenario Results: All 11 scenarios (Core = gpt-5.4-mini)
+
+| Scenario | overall_pass | Notes |
+|---|---|---|
+| Chitchat | ✅ | |
+| Schedule_Setup | ✅ | |
+| Fuzzy_Concept_Intro_Query | ✅ | after metric fix |
+| Self_Improvement_Trigger | ✅ | |
+| Image_Atmosphere | ✅ | 2/3 run-level pass |
+| Shell_Exec_NumPy_Regression | ✅ | |
+| Conversation_Recall_Kernel_Wording | ✅ | |
+| Fuzzy_Style_Name_Query | ❌ | after metric fix: ✅ (same `disambiguation_naturalness` bug; commit `c9a25a7`) |
+| Router_Concept_Discovery | ❌ | concept score gates low; router state dominated by prior context — pre-existing issue |
+| Shell_Exec_News_Fetch | ❌ | see below |
+| Submodule | ❌ | see below |
+
+### Shell_Exec_News_Fetch failure
+
+The core passes `command: "node"` and also includes `"node"` as the first element of `args`,
+causing node to interpret `"node"` as the script path and fail with
+`Cannot find module '/memory/node'`.
+
+The subsequent retry (correct args) hit a playwright DNS resolution failure (`NS_ERROR_UNKNOWN_HOST`)
+in the test environment, which appears intermittent — the sandbox fetches `openai.com/news/` successfully
+when called directly.
+
+This is a tool schema misunderstanding specific to `shell_exec__execute`: gpt-5.4-mini conflates
+the `command` field (executable) with `args` (arguments excluding the executable).
+Shell_Exec_NumPy_Regression passed because it used `python3 -c ...` style where the same ambiguity
+does not manifest.
+
+### Submodule failure
+
+`module_independence` (0.27) and `activation_alignment` (0.33) are both low.
+Historical data shows this scenario has never passed (27/27 runs fail across all model versions),
+and the only prior run with these metrics (2026-02-25, gpt-5.2) showed MI=0.35, AA=0.70.
+AA is lower now (0.70 → 0.33), but this is not a validated regression — sample size is 1 vs 3.
+Not treated as a gpt-5.4-mini regression.
+
+### Overall assessment: conversational quality is sufficient
+
+gpt-5.4-mini handles casual conversation, memory recall, tool-driven tasks (scheduling, Python execution),
+and multi-step preference refinement at the same level as gpt-5.2.
+The failures are:
+- **Router_Concept_Discovery / Submodule**: pre-existing, model-independent issues
+- **Shell_Exec_News_Fetch**: specific tool schema misunderstanding for `shell_exec__execute`
+- **Fuzzy_Style_Name_Query**: metric definition bug (fixed)
+
+### Future consideration: model routing
+
+For scenarios requiring precise tool schema adherence (shell_exec style) or complex concept graph
+interactions, routing to a more capable model on demand may be worth exploring.
+gpt-5.4-mini is sufficient for conversational core use; a tiered approach could address the
+remaining gaps without reverting the cost reduction across the board.
 
 ## Phase 2 Results: Tester = gpt-5.4-mini
 
