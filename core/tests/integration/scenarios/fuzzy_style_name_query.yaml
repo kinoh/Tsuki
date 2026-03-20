@@ -53,11 +53,10 @@ metrics_definition:
 
   disambiguation_naturalness:
     description: |
-      Judge whether follow-up clarification feels like natural conversation rather than search-tree narrowing.
-      Score high when:
-      - clarification questions feel lightweight and grounded in the user's phrasing
-      - the assistant does not force binary or menu-like branching
-      Penalize "A or B?" style narrowing that feels like mechanical disambiguation.
+      Judge whether the assistant avoids rigid binary clarification.
+      Score 1.0 when the assistant asks no clarification question, or asks only a light natural interest-check.
+      Penalize only when the assistant ends a reply with a rigid "A or B?" style narrowing question
+      that treats the conversation as a decision branch rather than a casual exchange.
 
   answer_density_fit:
     description: |
