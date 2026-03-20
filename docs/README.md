@@ -5,10 +5,11 @@
 ```
 docs/
   {area}/
-    spec/     # Design model, principles, and guidance for extension — not what code does, but why
-    adr/      # Architecture Decision Records: context, decision, rationale
-    runbook/  # Operational procedures (infra area only)
-  archive/    # Legacy flat docs — to be discarded after ADR extraction is complete
+    spec/      # Design model, principles, and guidance for extension — not what code does, but why
+    adr/       # Architecture Decision Records: context, decision, rationale
+    research/  # Evaluations, experiments, feasibility studies, and unique findings
+    runbook/   # Operational procedures (infra area only)
+  archive/     # Legacy flat docs — to be discarded after ADR extraction is complete
 ```
 
 ### Areas
@@ -20,12 +21,14 @@ docs/
 | `infra/` | Compose, Docker, CI/CD, Taskfile, deployment |
 | `integrations/` | MCP servers, RSS, TTS, sandbox, skill packages |
 
-## spec vs adr
+## spec vs adr vs research
 
-- **spec** — describes how things work *now*: interface contracts, configuration references,
-  runbooks. Update in place when the implementation changes.
+- **spec** — design model, principles, and guidance for extension. Not what the code does, but
+  why it is shaped that way. Update in place when the model changes.
 - **adr** — records *why* a decision was made: context, decision, rationale, rejected
   alternatives. Append-only; do not edit past decisions.
+- **research** — evaluations, experiments, feasibility probes, and findings that informed or may
+  inform design. Not decisions themselves, but the evidence behind them.
 
 ## File Naming
 
