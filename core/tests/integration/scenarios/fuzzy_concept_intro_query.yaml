@@ -70,8 +70,7 @@ metrics_definition:
 
   disambiguation_naturalness:
     description: |
-      Judge whether the assistant's closing question or clarification feels natural.
-      Score high when:
-      - the assistant asks at most a light interest-check when needed
-      - clarification is phrased as a human conversational preference, not a binary search branch
-      Penalize rigid "which of these two tracks?" style narrowing at the end of the answer.
+      Judge whether the assistant avoids rigid binary clarification.
+      Score 1.0 when the assistant asks no clarification question, or asks only a light natural interest-check.
+      Penalize only when the assistant ends a reply with a rigid "A or B?" style narrowing question
+      that treats the conversation as a decision branch rather than a casual exchange.
