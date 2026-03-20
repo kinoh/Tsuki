@@ -609,7 +609,7 @@ impl Db {
       .execute(
         "INSERT INTO state_records (key, content, related_keys_json, metadata_json, updated_at)\
          VALUES (?, ?, ?, ?, ?)\
-         ON CONFLICT(key) DO UPDATE SET\
+         ON CONFLICT(key) DO UPDATE SET \
            content=excluded.content,\
            related_keys_json=excluded.related_keys_json,\
            metadata_json=excluded.metadata_json,\
@@ -662,6 +662,30 @@ impl Db {
         params![q.clone(), q.clone(), q, limit as i64],
       )
       .await?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let key: String = row.get(0)?;
+            let content: String = row.get(1)?;
+            let related_keys_json: String = row.get(2)?;
+            let metadata_json: String = row.get(3)?;
+            let updated_at: String = row.get(4)?;
+            results.push((key, content, related_keys_json, metadata_json, updated_at));
+        }
+        Ok(results)
+    }
+
+    pub async fn list_state_records(
+        &self,
+        limit: usize,
+    ) -> DbResult<Vec<(String, String, String, String, String)>> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                "SELECT key, content, related_keys_json, metadata_json, updated_at FROM state_records \
+                 ORDER BY updated_at DESC LIMIT ?",
+                params![limit as i64],
+            )
+            .await?;
         let mut results = Vec::new();
         while let Some(row) = rows.next().await? {
             let key: String = row.get(0)?;

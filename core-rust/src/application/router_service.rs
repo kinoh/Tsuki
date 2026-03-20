@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use crate::activation_concept_graph::ActiveGraphNode;
+use crate::activation_concept_graph::{ActiveGraphNode, VisibleSkill};
 use crate::app_state::AppState;
 use crate::application::concept_activation_service::activate_concepts;
 use crate::application::concept_retrieval_service::retrieve_concepts;
@@ -25,6 +25,7 @@ const SATURATION_STEP: f64 = 0.24;
 const SATURATION_MAX: f64 = 0.72;
 const SATURATION_RECOVERY: f64 = 0.06;
 const POST_HARD_DAMPEN_RATIO: f64 = 0.35;
+const VISIBLE_SKILL_LIMIT: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct HardTriggerResult {
@@ -44,6 +45,7 @@ pub(crate) struct RouterOutput {
     pub(crate) soft_recommendations: Vec<String>,
     pub(crate) mcp_visible_tools: Vec<String>,
     pub(crate) mcp_tool_visibility: Vec<McpToolVisibility>,
+    pub(crate) visible_skills: Vec<VisibleSkill>,
     pub(crate) hard_trigger_results: Vec<HardTriggerResult>,
 }
 
@@ -122,10 +124,18 @@ where
         if let Err(err) = state
             .services
             .activation_concept_graph
-            .activate_related_submodules(activation_sources)
+            .activate_related_submodules(activation_sources.clone())
             .await
         {
             emit_router_debug_error(state, "activate_related_submodules", &err).await;
+        }
+        if let Err(err) = state
+            .services
+            .activation_concept_graph
+            .activate_related_skills(activation_sources)
+            .await
+        {
+            emit_router_debug_error(state, "activate_related_skills", &err).await;
         }
     }
 
@@ -154,6 +164,21 @@ where
         .filter(|item| item.visible)
         .map(|item| item.runtime_tool_name.clone())
         .collect::<Vec<_>>();
+    let visible_skills = match state
+        .services
+        .activation_concept_graph
+        .visible_skills(
+            state.config.router.recommendation_threshold as f64,
+            VISIBLE_SKILL_LIMIT,
+        )
+        .await
+    {
+        Ok(items) => items,
+        Err(err) => {
+            emit_router_debug_error(state, "visible_skills", &err).await;
+            Vec::new()
+        }
+    };
     let activation_snapshot = ActivationSnapshot {
         active_concepts_and_arousal: activation.active_concepts_and_arousal.clone(),
         hard_triggers: hard_triggers.clone(),
@@ -189,6 +214,7 @@ where
         soft_recommendations,
         mcp_visible_tools,
         mcp_tool_visibility,
+        visible_skills,
         hard_trigger_results,
     };
     if !dry_run {

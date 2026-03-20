@@ -3,9 +3,13 @@ use async_openai::{
     types::responses::{CreateResponseArgs, InputParam},
     Client,
 };
-use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine,
+};
 use bech32::{ToBase32, Variant};
 use futures::{SinkExt, StreamExt};
+use reqwest::header::{COOKIE, ORIGIN, SET_COOKIE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -29,6 +33,7 @@ const READY_INTERVAL_MS: u64 = 500;
 const REQUIRED_BASELINE_METRICS: [&str; 2] = ["scenario_requirement_fit", "dialog_naturalness"];
 const SECRET_DIR_PATH: &str = "tests/integration/secrets";
 const SECRET_KEY_ENV_VAR: &str = "PROMPT_PRIVATE_KEY";
+const ADMIN_PASSWORD_ENV_VAR: &str = "ADMIN_AUTH_PASSWORD";
 const INCOMPLETE_SCENARIO_REQUIREMENT_CAP: f64 = 0.5;
 const DEFAULT_EMIT_WAIT_TIMEOUT_MS: u64 = 15_000;
 const POST_STEP_EVENT_DRAIN_IDLE_MS: u64 = 500;
@@ -95,8 +100,22 @@ struct MetricDefinition {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct ScenarioSkillFile {
+    path: String,
+    body: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ScenarioStep {
+    InstallSkill {
+        key: String,
+        body: String,
+        summary: String,
+        trigger_concepts: Vec<String>,
+        #[serde(default)]
+        files: Vec<ScenarioSkillFile>,
+    },
     Conversation {
         tester_instructions: String,
         #[serde(default)]
@@ -190,7 +209,9 @@ struct RuntimeContext {
     temp_dir: PathBuf,
     db_path: PathBuf,
     ws_url: String,
+    http_base_url: String,
     auth_token: String,
+    admin_password: String,
     memgraph_uri: String,
     memgraph_backup_path: PathBuf,
     sqlite_backup_path: Option<PathBuf>,
@@ -225,6 +246,15 @@ struct ConversationRuntimeStep {
 }
 
 #[derive(Debug, Clone)]
+struct InstallSkillRuntimeStep {
+    key: String,
+    body: String,
+    summary: String,
+    trigger_concepts: Vec<String>,
+    files: Vec<ScenarioSkillFile>,
+}
+
+#[derive(Debug, Clone)]
 struct EmitEventRuntimeStep {
     event: EmitEventPayload,
     wait_for_tags_any: Vec<String>,
@@ -240,6 +270,7 @@ struct SensoryRuntimeStep {
 
 #[derive(Debug, Clone)]
 enum RuntimeScenarioStep {
+    InstallSkill(InstallSkillRuntimeStep),
     Conversation(ConversationRuntimeStep),
     EmitEvent(EmitEventRuntimeStep),
     Sensory(SensoryRuntimeStep),
@@ -567,6 +598,94 @@ fn validate_scenario_definition(scenario: &Scenario) -> Result<(), String> {
 
     for (index, step) in scenario.steps.iter().enumerate() {
         match step {
+            ScenarioStep::InstallSkill {
+                key,
+                body,
+                summary,
+                trigger_concepts,
+                files,
+            } => {
+                if key.trim().is_empty() {
+                    return Err(format!(
+                        "steps[{}] install_skill requires non-empty key",
+                        index
+                    ));
+                }
+                if body.trim().is_empty() {
+                    return Err(format!(
+                        "steps[{}] install_skill requires non-empty body",
+                        index
+                    ));
+                }
+                if summary.trim().is_empty() {
+                    return Err(format!(
+                        "steps[{}] install_skill requires non-empty summary",
+                        index
+                    ));
+                }
+                if trigger_concepts.is_empty() {
+                    return Err(format!(
+                        "steps[{}] install_skill requires at least one trigger_concepts item",
+                        index
+                    ));
+                }
+                if trigger_concepts.len() > 3 {
+                    return Err(format!(
+                        "steps[{}] install_skill supports at most 3 trigger_concepts items",
+                        index
+                    ));
+                }
+                let mut unique = HashSet::new();
+                for trigger in trigger_concepts {
+                    let trimmed = trigger.trim();
+                    if trimmed.is_empty() {
+                        return Err(format!(
+                            "steps[{}] install_skill trigger_concepts must not contain empty items",
+                            index
+                        ));
+                    }
+                    if !unique.insert(trimmed.to_string()) {
+                        return Err(format!(
+                            "steps[{}] install_skill trigger_concepts must be unique after trimming",
+                            index
+                        ));
+                    }
+                }
+                let mut unique_files = HashSet::new();
+                for file in files {
+                    let path = file.path.trim();
+                    if path.is_empty() {
+                        return Err(format!(
+                            "steps[{}] install_skill files must not contain empty paths",
+                            index
+                        ));
+                    }
+                    if path == "SKILL.md" {
+                        return Err(format!(
+                            "steps[{}] install_skill files must not include SKILL.md",
+                            index
+                        ));
+                    }
+                    if path.contains("..") || path.starts_with('/') {
+                        return Err(format!(
+                            "steps[{}] install_skill files contain invalid path '{}'",
+                            index, path
+                        ));
+                    }
+                    if file.body.trim().is_empty() {
+                        return Err(format!(
+                            "steps[{}] install_skill files must not contain empty bodies",
+                            index
+                        ));
+                    }
+                    if !unique_files.insert(path.to_string()) {
+                        return Err(format!(
+                            "steps[{}] install_skill files must be unique after trimming",
+                            index
+                        ));
+                    }
+                }
+            }
             ScenarioStep::Conversation {
                 tester_instructions,
                 max_turns,
@@ -710,7 +829,13 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
 
     let auth_token =
         std::env::var("WEB_AUTH_TOKEN").unwrap_or_else(|_| DEFAULT_AUTH_TOKEN.to_string());
+    let admin_password = std::env::var(ADMIN_PASSWORD_ENV_VAR)
+        .map_err(|_| format!("{} is required", ADMIN_PASSWORD_ENV_VAR))?;
+    if admin_password.trim().is_empty() {
+        return Err(format!("{} must not be empty", ADMIN_PASSWORD_ENV_VAR));
+    }
     let ws_url = format!("ws://127.0.0.1:{}/", port);
+    let http_base_url = format!("http://127.0.0.1:{}", port);
     let memgraph_uri = core.memgraph_uri.trim().to_string();
     if memgraph_uri.is_empty() {
         return Err("core.memgraph_uri must not be empty".to_string());
@@ -753,7 +878,9 @@ fn prepare_runtime(core: &CoreConfig) -> Result<RuntimeContext, String> {
         temp_dir,
         db_path,
         ws_url,
+        http_base_url,
         auth_token,
+        admin_password,
         memgraph_uri,
         memgraph_backup_path,
         sqlite_backup_path,
@@ -782,6 +909,7 @@ async fn start_core(runtime: &RuntimeContext) -> Result<Child, String> {
         ])
         .current_dir(&runtime.temp_dir)
         .env("WEB_AUTH_TOKEN", runtime.auth_token.as_str())
+        .env(ADMIN_PASSWORD_ENV_VAR, runtime.admin_password.as_str())
         .env("MEMGRAPH_URI", runtime.memgraph_uri.as_str())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -1367,6 +1495,8 @@ async fn run_tester_dialogue(
     runtime: &RuntimeContext,
 ) -> Result<DialogueRun, String> {
     let steps = build_runtime_scenario_steps(&assets.scenario, assets.execution.max_turns)?;
+    let http_client = reqwest::Client::new();
+    let mut admin_session_cookie: Option<String> = None;
     let (mut ws_stream, _) = connect_async(runtime.ws_url.as_str())
         .await
         .map_err(|err| format!("websocket connect failed: {}", err))?;
@@ -1387,6 +1517,16 @@ async fn run_tester_dialogue(
 
     for (step_index, step) in steps.iter().enumerate() {
         match step {
+            RuntimeScenarioStep::InstallSkill(install) => {
+                run_install_skill_step(
+                    runtime,
+                    &http_client,
+                    &mut admin_session_cookie,
+                    install,
+                    step_index + 1,
+                )
+                .await?;
+            }
             RuntimeScenarioStep::Conversation(conversation) => {
                 run_conversation_step(
                     assets,
@@ -1529,6 +1669,86 @@ async fn run_conversation_step(
     Ok(())
 }
 
+async fn run_install_skill_step(
+    runtime: &RuntimeContext,
+    http_client: &reqwest::Client,
+    admin_session_cookie: &mut Option<String>,
+    step: &InstallSkillRuntimeStep,
+    step_index: usize,
+) -> Result<(), String> {
+    if admin_session_cookie.is_none() {
+        *admin_session_cookie = Some(admin_login(runtime, http_client).await?);
+    }
+    let encoded_key = url_encode_path_segment(step.key.as_str());
+    let url = format!("{}/admin/skills/{}", runtime.http_base_url, encoded_key);
+    let files = step
+        .files
+        .iter()
+        .map(|file| {
+            json!({
+                "path": file.path,
+                "body": file.body,
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload = json!({
+        "content": step.body,
+        "summary": step.summary,
+        "trigger_concepts": step.trigger_concepts,
+        "files": files,
+    });
+    println!(
+        "HARNESS_INSTALL_SKILL step={} key={} trigger_count={} file_count={}",
+        step_index,
+        step.key,
+        step.trigger_concepts.len(),
+        step.files.len()
+    );
+    let response = http_client
+        .put(url)
+        .header(ORIGIN, runtime.http_base_url.as_str())
+        .header(
+            COOKIE,
+            admin_session_cookie
+                .as_deref()
+                .ok_or("missing admin session cookie after login")?,
+        )
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|err| format!("install_skill request failed for '{}': {}", step.key, err))?;
+    let status = response.status();
+    let response_text = response.text().await.map_err(|err| {
+        format!(
+            "failed to read install_skill response for '{}': {}",
+            step.key, err
+        )
+    })?;
+    if !status.is_success() {
+        return Err(format!(
+            "install_skill failed for '{}' status={} body={}",
+            step.key, status, response_text
+        ));
+    }
+    let result: Value = serde_json::from_str(&response_text).map_err(|err| {
+        format!(
+            "install_skill response for '{}' was not valid json: {}",
+            step.key, err
+        )
+    })?;
+    let saved_key = result
+        .get("key")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if saved_key != step.key {
+        return Err(format!(
+            "install_skill response key mismatch for '{}': got '{}'",
+            step.key, saved_key
+        ));
+    }
+    Ok(())
+}
+
 async fn run_emit_event_step(
     ws_stream: &mut WsStream,
     step: &EmitEventRuntimeStep,
@@ -1580,6 +1800,30 @@ fn build_runtime_scenario_steps(
     let mut out = Vec::with_capacity(scenario.steps.len());
     for (index, step) in scenario.steps.iter().enumerate() {
         match step {
+            ScenarioStep::InstallSkill {
+                key,
+                body,
+                summary,
+                trigger_concepts,
+                files,
+            } => {
+                out.push(RuntimeScenarioStep::InstallSkill(InstallSkillRuntimeStep {
+                    key: key.trim().to_string(),
+                    body: body.clone(),
+                    summary: summary.trim().to_string(),
+                    trigger_concepts: trigger_concepts
+                        .iter()
+                        .map(|item| item.trim().to_string())
+                        .collect(),
+                    files: files
+                        .iter()
+                        .map(|file| ScenarioSkillFile {
+                            path: file.path.trim().to_string(),
+                            body: file.body.clone(),
+                        })
+                        .collect(),
+                }));
+            }
             ScenarioStep::Conversation {
                 tester_instructions,
                 max_turns,
@@ -1649,6 +1893,50 @@ fn build_runtime_scenario_steps(
         }
     }
     Ok(out)
+}
+
+async fn admin_login(
+    runtime: &RuntimeContext,
+    http_client: &reqwest::Client,
+) -> Result<String, String> {
+    let url = format!("{}/auth/login", runtime.http_base_url);
+    let response = http_client
+        .post(url)
+        .json(&json!({
+            "password": runtime.admin_password,
+        }))
+        .send()
+        .await
+        .map_err(|err| format!("admin login request failed: {}", err))?;
+    let status = response.status();
+    let cookie_header = response
+        .headers()
+        .get(SET_COOKIE)
+        .ok_or("admin login response missing set-cookie header")?
+        .to_str()
+        .map_err(|err| format!("admin login set-cookie header invalid: {}", err))?
+        .to_string();
+    let response_text = response
+        .text()
+        .await
+        .map_err(|err| format!("failed to read admin login response body: {}", err))?;
+    if !status.is_success() {
+        return Err(format!(
+            "admin login failed status={} body={}",
+            status, response_text
+        ));
+    }
+    let cookie = cookie_header
+        .split(';')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or("admin login set-cookie header did not contain a cookie pair")?;
+    Ok(cookie.to_string())
+}
+
+fn url_encode_path_segment(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
 fn emit_event_payload_json(event: &EmitEventPayload) -> Result<String, String> {
@@ -2373,6 +2661,27 @@ fn scenario_instructions_for_judge(scenario: &Scenario) -> String {
     lines.push("Scenario steps:".to_string());
     for (index, step) in scenario.steps.iter().enumerate() {
         match step {
+            ScenarioStep::InstallSkill {
+                key,
+                body,
+                summary,
+                trigger_concepts,
+                files,
+            } => {
+                lines.push(format!(
+                    "{}. install_skill key={} summary={} trigger_concepts={} files={} body={}",
+                    index + 1,
+                    key.trim(),
+                    summary.trim(),
+                    trigger_concepts.join(","),
+                    files
+                        .iter()
+                        .map(|file| file.path.trim())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    body.trim()
+                ));
+            }
             ScenarioStep::Conversation {
                 tester_instructions,
                 max_turns,

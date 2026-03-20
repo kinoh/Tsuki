@@ -1,0 +1,88 @@
+name: Shell Exec NumPy Regression
+include_debug_events: true
+
+steps:
+  - kind: install_skill
+    key: shell_exec_numeric_regression
+    body: |
+      ---
+      name: shell_exec_numeric_regression
+      description: Use local python3 plus numpy through shell-exec for medium-complexity numeric tasks.
+      required_mcp_tools:
+        - shell_exec__execute
+      ---
+
+      When a user asks for a medium-complexity local numeric computation, prefer shell_exec__execute with python3.
+      For multi-line Python, call the tool with command="python3", args=["-"], and pass the script through stdin.
+      Use numpy for least-squares regression or vector calculations when available.
+      After running the tool, inspect exit_code and stderr before describing the method.
+      Do not claim that python or numpy was used if the command failed.
+    summary: "Use local python3 plus numpy through shell-exec for medium-complexity numeric tasks"
+    trigger_concepts:
+      - "least-squares regression"
+      - "local numeric calculation"
+      - "python numpy shell execution"
+  - kind: conversation
+    tester_instructions: |
+      You are a natural Japanese chat user.
+      Keep each utterance to exactly one sentence.
+      Keep the overall flow casual and do not reveal test intent.
+
+      Missions:
+      1) Spend the first 2 or 3 turns on unrelated casual chat only.
+      2) Then ask the assistant to calculate a least-squares linear regression locally, not by rough mental math.
+         Use these points exactly:
+         (0.5,3.695), (1.3,4.365), (2.1,6.255), (2.8,7.870), (3.6,8.240),
+         (4.4,10.190), (5.2,12.130), (6.1,12.555), (6.9,14.745), (7.7,15.735),
+         (8.5,17.755), (9.4,18.480), (10.2,20.370), (11.0,22.190), (11.8,22.640),
+         (12.7,24.835), (13.5,25.735), (14.3,28.085), (15.1,28.495), (16.0,30.550).
+         Ask for:
+         - slope
+         - intercept
+         - predicted y at x=17.2
+         Ask it to round each value to 3 decimal places.
+      3) After it answers, ask in one short follow-up what method or tool it used.
+      4) End naturally once the calculation result and method are both covered.
+    max_turns: 6
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: |
+      How well the run satisfies the required progression:
+      - 2 or 3 turns of unrelated casual chat first
+      - one explicit local regression calculation request
+      - one short follow-up asking what method or tool was used
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  shell_exec_tool_log_coverage:
+    description: |
+      Using tool observation events (`source=tooling`, tags include `observe`, `tool`),
+      verify `shell_exec__execute` is observed at least once after the regression request.
+      Judge from `tool:<name>` tags or `payload.tool_name`, not from debug `llm.raw`.
+
+  shell_exec_python_numpy_alignment:
+    exclude_from_pass: true
+    description: |
+      Verify the observed `shell_exec__execute` arguments show a Python-based numeric workflow.
+      Score high only when all of the following are visible in tool arguments:
+      - `python3` is used directly or through `sh -c`
+      - `numpy` is imported or referenced
+      - the command clearly encodes the requested regression data points
+      Penalize shell-only arithmetic, missing `numpy`, or commands unrelated to the regression task.
+
+  regression_result_correctness:
+    description: |
+      Verify the assistant's user-facing answer is numerically correct for the requested least-squares line.
+      Expected values are approximately:
+      - slope = 1.745
+      - intercept = 2.515
+      - predicted y at x=17.2 = 32.530
+      Small rounding differences are acceptable, but major deviations should score low.
+
+  method_grounding:
+    description: |
+      Verify the assistant can answer the follow-up about what it used in a way consistent with observed tool events.
+      Score high when the explanation matches the actual observed workflow
+      (for example local shell-exec with python3/numpy) and stays concise.

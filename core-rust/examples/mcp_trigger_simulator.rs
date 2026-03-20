@@ -13,6 +13,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::env;
+use std::fs;
 use std::sync::Arc;
 use url::Url;
 
@@ -30,6 +31,18 @@ struct ToolObject {
     #[serde(default)]
     #[serde(alias = "inputSchema")]
     input_schema: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PromptConfig {
+    internal_prompts: InternalPromptConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalPromptConfig {
+    mcp_trigger_extract_instructions: String,
+    mcp_trigger_extract_prompt_template: String,
+    mcp_trigger_extract_retry_prompt_template: String,
 }
 
 #[tokio::main]
@@ -149,14 +162,23 @@ async fn simulate_trigger_concepts(
     server_id: &str,
     tool: &ToolObject,
 ) -> Result<(), String> {
-    let llm = build_llm();
+    let internal_prompts = load_internal_prompts()?;
+    let llm = build_llm(&internal_prompts);
     let input_schema = tool.input_schema.clone().unwrap_or_else(|| json!({}));
-    let prompts = build_trigger_concept_prompts(&TriggerConceptExtractionInput {
-        server_id,
-        tool_name: tool.name.as_str(),
-        description: tool.description.as_deref(),
-        input_schema: &input_schema,
-    });
+    let prompts = build_trigger_concept_prompts(
+        &TriggerConceptExtractionInput {
+            server_id,
+            tool_name: tool.name.as_str(),
+            description: tool.description.as_deref(),
+            input_schema: &input_schema,
+        },
+        internal_prompts
+            .mcp_trigger_extract_prompt_template
+            .as_str(),
+        internal_prompts
+            .mcp_trigger_extract_retry_prompt_template
+            .as_str(),
+    );
     let mut last_error = "llm parse check failed: empty output".to_string();
     let mut last_raw = Value::Null;
     let mut last_output = String::new();
@@ -213,12 +235,19 @@ async fn simulate_trigger_concepts(
     Err(last_error)
 }
 
-fn build_llm() -> Arc<dyn LlmAdapter> {
+fn load_internal_prompts() -> Result<InternalPromptConfig, String> {
+    let raw = fs::read_to_string("config.toml")
+        .map_err(|err| format!("failed to read config.toml: {}", err))?;
+    let parsed = toml::from_str::<PromptConfig>(&raw)
+        .map_err(|err| format!("failed to parse config.toml: {}", err))?;
+    Ok(parsed.internal_prompts)
+}
+
+fn build_llm(internal_prompts: &InternalPromptConfig) -> Arc<dyn LlmAdapter> {
     let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-5.2".to_string());
     build_response_api_llm(ResponseApiConfig {
         model,
-        instructions: "Extract trigger concepts for MCP tools. Return strict JSON only."
-            .to_string(),
+        instructions: internal_prompts.mcp_trigger_extract_instructions.clone(),
         temperature: None,
         max_output_tokens: Some(200),
         tools: Vec::new(),

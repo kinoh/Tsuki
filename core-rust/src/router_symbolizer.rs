@@ -50,9 +50,7 @@ impl SymbolizerBackend for ResponseApiSymbolizerBackend {
         // InputAudio content part. A future iteration can use InputFile when supported.
         if !input.audio.is_empty() {
             let note = format!("[{} audio clip(s) provided]", input.audio.len());
-            content.push(InputContent::InputText(InputTextContent {
-                text: note,
-            }));
+            content.push(InputContent::InputText(InputTextContent { text: note }));
         }
 
         let message = EasyInputMessage {
@@ -99,10 +97,7 @@ impl SymbolizerBackend for ResponseApiSymbolizerBackend {
 }
 
 fn image_content(attachment: &MediaAttachment) -> InputImageContent {
-    let url = format!(
-        "data:{};base64,{}",
-        attachment.mime_type, attachment.data
-    );
+    let url = format!("data:{};base64,{}", attachment.mime_type, attachment.data);
     InputImageContent {
         detail: ImageDetail::Auto,
         file_id: None,
@@ -215,7 +210,10 @@ mod tests {
     async fn image_input_with_text_calls_backend() {
         let backend = MockBackend::new(Ok("海の写真、波が穏やか".to_string()));
         let symbolizer = OpenAIRouterSymbolizer::new(backend);
-        let result = symbolizer.symbolize(&image_input("これ見て")).await.unwrap();
+        let result = symbolizer
+            .symbolize(&image_input("これ見て"))
+            .await
+            .unwrap();
         assert_eq!(result, "海の写真、波が穏やか");
         assert!(symbolizer.backend.was_called());
     }

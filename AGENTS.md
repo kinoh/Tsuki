@@ -51,6 +51,8 @@ Guidance for coding agents working on Tsuki.
 - Never adopt implicit fallbacks. Enforce fail-fast behavior for missing/invalid required behavior.
 - Never swallow errors; always emit explicit logs with the concrete cause.
 - Keep state simple; do not add state fields unless they are strictly necessary for domain behavior.
+- When working in a git worktree, keep implementation, execution, verification, and cleanup scoped to that same worktree unless the user explicitly asks otherwise.
+- Admin UIs must stay faithful to internal responsibility boundaries and must not mix cross-component derived data into a view for a single component.
 - Migration/import tools must reuse the same event contract and normalization rules as runtime code; no ad-hoc mappings.
 - Before writing or updating documents under `docs/`, always read `docs/README.md` and follow its documentation strategy.
 

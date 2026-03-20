@@ -18,14 +18,14 @@ tasks:
   local-reset:
     desc: Reset local data
     cmds:
-      - task -t Taskfile.yaml sandbox/restore/latest
-      - task -t Taskfile.yaml memgraph/restore/latest
-      - task runtime/restore/latest
+      - task: sandbox/restore/latest
+      - task: memgraph/restore/latest
+      - task: runtime/restore/latest
   memgraph/restore/latest:
     desc: Restore latest memgraph database
     vars:
       BACKUP_FILE_NAME:
-        sh: 'ls -t ${BACKUP_DIR:-./backup}/memgraph | head -1'
+        sh: 'ls -t ${BACKUP_DIR:-./backup}/memgraph/ | head -1'
     cmds:
       - task memgraph/restore/{{.BACKUP_FILE_NAME}}
   memgraph/restore/*:
@@ -45,7 +45,7 @@ tasks:
     desc: Restore latest sandbox data
     vars:
       BACKUP_FILE_PATH:
-        sh: 'find ./backup -name "tsuki-sandbox-backup-*.tar.gz" | sort | tail -1'
+        sh: 'find ./backup/ -name "tsuki-sandbox-backup-*.tar.gz" | sort | tail -1'
     cmds:
       - task: sandbox/restore/{{.BACKUP_FILE_PATH}}
   sandbox/restore/*:
@@ -62,7 +62,7 @@ tasks:
     desc: Restore latest runtime data
     vars:
       BACKUP_FILE_PATH:
-        sh: 'find ./backup -name "tsuki-backup-*.tar.gz" | sort | tail -1'
+        sh: 'find ./backup/ -name "tsuki-backup-*.tar.gz" | sort | tail -1'
     cmds:
       - task: runtime/restore/{{.BACKUP_FILE_PATH}}
   runtime/restore/*:

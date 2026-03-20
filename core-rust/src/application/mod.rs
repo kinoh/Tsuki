@@ -1,7 +1,6 @@
 pub mod concept_activation_service;
 pub mod concept_retrieval_service;
 pub mod conversation_recall_service;
-pub mod router_symbolization_service;
 pub mod debug_service;
 pub mod event_service;
 pub mod execution_service;
@@ -11,7 +10,10 @@ pub mod improve_service;
 pub mod module_bootstrap;
 pub mod pipeline_service;
 pub mod router_service;
+pub mod router_symbolization_service;
 pub mod scheduler_notice_service;
 pub mod scheduler_service;
+pub mod skill_admin_service;
+pub mod state_record_admin_service;
 pub mod trigger_ingress_api;
 pub mod usage_service;

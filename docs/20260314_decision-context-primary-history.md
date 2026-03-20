@@ -8,7 +8,7 @@ This document records the decision to redefine the decision-module input context
 
 ## Problem Statement
 
-- The previous `input.decision_context_template` used flat fact-style section labels only.
+- The previous `internal_prompts.decision_context_template` used flat fact-style section labels only.
 - `recent_event_history` and `recalled_event_history` were both injected as similarly shaped conversation blocks without explicit authority boundaries.
 - The layout placed long recalled text near the end of the prompt without clear block termination or a strong statement that it was supplemental.
 - User feedback identified the practical failure mode directly:
@@ -35,7 +35,7 @@ This document records the decision to redefine the decision-module input context
 
 ## Implementation Details
 
-- Updated `core-rust/config.toml` `input.decision_context_template` to:
+- Updated `core-rust/config.toml` `internal_prompts.decision_context_template` to:
   - place `<recent_event_history>` first
   - move all other blocks under `<supplemental_context>`
   - add an explicit consistency rule inside `<recalled_event_history>`

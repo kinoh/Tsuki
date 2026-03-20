@@ -34,6 +34,14 @@ use crate::app_state::{
 };
 use crate::application::event_service::record_event;
 use crate::application::module_bootstrap::{build_modules, sync_module_registry_from_prompts};
+use crate::application::skill_admin_service::{
+    get_skill_detail, list_skills, upsert_skill, SkillAdminDetail, SkillCatalogItem,
+    SkillUpsertPayload,
+};
+use crate::application::state_record_admin_service::{
+    get_state_record_detail, list_state_records, upsert_state_record, StateRecordDetail,
+    StateRecordListItem, StateRecordUpsertPayload,
+};
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config};
 use crate::conversation_recall_store::ConversationRecallStore;
@@ -45,10 +53,10 @@ use crate::debug_api::{
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::llm::{build_response_api_llm, ResponseApiConfig};
-use crate::router_symbolizer::build_response_api_symbolizer;
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
+use crate::router_symbolizer::build_response_api_symbolizer;
 use crate::scheduler::ScheduleStore;
 use crate::state::{DbStateStore, StateStore};
 
@@ -196,6 +204,38 @@ struct DebugConceptSearchQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct DebugStateRecordsQuery {
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugStateRecordsResponse {
+    items: Vec<StateRecordListItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugStateRecordDetailResponse {
+    item: StateRecordDetail,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebugSkillsQuery {
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugSkillsResponse {
+    items: Vec<SkillCatalogItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugSkillDetailResponse {
+    item: SkillAdminDetail,
+}
+
+#[derive(Debug, Deserialize)]
 struct DebugConceptGraphQueriesQuery {
     limit: Option<usize>,
 }
@@ -294,8 +334,10 @@ pub(crate) async fn run_server() {
         activation_concept_graph.as_ref(),
         build_response_api_llm(ResponseApiConfig {
             model: config.llm.model.clone(),
-            instructions: "Extract trigger concepts for MCP tools. Return strict JSON only."
-                .to_string(),
+            instructions: config
+                .internal_prompts
+                .mcp_trigger_extract_instructions
+                .clone(),
             temperature: None,
             max_output_tokens: Some(200),
             tools: Vec::new(),
@@ -304,6 +346,7 @@ pub(crate) async fn run_server() {
             usage_context: None,
             max_tool_rounds: 0,
         }),
+        &config.internal_prompts,
         emit_event.clone(),
     )
     .await;
@@ -374,7 +417,7 @@ pub(crate) async fn run_server() {
             limits: config.limits.clone(),
             router: config.router.clone(),
             conversation_recall: config.conversation_recall.clone(),
-            input: config.input.clone(),
+            internal_prompts: config.internal_prompts.clone(),
             tts: config.tts.clone(),
         },
         PromptState::new(
@@ -417,6 +460,13 @@ pub(crate) async fn run_server() {
     let admin_router = Router::new()
         .route("/styles/{name}", get(debug_style))
         .route("/prompts", get(debug_ui))
+        .route("/skills", get(debug_skill_admin_ui))
+        .route("/skills/list", get(debug_get_skills))
+        .route(
+            "/skills/{key}",
+            get(debug_get_skill_detail).put(admin_upsert_skill),
+        )
+        .route("/state-records", get(debug_state_records_ui))
         .route("/events", get(debug_monitor_ui))
         .route("/concept-graph", get(debug_concept_graph_ui))
         .route("/concept-graph/health", get(debug_concept_graph_health))
@@ -436,6 +486,11 @@ pub(crate) async fn run_server() {
             get(debug_concept_graph_relations),
         )
         .route("/concept-graph/queries", get(debug_concept_graph_queries))
+        .route("/state-records/data", get(debug_get_state_records))
+        .route(
+            "/state-records/data/{key}",
+            get(debug_get_state_record_detail).put(debug_upsert_state_record),
+        )
         .route(
             "/prompts/data",
             get(debug_get_prompts).post(debug_update_prompts),
@@ -976,6 +1031,43 @@ async fn debug_update_prompts(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
     *state.prompts.overrides.write().await = overrides;
     Ok(Json(payload))
+}
+
+async fn debug_get_state_records(
+    State(state): State<AppState>,
+    Query(query): Query<DebugStateRecordsQuery>,
+) -> Result<Json<DebugStateRecordsResponse>, (StatusCode, String)> {
+    let items = list_state_records(&state, query.q.as_deref(), query.limit).await?;
+    Ok(Json(DebugStateRecordsResponse { items }))
+}
+
+async fn debug_get_state_record_detail(
+    Path(key): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<DebugStateRecordDetailResponse>, (StatusCode, String)> {
+    let item = get_state_record_detail(&state, key.as_str())
+        .await?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "state record not found".to_string()))?;
+    Ok(Json(DebugStateRecordDetailResponse { item }))
+}
+
+async fn debug_upsert_state_record(
+    Path(key): Path<String>,
+    State(state): State<AppState>,
+    Json(payload): Json<StateRecordUpsertPayload>,
+) -> Result<Json<DebugStateRecordDetailResponse>, (StatusCode, String)> {
+    let item = upsert_state_record(&state, key.as_str(), payload).await?;
+    Ok(Json(DebugStateRecordDetailResponse { item }))
+}
+
+async fn admin_upsert_skill(
+    Path(key): Path<String>,
+    State(state): State<AppState>,
+    Json(payload): Json<SkillUpsertPayload>,
+) -> Result<Json<crate::application::skill_admin_service::SkillUpsertResult>, (StatusCode, String)>
+{
+    let result = upsert_skill(&state, key.as_str(), payload).await?;
+    Ok(Json(result))
 }
 
 async fn debug_run_module(
@@ -1858,6 +1950,58 @@ async fn debug_concept_graph_ui(
             Ok(Html(EMBEDDED.to_string()))
         }
     }
+}
+
+async fn debug_skill_admin_ui(
+    State(_state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    const EMBEDDED: &str = include_str!("../static/skill_admin_ui.html");
+    const UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/skill_admin_ui.html");
+    match tokio::fs::read_to_string(UI_PATH).await {
+        Ok(html) => Ok(Html(html)),
+        Err(err) => {
+            println!(
+                "SKILL_ADMIN_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                UI_PATH, err
+            );
+            Ok(Html(EMBEDDED.to_string()))
+        }
+    }
+}
+
+async fn debug_state_records_ui(
+    State(_state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    const EMBEDDED: &str = include_str!("../static/state_records_ui.html");
+    const UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/state_records_ui.html");
+    match tokio::fs::read_to_string(UI_PATH).await {
+        Ok(html) => Ok(Html(html)),
+        Err(err) => {
+            println!(
+                "STATE_RECORDS_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                UI_PATH, err
+            );
+            Ok(Html(EMBEDDED.to_string()))
+        }
+    }
+}
+
+async fn debug_get_skills(
+    State(state): State<AppState>,
+    Query(query): Query<DebugSkillsQuery>,
+) -> Result<Json<DebugSkillsResponse>, (StatusCode, String)> {
+    let items = list_skills(&state, query.q.as_deref(), query.limit).await?;
+    Ok(Json(DebugSkillsResponse { items }))
+}
+
+async fn debug_get_skill_detail(
+    Path(key): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<DebugSkillDetailResponse>, (StatusCode, String)> {
+    let item = get_skill_detail(&state, key.as_str())
+        .await?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "skill not found".to_string()))?;
+    Ok(Json(DebugSkillDetailResponse { item }))
 }
 
 fn admin_password_fingerprint(password: &str) -> String {
