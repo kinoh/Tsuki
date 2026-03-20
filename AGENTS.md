@@ -63,9 +63,10 @@ Guidance for coding agents working on Tsuki.
 
 ## MCP Topology
 - Universal MCP
+  - `shell-exec` (Rust binary) for sandboxed shell execution; runs inside a gVisor container.
   - `rss-mcp-lite` (npm) for shared RSS; data: `${DATA_DIR}/rss_feeds.db`, `${DATA_DIR}/rss_feeds.opml`.
 - User-specific MCP (Rust binaries)
-  - `scheduler`: time-based notifications, data under `${DATA_DIR}/${userId}__scheduler/`.
+  - none at present.
 - MCP clients support resource subscriptions; isolation is per user; roots are under `DATA_DIR`.
 - When an MCP tool contract feels wrong (description, schema, examples, behavior), inspect the provider implementation under `mcp/` before patching a consumer such as `core`.
 

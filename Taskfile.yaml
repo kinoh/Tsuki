@@ -78,13 +78,9 @@ tasks:
     cmds:
       - '{{.DOCKER_COMPOSE}} logs --tail=100 {{.SERVICE}}'
   mcp/build:
-    desc: Build all MCP servers
+    desc: Build the MCP server
     deps:
-      - mcp/build-concept-graph
-      - mcp/build-scheduler
-      - mcp/build-weather
-      - mcp/build-metrics
-      - mcp/build-rss
+      - mcp/build-shell-exec
   mcp/build-*:
     desc: Build a MCP server
     vars:

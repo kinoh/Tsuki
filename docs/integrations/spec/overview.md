@@ -12,7 +12,6 @@ threshold (activation-gated visibility).
 | Server | Role |
 |---|---|
 | `shell-exec` | Shell command execution inside the gVisor sandbox |
-| `scheduler` | User-specific time-based notifications |
 | `rss-mcp-lite` | Shared RSS feed access |
 
 Tool naming convention: `<server_id>__<tool_name>` (collision-safe, stable).
