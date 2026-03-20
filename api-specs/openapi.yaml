@@ -3,7 +3,7 @@ info:
   title: Tsuki Core-Rust HTTP API
   version: 1.2.0
   description: |
-    HTTP contract for the current core-rust phase.
+    HTTP contract for the current core phase.
     Includes runtime APIs, notification APIs, and TTS synthesis API.
 
 servers:

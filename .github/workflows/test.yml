@@ -3,11 +3,11 @@ name: Test
 on:
   push:
     paths:
-      - "core-rust/**"
+      - "core/**"
       - ".github/workflows/test.yml"
   pull_request:
     paths:
-      - "core-rust/**"
+      - "core/**"
       - ".github/workflows/test.yml"
 
 concurrency:
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./core-rust
+        working-directory: ./core
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust
@@ -27,6 +27,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            core-rust -> target
+            core -> target
       - name: Run tests
         run: cargo test

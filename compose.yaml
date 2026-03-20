@@ -6,7 +6,7 @@ services:
     image: tsuki-core:${GIT_HASH}
     build:
       context: .
-      dockerfile: docker/core-rust/Dockerfile
+      dockerfile: docker/core/Dockerfile
       target: runtime
       args:
         GIT_HASH: ${GIT_HASH}

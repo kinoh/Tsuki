@@ -2,7 +2,7 @@
 
 ### Features
 
-- **Rust Backend**: Event-stream based runtime in `core-rust/`
+- **Rust Backend**: Event-stream based runtime in `core/`
 - **WebSocket & HTTP APIs**: Real-time chat plus REST endpoints defined in `api-specs/`
 - **Multi-channel Message Delivery**: WebSocket, notifications, and internal event routing
 - **Prompt File Runtime**: Prompt state stored in `prompts.md` under runtime data
@@ -14,7 +14,7 @@
 
 ```bash
 # Start the backend
-cd core-rust/
+cd core/
 cargo run
 
 # Optional WebSocket CLI
@@ -32,7 +32,7 @@ task deploy
 
 ### Architecture
 
-- **Backend** (`core-rust/`): Rust runtime, event store, admin/auth surfaces, and MCP integration
+- **Backend** (`core/`): Rust runtime, event store, admin/auth surfaces, and MCP integration
 - **GUI Client** (`gui/`): Tauri + Svelte cross-platform application
 - **Docker Deployment**: Docker Compose stack for runtime, memgraph, sandbox, and voice services
 

@@ -8,7 +8,7 @@ Guidance for coding agents working on Tsuki.
 - Liveliness > determinism; allow variability and small surprises.
 
 ## Directory Layout (high level)
-- `core-rust/`: Rust backend runtime — see `core-rust/AGENTS.md` for implementation rules
+- `core/`: Rust backend runtime — see `core/AGENTS.md` for implementation rules
   - `src/application/`: application services and orchestration boundaries
   - `src/server_app.rs`: HTTP + WebSocket server, admin/auth surfaces, route wiring
   - `src/bin/`: operational and maintenance CLIs
@@ -25,7 +25,7 @@ Guidance for coding agents working on Tsuki.
 - `docker/`, `compose.yaml`, `Taskfile.yaml`: container and task runner configs
 
 ## System Shape
-- Backend (in `core-rust/`): Rust runtime exposing HTTP + WebSocket, notifications, admin/auth, and MCP-backed execution.
+- Backend (in `core/`): Rust runtime exposing HTTP + WebSocket, notifications, admin/auth, and MCP-backed execution.
 - Client (in `gui/`): Tauri + Svelte desktop/mobile client.
 - MCP-first: abilities come from MCP servers, not built-ins.
 - Per-user runtime state is stored in the event/database layer rather than in a TypeScript thread manager.
@@ -67,12 +67,12 @@ Guidance for coding agents working on Tsuki.
 - User-specific MCP (Rust binaries)
   - `scheduler`: time-based notifications, data under `${DATA_DIR}/${userId}__scheduler/`.
 - MCP clients support resource subscriptions; isolation is per user; roots are under `DATA_DIR`.
-- When an MCP tool contract feels wrong (description, schema, examples, behavior), inspect the provider implementation under `mcp/` before patching a consumer such as `core-rust`.
+- When an MCP tool contract feels wrong (description, schema, examples, behavior), inspect the provider implementation under `mcp/` before patching a consumer such as `core`.
 
 ## Runtime & Commands
 - Backend dev
-  - `cd core-rust && cargo run`
-  - `cd core-rust && cargo test`
+  - `cd core && cargo run`
+  - `cd core && cargo test`
 - GUI dev
   - `cd gui && npm run dev`
 - Docker/Taskfile
@@ -99,8 +99,8 @@ Guidance for coding agents working on Tsuki.
 - Required runtime env: `WEB_AUTH_TOKEN`, `OPENAI_API_KEY`, `ADMIN_AUTH_PASSWORD`.
 - Optional runtime env: `FCM_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_KEY`, `GEMINI_API_KEY`, `MEMGRAPH_PASSWORD`, `TURSO_AUTH_TOKEN`.
 - Dev/test-only env may include `OPENAI_MODEL` and `PROMPT_PRIVATE_KEY` for auxiliary tools.
-- Storage roots: runtime DB `${DATA_DIR}/core-rust.db`, shared RSS data under `${DATA_DIR}`, prompt file `${DATA_DIR}/prompts.md`.
+- Storage roots: runtime DB `${DATA_DIR}/core.db`, shared RSS data under `${DATA_DIR}`, prompt file `${DATA_DIR}/prompts.md`.
 
 ## Testing
-- Rust tests: `cd core-rust && cargo test`.
-- Integration harness: `task -t core-rust/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/chitchat.yaml --run-count 1`
+- Rust tests: `cd core && cargo test`.
+- Integration harness: `task -t core/Taskfile.yaml integration/run -- --scenario tests/integration/scenarios/chitchat.yaml --run-count 1`
