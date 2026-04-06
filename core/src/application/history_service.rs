@@ -33,6 +33,65 @@ pub(crate) async fn format_decision_debug_history(
     format_event_lines(&events)
 }
 
+pub(crate) async fn visible_events_before_anchor(
+    state: &AppState,
+    limit: usize,
+    anchor_ts: &str,
+    anchor_event_id: &str,
+    excluded_event_ids: Option<&HashSet<String>>,
+) -> Vec<Event> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let batch_size = limit.saturating_mul(4).clamp(50, 500);
+    let max_scanned = 5_000usize;
+    let mut visible = Vec::<Event>::with_capacity(limit);
+    let mut scanned = 0usize;
+    let mut cursor = Some((anchor_ts.to_string(), anchor_event_id.to_string()));
+
+    while visible.len() < limit && scanned < max_scanned {
+        let Some((ts, event_id)) = cursor.as_ref() else {
+            break;
+        };
+        let batch = match state
+            .services
+            .event_store
+            .list_before_anchor(ts.as_str(), event_id.as_str(), batch_size)
+            .await
+        {
+            Ok(events) => events,
+            Err(err) => {
+                println!("EVENT_STORE_ERROR error={}", err);
+                return Vec::new();
+            }
+        };
+        if batch.is_empty() {
+            break;
+        }
+        scanned += batch.len();
+        cursor = batch
+            .last()
+            .map(|event| (event.ts.clone(), event.event_id.clone()));
+        for event in batch {
+            if is_debug_event(&event) {
+                continue;
+            }
+            if excluded_event_ids
+                .map(|ids| ids.contains(event.event_id.as_str()))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            visible.push(event);
+            if visible.len() >= limit {
+                break;
+            }
+        }
+    }
+    visible.reverse();
+    visible
+}
+
 pub(crate) async fn latest_events(
     state: &AppState,
     limit: usize,

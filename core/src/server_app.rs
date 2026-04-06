@@ -47,8 +47,10 @@ use crate::config::{load_config, Config};
 use crate::conversation_recall_store::ConversationRecallStore;
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::debug_api::{
-    DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest, DebugRunRequest,
-    DebugRunResponse, DebugTriggerRequest, DebugTriggerResponse,
+    DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
+    DebugReplayTurnCompareRequest, DebugReplayTurnCompareResponse, DebugReplayTurnRequest,
+    DebugReplayTurnResponse, DebugRunRequest, DebugRunResponse, DebugTriggerRequest,
+    DebugTriggerResponse,
 };
 use crate::event::Event;
 use crate::event_store::EventStore;
@@ -496,6 +498,8 @@ pub(crate) async fn run_server() {
             get(debug_get_prompts).post(debug_update_prompts),
         )
         .route("/modules/{name}/run", post(debug_run_module))
+        .route("/replays/turn", post(debug_replay_turn))
+        .route("/replays/turn/compare", post(debug_compare_replay_turn))
         .route("/events/stream", get(debug_events_stream))
         .route("/events/list", get(debug_events))
         .route_layer(axum::middleware::from_fn_with_state(
@@ -1077,6 +1081,23 @@ async fn debug_run_module(
 ) -> Result<Json<DebugRunResponse>, (StatusCode, String)> {
     let result =
         crate::application::pipeline_service::run_debug_module(&state, name, payload).await?;
+    Ok(Json(result))
+}
+
+async fn debug_replay_turn(
+    State(state): State<AppState>,
+    Json(payload): Json<DebugReplayTurnRequest>,
+) -> Result<Json<DebugReplayTurnResponse>, (StatusCode, String)> {
+    let result = crate::application::debug_replay_service::replay_turn(&state, payload).await?;
+    Ok(Json(result))
+}
+
+async fn debug_compare_replay_turn(
+    State(state): State<AppState>,
+    Json(payload): Json<DebugReplayTurnCompareRequest>,
+) -> Result<Json<DebugReplayTurnCompareResponse>, (StatusCode, String)> {
+    let result =
+        crate::application::debug_replay_service::compare_replay_turn(&state, payload).await?;
     Ok(Json(result))
 }
 

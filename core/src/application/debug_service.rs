@@ -155,6 +155,7 @@ pub(crate) async fn run_debug_module(
             history_cutoff_ts,
             &excluded_event_ids,
             state,
+            &overrides,
         )
         .await?
     } else {
@@ -166,6 +167,7 @@ pub(crate) async fn run_debug_module(
             history_cutoff_ts,
             &excluded_event_ids,
             state,
+            &overrides,
         )
         .await?
     };

@@ -1,6 +1,26 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub(crate) struct DebugPromptOverridesPayload {
+    #[serde(default)]
+    pub(crate) base: Option<String>,
+    #[serde(default)]
+    pub(crate) router: Option<String>,
+    #[serde(default)]
+    pub(crate) decision: Option<String>,
+    #[serde(default)]
+    pub(crate) self_improvement: Option<String>,
+    #[serde(default)]
+    pub(crate) submodules: Vec<DebugPromptModulePayload>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(crate) struct DebugPromptModulePayload {
+    pub(crate) name: String,
+    pub(crate) instructions: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct DebugRunRequest {
     pub(crate) input: String,
@@ -23,6 +43,53 @@ pub(crate) struct DebugRunRequest {
 #[derive(Debug, Serialize)]
 pub(crate) struct DebugRunResponse {
     pub(crate) output: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct DebugReplayTurnRequest {
+    pub(crate) event_id: String,
+    #[serde(default)]
+    pub(crate) module: Option<String>,
+    #[serde(default)]
+    pub(crate) prompt_overrides: Option<DebugPromptOverridesPayload>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DebugReplayTurnResponse {
+    pub(crate) event_id: String,
+    pub(crate) module: String,
+    pub(crate) input: String,
+    pub(crate) original_output: String,
+    pub(crate) history: String,
+    pub(crate) output: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct DebugReplayTurnCompareRequest {
+    pub(crate) event_id: String,
+    #[serde(default)]
+    pub(crate) module: Option<String>,
+    #[serde(default)]
+    pub(crate) variant_a: Option<DebugPromptOverridesPayload>,
+    #[serde(default)]
+    pub(crate) variant_b: Option<DebugPromptOverridesPayload>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DebugReplayTurnCompareVariantResponse {
+    pub(crate) label: String,
+    pub(crate) output: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DebugReplayTurnCompareResponse {
+    pub(crate) event_id: String,
+    pub(crate) module: String,
+    pub(crate) input: String,
+    pub(crate) original_output: String,
+    pub(crate) history: String,
+    pub(crate) variant_a: DebugReplayTurnCompareVariantResponse,
+    pub(crate) variant_b: DebugReplayTurnCompareVariantResponse,
 }
 
 #[derive(Debug, Deserialize)]

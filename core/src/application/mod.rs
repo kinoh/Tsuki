@@ -1,6 +1,7 @@
 pub mod concept_activation_service;
 pub mod concept_retrieval_service;
 pub mod conversation_recall_service;
+pub mod debug_replay_service;
 pub mod debug_service;
 pub mod event_service;
 pub mod execution_service;

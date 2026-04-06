@@ -348,6 +348,7 @@ pub(crate) async fn run_all_submodules_debug(
     history_cutoff_ts: Option<&str>,
     excluded_event_ids: &std::collections::HashSet<String>,
     state: &AppState,
+    overrides: &PromptOverrides,
 ) -> Result<String, (StatusCode, String)> {
     let module_names = state
         .runtime
@@ -371,6 +372,7 @@ pub(crate) async fn run_all_submodules_debug(
             history_cutoff_ts,
             excluded_event_ids,
             state,
+            overrides,
         )
         .await?;
         Ok::<(String, String), (StatusCode, String)>((name.clone(), output))
@@ -391,6 +393,7 @@ pub(crate) async fn run_submodule_debug(
     history_cutoff_ts: Option<&str>,
     excluded_event_ids: &std::collections::HashSet<String>,
     state: &AppState,
+    overrides: &PromptOverrides,
 ) -> Result<String, (StatusCode, String)> {
     let history = if context_override.is_some() {
         String::new()
@@ -405,7 +408,6 @@ pub(crate) async fn run_submodule_debug(
     } else {
         "none".to_string()
     };
-    let overrides = current_prompt_overrides(state).await;
     let base_instructions = state.prompts.base_or_default(&overrides);
     let module_defs = state
         .runtime
