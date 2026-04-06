@@ -470,6 +470,7 @@ pub(crate) async fn run_server() {
         )
         .route("/state-records", get(debug_state_records_ui))
         .route("/events", get(debug_monitor_ui))
+        .route("/turns", get(debug_turns_ui))
         .route("/concept-graph", get(debug_concept_graph_ui))
         .route("/concept-graph/health", get(debug_concept_graph_health))
         .route("/concept-graph/stats", get(debug_concept_graph_stats))
@@ -1922,6 +1923,23 @@ async fn debug_monitor_ui(
             println!(
                 "MONITOR_UI_READ_ERROR path={} error={} (falling back to embedded html)",
                 MONITOR_UI_PATH, err
+            );
+            Ok(Html(EMBEDDED.to_string()))
+        }
+    }
+}
+
+async fn debug_turns_ui(
+    State(_state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    const EMBEDDED: &str = include_str!("../static/turns_ui.html");
+    const UI_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static/turns_ui.html");
+    match tokio::fs::read_to_string(UI_PATH).await {
+        Ok(html) => Ok(Html(html)),
+        Err(err) => {
+            println!(
+                "TURNS_UI_READ_ERROR path={} error={} (falling back to embedded html)",
+                UI_PATH, err
             );
             Ok(Html(EMBEDDED.to_string()))
         }

@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tsuki Turn Console</title>
+    <link rel="stylesheet" href="/admin/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-base.css" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Iosevka", "SFMono-Regular", Menlo, Consolas, monospace;
+        background: var(--page-bg);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+      .title-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-nav {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-nav a {
+        color: var(--muted);
+        font-size: 12px;
+        text-decoration: none;
+        padding-bottom: 2px;
+        border-bottom: 1px solid transparent;
+      }
+      .top-nav a.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+      .logout-btn {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .logout-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .panel {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      input, button {
+        background: var(--surface-2);
+        color: var(--text);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 7px 9px;
+        font: inherit;
+        font-size: 13px;
+      }
+      input { min-width: 130px; }
+      button { cursor: pointer; }
+      button:hover { border-color: var(--accent); }
+      .status {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .layout {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
+      }
+      .timeline-pane {
+        min-width: 0;
+      }
+      .timeline {
+        max-height: 72vh;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface-2);
+      }
+      .turn {
+        padding: 4px 8px;
+      }
+      .line {
+        line-height: 1.35;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        cursor: pointer;
+        border-radius: 6px;
+        padding: 1px 3px;
+      }
+      .line:hover { background: rgba(255, 255, 255, 0.05); }
+      .line.active {
+        background: rgba(113, 74, 244, 0.22);
+        box-shadow: inset 0 0 0 1px rgba(255, 79, 167, 0.55);
+      }
+      .line.error-log {
+        color: var(--warn);
+        cursor: default;
+      }
+      .ts { color: var(--muted); margin-right: 8px; }
+      .mod {
+        display: inline-block;
+        width: 96px;
+        color: var(--muted);
+      }
+      .sep {
+        color: var(--muted);
+        margin-right: 6px;
+      }
+      .detail {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface-2);
+        padding: 10px;
+        max-height: 72vh;
+        overflow: auto;
+      }
+      .detail h2 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+      .kv {
+        margin: 2px 0;
+        font-size: 12px;
+      }
+      .k {
+        display: inline-block;
+        width: 68px;
+        color: var(--muted);
+      }
+      pre {
+        margin: 8px 0 0;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--bg);
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+      }
+      .detail-section {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+      }
+      .detail-section h3 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      .detail textarea,
+      .detail select {
+        width: 100%;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        font: inherit;
+        font-size: 12px;
+        margin-top: 6px;
+      }
+      .detail textarea {
+        min-height: 90px;
+        resize: vertical;
+      }
+      .detail .button-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .detail .hint {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 6px;
+      }
+      .detail .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .detail .result-card {
+        margin-top: 10px;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+      }
+      @media (max-width: 1100px) {
+        .layout { grid-template-columns: 1fr; }
+        .detail .two-col { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="title-row">
+        <h1>Tsuki Turn Console</h1>
+        <div class="title-right">
+          <nav class="top-nav" aria-label="Admin Pages">
+            <a href="/admin/events">Events</a>
+            <a href="/admin/turns" class="active">Turns</a>
+            <a href="/admin/prompts">Prompts</a>
+            <a href="/admin/skills">Skills</a>
+            <a href="/admin/concept-graph">Concept Graph</a>
+            <a href="/admin/state-records">State</a>
+          </nav>
+          <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
+        </div>
+      </div>
+      <section class="panel">
+        <div class="row">
+          <label>Max items <input id="maxItems" type="number" min="50" max="5000" step="50" value="1200" /></label>
+          <label>Search <input id="searchText" type="text" placeholder="text / tag / event_id" /></label>
+          <button id="refreshButton" type="button">Refresh</button>
+          <span class="status" id="statusText">Loading…</span>
+        </div>
+        <div class="layout">
+          <div class="timeline-pane">
+            <div class="timeline" id="timeline"></div>
+          </div>
+          <div class="detail" id="detail">
+            <h2>Turn Detail</h2>
+            <div class="status">Select a turn line.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script>
+      const state = {
+        eventSource: null,
+        eventsById: new Map(),
+        selectedEventId: null,
+        streamError: null,
+        prompts: null,
+      };
+
+      const els = {
+        timeline: document.getElementById("timeline"),
+        detail: document.getElementById("detail"),
+        statusText: document.getElementById("statusText"),
+        refreshButton: document.getElementById("refreshButton"),
+        maxItems: document.getElementById("maxItems"),
+        searchText: document.getElementById("searchText"),
+        topLogoutButton: document.getElementById("topLogoutButton"),
+      };
+
+      function eventTags(event) {
+        return Array.isArray(event?.meta?.tags) ? event.meta.tags : [];
+      }
+
+      function eventText(event) {
+        if (typeof event?.payload?.text === "string") return event.payload.text;
+        try {
+          return JSON.stringify(event?.payload || {});
+        } catch {
+          return "";
+        }
+      }
+
+      function shorten(value, max = 180) {
+        if (!value) return "";
+        return value.length <= max ? value : `${value.slice(0, max)}...`;
+      }
+
+      function isAssistantResponseEvent(event) {
+        return event?.source === "assistant" && eventTags(event).includes("response");
+      }
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;");
+      }
+
+      function parseTs(ts) {
+        const ms = Date.parse(ts || "");
+        return Number.isFinite(ms) ? ms : 0;
+      }
+
+      function normalizeMaxItems() {
+        const raw = Number(els.maxItems.value);
+        const safe = Number.isFinite(raw) ? raw : 1200;
+        return Math.max(50, Math.min(5000, safe));
+      }
+
+      function updateStatusText() {
+        const total = Array.from(state.eventsById.values()).filter(isAssistantResponseEvent).length;
+        els.statusText.textContent = `${total} turns loaded`;
+      }
+
+      function eventMatchesSearch(event) {
+        const text = (els.searchText.value || "").trim().toLowerCase();
+        if (!text) return true;
+        const hay = [
+          event.event_id || "",
+          event.ts || "",
+          eventText(event),
+          eventTags(event).join(" "),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(text);
+      }
+
+      function syncSelectedEventToUrl(eventId) {
+        const url = new URL(window.location.href);
+        if (eventId) {
+          url.searchParams.set("event_id", eventId);
+        } else {
+          url.searchParams.delete("event_id");
+        }
+        window.history.replaceState({}, "", url);
+      }
+
+      function renderDetail(eventId) {
+        const event = state.eventsById.get(eventId);
+        if (!event) {
+          els.detail.innerHTML = '<h2>Turn Detail</h2><div class="status">Select a turn line.</div>';
+          return;
+        }
+        const tags = eventTags(event).join(", ") || "-";
+        let payloadText = "{}";
+        try {
+          payloadText = JSON.stringify(event.payload || {}, null, 2);
+        } catch {
+          payloadText = String(event.payload || "");
+        }
+        els.detail.innerHTML = `
+          <h2>Turn Detail</h2>
+          <div class="kv"><span class="k">event_id</span>${event.event_id || "-"}</div>
+          <div class="kv"><span class="k">ts</span>${event.ts || "-"}</div>
+          <div class="kv"><span class="k">source</span>${event.source || "-"}</div>
+          <div class="kv"><span class="k">tags</span>${tags}</div>
+          <pre>${payloadText.replace(/</g, "&lt;")}</pre>
+          ${buildReplayPanel()}
+        `;
+        wireReplayControls(event);
+      }
+
+      function buildReplayPanel() {
+        const prompts = state.prompts || {};
+        const basePrompt = typeof prompts.base === "string" ? prompts.base : "";
+        const routerPrompt = typeof prompts.router === "string" ? prompts.router : "";
+        const decisionPrompt = typeof prompts.decision === "string" ? prompts.decision : "";
+        return `
+          <section class="detail-section">
+            <h3>Turn Replay</h3>
+            <label>
+              Module
+              <select id="replayModule">
+                <option value="decision">decision</option>
+                <option value="router">router</option>
+                <option value="submodules">submodules</option>
+              </select>
+            </label>
+            <div class="button-row">
+              <button id="replayRunButton" type="button">Replay</button>
+            </div>
+            <div id="replayStatus" class="hint">Re-run this assistant turn from the preceding user input.</div>
+            <div id="replaySingleResult"></div>
+          </section>
+
+          <section class="detail-section">
+            <h3>Prompt A/B</h3>
+            <div class="hint">Override only what you want to change. Empty fields keep current prompts.</div>
+            <div class="two-col">
+              <div>
+                <label>
+                  Variant A Base
+                  <textarea id="variantABase" placeholder="${escapeHtml(basePrompt)}"></textarea>
+                </label>
+                <label>
+                  Variant A Router
+                  <textarea id="variantARouter" placeholder="${escapeHtml(routerPrompt)}"></textarea>
+                </label>
+                <label>
+                  Variant A Decision
+                  <textarea id="variantADecision" placeholder="${escapeHtml(decisionPrompt)}"></textarea>
+                </label>
+              </div>
+              <div>
+                <label>
+                  Variant B Base
+                  <textarea id="variantBBase" placeholder="${escapeHtml(basePrompt)}"></textarea>
+                </label>
+                <label>
+                  Variant B Router
+                  <textarea id="variantBRouter" placeholder="${escapeHtml(routerPrompt)}"></textarea>
+                </label>
+                <label>
+                  Variant B Decision
+                  <textarea id="variantBDecision" placeholder="${escapeHtml(decisionPrompt)}"></textarea>
+                </label>
+              </div>
+            </div>
+            <div class="button-row">
+              <button id="replayCompareButton" type="button">Compare A/B</button>
+            </div>
+            <div id="compareStatus" class="hint">Use the same turn history for both variants.</div>
+            <div id="replayCompareResult"></div>
+          </section>
+        `;
+      }
+
+      function buildPromptOverrides(prefix) {
+        const base = document.getElementById(`${prefix}Base`)?.value?.trim() || "";
+        const router = document.getElementById(`${prefix}Router`)?.value?.trim() || "";
+        const decision = document.getElementById(`${prefix}Decision`)?.value?.trim() || "";
+        const payload = {};
+        if (base) payload.base = base;
+        if (router) payload.router = router;
+        if (decision) payload.decision = decision;
+        return Object.keys(payload).length > 0 ? payload : null;
+      }
+
+      function renderReplaySingleResult(result) {
+        const container = document.getElementById("replaySingleResult");
+        if (!container) return;
+        container.innerHTML = `
+          <div class="result-card">
+            <div class="kv"><span class="k">module</span>${escapeHtml(result.module)}</div>
+            <div class="kv"><span class="k">input</span>${escapeHtml(result.input)}</div>
+            <div class="kv"><span class="k">original</span>${escapeHtml(result.original_output)}</div>
+            <pre>${escapeHtml(result.output)}</pre>
+            <div class="hint">History slice used for replay</div>
+            <pre>${escapeHtml(result.history)}</pre>
+          </div>
+        `;
+      }
+
+      function renderReplayCompareResult(result) {
+        const container = document.getElementById("replayCompareResult");
+        if (!container) return;
+        container.innerHTML = `
+          <div class="result-card">
+            <div class="kv"><span class="k">module</span>${escapeHtml(result.module)}</div>
+            <div class="kv"><span class="k">input</span>${escapeHtml(result.input)}</div>
+            <div class="kv"><span class="k">original</span>${escapeHtml(result.original_output)}</div>
+            <div class="two-col">
+              <div>
+                <div class="hint">Variant ${escapeHtml(result.variant_a.label)}</div>
+                <pre>${escapeHtml(result.variant_a.output)}</pre>
+              </div>
+              <div>
+                <div class="hint">Variant ${escapeHtml(result.variant_b.label)}</div>
+                <pre>${escapeHtml(result.variant_b.output)}</pre>
+              </div>
+            </div>
+            <div class="hint">History slice used for compare</div>
+            <pre>${escapeHtml(result.history)}</pre>
+          </div>
+        `;
+      }
+
+      function wireReplayControls(event) {
+        const replayRunButton = document.getElementById("replayRunButton");
+        const replayCompareButton = document.getElementById("replayCompareButton");
+        const replayStatus = document.getElementById("replayStatus");
+        const compareStatus = document.getElementById("compareStatus");
+        const replayModule = document.getElementById("replayModule");
+
+        replayRunButton?.addEventListener("click", async () => {
+          replayStatus.textContent = "Replaying...";
+          try {
+            const response = await fetch("/admin/replays/turn", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                event_id: event.event_id,
+                module: replayModule?.value || "decision",
+              }),
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const result = await response.json();
+            renderReplaySingleResult(result);
+            replayStatus.textContent = "Replay complete.";
+          } catch (error) {
+            replayStatus.textContent = `Replay failed: ${error.message}`;
+          }
+        });
+
+        replayCompareButton?.addEventListener("click", async () => {
+          compareStatus.textContent = "Comparing...";
+          try {
+            const response = await fetch("/admin/replays/turn/compare", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                event_id: event.event_id,
+                module: replayModule?.value || "decision",
+                variant_a: buildPromptOverrides("variantA"),
+                variant_b: buildPromptOverrides("variantB"),
+              }),
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const result = await response.json();
+            renderReplayCompareResult(result);
+            compareStatus.textContent = "Compare complete.";
+          } catch (error) {
+            compareStatus.textContent = `Compare failed: ${error.message}`;
+          }
+        });
+      }
+
+      function renderTimeline() {
+        const maxItems = normalizeMaxItems();
+        const eventsDesc = Array.from(state.eventsById.values())
+          .filter((event) => isAssistantResponseEvent(event) && eventMatchesSearch(event))
+          .sort((a, b) => parseTs(b.ts) - parseTs(a.ts))
+          .slice(0, maxItems);
+
+        if (eventsDesc.length === 0) {
+          els.timeline.innerHTML = '<div class="turn"><div class="line">No turns.</div></div>';
+          renderDetail(null);
+          return;
+        }
+
+        const html = eventsDesc
+          .map((event) => {
+            const active = state.selectedEventId === event.event_id ? "active" : "";
+            const module = event?.meta?.module || "assistant";
+            return `
+              <div class="turn">
+                <div class="line ${active}" data-event-id="${event.event_id}">
+                  <span class="ts">${event.ts || ""}</span>
+                  <span class="mod">${module}</span>
+                  <span class="sep">|</span>${shorten(eventText(event))}
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+        const streamError = state.streamError
+          ? `<div class="turn"><div class="line error-log">${escapeHtml(state.streamError)}</div></div>`
+          : "";
+        els.timeline.innerHTML = html + streamError;
+
+        const selectedStillVisible = eventsDesc.some((event) => event.event_id === state.selectedEventId);
+        if (!selectedStillVisible) {
+          state.selectedEventId = eventsDesc[0]?.event_id || null;
+          syncSelectedEventToUrl(state.selectedEventId);
+        }
+        renderDetail(state.selectedEventId);
+        updateStatusText();
+      }
+
+      function upsertEvent(event) {
+        if (!event || !event.event_id || !isAssistantResponseEvent(event)) return;
+        state.eventsById.set(event.event_id, event);
+        if (state.eventsById.size > 3000) {
+          const evs = Array.from(state.eventsById.values()).sort((a, b) => parseTs(b.ts) - parseTs(a.ts));
+          state.eventsById.clear();
+          evs.slice(0, 1500).forEach((ev) => state.eventsById.set(ev.event_id, ev));
+        }
+      }
+
+      async function loadHistory() {
+        try {
+          const res = await fetch("/admin/events/list?limit=1200");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const events = Array.isArray(data?.events) ? data.events : [];
+          events.forEach((event) => upsertEvent(event));
+          const requestedEventId = new URLSearchParams(window.location.search).get("event_id");
+          if (
+            requestedEventId &&
+            state.eventsById.has(requestedEventId)
+          ) {
+            state.selectedEventId = requestedEventId;
+          } else if (!state.selectedEventId && state.eventsById.size > 0) {
+            const first = Array.from(state.eventsById.values()).sort((a, b) => parseTs(b.ts) - parseTs(a.ts))[0];
+            state.selectedEventId = first?.event_id || null;
+          }
+          renderTimeline();
+        } catch (error) {
+          els.statusText.textContent = `Load failed: ${error.message}`;
+        }
+      }
+
+      async function loadPrompts() {
+        try {
+          const res = await fetch("/admin/prompts/data");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          state.prompts = await res.json();
+          if (state.selectedEventId) {
+            renderDetail(state.selectedEventId);
+          }
+        } catch (_error) {
+          state.prompts = null;
+        }
+      }
+
+      function connectStream() {
+        if (state.eventSource) return;
+        const es = new EventSource("/admin/events/stream");
+        es.onmessage = (msg) => {
+          try {
+            const payload = JSON.parse(msg.data || "{}");
+            const event = payload?.event;
+            upsertEvent(event);
+            renderTimeline();
+          } catch (_err) {}
+        };
+        es.onerror = () => {
+          state.streamError = "stream reconnecting…";
+          renderTimeline();
+        };
+        es.onopen = () => {
+          state.streamError = null;
+          renderTimeline();
+        };
+        state.eventSource = es;
+      }
+
+      els.refreshButton.addEventListener("click", loadHistory);
+      els.searchText.addEventListener("input", renderTimeline);
+      els.maxItems.addEventListener("change", renderTimeline);
+      els.timeline.addEventListener("click", (event) => {
+        const row = event.target.closest("[data-event-id]");
+        if (!row) return;
+        const eventId = row.getAttribute("data-event-id");
+        if (!eventId) return;
+        state.selectedEventId = eventId;
+        syncSelectedEventToUrl(eventId);
+        renderTimeline();
+      });
+      els.topLogoutButton.addEventListener("click", async () => {
+        await fetch("/auth/logout", { method: "POST" });
+        window.location.href = "/admin/login";
+      });
+
+      loadHistory();
+      loadPrompts();
+      connectStream();
+    </script>
+  </body>
+</html>

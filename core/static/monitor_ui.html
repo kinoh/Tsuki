@@ -181,64 +181,23 @@
         word-break: break-word;
         font-size: 12px;
       }
-      .detail-section {
-        margin-top: 14px;
-        padding-top: 12px;
-        border-top: 1px solid var(--line);
-      }
-      .detail-section h3 {
-        margin: 0 0 8px;
+      .detail-link {
+        display: inline-block;
+        margin-top: 10px;
+        color: var(--accent);
         font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--muted);
+        text-decoration: none;
       }
-      .detail textarea,
-      .detail select {
-        width: 100%;
-        background: var(--bg);
-        color: var(--text);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 8px;
-        font: inherit;
-        font-size: 12px;
-        margin-top: 6px;
-      }
-      .detail textarea {
-        min-height: 90px;
-        resize: vertical;
-      }
-      .detail .button-row {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin-top: 8px;
-      }
-      .detail .button-row button.secondary {
-        background: transparent;
-        color: var(--text);
+      .detail-link:hover {
+        text-decoration: underline;
       }
       .detail .hint {
         color: var(--muted);
         font-size: 12px;
         margin-top: 6px;
       }
-      .detail .two-col {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-      }
-      .detail .result-card {
-        margin-top: 10px;
-        padding: 10px;
-        border-radius: 8px;
-        border: 1px solid var(--line);
-        background: rgba(255, 255, 255, 0.02);
-      }
       @media (max-width: 1100px) {
         .layout { grid-template-columns: 1fr; }
-        .detail .two-col { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -249,6 +208,7 @@
         <div class="title-right">
           <nav class="top-nav" aria-label="Admin Pages">
             <a href="/admin/events" class="active">Events</a>
+            <a href="/admin/turns">Turns</a>
             <a href="/admin/prompts">Prompts</a>
             <a href="/admin/skills">Skills</a>
             <a href="/admin/concept-graph">Concept Graph</a>
@@ -281,7 +241,6 @@
         eventsById: new Map(),
         selectedEventId: null,
         streamError: null,
-        prompts: null,
       };
 
       const els = {
@@ -317,18 +276,6 @@
 
       function isOutputEvent(event) {
         return !!event && !isInputEvent(event);
-      }
-
-      function isAssistantResponseEvent(event) {
-        return event?.source === "assistant" && eventTags(event).includes("response");
-      }
-
-      function escapeHtml(value) {
-        return String(value || "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/\"/g, "&quot;");
       }
 
       function parseTs(ts) {
@@ -368,7 +315,9 @@
         } catch {
           payloadText = String(event.payload || "");
         }
-        const replayPanel = isAssistantResponseEvent(event) ? buildReplayPanel(event) : "";
+        const turnLink = event?.source === "assistant" && eventTags(event).includes("response")
+          ? `<a class="detail-link" href="/admin/turns?event_id=${encodeURIComponent(event.event_id || "")}">Open in Turns</a>`
+          : "";
         els.detail.innerHTML = `
           <h2>Event Detail</h2>
           <div class="kv"><span class="k">event_id</span>${event.event_id || "-"}</div>
@@ -376,176 +325,8 @@
           <div class="kv"><span class="k">source</span>${event.source || "-"}</div>
           <div class="kv"><span class="k">tags</span>${tags}</div>
           <pre>${payloadText.replace(/</g, "&lt;")}</pre>
-          ${replayPanel}
+          ${turnLink}
         `;
-        if (isAssistantResponseEvent(event)) {
-          wireReplayControls(event);
-        }
-      }
-
-      function buildReplayPanel(event) {
-        const prompts = state.prompts || {};
-        const basePrompt = typeof prompts.base === "string" ? prompts.base : "";
-        const routerPrompt = typeof prompts.router === "string" ? prompts.router : "";
-        const decisionPrompt = typeof prompts.decision === "string" ? prompts.decision : "";
-        return `
-          <section class="detail-section">
-            <h3>Turn Replay</h3>
-            <label>
-              Module
-              <select id="replayModule">
-                <option value="decision">decision</option>
-                <option value="router">router</option>
-                <option value="submodules">submodules</option>
-              </select>
-            </label>
-            <div class="button-row">
-              <button id="replayRunButton" type="button">Replay</button>
-            </div>
-            <div id="replayStatus" class="hint">Re-run this assistant turn from the preceding user input.</div>
-            <div id="replaySingleResult"></div>
-          </section>
-
-          <section class="detail-section">
-            <h3>Prompt A/B</h3>
-            <div class="hint">Override only what you want to change. Empty fields keep current prompts.</div>
-            <div class="two-col">
-              <div>
-                <label>
-                  Variant A Base
-                  <textarea id="variantABase" placeholder="${escapeHtml(basePrompt)}"></textarea>
-                </label>
-                <label>
-                  Variant A Router
-                  <textarea id="variantARouter" placeholder="${escapeHtml(routerPrompt)}"></textarea>
-                </label>
-                <label>
-                  Variant A Decision
-                  <textarea id="variantADecision" placeholder="${escapeHtml(decisionPrompt)}"></textarea>
-                </label>
-              </div>
-              <div>
-                <label>
-                  Variant B Base
-                  <textarea id="variantBBase" placeholder="${escapeHtml(basePrompt)}"></textarea>
-                </label>
-                <label>
-                  Variant B Router
-                  <textarea id="variantBRouter" placeholder="${escapeHtml(routerPrompt)}"></textarea>
-                </label>
-                <label>
-                  Variant B Decision
-                  <textarea id="variantBDecision" placeholder="${escapeHtml(decisionPrompt)}"></textarea>
-                </label>
-              </div>
-            </div>
-            <div class="button-row">
-              <button id="replayCompareButton" type="button">Compare A/B</button>
-            </div>
-            <div id="compareStatus" class="hint">Use the same turn history for both variants.</div>
-            <div id="replayCompareResult"></div>
-          </section>
-        `;
-      }
-
-      function buildPromptOverrides(prefix) {
-        const base = document.getElementById(`${prefix}Base`)?.value?.trim() || "";
-        const router = document.getElementById(`${prefix}Router`)?.value?.trim() || "";
-        const decision = document.getElementById(`${prefix}Decision`)?.value?.trim() || "";
-        const payload = {};
-        if (base) payload.base = base;
-        if (router) payload.router = router;
-        if (decision) payload.decision = decision;
-        return Object.keys(payload).length > 0 ? payload : null;
-      }
-
-      function renderReplaySingleResult(result) {
-        const container = document.getElementById("replaySingleResult");
-        if (!container) return;
-        container.innerHTML = `
-          <div class="result-card">
-            <div class="kv"><span class="k">module</span>${escapeHtml(result.module)}</div>
-            <div class="kv"><span class="k">input</span>${escapeHtml(result.input)}</div>
-            <div class="kv"><span class="k">original</span>${escapeHtml(result.original_output)}</div>
-            <pre>${escapeHtml(result.output)}</pre>
-            <div class="hint">History slice used for replay</div>
-            <pre>${escapeHtml(result.history)}</pre>
-          </div>
-        `;
-      }
-
-      function renderReplayCompareResult(result) {
-        const container = document.getElementById("replayCompareResult");
-        if (!container) return;
-        container.innerHTML = `
-          <div class="result-card">
-            <div class="kv"><span class="k">module</span>${escapeHtml(result.module)}</div>
-            <div class="kv"><span class="k">input</span>${escapeHtml(result.input)}</div>
-            <div class="kv"><span class="k">original</span>${escapeHtml(result.original_output)}</div>
-            <div class="two-col">
-              <div>
-                <div class="hint">Variant ${escapeHtml(result.variant_a.label)}</div>
-                <pre>${escapeHtml(result.variant_a.output)}</pre>
-              </div>
-              <div>
-                <div class="hint">Variant ${escapeHtml(result.variant_b.label)}</div>
-                <pre>${escapeHtml(result.variant_b.output)}</pre>
-              </div>
-            </div>
-            <div class="hint">History slice used for compare</div>
-            <pre>${escapeHtml(result.history)}</pre>
-          </div>
-        `;
-      }
-
-      function wireReplayControls(event) {
-        const replayRunButton = document.getElementById("replayRunButton");
-        const replayCompareButton = document.getElementById("replayCompareButton");
-        const replayStatus = document.getElementById("replayStatus");
-        const compareStatus = document.getElementById("compareStatus");
-        const replayModule = document.getElementById("replayModule");
-
-        replayRunButton?.addEventListener("click", async () => {
-          replayStatus.textContent = "Replaying...";
-          try {
-            const response = await fetch("/admin/replays/turn", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                event_id: event.event_id,
-                module: replayModule?.value || "decision",
-              }),
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const result = await response.json();
-            renderReplaySingleResult(result);
-            replayStatus.textContent = "Replay complete.";
-          } catch (error) {
-            replayStatus.textContent = `Replay failed: ${error.message}`;
-          }
-        });
-
-        replayCompareButton?.addEventListener("click", async () => {
-          compareStatus.textContent = "Comparing...";
-          try {
-            const response = await fetch("/admin/replays/turn/compare", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                event_id: event.event_id,
-                module: replayModule?.value || "decision",
-                variant_a: buildPromptOverrides("variantA"),
-                variant_b: buildPromptOverrides("variantB"),
-              }),
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const result = await response.json();
-            renderReplayCompareResult(result);
-            compareStatus.textContent = "Compare complete.";
-          } catch (error) {
-            compareStatus.textContent = `Compare failed: ${error.message}`;
-          }
-        });
       }
 
       function renderTimeline() {
@@ -610,19 +391,6 @@
         } catch (_err) {}
       }
 
-      async function loadPrompts() {
-        try {
-          const res = await fetch("/admin/prompts/data");
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          state.prompts = await res.json();
-          if (state.selectedEventId) {
-            renderDetail(state.selectedEventId);
-          }
-        } catch (_err) {
-          state.prompts = null;
-        }
-      }
-
       function connectStream() {
         if (state.eventSource) return;
         const es = new EventSource("/admin/events/stream");
@@ -675,7 +443,6 @@
       });
 
       loadHistory();
-      loadPrompts();
       connectStream();
     </script>
   </body>
