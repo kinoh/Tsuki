@@ -14,6 +14,24 @@ tasks:
     cmds:
       - cargo run --bin tsuki-core-rust
 
+  embedding/download-model:
+    desc: Download the local concept embedding model used by core
+    vars:
+      MODEL_DIR: '{{.CONCEPT_EMBEDDING_MODEL_DIR | default "/opt/tsuki/models/quantized-stable-static-embedding-fast-retrieval-mrl-ja"}}'
+      MODEL_BASE_URL: https://huggingface.co/RikkaBotan/quantized-stable-static-embedding-fast-retrieval-mrl-ja/resolve/e092037cf8c85a3f1325bfa22d2797f3bc13594e
+    cmds:
+      - |
+        set -eux
+        echo "embedding model download start: {{.MODEL_DIR}}"
+        mkdir -p "{{.MODEL_DIR}}"
+        wget -O "{{.MODEL_DIR}}/tokenizer.json" "{{.MODEL_BASE_URL}}/tokenizer.json"
+        wget -O "{{.MODEL_DIR}}/model_rest.safetensors" "{{.MODEL_BASE_URL}}/model_rest.safetensors"
+        wget -O "{{.MODEL_DIR}}/embedding.q4_k_m.bin" "{{.MODEL_BASE_URL}}/embedding.q4_k_m.bin"
+        test -s "{{.MODEL_DIR}}/tokenizer.json"
+        test -s "{{.MODEL_DIR}}/model_rest.safetensors"
+        test -s "{{.MODEL_DIR}}/embedding.q4_k_m.bin"
+        echo "embedding model download complete: {{.MODEL_DIR}}"
+
   integration/memgraph/up:
     desc: Start isolated test memgraph service
     cmds:
