@@ -1,21 +1,21 @@
 FROM rust:1.89-bookworm AS builder
 
-WORKDIR /workspace/core-rust
+WORKDIR /workspace/core
 
-COPY core-rust/Cargo.toml core-rust/Cargo.lock ./
-COPY core-rust/src ./src
-COPY core-rust/static ./static
-COPY core-rust/config.toml core-rust/config.prod.toml ./
+COPY core/Cargo.toml core/Cargo.lock ./
+COPY core/src ./src
+COPY core/static ./static
+COPY core/config.toml core/config.prod.toml ./
 COPY api-specs ../api-specs
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/workspace/core-rust/target \
+    --mount=type=cache,target=/workspace/core/target \
     cargo build --release --bin tsuki-core-rust --bin merge_toml \
-    && /workspace/core-rust/target/release/merge_toml \
-      --base /workspace/core-rust/config.toml \
-      --overlay /workspace/core-rust/config.prod.toml \
+    && /workspace/core/target/release/merge_toml \
+      --base /workspace/core/config.toml \
+      --overlay /workspace/core/config.prod.toml \
       --output /tmp/config.toml \
-    && cp /workspace/core-rust/target/release/tsuki-core-rust /tmp/tsuki-core-rust
+    && cp /workspace/core/target/release/tsuki-core-rust /tmp/tsuki-core-rust
 
 FROM debian:bookworm-slim AS runtime
 
