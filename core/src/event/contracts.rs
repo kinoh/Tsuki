@@ -96,6 +96,32 @@ pub(crate) fn llm_error(source: &str, payload: Value, extra_tags: Vec<String>) -
     emit(source, "text", payload, tags)
 }
 
+pub(crate) fn action_result(
+    action_name: &str,
+    ok: bool,
+    output: &str,
+    error: Option<&str>,
+) -> Event {
+    let mut tags = vec![
+        "action.result".to_string(),
+        format!("action:{}", action_name),
+    ];
+    if !ok {
+        tags.push("error".to_string());
+    }
+    emit(
+        "action_execution",
+        "state",
+        json!({
+            "action": action_name,
+            "ok": ok,
+            "output": output,
+            "error": error,
+        }),
+        tags,
+    )
+}
+
 pub(crate) fn self_improvement_module_processed(payload: Value) -> Event {
     emit(
         "self_improvement",

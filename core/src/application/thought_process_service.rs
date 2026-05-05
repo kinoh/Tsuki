@@ -1,16 +1,23 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, collections::HashSet, sync::Arc};
 use tokio::runtime::Handle;
 
 use crate::{
     app_state::AppState,
     application::{
-        event_service::record_event, history_service::format_event_lines,
-        module_bootstrap::ModuleRuntime, usage_service::DbLlmUsageRecorder,
+        concept_activation_service::activate_concepts,
+        concept_retrieval_service::retrieve_concepts,
+        conversation_recall_service::format_recalled_event_history, event_service::record_event,
+        history_service::format_event_lines, module_bootstrap::ModuleRuntime,
+        router_symbolization_service::symbolize, usage_service::DbLlmUsageRecorder,
     },
-    event::{contracts::response_text, Event},
+    event::{
+        contracts::{action_result, response_text},
+        Event,
+    },
+    input_ingress::{MediaAttachment, RouterInput},
     llm::{
         build_response_api_llm, LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder,
         ResponseApiConfig,
@@ -168,16 +175,95 @@ pub(crate) struct DecisionService {
     llm: Arc<dyn LlmAdapter>,
 }
 
-pub(crate) struct EventSetCognition;
+pub(crate) struct AppCognition {
+    state: AppState,
+    dry_run: bool,
+}
+
+impl AppCognition {
+    pub(crate) fn new(state: AppState, dry_run: bool) -> Self {
+        Self { state, dry_run }
+    }
+}
 
 #[async_trait]
-impl CognitionComponent for EventSetCognition {
+impl CognitionComponent for AppCognition {
     async fn build_decision_context(
         &self,
         input: &ThoughtProcessInput,
     ) -> Result<DecisionContext, String> {
+        let latest_input = latest_router_input(&input.events);
+        let input_text = latest_input
+            .as_ref()
+            .map(RouterInput::display_text)
+            .unwrap_or_default();
+        let recent_event_history = format_event_lines(&input.events);
+        let mut context_parts = Vec::<String>::new();
+        context_parts.push(format!(
+            "<recent_event_history>\n{}\n</recent_event_history>",
+            recent_event_history
+        ));
+        if let Some(router_input) = latest_input.as_ref() {
+            let symbolization =
+                symbolize(router_input, self.state.services.router_symbolizer.as_ref()).await;
+            if let Some(err) = &symbolization.error {
+                println!("COGNITION_SYMBOLIZE_ERROR error={}", err);
+            }
+            let concept_limit = self.state.config.router.query_terms_max.max(1);
+            let active_state_limit = self.state.config.router.active_state_limit.max(1);
+            let retrieval = retrieve_concepts(
+                &symbolization.text,
+                router_input,
+                concept_limit,
+                &self.state.config.router.multimodal_embedding,
+                self.state.services.activation_concept_graph.as_ref(),
+            )
+            .await;
+            for err in &retrieval.errors {
+                println!("COGNITION_CONCEPT_RETRIEVAL_ERROR error={}", err);
+            }
+            let activation = activate_concepts(
+                &retrieval.candidate_concepts,
+                active_state_limit,
+                self.state.services.activation_concept_graph.as_ref(),
+                self.dry_run,
+            )
+            .await;
+            for err in &activation.errors {
+                println!("COGNITION_CONCEPT_ACTIVATION_ERROR error={}", err);
+            }
+            let recalled_history =
+                format_recalled_event_history(&self.state, &input_text, &HashSet::new()).await;
+            context_parts.push(format!(
+                "<latest_input>\n{}\n</latest_input>",
+                input_text.trim()
+            ));
+            context_parts.push(format!(
+                "<symbolized_input>\n{}\n</symbolized_input>",
+                symbolization.text.trim()
+            ));
+            context_parts.push(format!(
+                "<concept_candidates source=\"{}\">\n{}\n</concept_candidates>",
+                retrieval.candidate_source,
+                format_list_or_none(&retrieval.candidate_concepts)
+            ));
+            context_parts.push(format!(
+                "<active_concepts_and_arousal>\n{}\n</active_concepts_and_arousal>",
+                activation.active_concepts_and_arousal
+            ));
+            context_parts.push(format!(
+                "<recalled_history>\n{}\n</recalled_history>",
+                recalled_history
+            ));
+        } else {
+            context_parts.push("<latest_input>\nnone\n</latest_input>".to_string());
+            context_parts.push(
+                "<active_concepts_and_arousal>\nnone\n</active_concepts_and_arousal>".to_string(),
+            );
+            context_parts.push("<recalled_history>\nnone\n</recalled_history>".to_string());
+        }
         Ok(DecisionContext {
-            context: format_event_lines(&input.events),
+            context: context_parts.join("\n\n"),
             available_actions: default_available_actions(),
         })
     }
@@ -203,16 +289,16 @@ pub(crate) async fn run_basic_thought_process(
         usage_context: Some(LlmUsageContext::new("user", "decision")),
         max_tool_rounds: 0,
     }));
-    let state_for_reply = state.clone();
-    let action_execution = ActionExecutionService::with_user_reply(Arc::new(move |event| {
-        let state = state_for_reply.clone();
-        tokio::task::block_in_place(|| {
-            Handle::current().block_on(record_event(&state, event));
-        });
-    }));
-    ThoughtProcessService::new(Arc::new(EventSetCognition), decision, action_execution)
-        .run(&ThoughtProcessInput { events })
-        .await
+    let emit_event = emit_event_blocking(state.clone());
+    let action_execution =
+        ActionExecutionService::with_default_executors(emit_event, runtime, state);
+    ThoughtProcessService::new(
+        Arc::new(AppCognition::new(state.clone(), false)),
+        decision,
+        action_execution,
+    )
+    .run(&ThoughtProcessInput { events })
+    .await
 }
 
 fn build_decision_instructions(base_instructions: &str, decision_instructions: &str) -> String {
@@ -221,7 +307,7 @@ fn build_decision_instructions(base_instructions: &str, decision_instructions: &
         base_instructions.trim(),
         decision_instructions.trim(),
         "You are the Decision component of the thought process.",
-        "Return JSON only with shape {\"actions\":[{\"name\":\"...\",\"input\":\"...\"}],\"reason\":\"...\"}. Select only actions listed in the input. Use user_reply to send a message to the user."
+        "Return JSON only with shape {\"actions\":[{\"name\":\"...\",\"input\":\"...\"}],\"reason\":\"...\"}. Select only actions listed in the input. Use user_reply to send a message to the user. Use perform_task for complex external work that requires tools."
     )
 }
 
@@ -333,22 +419,97 @@ impl ActionExecutor for UserReplyExecutor {
     }
 }
 
+pub(crate) struct PerformTaskExecutor {
+    llm: Arc<dyn LlmAdapter>,
+}
+
+impl PerformTaskExecutor {
+    pub(crate) fn new(llm: Arc<dyn LlmAdapter>) -> Self {
+        Self { llm }
+    }
+}
+
+#[async_trait]
+impl ActionExecutor for PerformTaskExecutor {
+    async fn execute(&self, input: &str) -> Result<String, ActionExecutionError> {
+        let response = self
+            .llm
+            .respond(LlmRequest {
+                input: input.to_string(),
+            })
+            .await
+            .map_err(|err| ActionExecutionError {
+                message: err.to_string(),
+            })?;
+        Ok(response.text)
+    }
+}
+
 pub(crate) struct ActionExecutionService {
     executors: HashMap<String, Arc<dyn ActionExecutor>>,
+    emit_event: Option<Arc<dyn Fn(Event) + Send + Sync>>,
 }
 
 impl ActionExecutionService {
+    #[cfg(test)]
     pub(crate) fn new(executors: HashMap<String, Arc<dyn ActionExecutor>>) -> Self {
-        Self { executors }
+        Self {
+            executors,
+            emit_event: None,
+        }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_user_reply(emit_event: Arc<dyn Fn(Event) + Send + Sync>) -> Self {
+        let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
+        let emit_event_for_reply = emit_event.clone();
+        executors.insert(
+            "user_reply".to_string(),
+            Arc::new(UserReplyExecutor::new(emit_event_for_reply)),
+        );
+        Self {
+            executors,
+            emit_event: Some(emit_event),
+        }
+    }
+
+    pub(crate) fn with_default_executors(
+        emit_event: Arc<dyn Fn(Event) + Send + Sync>,
+        runtime: &ModuleRuntime,
+        state: &AppState,
+    ) -> Self {
         let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
         executors.insert(
             "user_reply".to_string(),
-            Arc::new(UserReplyExecutor::new(emit_event)),
+            Arc::new(UserReplyExecutor::new(emit_event.clone())),
         );
-        Self::new(executors)
+        let usage_recorder: Arc<dyn LlmUsageRecorder> =
+            Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
+        let task_tools = runtime
+            .tools
+            .iter()
+            .filter(|tool| tool_name(tool) != Some("emit_user_reply"))
+            .cloned()
+            .collect::<Vec<_>>();
+        let task_llm = build_response_api_llm(ResponseApiConfig {
+            model: runtime.model.clone(),
+            instructions: "You are an execution component. Carry out the selected external action using available tools when needed. Return a concise execution result for the action result log. Do not message the user directly.".to_string(),
+            temperature: runtime.temperature,
+            max_output_tokens: runtime.max_output_tokens,
+            tools: task_tools,
+            tool_handler: Some(runtime.tool_handler.clone()),
+            usage_recorder: Some(usage_recorder),
+            usage_context: Some(LlmUsageContext::new("user", "perform_task")),
+            max_tool_rounds: runtime.max_tool_rounds,
+        });
+        executors.insert(
+            "perform_task".to_string(),
+            Arc::new(PerformTaskExecutor::new(task_llm)),
+        );
+        Self {
+            executors,
+            emit_event: Some(emit_event),
+        }
     }
 
     pub(crate) async fn execute(
@@ -367,12 +528,14 @@ impl ActionExecutionService {
                     "THOUGHT_ACTION stage=validate name={} ok=false error={}",
                     action.name, error
                 );
-                results.push(ActionResult {
+                let result = ActionResult {
                     name: action.name.clone(),
                     ok: false,
                     output: String::new(),
                     error: Some(error),
-                });
+                };
+                self.emit_action_result(&result);
+                results.push(result);
                 continue;
             }
             let Some(executor) = self.executors.get(&action.name) else {
@@ -381,12 +544,14 @@ impl ActionExecutionService {
                     "THOUGHT_ACTION stage=resolve name={} ok=false error={}",
                     action.name, error
                 );
-                results.push(ActionResult {
+                let result = ActionResult {
                     name: action.name.clone(),
                     ok: false,
                     output: String::new(),
                     error: Some(error),
-                });
+                };
+                self.emit_action_result(&result);
+                results.push(result);
                 continue;
             };
             println!(
@@ -397,12 +562,14 @@ impl ActionExecutionService {
             match executor.execute(&action.input).await {
                 Ok(output) => {
                     println!("THOUGHT_ACTION stage=end name={} ok=true", action.name);
-                    results.push(ActionResult {
+                    let result = ActionResult {
                         name: action.name.clone(),
                         ok: true,
                         output,
                         error: None,
-                    });
+                    };
+                    self.emit_action_result(&result);
+                    results.push(result);
                 }
                 Err(err) => {
                     let error = err.to_string();
@@ -410,30 +577,117 @@ impl ActionExecutionService {
                         "THOUGHT_ACTION stage=end name={} ok=false error={}",
                         action.name, error
                     );
-                    results.push(ActionResult {
+                    let result = ActionResult {
                         name: action.name.clone(),
                         ok: false,
                         output: String::new(),
                         error: Some(error),
-                    });
+                    };
+                    self.emit_action_result(&result);
+                    results.push(result);
                 }
             }
         }
         results
     }
+
+    fn emit_action_result(&self, result: &ActionResult) {
+        if let Some(emit_event) = &self.emit_event {
+            emit_event(action_result(
+                &result.name,
+                result.ok,
+                &result.output,
+                result.error.as_deref(),
+            ));
+        }
+    }
 }
 
 pub(crate) fn default_available_actions() -> Vec<AvailableAction> {
-    vec![AvailableAction {
-        name: "user_reply".to_string(),
-        description: "Send a text message to the user.".to_string(),
-        input_description: "The exact reply text.".to_string(),
-    }]
+    vec![
+        AvailableAction {
+            name: "user_reply".to_string(),
+            description: "Send a text message to the user.".to_string(),
+            input_description: "The exact reply text.".to_string(),
+        },
+        AvailableAction {
+            name: "perform_task".to_string(),
+            description: "Carry out complex external work using the execution component and tools."
+                .to_string(),
+            input_description: "A concise task description for the execution component."
+                .to_string(),
+        },
+    ]
 }
 
 #[allow(dead_code)]
 fn _trace_payload(value: impl Serialize) -> Value {
     serde_json::to_value(value).unwrap_or_else(|err| json!({ "error": err.to_string() }))
+}
+
+fn emit_event_blocking(state: AppState) -> Arc<dyn Fn(Event) + Send + Sync> {
+    Arc::new(move |event| {
+        let state = state.clone();
+        tokio::task::block_in_place(|| {
+            Handle::current().block_on(record_event(&state, event));
+        });
+    })
+}
+
+fn latest_router_input(events: &[Event]) -> Option<RouterInput> {
+    events.iter().rev().find_map(router_input_from_event)
+}
+
+fn router_input_from_event(event: &Event) -> Option<RouterInput> {
+    if event.source != "user" || !event.meta.tags.iter().any(|tag| tag == "input") {
+        return None;
+    }
+    let kind = event
+        .meta
+        .tags
+        .iter()
+        .find_map(|tag| tag.strip_prefix("type:"))
+        .unwrap_or("message")
+        .to_string();
+    let text = event
+        .payload
+        .get("user_text")
+        .or_else(|| event.payload.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let images = serde_json::from_value::<Vec<MediaAttachment>>(
+        event
+            .payload
+            .get("images")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+    )
+    .unwrap_or_default();
+    let audio = serde_json::from_value::<Vec<MediaAttachment>>(
+        event
+            .payload
+            .get("audio")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+    )
+    .unwrap_or_default();
+    Some(RouterInput::new(kind, text, images, audio))
+}
+
+fn format_list_or_none(items: &[String]) -> String {
+    if items.is_empty() {
+        "none".to_string()
+    } else {
+        items.join("\n")
+    }
+}
+
+fn tool_name(tool: &async_openai::types::responses::Tool) -> Option<&str> {
+    match tool {
+        async_openai::types::responses::Tool::Function(def) => Some(def.name.as_str()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -470,6 +724,15 @@ mod tests {
             Err(ActionExecutionError {
                 message: "boom".to_string(),
             })
+        }
+    }
+
+    struct EchoExecutor;
+
+    #[async_trait]
+    impl ActionExecutor for EchoExecutor {
+        async fn execute(&self, input: &str) -> Result<String, ActionExecutionError> {
+            Ok(format!("executed: {}", input))
         }
     }
 
@@ -556,6 +819,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert!(requests[0].input.contains("The user greeted Tsuki."));
         assert!(requests[0].input.contains("name: user_reply"));
+        assert!(requests[0].input.contains("name: perform_task"));
         assert!(requests[0].input.contains("Return JSON only"));
     }
 
@@ -580,14 +844,44 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(results[0].ok);
         let emitted = emitted.lock().expect("lock");
-        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted.len(), 2);
         assert_eq!(emitted[0].source, "assistant");
         assert_eq!(emitted[0].payload["text"], "hello");
         assert!(emitted[0].meta.tags.iter().any(|tag| tag == "response"));
+        assert_eq!(emitted[1].source, "action_execution");
+        assert_eq!(emitted[1].payload["action"], "user_reply");
+        assert_eq!(emitted[1].payload["ok"], true);
+        assert!(emitted[1]
+            .meta
+            .tags
+            .iter()
+            .any(|tag| tag == "action.result"));
     }
 
     #[tokio::test]
     async fn action_execution_rejects_unavailable_action() {
+        let service = ActionExecutionService::new(HashMap::new());
+
+        let results = service
+            .execute(
+                &default_available_actions(),
+                &[Action {
+                    name: "shell_exec".to_string(),
+                    input: "inspect logs".to_string(),
+                }],
+            )
+            .await;
+
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].ok);
+        assert_eq!(
+            results[0].error.as_deref(),
+            Some("unavailable action: shell_exec")
+        );
+    }
+
+    #[tokio::test]
+    async fn action_execution_reports_missing_executor_for_available_action() {
         let service = ActionExecutionService::new(HashMap::new());
 
         let results = service
@@ -604,8 +898,29 @@ mod tests {
         assert!(!results[0].ok);
         assert_eq!(
             results[0].error.as_deref(),
-            Some("unavailable action: perform_task")
+            Some("missing executor for action: perform_task")
         );
+    }
+
+    #[tokio::test]
+    async fn action_execution_delegates_perform_task_to_executor() {
+        let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
+        executors.insert("perform_task".to_string(), Arc::new(EchoExecutor));
+        let service = ActionExecutionService::new(executors);
+
+        let results = service
+            .execute(
+                &default_available_actions(),
+                &[Action {
+                    name: "perform_task".to_string(),
+                    input: "inspect logs".to_string(),
+                }],
+            )
+            .await;
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ok);
+        assert_eq!(results[0].output, "executed: inspect logs");
     }
 
     #[tokio::test]
@@ -660,7 +975,7 @@ mod tests {
         assert_eq!(result.decision_output.reason, "greeting");
         assert_eq!(result.action_results.len(), 1);
         assert!(result.action_results[0].ok);
-        assert_eq!(emitted.lock().expect("lock").len(), 1);
+        assert_eq!(emitted.lock().expect("lock").len(), 2);
     }
 
     #[tokio::test]

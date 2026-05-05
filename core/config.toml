@@ -78,8 +78,9 @@ Use this only when it is consistent with recent_event_history.
 </supplemental_context>
 
 <output_contract>
-Return exactly one line:
-decision=<respond|ignore> reason=<short>
+Return strict JSON only:
+{"actions":[{"name":"...","input":"..."}],"reason":"..."}
+Select action names only from available_actions.
 </output_contract>."""
 
 submodule_context_template = """Latest user input: {{latest_user_input}}
