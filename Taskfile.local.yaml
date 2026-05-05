@@ -16,7 +16,11 @@ tasks:
     cmds:
       - '{{.DOCKER_COMPOSE}} ps'
   core/debug-deps/up:
-    desc: Start local containers required for debugging core outside Docker
+    desc: Start minimal local containers required for debugging core outside Docker
+    cmds:
+      - '{{.DOCKER_COMPOSE}} up --detach memgraph'
+  core/debug-deps/up-all:
+    desc: Start all local support containers for debugging core outside Docker
     cmds:
       - '{{.DOCKER_COMPOSE}} up --detach memgraph sandbox voicevox-engine ja-accent'
   local-reset:
