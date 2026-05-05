@@ -62,7 +62,7 @@ This keeps the run reproducible without inventing a second input channel beside 
 Cognition constructs the response context needed for response generation.
 
 It owns interpretation of the provided events, including any access to concept graph, recall, or
-state required to understand the situation. It also decides which actions are available to
+state required to build the context. It also decides which actions are available to
 response generation for this run.
 
 Cognition may perform internal state updates that belong to its own responsibility, such as
@@ -73,11 +73,11 @@ Example output shape:
 
 ```
 ResponseContext
-  situation
+  context
   available_actions
 ```
 
-`situation` is the cognitive context used by response generation. It may include interpretation,
+`context` is the cognitive context used by response generation. It may include interpretation,
 focus, relevant history, recalled facts, active concepts, and other compact context chosen by
 cognition.
 
