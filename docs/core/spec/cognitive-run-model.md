@@ -20,8 +20,8 @@ debug run can mix several concerns:
 Submodules are also not an established compatibility surface. The model can therefore be changed
 without preserving the current direct submodule invocation contract.
 
-The goal is to make each runtime turn understandable as one bounded cognitive run with explicit
-inputs, cognitive context, response intent, external actions, and trace.
+The goal is to make each turn understandable as one bounded cognitive run with explicit events,
+response context, selected actions, action results, and trace.
 
 ## High-Level Shape
 
@@ -44,9 +44,9 @@ every internal edge.
 
 A cognitive run starts from an explicit event set.
 
-The runtime may decide which recent or selected events to provide, but it should not pre-resolve
-concept graph context, recalled history, or available action contracts as separate run inputs.
-Those belong to later responsibilities.
+The caller may decide which recent or selected events to provide, but it should not pre-resolve
+concept graph context, recalled history, or available action choices as separate run inputs. Those
+belong to cognition.
 
 The input contract should stay narrow:
 
@@ -59,11 +59,11 @@ This keeps the run reproducible without inventing a second input channel beside 
 
 ## Cognition
 
-Cognition constructs the context needed for response generation.
+Cognition constructs the response context needed for response generation.
 
 It owns interpretation of the provided events, including any access to concept graph, recall, or
-state required to understand the situation. It also recognizes possible external actions that may
-be relevant.
+state required to understand the situation. It also decides which actions are available to
+response generation for this run.
 
 Cognition may perform internal state updates that belong to its own responsibility, such as
 concept graph activation. Those updates are not modeled as transferable effects. In dry-run or
@@ -72,51 +72,43 @@ inspection mode, the component should expose what it would have changed as trace
 Example output shape:
 
 ```
-CognitionOutput
-  context
-  recognized_actions
-  uncertainty
+ResponseContext
+  situation
+  available_actions
 ```
 
-`context` is the cognitive context used by response generation. It may include interpretation,
+`situation` is the cognitive context used by response generation. It may include interpretation,
 focus, relevant history, recalled facts, active concepts, and other compact context chosen by
 cognition.
 
-`recognized_actions` are possible external actions cognition has noticed. They are not decisions
-to execute anything.
-
-`uncertainty` makes unclear or insufficiently understood situations visible to response generation.
+`available_actions` is the set of actions response generation may choose from in this run.
+Each available action should describe its name, when it is appropriate, and how to write its single
+string input.
 
 Cognition does not produce the final user-facing response and does not decide which external
 action to execute.
 
 ## Response Generation
 
-Response generation chooses what to do with the cognition output.
+Response generation chooses actions from the response context.
 
-It consumes the cognition output and produces a response intent. It should not directly execute
+It consumes the response context and produces selected actions. It should not directly execute
 external actions or mutate durable internal state.
 
-Example response intent shape:
+Example output shape:
 
 ```
-ResponseIntent
-  kind: respond | execute_action | reconsider | no_action
-  speech
-  selected_actions
+ResponseOutput
+  actions
   reason
 ```
 
-`speech` is present when the intent includes a user-facing reply.
+`actions` are selected from `available_actions`. An empty list means no external action should be
+executed.
 
-`selected_actions` are chosen from the recognized actions or from action forms that response
-generation is allowed to request. They are external actions, not internal state mutations.
+`reason` explains the selection for trace and operator inspection.
 
-`reconsider` is a first-class outcome. A response generator may conclude that it cannot make a
-good judgment with the current cognition output and request additional analysis inside the same
-cognitive run.
-
-The response intent should stay small. It should not contain generic state effects, concept graph
+The response output should stay small. It should not contain generic state effects, concept graph
 effects, or execution results.
 
 ## Actions
@@ -132,8 +124,18 @@ Examples:
 - schedule operation
 - file, network, or API interaction
 
-Actions are recognized by cognition and selected by response generation. Action execution performs
-only the selected external actions.
+An action selected by response generation has a uniform shape:
+
+```
+Action
+  name: string
+  input: string
+```
+
+`user_reply` is an action. Its `input` is the reply text.
+
+Actions are made available by cognition and selected by response generation. Action execution
+performs only the selected external actions.
 
 Internal state changes are not actions. Concept graph activation, recall bookkeeping, local state
 maintenance, and trace/debug records are component-owned behavior. They may be previewed for
@@ -152,16 +154,6 @@ It owns:
 
 Action execution does not discover actions and does not decide which action should happen.
 
-## Reconsideration
-
-Reconsideration is graph-level control flow, not an event-driven module handoff.
-
-A reconsideration step may run additional cognitive analysis, rerun cognition with a different
-focus, or ask response generation to evaluate a narrower candidate set. The reason for
-reconsideration and the additional inputs must be visible in the run trace.
-
-This avoids treating "I cannot judge yet" as an error and makes it a normal cognitive outcome.
-
 ## Trace
 
 Trace is for operators and development UI. It is not a data contract between components.
@@ -171,7 +163,7 @@ Useful trace fields include:
 - component input preview
 - rendered prompts and contexts
 - component output
-- recognized actions
+- available actions
 - selected actions
 - intended state changes in dry-run mode
 - applied state changes in commit mode
@@ -189,7 +181,7 @@ Split a component only when the split creates a useful contract:
 
 - its input and output can be typed clearly
 - it should be evaluated or tuned independently
-- it may be rerun on reconsideration
+- it may be rerun when additional analysis is useful
 - downstream consumers are meaningful and stable
 - its trace is useful to operators
 
@@ -204,7 +196,7 @@ Possible components include:
 - concept activation
 - recall selection
 - candidate response analysis
-- action recognition
+- action availability selection
 - response composition
 
 These are examples, not required nodes.
@@ -231,9 +223,9 @@ Useful inspection surfaces:
 
 - event set preview
 - cognition output
-- recognized actions
+- available actions
 - rendered prompts and contexts per component
-- response intent
+- response output
 - selected actions
 - action execution results
 - dry-run intended changes and commit applied changes
@@ -252,10 +244,10 @@ A minimal migration path is:
 1. Introduce a cognitive run input that accepts an explicit event set.
 2. Rename or wrap router behavior as cognition context construction.
 3. Move concept graph and recall selection under cognition responsibility.
-4. Change decision behavior to produce a small response intent.
-5. Represent external actions as recognized candidates and selected actions.
+4. Change decision behavior to produce selected actions.
+5. Represent user replies as actions.
 6. Move direct external action execution out of response generation.
 7. Replace submodule debug execution with cognitive run inspection and component-level reruns.
 
-The existing event stream remains useful as the durable history layer, but the proposed runtime
-does not require every reasoning step to be an event-driven autonomous module.
+The existing event stream remains useful as the durable history layer, but the proposed model does
+not require every reasoning step to be an event-driven autonomous module.
