@@ -21,15 +21,15 @@ Submodules are also not an established compatibility surface. The model can ther
 without preserving the current direct submodule invocation contract.
 
 The goal is to make each turn understandable as one bounded thought process with explicit events,
-judgment context, selected actions, action results, and trace.
+decision context, intent candidates, selected actions, action results, and trace.
 
 ## High-Level Shape
 
 ```
 events
   -> cognition
-  -> focus-pragmatic planning
-  -> judgment
+  -> deliberation
+  -> decision
   -> action execution
   -> output events
 ```
@@ -60,10 +60,10 @@ This keeps the run reproducible without inventing a second input channel beside 
 
 ## Cognition
 
-Cognition constructs the judgment context.
+Cognition constructs the decision context.
 
 It owns interpretation of the provided events, including any access to concept graph, recall, or
-state required to build the context. It also decides which actions are available to judgment for
+state required to build the context. It also decides which actions are available to decision for
 this thought process.
 
 Cognition may perform internal state updates that belong to its own responsibility, such as
@@ -73,40 +73,82 @@ inspection mode, the component should expose what it would have changed as trace
 Example output shape:
 
 ```
-JudgmentContext
+DecisionContext
   context
   available_actions
 ```
 
-`context` is the cognitive context used by judgment. It may include interpretation,
+`context` is the cognitive context used by decision. It may include interpretation,
 focus, relevant history, recalled facts, active concepts, and other compact context chosen by
 cognition.
 
-`available_actions` is the set of actions judgment may choose from in this thought process.
+`available_actions` is the set of actions decision may choose from in this thought process.
 Each available action should describe its name, when it is appropriate, and how to write its single
 string input.
 
 Cognition does not produce the final user-facing response and does not decide which external
 action to execute.
 
-## Focus-Pragmatic Planning
+## Deliberation
 
-Focus-pragmatic planning makes conversational development explicit without making the final surface
-utterance the primary decision object.
+Deliberation contributes optional structured intent candidates for decision.
 
-The model assumes that a conversational turn can be described as:
+It is the place for former submodule-like behavior: motive lenses, risk checks, task decomposition,
+focus modeling, or other bounded analyses that are useful before action choice but should not
+execute external actions.
+
+Deliberation is not a required chain of independent modules. It is a bounded area inside the thought
+process where zero or more contributors may run against the decision context. A contributor should
+exist only when its output contract is stable enough to inspect, test, and tune independently.
+
+Example output shape:
 
 ```
-utterance = focus operation x pragmatic motive
+DeliberationOutput
+  intent_candidates
+  constraints
+  trace
 ```
 
-The focus operation describes how the turn handles the current conceptual focus. The pragmatic
-motive describes why that operation is useful in the social, epistemic, playful, or meta-conversational
-context.
+`intent_candidates` are candidate reasons or directions for action. They are model-tagged so the
+thought process does not depend on one privileged intent model.
+
+```
+IntentCandidate
+  model: string
+  source: string
+  content: string
+```
+
+`constraints` are explicit restrictions that decision should obey, such as safety, scope, or
+interaction constraints. Do not add a generic `notes` field; if data is meant for decision, give it
+a specific contract, and if it is only for humans, put it in trace.
+
+`trace` is for inspection only. Decision must not depend on trace.
+
+Existing submodules fit here when they are retained. A former submodule should no longer be treated
+as an arbitrary standalone prompt or a decision-callable tool. It should instead become a
+deliberation contributor that emits intent candidates or constraints according to its own explicit
+contract.
+
+## Focus-Pragmatic Intent Model
+
+The focus-pragmatic model is one possible `IntentCandidate.model`; it is not a required stage and
+not a required top-level output shape.
+
+It describes a possible intent as:
+
+```
+intent = focus operation x pragmatic motive
+```
+
+The focus operation describes how the process handles the current conceptual focus. The pragmatic
+motive describes why that operation is useful in the current context. The resulting intent may be
+realized by a user reply, a task action, a notification, a no-op, or another available action.
 
 The current focus does not need to be persisted as a separate durable state. It should normally be
-reconstructed from recent events, active concepts, and recalled context by cognition. Planning may
-therefore produce focus-operation candidates without introducing a global "current focus" field.
+reconstructed from recent events, active concepts, and recalled context by cognition or by the
+contributor producing the intent candidate.
 
 Focus operations:
 
@@ -123,47 +165,39 @@ Pragmatic motives:
 - `epistemic` - align understanding, correct recognition, or improve accuracy.
 - `meta` - manage conversational progress, sequencing, or transition.
 
-Example output shape:
+Example candidate shape:
 
 ```
-FocusPragmaticPlan
-  candidates
+IntentCandidate
+  model: focus_pragmatic
+  source: curiosity
+  content: operation=add; motive=epistemic; target=submodule model; move=clarify responsibility
 ```
 
-Each candidate should identify the focus operation, the pragmatic motive, the focus target, and a
-compact description of the intended conversational move. It should not be a finished reply.
+The content should identify the focus operation, pragmatic motive, focus target, and compact intent.
+It should not be a finished reply and should not imply that all actions are conversational.
 
-Existing submodules fit here when they are retained. A motive-oriented submodule should no longer
-be treated as an arbitrary standalone prompt that writes a suggestion sentence. It should instead
-act as a motive lens that proposes focus-operation and pragmatic-motive candidates for judgment.
+## Decision
 
-## Judgment
+Decision chooses actions from the decision context and deliberation output.
 
-Judgment chooses a plan and actions from the judgment context and focus-pragmatic candidates.
-
-It consumes the judgment context, available actions, and any focus-pragmatic candidates. It should
+It consumes the decision context, available actions, intent candidates, and constraints. It should
 not directly execute external actions or mutate durable internal state.
 
 Example output shape:
 
 ```
-JudgmentOutput
-  focus_operation
-  pragmatic_motive
+DecisionOutput
   actions
   reason
 ```
-
-`focus_operation` and `pragmatic_motive` describe the selected conversational move when the action
-set includes conversation-facing behavior. They are still useful when the selected action is not a
-reply, because they explain why the outside action is being taken in this turn.
 
 `actions` are selected from `available_actions`. An empty list means no external action should be
 executed.
 
 `reason` explains the selection for trace and operator inspection.
 
-The judgment output should stay small. It should not contain generic state effects, concept graph
+The decision output should stay small. It should not contain generic state effects, concept graph
 effects, or execution results.
 
 ## Actions
@@ -179,7 +213,7 @@ Examples:
 - schedule operation
 - file, network, or API interaction
 
-An action selected by judgment has a uniform shape:
+An action selected by decision has a uniform shape:
 
 ```
 Action
@@ -187,17 +221,18 @@ Action
   input: string
 ```
 
-`user_reply` is an action, but actions are not limited to conversation replies. The same judgment
+`user_reply` is an action, but actions are not limited to conversation replies. The same decision
 may select a reply, a task execution, a notification, a schedule operation, a concept-graph-facing
 operation, or no external action.
 
-The action `input` should be interpreted by the executor for that action. For a conversation-facing
-action, the input may be an abstract realization request based on the selected focus operation and
-pragmatic motive rather than the final surface text. For direct operational actions, the input may
-be a task description or command-like instruction. The common contract remains a single string so
-judgment does not need action-specific schemas.
+The action `input` should be interpreted by the executor for that action. It may reference an intent
+candidate when that is useful, but it is still action-specific executor input. For a
+conversation-facing action, the input may be an abstract realization request rather than the final
+surface text. For direct operational actions, the input may be a task description or command-like
+instruction. The common contract remains a single string so decision does not need action-specific
+schemas.
 
-Actions are made available by cognition and selected by judgment. Action execution
+Actions are made available by cognition and selected by decision. Action execution
 performs only the selected external actions.
 
 Internal state changes are not actions. Concept graph activation, recall bookkeeping, local state
@@ -212,7 +247,7 @@ It owns:
 
 - validating selected actions against available executors
 - executing selected external actions
-- realizing conversation-facing actions from the selected plan when that responsibility belongs to
+- realizing conversation-facing actions from selected intent when that responsibility belongs to
   the executor
 - emitting resulting output events
 - recording action results and failures
@@ -221,7 +256,7 @@ Action execution does not discover actions and does not decide which action shou
 
 Execution may be simple for direct actions such as `user_reply`, but it is not limited to a
 dispatcher. Complex actions may be handled by dedicated execution components that use LLMs and
-tools to carry out the selected action. Judgment still only selects actions; it does not execute
+tools to carry out the selected action. Decision still only selects actions; it does not execute
 tools directly.
 
 ## Trace
@@ -263,7 +298,7 @@ Possible components include:
 - input interpretation
 - focus or intent analysis
 - speech motivation analysis
-- focus-pragmatic planning
+- deliberation contribution
 - concept activation
 - recall selection
 - candidate response analysis
@@ -296,8 +331,10 @@ Useful inspection surfaces:
 - cognition output
 - available actions
 - rendered prompts and contexts per component
-- focus-pragmatic candidates
-- judgment output
+- deliberation output
+- intent candidates
+- constraints
+- decision output
 - selected actions
 - action execution results
 - dry-run intended changes and commit applied changes
@@ -316,13 +353,16 @@ A minimal migration path is:
 1. Introduce a thought process input that accepts an explicit event set.
 2. Rename or wrap router behavior as cognition context construction.
 3. Move concept graph and recall selection under cognition responsibility.
-4. Add focus-pragmatic planning between cognition and judgment.
-5. Recast retained submodules as motive lenses that produce focus-pragmatic candidates.
-6. Change decision behavior to judgment over focus-pragmatic candidates and selected actions.
-7. Represent user replies as actions without requiring the judgment output to contain final reply
+4. Add deliberation between cognition and decision.
+5. Recast retained submodules as deliberation contributors that produce intent candidates or
+   constraints.
+6. Treat focus-pragmatic output as one intent candidate model, not as a required thought-process
+   stage.
+7. Change decision behavior to choose actions from decision context and deliberation output.
+8. Represent user replies as actions without requiring the decision output to contain final reply
    text.
-8. Move direct external action execution out of judgment.
-9. Replace submodule debug execution with thought process inspection and component-level reruns.
+9. Move direct external action execution out of decision.
+10. Replace submodule debug execution with thought process inspection and component-level reruns.
 
 The existing event stream remains useful as the durable history layer, but the proposed model does
 not require every reasoning step to be an event-driven autonomous module.
