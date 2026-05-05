@@ -154,6 +154,11 @@ It owns:
 
 Action execution does not discover actions and does not decide which action should happen.
 
+Execution may be simple for direct actions such as `user_reply`, but it is not limited to a
+dispatcher. Complex actions may be handled by dedicated execution components that use LLMs and
+tools to carry out the selected action. Decision still only selects actions; it does not execute
+tools directly.
+
 ## Trace
 
 Trace is for operators and development UI. It is not a data contract between components.
