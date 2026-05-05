@@ -28,7 +28,7 @@ decision context, intent candidates, selected actions, action results, and trace
 ```
 events
   -> cognition
-  -> deliberation
+  -> deliberation contributors
   -> decision
   -> action execution
   -> output events
@@ -89,22 +89,25 @@ string input.
 Cognition does not produce the final user-facing response and does not decide which external
 action to execute.
 
-## Deliberation
+## Deliberation Contributors
 
-Deliberation contributes optional structured intent candidates for decision.
+Deliberation contributors produce optional structured intent candidates and constraints for
+decision.
 
-It is the place for former submodule-like behavior: motive lenses, risk checks, task decomposition,
-focus modeling, or other bounded analyses that are useful before action choice but should not
-execute external actions.
+They are the place for former submodule-like behavior: motive lenses, risk checks, task
+decomposition, focus modeling, or other bounded analyses that are useful before action choice but
+should not execute external actions.
 
-Deliberation is not a required chain of independent modules. It is a bounded area inside the thought
-process where zero or more contributors may run against the decision context. A contributor should
-exist only when its output contract is stable enough to inspect, test, and tune independently.
+There is no separate `Deliberation` actor. Contributor execution is part of thought process
+orchestration: after cognition constructs the decision context, the orchestrator may run zero or
+more contributors against that context and pass their combined output to decision. A contributor
+should exist only when its output contract is stable enough to inspect, test, and tune
+independently.
 
-Example output shape:
+Combined output shape:
 
 ```
-DeliberationOutput
+DeliberationContributions
   intent_candidates
   constraints
   trace
@@ -184,7 +187,7 @@ are conversational.
 
 ## Decision
 
-Decision chooses actions from the decision context and deliberation output.
+Decision chooses actions from the decision context and deliberation contributions.
 
 It consumes the decision context, available actions, intent candidates, and constraints. It should
 not directly execute external actions or mutate durable internal state.
@@ -336,7 +339,7 @@ Useful inspection surfaces:
 - cognition output
 - available actions
 - rendered prompts and contexts per component
-- deliberation output
+- deliberation contributions
 - intent candidates
 - constraints
 - decision output
@@ -358,12 +361,12 @@ A minimal migration path is:
 1. Introduce a thought process input that accepts an explicit event set.
 2. Rename or wrap router behavior as cognition context construction.
 3. Move concept graph and recall selection under cognition responsibility.
-4. Add deliberation between cognition and decision.
+4. Add deliberation contributors between cognition and decision.
 5. Recast retained submodules as deliberation contributors that produce intent candidates or
    constraints.
 6. Treat focus-pragmatic output as one possible intent candidate notation, not as a required
    thought-process stage or schema.
-7. Change decision behavior to choose actions from decision context and deliberation output.
+7. Change decision behavior to choose actions from decision context and deliberation contributions.
 8. Represent user replies as actions without requiring the decision output to contain final reply
    text.
 9. Move direct external action execution out of decision.
