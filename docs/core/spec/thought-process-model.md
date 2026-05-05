@@ -76,6 +76,7 @@ Example output shape:
 DecisionContext
   context
   available_actions
+  deliberation_contributors
 ```
 
 `context` is the cognitive context used by decision. It may include interpretation,
@@ -85,6 +86,10 @@ cognition.
 `available_actions` is the set of actions decision may choose from in this thought process.
 Each available action should describe its name, when it is appropriate, and how to write its single
 string input.
+
+`deliberation_contributors` is the set of contributor sources that orchestration may run before
+decision. Cognition owns this selection because it already interprets the event set, concept graph,
+and recall context. Normal flow must not run all contributors unconditionally.
 
 Cognition does not produce the final user-facing response and does not decide which external
 action to execute.
@@ -100,9 +105,9 @@ should not execute external actions.
 
 There is no separate `Deliberation` actor. Contributor execution is part of thought process
 orchestration: after cognition constructs the decision context, the orchestrator may run zero or
-more contributors against that context and pass their combined output to decision. A contributor
-should exist only when its output contract is stable enough to inspect, test, and tune
-independently.
+more contributors named by `DecisionContext.deliberation_contributors` against that context and
+pass their combined output to decision. A contributor should exist only when its output contract is
+stable enough to inspect, test, and tune independently.
 
 Combined output shape:
 

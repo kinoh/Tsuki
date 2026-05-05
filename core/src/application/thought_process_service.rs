@@ -22,6 +22,7 @@ use crate::{
         build_response_api_llm, LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder,
         ResponseApiConfig,
     },
+    module_registry::ModuleRegistryReader,
 };
 
 #[derive(Debug, Clone)]
@@ -33,6 +34,23 @@ pub(crate) struct ThoughtProcessInput {
 pub(crate) struct DecisionContext {
     pub(crate) context: String,
     pub(crate) available_actions: Vec<AvailableAction>,
+    pub(crate) deliberation_contributors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) struct DeliberationContributions {
+    #[serde(default)]
+    pub(crate) intent_candidates: Vec<IntentCandidate>,
+    #[serde(default)]
+    pub(crate) constraints: Vec<String>,
+    #[serde(default)]
+    pub(crate) trace: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct IntentCandidate {
+    pub(crate) source: String,
+    pub(crate) text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +85,7 @@ pub(crate) struct ActionResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThoughtProcessResult {
     pub(crate) decision_context: DecisionContext,
+    pub(crate) deliberation_contributions: DeliberationContributions,
     pub(crate) decision_output: DecisionOutput,
     pub(crate) action_results: Vec<ActionResult>,
 }
@@ -74,6 +93,7 @@ pub(crate) struct ThoughtProcessResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ThoughtProcessError {
     Cognition(String),
+    Deliberation(String),
     Decision(DecisionError),
 }
 
@@ -81,6 +101,7 @@ impl std::fmt::Display for ThoughtProcessError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Cognition(err) => write!(f, "cognition failed: {}", err),
+            Self::Deliberation(err) => write!(f, "deliberation contributor failed: {}", err),
             Self::Decision(err) => write!(f, "{}", err),
         }
     }
@@ -96,8 +117,19 @@ pub(crate) trait CognitionComponent: Send + Sync {
     ) -> Result<DecisionContext, String>;
 }
 
+#[async_trait]
+pub(crate) trait DeliberationContributor: Send + Sync {
+    fn source(&self) -> &str;
+
+    async fn contribute(
+        &self,
+        context: &DecisionContext,
+    ) -> Result<DeliberationContributions, String>;
+}
+
 pub(crate) struct ThoughtProcessService {
     cognition: Arc<dyn CognitionComponent>,
+    contributors: Vec<Arc<dyn DeliberationContributor>>,
     decision: DecisionService,
     action_execution: ActionExecutionService,
 }
@@ -105,11 +137,13 @@ pub(crate) struct ThoughtProcessService {
 impl ThoughtProcessService {
     pub(crate) fn new(
         cognition: Arc<dyn CognitionComponent>,
+        contributors: Vec<Arc<dyn DeliberationContributor>>,
         decision: DecisionService,
         action_execution: ActionExecutionService,
     ) -> Self {
         Self {
             cognition,
+            contributors,
             decision,
             action_execution,
         }
@@ -125,9 +159,13 @@ impl ThoughtProcessService {
             .build_decision_context(input)
             .await
             .map_err(ThoughtProcessError::Cognition)?;
+        let deliberation_contributions =
+            run_deliberation_contributors(&self.contributors, &decision_context)
+                .await
+                .map_err(ThoughtProcessError::Deliberation)?;
         let decision_output = self
             .decision
-            .decide(&decision_context)
+            .decide(&decision_context, &deliberation_contributions)
             .await
             .map_err(ThoughtProcessError::Decision)?;
         let action_results = self
@@ -144,6 +182,7 @@ impl ThoughtProcessService {
         );
         Ok(ThoughtProcessResult {
             decision_context,
+            deliberation_contributions,
             decision_output,
             action_results,
         })
@@ -183,6 +222,68 @@ pub(crate) struct AppCognition {
 impl AppCognition {
     pub(crate) fn new(state: AppState, dry_run: bool) -> Self {
         Self { state, dry_run }
+    }
+}
+
+pub(crate) struct PromptDeliberationContributor {
+    name: String,
+    llm: Arc<dyn LlmAdapter>,
+    context_template: String,
+}
+
+impl PromptDeliberationContributor {
+    pub(crate) fn new(
+        name: impl Into<String>,
+        llm: Arc<dyn LlmAdapter>,
+        context_template: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            llm,
+            context_template: context_template.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl DeliberationContributor for PromptDeliberationContributor {
+    fn source(&self) -> &str {
+        &self.name
+    }
+
+    async fn contribute(
+        &self,
+        context: &DecisionContext,
+    ) -> Result<DeliberationContributions, String> {
+        let input = render_contributor_input(&self.context_template, context);
+        println!(
+            "THOUGHT_CONTRIBUTOR stage=start source={} input_len={}",
+            self.name,
+            input.len()
+        );
+        let response = self
+            .llm
+            .respond(LlmRequest { input })
+            .await
+            .map_err(|err| err.to_string())?;
+        let text = response.text.trim().to_string();
+        println!(
+            "THOUGHT_CONTRIBUTOR stage=end source={} text_len={}",
+            self.name,
+            text.len()
+        );
+        if text.is_empty() {
+            Ok(DeliberationContributions::default())
+        } else {
+            Ok(DeliberationContributions {
+                intent_candidates: vec![IntentCandidate {
+                    source: self.name.clone(),
+                    text,
+                }],
+                constraints: Vec::new(),
+                trace: json!({}),
+            })
+        }
     }
 }
 
@@ -232,6 +333,12 @@ impl CognitionComponent for AppCognition {
             for err in &activation.errors {
                 println!("COGNITION_CONCEPT_ACTIVATION_ERROR error={}", err);
             }
+            let deliberation_contributors = select_deliberation_contributors(
+                &self.state,
+                &retrieval.candidate_concepts,
+                self.dry_run,
+            )
+            .await?;
             let recalled_history =
                 format_recalled_event_history(&self.state, &input_text, &HashSet::new()).await;
             context_parts.push(format!(
@@ -255,6 +362,15 @@ impl CognitionComponent for AppCognition {
                 "<recalled_history>\n{}\n</recalled_history>",
                 recalled_history
             ));
+            context_parts.push(format!(
+                "<deliberation_contributors>\n{}\n</deliberation_contributors>",
+                format_list_or_none(&deliberation_contributors)
+            ));
+            return Ok(DecisionContext {
+                context: context_parts.join("\n\n"),
+                available_actions: default_available_actions(),
+                deliberation_contributors,
+            });
         } else {
             context_parts.push("<latest_input>\nnone\n</latest_input>".to_string());
             context_parts.push(
@@ -265,6 +381,7 @@ impl CognitionComponent for AppCognition {
         Ok(DecisionContext {
             context: context_parts.join("\n\n"),
             available_actions: default_available_actions(),
+            deliberation_contributors: Vec::new(),
         })
     }
 }
@@ -292,13 +409,68 @@ pub(crate) async fn run_basic_thought_process(
     let emit_event = emit_event_blocking(state.clone());
     let action_execution =
         ActionExecutionService::with_default_executors(emit_event, runtime, state);
+    let contributors = build_prompt_deliberation_contributors(state, runtime, base_instructions)
+        .await
+        .map_err(ThoughtProcessError::Deliberation)?;
     ThoughtProcessService::new(
         Arc::new(AppCognition::new(state.clone(), false)),
+        contributors,
         decision,
         action_execution,
     )
     .run(&ThoughtProcessInput { events })
     .await
+}
+
+async fn build_prompt_deliberation_contributors(
+    state: &AppState,
+    runtime: &ModuleRuntime,
+    base_instructions: &str,
+) -> Result<Vec<Arc<dyn DeliberationContributor>>, String> {
+    let modules = state
+        .runtime
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| err.to_string())?;
+    let mut contributors = Vec::<Arc<dyn DeliberationContributor>>::new();
+    for module in modules {
+        let usage_recorder: Arc<dyn LlmUsageRecorder> =
+            Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
+        let llm = build_response_api_llm(ResponseApiConfig {
+            model: runtime.model.clone(),
+            instructions: compose_prompt_sections(&[
+                base_instructions,
+                module.instructions.as_str(),
+                state
+                    .config
+                    .internal_prompts
+                    .deliberation_contributor_instructions
+                    .as_str(),
+            ]),
+            temperature: runtime.temperature,
+            max_output_tokens: runtime.max_output_tokens,
+            tools: Vec::new(),
+            tool_handler: None,
+            usage_recorder: Some(usage_recorder),
+            usage_context: Some(LlmUsageContext::new(
+                "user",
+                format!("deliberation:{}", module.name),
+            )),
+            max_tool_rounds: 0,
+        });
+        contributors.push(Arc::new(PromptDeliberationContributor::new(
+            module.name,
+            llm,
+            state
+                .config
+                .internal_prompts
+                .deliberation_contributor_context_template
+                .clone(),
+        )));
+    }
+    Ok(contributors)
 }
 
 fn build_decision_instructions(base_instructions: &str, decision_instructions: &str) -> String {
@@ -311,6 +483,15 @@ fn build_decision_instructions(base_instructions: &str, decision_instructions: &
     )
 }
 
+fn compose_prompt_sections(sections: &[&str]) -> String {
+    sections
+        .iter()
+        .map(|section| section.trim())
+        .filter(|section| !section.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 impl DecisionService {
     pub(crate) fn new(llm: Arc<dyn LlmAdapter>) -> Self {
         Self { llm }
@@ -319,16 +500,19 @@ impl DecisionService {
     pub(crate) async fn decide(
         &self,
         context: &DecisionContext,
+        contributions: &DeliberationContributions,
     ) -> Result<DecisionOutput, DecisionError> {
         println!(
-            "THOUGHT_DECISION stage=start context_len={} available_actions={}",
+            "THOUGHT_DECISION stage=start context_len={} available_actions={} intent_candidates={} constraints={}",
             context.context.len(),
-            context.available_actions.len()
+            context.available_actions.len(),
+            contributions.intent_candidates.len(),
+            contributions.constraints.len()
         );
         let response = self
             .llm
             .respond(LlmRequest {
-                input: render_decision_input(context),
+                input: render_decision_input(context, contributions),
             })
             .await
             .map_err(|err| DecisionError::Llm(err.to_string()))?;
@@ -343,9 +527,84 @@ impl DecisionService {
     }
 }
 
-fn render_decision_input(context: &DecisionContext) -> String {
-    let actions = context
-        .available_actions
+async fn run_deliberation_contributors(
+    contributors: &[Arc<dyn DeliberationContributor>],
+    context: &DecisionContext,
+) -> Result<DeliberationContributions, String> {
+    let selected = context
+        .deliberation_contributors
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    println!(
+        "THOUGHT_CONTRIBUTIONS stage=start contributors={} selected={}",
+        contributors.len(),
+        selected.len()
+    );
+    let mut combined = DeliberationContributions::default();
+    let mut trace_entries = Vec::<Value>::new();
+    let mut executed = HashSet::<String>::new();
+    for contributor in contributors {
+        if !selected.contains(contributor.source()) {
+            continue;
+        }
+        executed.insert(contributor.source().to_string());
+        let output = contributor.contribute(context).await?;
+        combined.intent_candidates.extend(output.intent_candidates);
+        combined.constraints.extend(output.constraints);
+        if output.trace != Value::Null && output.trace != json!({}) {
+            trace_entries.push(output.trace);
+        }
+    }
+    if !trace_entries.is_empty() {
+        combined.trace = json!(trace_entries);
+    }
+    let missing = selected
+        .iter()
+        .filter(|source| !executed.contains(**source))
+        .map(|source| source.to_string())
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(format!(
+            "selected deliberation contributors are unavailable: {}",
+            missing.join(", ")
+        ));
+    }
+    println!(
+        "THOUGHT_CONTRIBUTIONS stage=end intent_candidates={} constraints={}",
+        combined.intent_candidates.len(),
+        combined.constraints.len()
+    );
+    Ok(combined)
+}
+
+fn render_decision_input(
+    context: &DecisionContext,
+    contributions: &DeliberationContributions,
+) -> String {
+    format!(
+        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"...\",\"input\":\"...\"}}],\"reason\":\"...\"}}",
+        context.context,
+        format_intent_candidates(&contributions.intent_candidates),
+        format_constraints(&contributions.constraints),
+        format_available_actions(&context.available_actions)
+    )
+}
+
+fn render_contributor_input(template: &str, context: &DecisionContext) -> String {
+    template
+        .replace("{{decision_context}}", &context.context)
+        .replace(
+            "{{available_actions}}",
+            &format_available_actions(&context.available_actions),
+        )
+}
+
+fn format_available_actions(actions: &[AvailableAction]) -> String {
+    if actions.is_empty() {
+        return "none".to_string();
+    }
+    actions
         .iter()
         .map(|action| {
             format!(
@@ -354,11 +613,29 @@ fn render_decision_input(context: &DecisionContext) -> String {
             )
         })
         .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "Context:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"...\",\"input\":\"...\"}}],\"reason\":\"...\"}}",
-        context.context, actions
-    )
+        .join("\n")
+}
+
+fn format_intent_candidates(candidates: &[IntentCandidate]) -> String {
+    if candidates.is_empty() {
+        return "none".to_string();
+    }
+    candidates
+        .iter()
+        .map(|candidate| format!("- {}: {}", candidate.source, candidate.text))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_constraints(constraints: &[String]) -> String {
+    if constraints.is_empty() {
+        return "none".to_string();
+    }
+    constraints
+        .iter()
+        .map(|constraint| format!("- {}", constraint))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn parse_decision_output(raw: &str) -> Result<DecisionOutput, DecisionError> {
@@ -638,6 +915,72 @@ fn latest_router_input(events: &[Event]) -> Option<RouterInput> {
     events.iter().rev().find_map(router_input_from_event)
 }
 
+async fn select_deliberation_contributors(
+    state: &AppState,
+    candidate_concepts: &[String],
+    dry_run: bool,
+) -> Result<Vec<String>, String> {
+    let active_modules = state
+        .runtime
+        .modules
+        .registry
+        .list_active()
+        .await
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(|module| module.name)
+        .collect::<Vec<_>>();
+    if active_modules.is_empty() {
+        return Ok(Vec::new());
+    }
+    let activation_sources = collect_submodule_activation_sources(candidate_concepts);
+    if !dry_run && !activation_sources.is_empty() {
+        state
+            .services
+            .activation_concept_graph
+            .activate_related_submodules(activation_sources)
+            .await?;
+    }
+    let submodule_concepts = active_modules
+        .iter()
+        .map(|name| format!("submodule:{}", name))
+        .collect::<Vec<_>>();
+    let concept_scores = state
+        .services
+        .activation_concept_graph
+        .concept_activation(&submodule_concepts)
+        .await?;
+    let threshold = (state.config.router.recommendation_threshold as f64).clamp(0.0, 1.0);
+    let mut selected = active_modules
+        .into_iter()
+        .filter(|name| {
+            let concept_name = format!("submodule:{}", name);
+            concept_scores
+                .get(concept_name.as_str())
+                .copied()
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0)
+                >= threshold
+        })
+        .collect::<Vec<_>>();
+    selected.sort();
+    Ok(selected)
+}
+
+fn collect_submodule_activation_sources(selected_seeds: &[String]) -> Vec<String> {
+    selected_seeds
+        .iter()
+        .filter_map(|seed| {
+            let trimmed = seed.trim();
+            if trimmed.is_empty() || trimmed.starts_with("submodule:") {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
+}
+
 fn router_input_from_event(event: &Event) -> Option<RouterInput> {
     if event.source != "user" || !event.meta.tags.iter().any(|tag| tag == "input") {
         return None;
@@ -755,11 +1098,39 @@ mod tests {
         }
     }
 
+    struct StaticContributor {
+        output: Result<DeliberationContributions, String>,
+        seen_contexts: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl DeliberationContributor for StaticContributor {
+        fn source(&self) -> &str {
+            "curiosity"
+        }
+
+        async fn contribute(
+            &self,
+            context: &DecisionContext,
+        ) -> Result<DeliberationContributions, String> {
+            self.seen_contexts
+                .lock()
+                .expect("lock")
+                .push(context.context.clone());
+            self.output.clone()
+        }
+    }
+
     fn decision_context() -> DecisionContext {
         DecisionContext {
             context: "The user greeted Tsuki.".to_string(),
             available_actions: default_available_actions(),
+            deliberation_contributors: vec!["curiosity".to_string()],
         }
+    }
+
+    fn empty_contributions() -> DeliberationContributions {
+        DeliberationContributions::default()
     }
 
     #[tokio::test]
@@ -771,7 +1142,7 @@ mod tests {
         }));
 
         let err = service
-            .decide(&decision_context())
+            .decide(&decision_context(), &empty_contributions())
             .await
             .expect_err("must reject non-json");
 
@@ -789,7 +1160,7 @@ mod tests {
         }));
 
         let err = service
-            .decide(&decision_context())
+            .decide(&decision_context(), &empty_contributions())
             .await
             .expect_err("must reject unavailable action");
 
@@ -810,7 +1181,17 @@ mod tests {
         }));
 
         let output = service
-            .decide(&decision_context())
+            .decide(
+                &decision_context(),
+                &DeliberationContributions {
+                    intent_candidates: vec![IntentCandidate {
+                        source: "curiosity".to_string(),
+                        text: "operation=add; motive=epistemic".to_string(),
+                    }],
+                    constraints: vec!["do not execute external tasks".to_string()],
+                    trace: json!({}),
+                },
+            )
             .await
             .expect("must decide");
 
@@ -818,6 +1199,10 @@ mod tests {
         let requests = requests.lock().expect("lock");
         assert_eq!(requests.len(), 1);
         assert!(requests[0].input.contains("The user greeted Tsuki."));
+        assert!(requests[0]
+            .input
+            .contains("curiosity: operation=add; motive=epistemic"));
+        assert!(requests[0].input.contains("do not execute external tasks"));
         assert!(requests[0].input.contains("name: user_reply"));
         assert!(requests[0].input.contains("name: perform_task"));
         assert!(requests[0].input.contains("Return JSON only"));
@@ -964,7 +1349,19 @@ mod tests {
         let actions = ActionExecutionService::with_user_reply(Arc::new(move |event| {
             emitted_for_executor.lock().expect("lock").push(event);
         }));
-        let service = ThoughtProcessService::new(cognition, decision, actions);
+        let contributor_contexts = Arc::new(Mutex::new(Vec::new()));
+        let contributor = Arc::new(StaticContributor {
+            output: Ok(DeliberationContributions {
+                intent_candidates: vec![IntentCandidate {
+                    source: "curiosity".to_string(),
+                    text: "greet back lightly".to_string(),
+                }],
+                constraints: Vec::new(),
+                trace: json!({}),
+            }),
+            seen_contexts: contributor_contexts.clone(),
+        });
+        let service = ThoughtProcessService::new(cognition, vec![contributor], decision, actions);
         let input = ThoughtProcessInput {
             events: vec![crate::event::contracts::input_text("user", "message", "hi")],
         };
@@ -973,6 +1370,11 @@ mod tests {
 
         assert_eq!(*seen_event_count.lock().expect("lock"), vec![1]);
         assert_eq!(result.decision_output.reason, "greeting");
+        assert_eq!(result.deliberation_contributions.intent_candidates.len(), 1);
+        assert_eq!(
+            *contributor_contexts.lock().expect("lock"),
+            vec!["The user greeted Tsuki.".to_string()]
+        );
         assert_eq!(result.action_results.len(), 1);
         assert!(result.action_results[0].ok);
         assert_eq!(emitted.lock().expect("lock").len(), 2);
@@ -982,7 +1384,10 @@ mod tests {
     async fn thought_process_stops_before_execution_when_decision_fails() {
         let seen_event_count = Arc::new(Mutex::new(Vec::new()));
         let cognition = Arc::new(StaticCognition {
-            context: Ok(decision_context()),
+            context: Ok(DecisionContext {
+                deliberation_contributors: Vec::new(),
+                ..decision_context()
+            }),
             seen_event_count,
         });
         let decision = DecisionService::new(Arc::new(StaticLlm {
@@ -994,7 +1399,7 @@ mod tests {
         let actions = ActionExecutionService::with_user_reply(Arc::new(move |event| {
             emitted_for_executor.lock().expect("lock").push(event);
         }));
-        let service = ThoughtProcessService::new(cognition, decision, actions);
+        let service = ThoughtProcessService::new(cognition, Vec::new(), decision, actions);
         let input = ThoughtProcessInput { events: Vec::new() };
 
         let err = service
@@ -1006,6 +1411,42 @@ mod tests {
             err,
             ThoughtProcessError::Decision(DecisionError::InvalidJson(_))
         ));
+        assert!(emitted.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn thought_process_stops_before_decision_when_contributor_fails() {
+        let cognition = Arc::new(StaticCognition {
+            context: Ok(decision_context()),
+            seen_event_count: Arc::new(Mutex::new(Vec::new())),
+        });
+        let decision_requests = Arc::new(Mutex::new(Vec::new()));
+        let decision = DecisionService::new(Arc::new(StaticLlm {
+            response: Ok(
+                r#"{"actions":[{"name":"user_reply","input":"hi"}],"reason":"greeting"}"#
+                    .to_string(),
+            ),
+            requests: decision_requests.clone(),
+        }));
+        let contributor = Arc::new(StaticContributor {
+            output: Err("cannot contribute".to_string()),
+            seen_contexts: Arc::new(Mutex::new(Vec::new())),
+        });
+        let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
+        let emitted_for_executor = emitted.clone();
+        let actions = ActionExecutionService::with_user_reply(Arc::new(move |event| {
+            emitted_for_executor.lock().expect("lock").push(event);
+        }));
+        let service = ThoughtProcessService::new(cognition, vec![contributor], decision, actions);
+        let input = ThoughtProcessInput { events: Vec::new() };
+
+        let err = service
+            .run(&input)
+            .await
+            .expect_err("contributor failure must stop process");
+
+        assert!(matches!(err, ThoughtProcessError::Deliberation(_)));
+        assert!(decision_requests.lock().expect("lock").is_empty());
         assert!(emitted.lock().expect("lock").is_empty());
     }
 }

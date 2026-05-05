@@ -92,6 +92,21 @@ Recent events:
 {{recent_event_history}}
 Execution reason: {{execution_reason}}"""
 
+deliberation_contributor_instructions = """You are a deliberation contributor inside the thought process.
+Read the decision context through your own role instructions.
+Return only concise candidate intent or constraint text for Decision.
+Do not choose actions, execute tools, or write a final user reply."""
+
+deliberation_contributor_context_template = """<decision_context>
+{{decision_context}}
+</decision_context>
+
+<available_actions>
+{{available_actions}}
+</available_actions>
+
+Return contributor text only."""
+
 mcp_trigger_extract_instructions = "Extract trigger concepts for MCP tools. Return strict JSON only."
 
 mcp_trigger_extract_prompt_template = """Extract trigger concepts for an MCP tool.
