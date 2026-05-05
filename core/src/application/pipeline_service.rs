@@ -1,9 +1,8 @@
 use crate::app_state::AppState;
 use crate::application::debug_service;
-use crate::application::execution_service::{
-    current_prompt_overrides, load_active_module_instructions, run_decision, run_submodule_tool,
-};
-use crate::application::router_service::run_router;
+use crate::application::execution_service::current_prompt_overrides;
+use crate::application::history_service::latest_events;
+use crate::application::thought_process_service::run_basic_thought_process;
 use crate::debug_api::{DebugRunRequest, DebugRunResponse};
 
 use axum::http::StatusCode;
@@ -48,67 +47,49 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
 
     let prep_started = Instant::now();
     let overrides = current_prompt_overrides(state).await;
-    let module_instructions = load_active_module_instructions(state, &overrides).await;
     println!(
-        "PERF pipeline trace={} stage=prepare ms={} active_modules={}",
+        "PERF pipeline trace={} stage=prepare ms={}",
         trace_id,
-        prep_started.elapsed().as_millis(),
-        module_instructions.len()
-    );
-    let input_for_router = input.clone();
-
-    let router_started = Instant::now();
-    let router_output = run_router(
-        &input_for_router,
-        &module_instructions,
-        &state.runtime.modules,
-        state,
-        &overrides,
-        false,
-        |module_name, activation_snapshot, instructions, focus| {
-            let module_name = module_name.to_string();
-            let activation_snapshot = activation_snapshot.clone();
-            let instructions = instructions.to_string();
-            let focus = focus.map(str::to_string);
-            let input_text = input_text.clone();
-            async move {
-                run_submodule_tool(
-                    state,
-                    &input_text,
-                    &activation_snapshot,
-                    &module_name,
-                    &instructions,
-                    focus.as_deref(),
-                )
-                .await
-            }
-        },
-    )
-    .await;
-    println!(
-        "PERF pipeline trace={} stage=router ms={} hard_triggers={} hard_results={} soft_recommendations={}",
-        trace_id,
-        router_started.elapsed().as_millis(),
-        router_output.hard_triggers.len(),
-        router_output.hard_trigger_results.len(),
-        router_output.soft_recommendations.len()
+        prep_started.elapsed().as_millis()
     );
 
-    let decision_started = Instant::now();
-    let _decision_output = run_decision(
-        &input_text,
-        router_output,
-        &state.runtime.modules,
+    let event_select_started = Instant::now();
+    let events = latest_events(state, state.config.limits.decision_history, None, None).await;
+    println!(
+        "PERF pipeline trace={} stage=select_events ms={} events={}",
+        trace_id,
+        event_select_started.elapsed().as_millis(),
+        events.len()
+    );
+
+    let thought_started = Instant::now();
+    let result = run_basic_thought_process(
         state,
-        &module_instructions,
-        &overrides,
+        events,
+        &state.runtime.modules.runtime,
+        &state.prompts.base_or_default(&overrides),
+        &state.prompts.decision_or_default(&overrides),
     )
     .await;
-    println!(
-        "PERF pipeline trace={} stage=decision ms={}",
-        trace_id,
-        decision_started.elapsed().as_millis(),
-    );
+    match result {
+        Ok(result) => {
+            println!(
+                "PERF pipeline trace={} stage=thought_process ms={} actions={} action_results={}",
+                trace_id,
+                thought_started.elapsed().as_millis(),
+                result.decision_output.actions.len(),
+                result.action_results.len()
+            );
+        }
+        Err(err) => {
+            println!(
+                "PERF pipeline trace={} stage=thought_process ms={} ok=false error={}",
+                trace_id,
+                thought_started.elapsed().as_millis(),
+                err
+            );
+        }
+    }
     println!(
         "PERF pipeline trace={} stage=end total_ms={}",
         trace_id,

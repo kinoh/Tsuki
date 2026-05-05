@@ -195,8 +195,6 @@ pub struct InternalPromptConfig {
     pub mcp_trigger_extract_retry_prompt_template: String,
     pub skill_index_instructions: String,
     pub skill_index_prompt_template: String,
-    pub decision_repair_instructions_template: String,
-    pub decision_repair_context_template: String,
     pub concept_link_selection_instructions: String,
     pub concept_link_selection_prompt_template: String,
 }

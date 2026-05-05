@@ -2,17 +2,14 @@ use axum::http::StatusCode;
 use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::json;
-use std::time::Instant;
 use std::{collections::HashMap, sync::Arc};
 use tokio::runtime::Handle;
 
 use crate::activation_concept_graph::VisibleSkill;
 use crate::app_state::AppState;
 use crate::application::event_service::record_event;
-use crate::application::history_service::{
-    format_decision_debug_history, format_event_history, format_event_lines, latest_events,
-};
-use crate::application::module_bootstrap::{ModuleRuntime, Modules};
+use crate::application::history_service::{format_decision_debug_history, format_event_history};
+use crate::application::module_bootstrap::ModuleRuntime;
 use crate::application::router_service::{
     activation_snapshot_from_router_output, ActivationSnapshot, HardTriggerResult, RouterOutput,
 };
@@ -24,8 +21,6 @@ use crate::llm::{
 };
 use crate::module_registry::ModuleRegistryReader;
 use crate::prompts::PromptOverrides;
-use crate::tools::EMIT_USER_REPLY_TOOL;
-
 const SUBMODULE_TOOL_PREFIX: &str = "run_submodule__";
 
 #[derive(Debug, Clone)]
@@ -80,157 +75,6 @@ async fn read_latest_router_state(state: &AppState) -> RouterOutput {
         })
         .and_then(|e| serde_json::from_value(e.payload).ok())
         .unwrap_or_default()
-}
-
-pub(crate) async fn run_decision(
-    input_text: &str,
-    router_output: RouterOutput,
-    modules: &Modules,
-    state: &AppState,
-    module_instructions: &HashMap<String, String>,
-    overrides: &PromptOverrides,
-) -> String {
-    let decision_started = Instant::now();
-    println!(
-        "PERF decision stage=start input_len={} hard_trigger_results={} soft_recommendations={}",
-        input_text.len(),
-        router_output.hard_trigger_results.len(),
-        router_output.soft_recommendations.len()
-    );
-    let history_started = Instant::now();
-    let history = format_event_lines(
-        &latest_events(state, state.config.limits.decision_history, None, None).await,
-    );
-    println!(
-        "PERF decision stage=history ms={} history_len={}",
-        history_started.elapsed().as_millis(),
-        history.len()
-    );
-    let base_instructions = state.prompts.base_or_default(&overrides);
-    let decision_instructions = state.prompts.decision_or_default(&overrides);
-    let activation_snapshot = activation_snapshot_from_router_output(&router_output);
-    let handler = DecisionToolHandler {
-        state: state.clone(),
-        input_text: input_text.to_string(),
-        activation_snapshot: activation_snapshot.clone(),
-        base_handler: modules.runtime.tool_handler.clone(),
-        module_instructions: module_instructions.clone(),
-    };
-    let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
-    let visible_mcp_tools = build_decision_mcp_tools(
-        &state,
-        &router_output.mcp_visible_tools,
-        &router_output.visible_skills,
-    );
-    let adapter = build_response_api_llm(build_config_with_tools_and_handler(
-        compose_decision_instructions(
-            &base_instructions,
-            &decision_instructions,
-            &visible_mcp_tools,
-            !router_output.visible_skills.is_empty(),
-        ),
-        &modules.runtime,
-        decision_tools(
-            &modules.runtime.tools,
-            visible_mcp_tools.clone(),
-            module_instructions.keys().cloned(),
-        ),
-        Arc::new(handler),
-        Some(LlmUsageContext::new("user", "decision")),
-        Some(usage_recorder),
-    ));
-    let activation_concepts =
-        format_activation_context(&activation_snapshot.active_concepts_and_arousal);
-    let executed_submodule_outputs =
-        format_hard_trigger_results(&router_output.hard_trigger_results);
-    let submodule_candidates =
-        format_soft_recommendations(&activation_snapshot.soft_recommendations);
-    let decision_input_text =
-        build_decision_input_text(input_text, &activation_snapshot.symbolized_text);
-    let visible_mcp_tool_contracts = format_visible_mcp_tool_contracts(&visible_mcp_tools);
-    let visible_skills = format_visible_skill_summaries(&router_output.visible_skills);
-    let context = render_decision_context_template(
-        &state.config.internal_prompts.decision_context_template,
-        DecisionContextTemplateVars {
-            latest_user_input: &decision_input_text,
-            active_concepts_and_arousal: &activation_concepts,
-            outputs_from_immediately_executed_submodules: &executed_submodule_outputs,
-            candidate_submodules_by_interest_match: &submodule_candidates,
-            recent_event_history: &history,
-            recalled_event_history: &router_output.recalled_event_history,
-            visible_mcp_tool_contracts: &visible_mcp_tool_contracts,
-            visible_skills: &visible_skills,
-        },
-    );
-
-    let llm_started = Instant::now();
-    let response = match adapter
-        .respond(LlmRequest {
-            input: context.clone(),
-        })
-        .await
-    {
-        Ok(response) => {
-            println!(
-                "PERF decision stage=respond ms={} ok=true output_len={} tool_calls={}",
-                llm_started.elapsed().as_millis(),
-                response.text.len(),
-                response.tool_calls.len()
-            );
-            response
-        }
-        Err(err) => {
-            let error_detail = err.to_string();
-            println!(
-                "PERF decision stage=respond ms={} ok=false error={}",
-                llm_started.elapsed().as_millis(),
-                error_detail
-            );
-            let error_text = format!("error: {}", error_detail);
-            let error_event = decision_text(error_text, true);
-            record_event(state, error_event).await;
-            emit_debug_module_error_event(state, "decision", "runtime", &context, &error_detail)
-                .await;
-            println!(
-                "PERF decision stage=end total_ms={} decision=error",
-                decision_started.elapsed().as_millis()
-            );
-            return format!("error: {}", error_detail);
-        }
-    };
-
-    let parsed = parse_decision(&response.text);
-    let response =
-        if parsed.decision == "respond" && !has_tool_call(&response, EMIT_USER_REPLY_TOOL) {
-            repair_missing_emit_user_reply(
-                modules,
-                state,
-                &base_instructions,
-                &decision_instructions,
-                &context,
-                &response,
-            )
-            .await
-            .unwrap_or(response)
-        } else {
-            response
-        };
-    let parsed = parse_decision(&response.text);
-    let reason_text = parsed.reason.unwrap_or_else(|| "none".to_string());
-    let decision_event = decision_text(
-        format!("decision={} reason={}", parsed.decision, reason_text),
-        false,
-    );
-    record_event(state, decision_event).await;
-    emit_debug_module_events(state, "decision", "runtime", &context, &response).await;
-    println!(
-        "PERF decision stage=end total_ms={} decision={}",
-        decision_started.elapsed().as_millis(),
-        parsed.decision
-    );
-
-    response.text
 }
 
 pub(crate) async fn run_decision_debug(
@@ -981,81 +825,6 @@ fn build_config_with_tools_and_handler(
         usage_recorder,
         usage_context,
         max_tool_rounds: runtime.max_tool_rounds,
-    }
-}
-
-fn has_tool_call(response: &crate::llm::LlmResponse, tool_name: &str) -> bool {
-    response
-        .tool_calls
-        .iter()
-        .any(|call| call.name == tool_name)
-}
-
-async fn repair_missing_emit_user_reply(
-    modules: &Modules,
-    state: &AppState,
-    base_instructions: &str,
-    decision_instructions: &str,
-    original_context: &str,
-    response: &crate::llm::LlmResponse,
-) -> Option<crate::llm::LlmResponse> {
-    let emit_tool = modules
-        .runtime
-        .tools
-        .iter()
-        .find(|tool| tool_name(tool) == Some(EMIT_USER_REPLY_TOOL))
-        .cloned()?;
-    let repair_instructions = format!(
-        "{}\n\n{}\n\n{}",
-        base_instructions,
-        decision_instructions,
-        state
-            .config
-            .internal_prompts
-            .decision_repair_instructions_template
-            .trim()
-    );
-    let tool_results = response
-        .tool_calls
-        .iter()
-        .map(|call| {
-            format!(
-                "- {}: output={} error={}",
-                call.name,
-                truncate(&call.output, 400),
-                call.error.as_deref().unwrap_or("none")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let repair_context = state
-        .config
-        .internal_prompts
-        .decision_repair_context_template
-        .replace("{{original_context}}", original_context)
-        .replace("{{tool_call_results}}", &tool_results);
-    let usage_recorder: Arc<dyn LlmUsageRecorder> =
-        Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
-    let adapter = build_response_api_llm(ResponseApiConfig {
-        model: modules.runtime.model.clone(),
-        instructions: repair_instructions,
-        temperature: modules.runtime.temperature,
-        max_output_tokens: modules.runtime.max_output_tokens,
-        tools: vec![emit_tool],
-        tool_handler: Some(modules.runtime.tool_handler.clone()),
-        usage_recorder: Some(usage_recorder),
-        usage_context: Some(LlmUsageContext::new("user", "decision-repair")),
-        max_tool_rounds: 1,
-    });
-
-    match adapter
-        .respond(LlmRequest {
-            input: repair_context,
-        })
-        .await
-    {
-        Ok(repaired) if has_tool_call(&repaired, EMIT_USER_REPLY_TOOL) => Some(repaired),
-        _ => None,
     }
 }
 

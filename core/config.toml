@@ -132,20 +132,6 @@ skill_key: {{skill_key}}
 body:
 {{skill_body}}"""
 
-decision_repair_instructions_template = """Decision contract repair:
-You already decided to respond but failed to call emit_user_reply.
-You must call emit_user_reply exactly once using the available tool.
-Do not call any other tool.
-After the tool call, output exactly one line: decision=respond reason=contract_repair."""
-
-decision_repair_context_template = """{{original_context}}
-
-tool_call_results_from_previous_attempt:
-{{tool_call_results}}
-
-Repair requirement:
-Call emit_user_reply now using the gathered tool results."""
-
 concept_link_selection_instructions = "You are a strict JSON selector for concept-graph curation tasks."
 
 concept_link_selection_prompt_template = """Target submodule: {{submodule}}
