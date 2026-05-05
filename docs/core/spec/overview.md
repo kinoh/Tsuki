@@ -15,6 +15,8 @@ stream. The stream is an observability channel, not a control bus. See `module-m
 - Decision: integrates all context and produces the final response
 
 No sequential contract exists between modules. See `module-model.md`, `router-activation-model.md`.
+A proposed redesign that reframes a turn as an input frame, cognition, response generation, and
+response execution is described in `cognitive-run-model.md`.
 
 **Concept graph** — Memgraph-backed semantic memory. Stores concepts, episodes, skills, and
 relations with arousal state. Router queries it for activation; conversation recall uses a derived
