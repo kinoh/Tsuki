@@ -110,15 +110,20 @@ DeliberationOutput
   trace
 ```
 
-`intent_candidates` are candidate reasons or directions for action. They are model-tagged so the
-thought process does not depend on one privileged intent model.
+`intent_candidates` are candidate reasons or directions for action. They are deliberately thin:
+decision reads the candidate text directly, without relying on a schema or category label.
 
 ```
 IntentCandidate
-  model: string
   source: string
-  content: string
+  text: string
 ```
+
+`source` identifies the deliberation contributor that produced the candidate.
+
+`text` is unstructured text for decision input. It may be prose or a compact notation such as
+`operation=add; motive=epistemic; target=submodule; aim=clarify boundary`. The thought process
+does not assign schema-level meaning to that notation.
 
 `constraints` are explicit restrictions that decision should obey, such as safety, scope, or
 interaction constraints. Do not add a generic `notes` field; if data is meant for decision, give it
@@ -131,10 +136,10 @@ as an arbitrary standalone prompt or a decision-callable tool. It should instead
 deliberation contributor that emits intent candidates or constraints according to its own explicit
 contract.
 
-## Focus-Pragmatic Intent Model
+## Focus-Pragmatic Notation
 
-The focus-pragmatic model is one possible `IntentCandidate.model`; it is not a required stage and
-not a required top-level output shape.
+Focus-pragmatic notation is one useful way to write `IntentCandidate.text`. It is not a required
+stage, a required top-level output shape, or a schema interpreted by the thought process.
 
 It describes a possible intent as:
 
@@ -165,17 +170,17 @@ Pragmatic motives:
 - `epistemic` - align understanding, correct recognition, or improve accuracy.
 - `meta` - manage conversational progress, sequencing, or transition.
 
-Example candidate shape:
+Example candidate:
 
 ```
 IntentCandidate
-  model: focus_pragmatic
   source: curiosity
-  content: operation=add; motive=epistemic; target=submodule model; move=clarify responsibility
+  text: operation=add; motive=epistemic; target=submodule; aim=clarify responsibility boundary
 ```
 
-The content should identify the focus operation, pragmatic motive, focus target, and compact intent.
-It should not be a finished reply and should not imply that all actions are conversational.
+When this notation is used, the text should identify the focus operation, pragmatic motive, focus
+target, and compact intent. It should not be a finished reply and should not imply that all actions
+are conversational.
 
 ## Decision
 
@@ -356,8 +361,8 @@ A minimal migration path is:
 4. Add deliberation between cognition and decision.
 5. Recast retained submodules as deliberation contributors that produce intent candidates or
    constraints.
-6. Treat focus-pragmatic output as one intent candidate model, not as a required thought-process
-   stage.
+6. Treat focus-pragmatic output as one possible intent candidate notation, not as a required
+   thought-process stage or schema.
 7. Change decision behavior to choose actions from decision context and deliberation output.
 8. Represent user replies as actions without requiring the decision output to contain final reply
    text.
