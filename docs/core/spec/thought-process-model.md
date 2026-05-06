@@ -332,8 +332,10 @@ flow belongs to the thought process.
 
 ## Development UI Implications
 
-The admin prompt UI should replace arbitrary module execution with thought process inspection.
-There is no compatibility requirement for router, decision, or submodule standalone runs.
+The admin prompt UI should replace legacy module-specific debug runs with thought process
+inspection. There is no compatibility requirement for router, decision, or submodule debug
+endpoints that reconstruct or override their own run contexts outside the thought process
+contract.
 
 Useful inspection surfaces:
 
@@ -361,9 +363,10 @@ receive inside a thought process:
 - decision run: decision context plus deliberation output
 - action execution run: available actions plus selected actions
 
-These runs are not standalone modules. They are thought-process component runs with explicit
-inputs. Editing an intermediate input for inspection is a synthetic run and must be labeled as such
-in the UI.
+These runs execute one thought-process component in isolation, but they are not legacy
+module-specific debug runs. Each run must use the same typed input that the component would receive
+inside a thought process. Editing an intermediate input for inspection is a synthetic run and must
+be labeled as such in the UI.
 
 ## Migration Notes
 
