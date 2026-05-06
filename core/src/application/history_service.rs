@@ -1,9 +1,7 @@
-use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
 use crate::app_state::AppState;
-use crate::event::contracts::role_text_output;
 use crate::event::Event;
 
 pub(crate) async fn format_event_history(
@@ -13,23 +11,6 @@ pub(crate) async fn format_event_history(
     excluded_event_ids: Option<&HashSet<String>>,
 ) -> String {
     let events = latest_events(state, limit, cutoff_ts, excluded_event_ids).await;
-    format_event_lines(&events)
-}
-
-pub(crate) async fn format_decision_debug_history(
-    state: &AppState,
-    limit: usize,
-    cutoff_ts: Option<&str>,
-    excluded_event_ids: Option<&HashSet<String>>,
-    submodule_outputs_raw: Option<&str>,
-) -> String {
-    let mut events = latest_events(state, limit, cutoff_ts, excluded_event_ids).await;
-    let submodule_overrides = parse_submodule_outputs(submodule_outputs_raw)
-        .into_iter()
-        .collect::<HashMap<_, _>>();
-    if !submodule_overrides.is_empty() {
-        apply_submodule_output_overrides(&mut events, &submodule_overrides);
-    }
     format_event_lines(&events)
 }
 
@@ -104,93 +85,6 @@ pub(crate) async fn latest_events(
     }
     visible.reverse();
     visible
-}
-
-pub(crate) fn is_user_input_event(event: &Event) -> bool {
-    event.source == "user" && event.meta.tags.iter().any(|tag| tag == "input")
-}
-
-pub(crate) fn is_decision_event(event: &Event) -> bool {
-    event.meta.tags.iter().any(|tag| tag == "decision")
-}
-
-fn parse_submodule_outputs(raw: Option<&str>) -> Vec<(String, String)> {
-    let raw = match raw {
-        Some(value) => value,
-        None => return Vec::new(),
-    };
-    raw.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                return None;
-            }
-            let (name, value) = line.split_once(':')?;
-            let name = name.trim();
-            let value = value.trim();
-            if name.is_empty() || value.is_empty() {
-                return None;
-            }
-            Some((name.to_string(), value.to_string()))
-        })
-        .collect()
-}
-
-fn apply_submodule_output_overrides(events: &mut Vec<Event>, overrides: &HashMap<String, String>) {
-    let mut applied = HashSet::<String>::new();
-    for event in events.iter_mut() {
-        let Some(module_name) = event_submodule_name(event).map(str::to_string) else {
-            continue;
-        };
-        let Some(override_text) = overrides.get(&module_name) else {
-            continue;
-        };
-        event.payload = json!({ "text": override_text });
-        applied.insert(module_name);
-    }
-    let missing = overrides
-        .iter()
-        .filter(|(name, _)| !applied.contains(name.as_str()))
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
-        return;
-    }
-    let insert_index = events
-        .iter()
-        .rposition(is_user_input_event)
-        .map(|index| index + 1)
-        .unwrap_or(events.len());
-    let mut synthetic = missing
-        .into_iter()
-        .map(|(name, text)| {
-            role_text_output(
-                format!("submodule:{}", name).as_str(),
-                "submodule",
-                text.to_string(),
-                false,
-            )
-        })
-        .collect::<Vec<_>>();
-    events.splice(insert_index..insert_index, synthetic.drain(..));
-}
-
-fn event_submodule_name(event: &Event) -> Option<&str> {
-    if let Some(name) = event
-        .source
-        .strip_prefix("submodule:")
-        .filter(|value| !value.is_empty())
-    {
-        return Some(name);
-    }
-    if !event.meta.tags.iter().any(|tag| tag == "submodule") {
-        return None;
-    }
-    event
-        .meta
-        .tags
-        .iter()
-        .find_map(|tag| tag.strip_prefix("module:"))
-        .filter(|value| !value.is_empty())
 }
 
 fn format_event_line(event: &Event) -> String {
@@ -354,51 +248,6 @@ mod tests {
                 "outcome:ok".to_string(),
             ],
         )
-    }
-
-    #[test]
-    fn apply_submodule_output_overrides_replaces_and_inserts() {
-        let mut events = vec![
-            input_text("user", "message", "hello"),
-            role_text_output(
-                "submodule:curiosity",
-                "submodule",
-                "old curiosity".to_string(),
-                false,
-            ),
-            decision_text("decision=respond reason=test".to_string(), false),
-        ];
-        let overrides = HashMap::from([
-            ("curiosity".to_string(), "new curiosity".to_string()),
-            ("social_approval".to_string(), "new social".to_string()),
-        ]);
-        apply_submodule_output_overrides(&mut events, &overrides);
-
-        let curiosity = events
-            .iter()
-            .find(|event| event.source == "submodule:curiosity")
-            .expect("curiosity event should exist");
-        assert_eq!(
-            curiosity
-                .payload
-                .get("text")
-                .and_then(|value| value.as_str())
-                .unwrap_or(""),
-            "new curiosity"
-        );
-
-        let inserted = events
-            .iter()
-            .find(|event| event.source == "submodule:social_approval")
-            .expect("social_approval event should be inserted");
-        assert_eq!(
-            inserted
-                .payload
-                .get("text")
-                .and_then(|value| value.as_str())
-                .unwrap_or(""),
-            "new social"
-        );
     }
 
     #[test]

@@ -72,7 +72,7 @@ pub(crate) struct Action {
     pub(crate) input: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ActionResult {
     pub(crate) name: String,
     pub(crate) ok: bool,
@@ -92,7 +92,7 @@ pub(crate) struct ComponentTrace {
     pub(crate) payload: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct ThoughtProcessResult {
     pub(crate) decision_context: DecisionContext,
     pub(crate) deliberation_contributions: DeliberationContributions,
@@ -106,6 +106,13 @@ pub(crate) enum ThoughtProcessError {
     Cognition(String),
     Deliberation(String),
     Decision(DecisionError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ThoughtProcessRunMode {
+    DryRun,
+    Commit,
 }
 
 impl std::fmt::Display for ThoughtProcessError {
@@ -170,6 +177,15 @@ impl ThoughtProcessService {
         &self,
         input: &ThoughtProcessInput,
     ) -> Result<ThoughtProcessResult, ThoughtProcessError> {
+        self.run_with_mode(input, ThoughtProcessRunMode::Commit)
+            .await
+    }
+
+    pub(crate) async fn run_with_mode(
+        &self,
+        input: &ThoughtProcessInput,
+        mode: ThoughtProcessRunMode,
+    ) -> Result<ThoughtProcessResult, ThoughtProcessError> {
         println!("THOUGHT_PROCESS stage=start events={}", input.events.len());
         let decision_context = self
             .cognition
@@ -190,6 +206,7 @@ impl ThoughtProcessService {
             .execute(
                 &decision_context.available_actions,
                 &decision_output.actions,
+                mode,
             )
             .await;
         println!(
@@ -411,6 +428,25 @@ pub(crate) async fn run_basic_thought_process(
     base_instructions: &str,
     decision_instructions: &str,
 ) -> Result<ThoughtProcessResult, ThoughtProcessError> {
+    run_basic_thought_process_with_mode(
+        state,
+        events,
+        runtime,
+        base_instructions,
+        decision_instructions,
+        ThoughtProcessRunMode::Commit,
+    )
+    .await
+}
+
+pub(crate) async fn run_basic_thought_process_with_mode(
+    state: &AppState,
+    events: Vec<Event>,
+    runtime: &ModuleRuntime,
+    base_instructions: &str,
+    decision_instructions: &str,
+    mode: ThoughtProcessRunMode,
+) -> Result<ThoughtProcessResult, ThoughtProcessError> {
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
         Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let decision = DecisionService::new(build_response_api_llm(ResponseApiConfig {
@@ -436,11 +472,11 @@ pub(crate) async fn run_basic_thought_process(
         decision,
         action_execution,
     )
-    .run(&ThoughtProcessInput { events })
+    .run_with_mode(&ThoughtProcessInput { events }, mode)
     .await
 }
 
-async fn build_prompt_deliberation_contributors(
+pub(crate) async fn build_prompt_deliberation_contributors(
     state: &AppState,
     runtime: &ModuleRuntime,
     base_instructions: &str,
@@ -491,13 +527,16 @@ async fn build_prompt_deliberation_contributors(
     Ok(contributors)
 }
 
-fn build_decision_instructions(base_instructions: &str, decision_instructions: &str) -> String {
+pub(crate) fn build_decision_instructions(
+    base_instructions: &str,
+    decision_instructions: &str,
+) -> String {
     format!(
         "{}\n\n{}\n\n{}\n{}",
         base_instructions.trim(),
         decision_instructions.trim(),
         "You are the Decision component of the thought process.",
-        "Return JSON only with shape {\"actions\":[{\"name\":\"...\",\"input\":\"...\"}],\"reason\":\"...\"}. Select only actions listed in the input. Use user_reply to send a message to the user. Use perform_task for complex external work that requires tools."
+        "Return JSON only with shape {\"actions\":[{\"name\":\"...\",\"input\":\"...\"}],\"reason\":\"...\"}. Select only actions listed in the input. Use user_reply for conversational responses, but pass an abstract response policy or realization request instead of final surface text. Use perform_task for complex external work that requires tools."
     )
 }
 
@@ -546,12 +585,12 @@ impl DecisionService {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-struct DeliberationRunResult {
-    contributions: DeliberationContributions,
-    traces: Vec<ComponentTrace>,
+pub(crate) struct DeliberationRunResult {
+    pub(crate) contributions: DeliberationContributions,
+    pub(crate) traces: Vec<ComponentTrace>,
 }
 
-async fn run_deliberation_contributors(
+pub(crate) async fn run_deliberation_contributors(
     contributors: &[Arc<dyn DeliberationContributor>],
     context: &DecisionContext,
 ) -> Result<DeliberationRunResult, String> {
@@ -703,25 +742,47 @@ impl std::error::Error for ActionExecutionError {}
 
 #[async_trait]
 pub(crate) trait ActionExecutor: Send + Sync {
-    async fn execute(&self, input: &str) -> Result<String, ActionExecutionError>;
+    async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError>;
+    async fn commit(&self, input: &str) -> Result<String, ActionExecutionError>;
 }
 
 pub(crate) struct UserReplyExecutor {
     emit_event: Arc<dyn Fn(Event) + Send + Sync>,
+    llm: Arc<dyn LlmAdapter>,
 }
 
 impl UserReplyExecutor {
-    pub(crate) fn new(emit_event: Arc<dyn Fn(Event) + Send + Sync>) -> Self {
-        Self { emit_event }
+    pub(crate) fn new(
+        emit_event: Arc<dyn Fn(Event) + Send + Sync>,
+        llm: Arc<dyn LlmAdapter>,
+    ) -> Self {
+        Self { emit_event, llm }
     }
 }
 
 #[async_trait]
 impl ActionExecutor for UserReplyExecutor {
-    async fn execute(&self, input: &str) -> Result<String, ActionExecutionError> {
-        let event = response_text(input.to_string());
+    async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError> {
+        Ok(json!({
+            "mode": "llm_mediated_user_reply",
+            "llm_input": input,
+            "tools_available": false,
+        }))
+    }
+
+    async fn commit(&self, input: &str) -> Result<String, ActionExecutionError> {
+        let response = self
+            .llm
+            .respond(LlmRequest {
+                input: input.to_string(),
+            })
+            .await
+            .map_err(|err| ActionExecutionError {
+                message: err.to_string(),
+            })?;
+        let event = response_text(response.text.clone());
         (self.emit_event)(event);
-        Ok("{\"ok\":true}".to_string())
+        Ok(response.text)
     }
 }
 
@@ -737,7 +798,16 @@ impl PerformTaskExecutor {
 
 #[async_trait]
 impl ActionExecutor for PerformTaskExecutor {
-    async fn execute(&self, input: &str) -> Result<String, ActionExecutionError> {
+    async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError> {
+        Ok(json!({
+            "mode": "llm_mediated_task",
+            "llm_input": input,
+            "tools_available": false,
+            "tools_available_in_commit": true,
+        }))
+    }
+
+    async fn commit(&self, input: &str) -> Result<String, ActionExecutionError> {
         let response = self
             .llm
             .respond(LlmRequest {
@@ -766,12 +836,15 @@ impl ActionExecutionService {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_user_reply(emit_event: Arc<dyn Fn(Event) + Send + Sync>) -> Self {
+    pub(crate) fn with_user_reply(
+        emit_event: Arc<dyn Fn(Event) + Send + Sync>,
+        llm: Arc<dyn LlmAdapter>,
+    ) -> Self {
         let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
         let emit_event_for_reply = emit_event.clone();
         executors.insert(
             "user_reply".to_string(),
-            Arc::new(UserReplyExecutor::new(emit_event_for_reply)),
+            Arc::new(UserReplyExecutor::new(emit_event_for_reply, llm)),
         );
         Self {
             executors,
@@ -785,9 +858,22 @@ impl ActionExecutionService {
         state: &AppState,
     ) -> Self {
         let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
+        let reply_usage_recorder: Arc<dyn LlmUsageRecorder> =
+            Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
+        let reply_llm = build_response_api_llm(ResponseApiConfig {
+            model: runtime.model.clone(),
+            instructions: "You are the user_reply action executor. Realize the selected conversational intent as the final message to the user. Return only the message text. Do not call tools.".to_string(),
+            temperature: runtime.temperature,
+            max_output_tokens: runtime.max_output_tokens,
+            tools: Vec::new(),
+            tool_handler: None,
+            usage_recorder: Some(reply_usage_recorder),
+            usage_context: Some(LlmUsageContext::new("user", "user_reply")),
+            max_tool_rounds: 0,
+        });
         executors.insert(
             "user_reply".to_string(),
-            Arc::new(UserReplyExecutor::new(emit_event.clone())),
+            Arc::new(UserReplyExecutor::new(emit_event.clone(), reply_llm)),
         );
         let usage_recorder: Arc<dyn LlmUsageRecorder> =
             Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
@@ -822,6 +908,7 @@ impl ActionExecutionService {
         &self,
         available_actions: &[AvailableAction],
         selected_actions: &[Action],
+        mode: ThoughtProcessRunMode,
     ) -> Vec<ActionResult> {
         let mut results = Vec::with_capacity(selected_actions.len());
         for action in selected_actions {
@@ -840,7 +927,9 @@ impl ActionExecutionService {
                     output: String::new(),
                     error: Some(error),
                 };
-                self.emit_action_result(&result);
+                if mode == ThoughtProcessRunMode::Commit {
+                    self.emit_action_result(&result);
+                }
                 results.push(result);
                 continue;
             }
@@ -856,16 +945,26 @@ impl ActionExecutionService {
                     output: String::new(),
                     error: Some(error),
                 };
-                self.emit_action_result(&result);
+                if mode == ThoughtProcessRunMode::Commit {
+                    self.emit_action_result(&result);
+                }
                 results.push(result);
                 continue;
             };
             println!(
-                "THOUGHT_ACTION stage=execute name={} input_len={}",
+                "THOUGHT_ACTION stage=execute name={} input_len={} mode={:?}",
                 action.name,
-                action.input.len()
+                action.input.len(),
+                mode
             );
-            match executor.execute(&action.input).await {
+            let execution = match mode {
+                ThoughtProcessRunMode::DryRun => executor
+                    .inspect(&action.input)
+                    .await
+                    .map(|value| value.to_string()),
+                ThoughtProcessRunMode::Commit => executor.commit(&action.input).await,
+            };
+            match execution {
                 Ok(output) => {
                     println!("THOUGHT_ACTION stage=end name={} ok=true", action.name);
                     let result = ActionResult {
@@ -874,7 +973,9 @@ impl ActionExecutionService {
                         output,
                         error: None,
                     };
-                    self.emit_action_result(&result);
+                    if mode == ThoughtProcessRunMode::Commit {
+                        self.emit_action_result(&result);
+                    }
                     results.push(result);
                 }
                 Err(err) => {
@@ -889,7 +990,9 @@ impl ActionExecutionService {
                         output: String::new(),
                         error: Some(error),
                     };
-                    self.emit_action_result(&result);
+                    if mode == ThoughtProcessRunMode::Commit {
+                        self.emit_action_result(&result);
+                    }
                     results.push(result);
                 }
             }
@@ -913,8 +1016,10 @@ pub(crate) fn default_available_actions() -> Vec<AvailableAction> {
     vec![
         AvailableAction {
             name: "user_reply".to_string(),
-            description: "Send a text message to the user.".to_string(),
-            input_description: "The exact reply text.".to_string(),
+            description: "Realize a conversational response and send it to the user.".to_string(),
+            input_description:
+                "An abstract response policy or realization request, not the final surface text."
+                    .to_string(),
         },
         AvailableAction {
             name: "perform_task".to_string(),
@@ -931,7 +1036,7 @@ fn _trace_payload(value: impl Serialize) -> Value {
     serde_json::to_value(value).unwrap_or_else(|err| json!({ "error": err.to_string() }))
 }
 
-fn emit_event_blocking(state: AppState) -> Arc<dyn Fn(Event) + Send + Sync> {
+pub(crate) fn emit_event_blocking(state: AppState) -> Arc<dyn Fn(Event) + Send + Sync> {
     Arc::new(move |event| {
         let state = state.clone();
         tokio::task::block_in_place(|| {
@@ -1041,7 +1146,13 @@ mod tests {
 
     #[async_trait]
     impl ActionExecutor for FailingExecutor {
-        async fn execute(&self, _input: &str) -> Result<String, ActionExecutionError> {
+        async fn inspect(&self, _input: &str) -> Result<Value, ActionExecutionError> {
+            Err(ActionExecutionError {
+                message: "boom".to_string(),
+            })
+        }
+
+        async fn commit(&self, _input: &str) -> Result<String, ActionExecutionError> {
             Err(ActionExecutionError {
                 message: "boom".to_string(),
             })
@@ -1052,7 +1163,11 @@ mod tests {
 
     #[async_trait]
     impl ActionExecutor for EchoExecutor {
-        async fn execute(&self, input: &str) -> Result<String, ActionExecutionError> {
+        async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError> {
+            Ok(json!({ "input": input }))
+        }
+
+        async fn commit(&self, input: &str) -> Result<String, ActionExecutionError> {
             Ok(format!("executed: {}", input))
         }
     }
@@ -1189,9 +1304,15 @@ mod tests {
     async fn action_execution_emits_user_reply_event() {
         let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
         let emitted_for_executor = emitted.clone();
-        let service = ActionExecutionService::with_user_reply(Arc::new(move |event| {
-            emitted_for_executor.lock().expect("lock").push(event);
-        }));
+        let service = ActionExecutionService::with_user_reply(
+            Arc::new(move |event| {
+                emitted_for_executor.lock().expect("lock").push(event);
+            }),
+            Arc::new(StaticLlm {
+                response: Ok("hello surface".to_string()),
+                requests: Arc::new(Mutex::new(Vec::new())),
+            }),
+        );
 
         let results = service
             .execute(
@@ -1200,6 +1321,7 @@ mod tests {
                     name: "user_reply".to_string(),
                     input: "hello".to_string(),
                 }],
+                ThoughtProcessRunMode::Commit,
             )
             .await;
 
@@ -1208,7 +1330,7 @@ mod tests {
         let emitted = emitted.lock().expect("lock");
         assert_eq!(emitted.len(), 2);
         assert_eq!(emitted[0].source, "assistant");
-        assert_eq!(emitted[0].payload["text"], "hello");
+        assert_eq!(emitted[0].payload["text"], "hello surface");
         assert!(emitted[0].meta.tags.iter().any(|tag| tag == "response"));
         assert_eq!(emitted[1].source, "action_execution");
         assert_eq!(emitted[1].payload["action"], "user_reply");
@@ -1231,6 +1353,7 @@ mod tests {
                     name: "shell_exec".to_string(),
                     input: "inspect logs".to_string(),
                 }],
+                ThoughtProcessRunMode::Commit,
             )
             .await;
 
@@ -1253,6 +1376,7 @@ mod tests {
                     name: "perform_task".to_string(),
                     input: "inspect logs".to_string(),
                 }],
+                ThoughtProcessRunMode::Commit,
             )
             .await;
 
@@ -1277,6 +1401,7 @@ mod tests {
                     name: "perform_task".to_string(),
                     input: "inspect logs".to_string(),
                 }],
+                ThoughtProcessRunMode::Commit,
             )
             .await;
 
@@ -1298,12 +1423,77 @@ mod tests {
                     name: "user_reply".to_string(),
                     input: "hello".to_string(),
                 }],
+                ThoughtProcessRunMode::Commit,
             )
             .await;
 
         assert_eq!(results.len(), 1);
         assert!(!results[0].ok);
         assert_eq!(results[0].error.as_deref(), Some("boom"));
+    }
+
+    #[tokio::test]
+    async fn action_execution_dry_run_inspects_user_reply_without_emitting_or_calling_llm() {
+        let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
+        let emitted_for_executor = emitted.clone();
+        let reply_requests = Arc::new(Mutex::new(Vec::new()));
+        let service = ActionExecutionService::with_user_reply(
+            Arc::new(move |event| {
+                emitted_for_executor.lock().expect("lock").push(event);
+            }),
+            Arc::new(StaticLlm {
+                response: Ok("hello surface".to_string()),
+                requests: reply_requests.clone(),
+            }),
+        );
+
+        let results = service
+            .execute(
+                &default_available_actions(),
+                &[Action {
+                    name: "user_reply".to_string(),
+                    input: "operation=add; motive=affiliation".to_string(),
+                }],
+                ThoughtProcessRunMode::DryRun,
+            )
+            .await;
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ok);
+        assert!(results[0].output.contains("llm_mediated_user_reply"));
+        assert!(emitted.lock().expect("lock").is_empty());
+        assert!(reply_requests.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn action_execution_dry_run_inspects_perform_task_without_calling_llm() {
+        let task_requests = Arc::new(Mutex::new(Vec::new()));
+        let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
+        executors.insert(
+            "perform_task".to_string(),
+            Arc::new(PerformTaskExecutor::new(Arc::new(StaticLlm {
+                response: Ok("done".to_string()),
+                requests: task_requests.clone(),
+            }))),
+        );
+        let service = ActionExecutionService::new(executors);
+
+        let results = service
+            .execute(
+                &default_available_actions(),
+                &[Action {
+                    name: "perform_task".to_string(),
+                    input: "inspect logs".to_string(),
+                }],
+                ThoughtProcessRunMode::DryRun,
+            )
+            .await;
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ok);
+        assert!(results[0].output.contains("llm_mediated_task"));
+        assert!(results[0].output.contains("tools_available_in_commit"));
+        assert!(task_requests.lock().expect("lock").is_empty());
     }
 
     #[tokio::test]
@@ -1323,9 +1513,15 @@ mod tests {
         }));
         let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
         let emitted_for_executor = emitted.clone();
-        let actions = ActionExecutionService::with_user_reply(Arc::new(move |event| {
-            emitted_for_executor.lock().expect("lock").push(event);
-        }));
+        let actions = ActionExecutionService::with_user_reply(
+            Arc::new(move |event| {
+                emitted_for_executor.lock().expect("lock").push(event);
+            }),
+            Arc::new(StaticLlm {
+                response: Ok("hi surface".to_string()),
+                requests: Arc::new(Mutex::new(Vec::new())),
+            }),
+        );
         let contributor_contexts = Arc::new(Mutex::new(Vec::new()));
         let contributor = Arc::new(StaticContributor {
             output: Ok(DeliberationContributorResult {
@@ -1380,9 +1576,15 @@ mod tests {
         }));
         let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
         let emitted_for_executor = emitted.clone();
-        let actions = ActionExecutionService::with_user_reply(Arc::new(move |event| {
-            emitted_for_executor.lock().expect("lock").push(event);
-        }));
+        let actions = ActionExecutionService::with_user_reply(
+            Arc::new(move |event| {
+                emitted_for_executor.lock().expect("lock").push(event);
+            }),
+            Arc::new(StaticLlm {
+                response: Ok("hi surface".to_string()),
+                requests: Arc::new(Mutex::new(Vec::new())),
+            }),
+        );
         let service = ThoughtProcessService::new(cognition, Vec::new(), decision, actions);
         let input = ThoughtProcessInput { events: Vec::new() };
 
@@ -1418,9 +1620,15 @@ mod tests {
         });
         let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
         let emitted_for_executor = emitted.clone();
-        let actions = ActionExecutionService::with_user_reply(Arc::new(move |event| {
-            emitted_for_executor.lock().expect("lock").push(event);
-        }));
+        let actions = ActionExecutionService::with_user_reply(
+            Arc::new(move |event| {
+                emitted_for_executor.lock().expect("lock").push(event);
+            }),
+            Arc::new(StaticLlm {
+                response: Ok("hi surface".to_string()),
+                requests: Arc::new(Mutex::new(Vec::new())),
+            }),
+        );
         let service = ThoughtProcessService::new(cognition, vec![contributor], decision, actions);
         let input = ThoughtProcessInput { events: Vec::new() };
 

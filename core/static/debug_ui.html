@@ -3,1741 +3,387 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Core Rust Debug UI</title>
-    <link rel="stylesheet" href="/admin/styles/ui-tokens.css" />
-    <link rel="stylesheet" href="/admin/styles/ui-base.css" />
+    <title>Tsuki Thought Process</title>
     <style>
-      * {
-        box-sizing: border-box;
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fb;
+        --panel: #ffffff;
+        --line: #d8dde8;
+        --text: #1d2430;
+        --muted: #687386;
+        --accent: #0f766e;
+        --danger: #b42318;
       }
-
+      * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
         color: var(--text);
-        background: var(--page-bg);
-        min-height: 100vh;
       }
-
-      .title-row {
-        padding: 20px 28px 0;
+      header {
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 12px;
-        flex-wrap: wrap;
-      }
-
-      .title-row h1 {
-        font-size: 20px;
-        margin: 0;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .title-right {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
-      }
-
-      .top-nav {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
-      }
-
-      .top-nav a {
-        color: var(--muted);
-        font-size: 12px;
-        text-decoration: none;
-        padding-bottom: 2px;
-        border-bottom: 1px solid transparent;
-      }
-
-      .top-nav a.active {
-        color: var(--text);
-        border-bottom-color: var(--accent);
-      }
-
-      .logout-btn {
-        background: transparent;
-        border: 1px solid var(--line);
-        color: var(--muted);
-        border-radius: 8px;
-        padding: 4px 8px;
-        font-size: 12px;
-      }
-
-      .logout-btn:hover {
-        border-color: var(--accent);
-        color: var(--text);
-      }
-
-      .title-row .status {
-        font-size: 13px;
-        color: var(--muted);
-      }
-
-      .layout {
-        display: grid;
-        grid-template-columns: minmax(220px, 18vw) minmax(0, 1fr) minmax(360px, 32vw);
         gap: 16px;
-        padding: 20px 24px 32px;
       }
-
-      .panel {
-        background: var(--panel);
-        border-radius: var(--radius);
+      h1, h2, h3 { margin: 0; font-weight: 650; }
+      h1 { font-size: 20px; }
+      h2 { font-size: 16px; margin-bottom: 10px; }
+      h3 { font-size: 14px; margin-bottom: 8px; }
+      main {
+        display: grid;
+        grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
+        gap: 16px;
         padding: 16px;
-        box-shadow: var(--shadow);
-        border: 1px solid rgba(255, 255, 255, 0.05);
       }
-
-      .panel h2 {
-        margin: 0 0 12px;
-        font-size: 14px;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        color: var(--muted);
-      }
-
-      .worklog-list {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        max-height: 70vh;
-        overflow: auto;
-        position: relative;
-        padding-top: 10px;
-        padding-right: 10px;
-        scrollbar-gutter: stable;
-      }
-
-      .worklog-item {
-        padding: 10px 12px;
-        padding-right: 44px;
-        border-radius: 12px;
-        border: 1px solid transparent;
-        background: var(--panel-2);
-        cursor: pointer;
-        transition: border 0.2s ease, transform 0.2s ease;
-        position: relative;
-      }
-
-      .worklog-item:hover {
-        border-color: rgba(255, 79, 167, 0.5);
-        transform: translateY(-1px);
-      }
-
-      .worklog-item.active {
-        border-color: var(--accent);
-      }
-
-      .worklog-meta {
-        font-size: 11px;
-        color: var(--muted);
-      }
-
-      .exclude-btn {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        width: 12px;
-        height: 12px;
-        padding: 0;
-        margin: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 999px;
-        border: none;
-        background: transparent;
-        color: var(--muted);
-        font-size: 12px;
-        line-height: 1;
-        font-weight: 600;
-        cursor: pointer;
-      }
-
-      .exclude-btn:hover {
-        color: var(--accent);
-      }
-
-      .worklog-item.excluded {
-        opacity: 0.45;
-      }
-
-      .worklog-item.cutoff-anchor {
-        position: relative;
-      }
-
-      .worklog-item.cutoff-anchor::after {
-        content: "";
-        position: absolute;
-        left: 8px;
-        right: 8px;
-        bottom: -6px;
-        border-bottom: 2px solid rgba(113, 74, 244, 0.85);
-      }
-
-      .worklog-list.cutoff-at-top::before {
-        content: "";
-        position: absolute;
-        left: 8px;
-        right: 8px;
-        top: 2px;
-        border-top: 2px solid rgba(113, 74, 244, 0.85);
-      }
-
-      .flow {
-        background: linear-gradient(145deg, rgba(23, 26, 33, 0.6), rgba(15, 17, 21, 0.6));
-        border-radius: var(--radius);
-        padding: 20px;
-        min-height: 60vh;
-        border: 1px solid var(--line);
-        position: relative;
-        overflow: hidden;
-      }
-
-      .flow-grid {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 14px;
-        align-items: center;
-      }
-
-      .node {
-        border-radius: 14px;
-        padding: 14px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        text-align: center;
-        transition: transform 0.2s ease, border 0.2s ease, opacity 0.2s ease;
-      }
-
-      .node strong {
-        display: block;
-        font-size: 13px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .node small {
-        color: var(--muted);
-      }
-
-      .node.active {
-        border-color: var(--accent);
-        transform: translateY(-2px) scale(1.01);
-        background: rgba(255, 79, 167, 0.14);
-      }
-
-      .node.dim {
-        opacity: 0.35;
-      }
-
-      .flow-details {
-        margin-top: 18px;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-      }
-
-      .submodule-list {
-        margin-top: 12px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        justify-content: center;
-      }
-
-      .submodule-chip {
-        padding: 6px 10px;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(15, 17, 21, 0.8);
-        font-size: 11px;
-        letter-spacing: 0.04em;
-        cursor: pointer;
-        transition: transform 0.2s ease, border 0.2s ease;
-      }
-
-      .submodule-chip:hover {
-        transform: translateY(-1px);
-        border-color: rgba(85, 182, 210, 0.6);
-      }
-
-      .submodule-chip.active {
-        border-color: var(--accent-2);
-        background: rgba(113, 74, 244, 0.2);
-        box-shadow: 0 0 0 1px rgba(113, 74, 244, 0.4);
-      }
-
-      .detail-card {
+      section, aside, .panel {
         background: var(--panel);
-        border-radius: 14px;
-        padding: 12px;
         border: 1px solid var(--line);
-        min-height: 120px;
-      }
-
-      .detail-card h3 {
-        margin: 0 0 8px;
-        font-size: 12px;
-        text-transform: uppercase;
-        color: var(--muted);
-        letter-spacing: 0.08em;
-      }
-
-      .detail-card pre {
-        white-space: pre-wrap;
-        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-        font-size: 12px;
-        color: var(--text);
-      }
-
-      .control-section {
-        margin-bottom: 16px;
-      }
-
-      .control-section h2 {
-        margin-top: 36px;
-      }
-
-      label {
-        font-size: 12px;
-        color: var(--muted);
-        display: block;
-        margin-top: 6px;
-        margin-bottom: 6px;
-      }
-
-      .checkbox-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin: 8px 0 4px;
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      .checkbox-row label {
-        margin: 0;
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      .checkbox-row input {
-        width: auto;
-      }
-
-      .submodule-manage-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin: 8px 0 12px;
-      }
-
-      .submodule-manage-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 8px 10px;
-        border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(15, 17, 21, 0.7);
-        font-size: 12px;
-      }
-
-      .submodule-manage-item button {
-        background: transparent;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        color: var(--text);
-        padding: 6px 10px;
         border-radius: 8px;
-        font-size: 11px;
+        padding: 14px;
       }
-
-      select,
-      textarea,
-      input {
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 650;
+        color: var(--muted);
+        margin: 12px 0 6px;
+      }
+      textarea, input, select {
         width: 100%;
-        border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(15, 17, 21, 0.9);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 9px;
+        font: inherit;
+        background: #fff;
         color: var(--text);
-        padding: 10px;
-        font-size: 13px;
       }
-
-      textarea {
-        min-height: 120px;
-        resize: vertical;
-      }
-
+      input[type="checkbox"] { width: auto; }
+      textarea { min-height: 90px; resize: vertical; }
       button {
+        border: 0;
+        border-radius: 6px;
+        padding: 9px 12px;
         background: var(--accent);
-        color: var(--bg);
-        border: none;
-        border-radius: 10px;
-        padding: 10px 14px;
-        font-weight: 600;
+        color: #fff;
+        font-weight: 650;
         cursor: pointer;
       }
-
       button.secondary {
-        background: transparent;
-        border: 1px solid var(--line);
+        background: #eef2f7;
         color: var(--text);
+        border: 1px solid var(--line);
       }
-
-      .button-row {
-        display: flex;
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(120px, 1fr));
         gap: 8px;
-        margin-top: 10px;
-        margin-bottom: 10px;
+        margin-bottom: 12px;
       }
-
-      .muted {
-        color: var(--muted);
-        font-size: 12px;
+      .node {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        min-height: 64px;
+        background: #fbfcfe;
       }
-
-      @media (max-width: 1440px) {
-        .layout {
-          grid-template-columns: minmax(200px, 24vw) minmax(0, 1fr) minmax(320px, 36vw);
-        }
+      .node strong { display: block; font-size: 13px; }
+      .node small { color: var(--muted); }
+      .node.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.12); }
+      pre {
+        margin: 0;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #0f172a;
+        color: #e5edf8;
+        overflow: auto;
+        max-height: 360px;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
-
-      @media (max-width: 1200px) {
-        .layout {
-          grid-template-columns: 1fr;
-        }
-        .flow-grid {
-          grid-template-columns: 1fr 1fr;
-        }
+      .muted { color: var(--muted); font-size: 12px; }
+      .status { min-height: 18px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+      .status.error { color: var(--danger); }
+      .stack { display: grid; gap: 12px; }
+      .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+      .tabs button.active { background: var(--accent); color: #fff; }
+      .tabs button { background: #eef2f7; color: var(--text); border: 1px solid var(--line); }
+      @media (max-width: 980px) {
+        main { grid-template-columns: 1fr; }
+        .flow { grid-template-columns: 1fr; }
       }
     </style>
   </head>
   <body>
-    <div class="title-row">
-      <h1>Core Rust Debug</h1>
-      <div class="title-right">
-            <nav class="top-nav" aria-label="Admin Pages">
-              <a href="/admin/events">Events</a>
-              <a href="/admin/prompts" class="active">Prompts</a>
-              <a href="/admin/skills">Skills</a>
-              <a href="/admin/concept-graph">Concept Graph</a>
-              <a href="/admin/state-records">State</a>
-            </nav>
-        <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
-        <div class="status" id="status">Idle</div>
+    <header>
+      <h1>Thought Process</h1>
+      <div class="row">
+        <a href="/admin/events">Events</a>
+        <a href="/admin/concept-graph">Concept Graph</a>
+        <a href="/admin/state-records">State Records</a>
+        <a href="/admin/skills">Skills</a>
       </div>
-    </div>
+    </header>
 
-    <div class="layout">
-      <aside class="panel">
-        <h2>Event Log</h2>
-        <div class="worklog-list" id="worklog"></div>
-        <div class="button-row">
-          <select id="eventFilter">
-            <option value="all">all</option>
-            <option value="non-debug">non-debug</option>
-            <option value="debug-only">debug-only</option>
-          </select>
-          <button class="secondary" id="refreshLog">Refresh</button>
-          <button class="secondary" id="setCutoff">Set cutoff</button>
-          <button class="secondary" id="clearCutoff">Clear cutoff</button>
-        </div>
-      </aside>
+    <main>
+      <aside class="stack">
+        <section>
+          <h2>Run</h2>
+          <label for="inputText">Input</label>
+          <textarea id="inputText" placeholder="Optional message to append to the event history for this run"></textarea>
+          <div class="grid">
+            <div>
+              <label for="mode">Mode</label>
+              <select id="mode">
+                <option value="dry_run">dry_run</option>
+                <option value="commit">commit</option>
+              </select>
+            </div>
+            <div>
+              <label for="historyLimit">History Limit</label>
+              <input id="historyLimit" type="number" min="0" max="1000" value="40" />
+            </div>
+          </div>
+          <label><input id="includeHistory" type="checkbox" checked /> Include event history</label>
+          <div class="row">
+            <button id="runThought">Run Thought Process</button>
+            <button class="secondary" id="clearOutput">Clear</button>
+          </div>
+          <div class="status" id="runStatus"></div>
+        </section>
 
-      <section class="flow">
-        <div class="flow-grid" id="flowGrid">
-          <div class="node" data-node="input">
-            <strong>Input</strong>
-            <small>User</small>
+        <section>
+          <h2>Component Run</h2>
+          <div class="row">
+            <button class="secondary" data-component="cognition">Cognition</button>
+            <button class="secondary" data-component="deliberation">Deliberation</button>
+            <button class="secondary" data-component="decision">Decision</button>
+            <button class="secondary" data-component="action_execution">Action Execution</button>
           </div>
-          <div class="node" data-node="router">
-            <strong>Router</strong>
-            <small>Concept graph</small>
-          </div>
-          <div class="node" data-node="submodules">
-            <strong>Submodules</strong>
-            <small>Parallel</small>
-            <div class="submodule-list" id="submoduleList"></div>
-          </div>
-          <div class="node" data-node="decision">
-            <strong>Decision</strong>
-            <small>Main</small>
-          </div>
-          <div class="node" data-node="reply">
-            <strong>Reply</strong>
-            <small>emit_user_reply</small>
-          </div>
-        </div>
+          <label for="syntheticInput">Synthetic Input</label>
+          <textarea id="syntheticInput" placeholder="Optional JSON override. Synthetic component runs must be treated as inspection-only."></textarea>
+          <div class="muted">When populated, this replaces the component input and the run is synthetic.</div>
+          <div class="status" id="componentStatus"></div>
+        </section>
 
-        <div class="flow-details">
-          <div class="detail-card">
-            <h3>Input</h3>
-            <pre id="inputText">No run selected.</pre>
-          </div>
-          <div class="detail-card">
-            <h3>Output</h3>
-            <pre id="outputText">Run a module to see output.</pre>
-          </div>
-        </div>
-
-        <div class="detail-card" style="margin-top: 12px;">
-          <h3>LLM Input Context</h3>
-          <div class="button-row">
-            <button class="secondary" id="contextEditStart" type="button" disabled>Edit</button>
-            <button id="contextResend" type="button" hidden disabled>Re-send</button>
-            <button class="secondary" id="contextEditCancel" type="button" hidden>Cancel</button>
-          </div>
-          <pre id="contextText">(none)</pre>
-          <textarea id="contextEditor" hidden></textarea>
-          <div class="muted" id="contextEditStatus"></div>
-        </div>
-
-        <div class="detail-card" style="margin-top: 12px;">
-          <h3>Raw Response</h3>
-          <pre id="rawText">(none)</pre>
-        </div>
-
-      </section>
-
-      <aside class="panel">
-        <h2 id="moduleTitle">Module</h2>
-        <div class="muted" id="moduleEmpty">Select a node in the flow.</div>
-
-        <div class="control-section" id="inputSection" hidden>
-          <label for="moduleInput">Input</label>
-          <textarea id="moduleInput" placeholder="Type input for the selected module..."></textarea>
-          <label for="appendInputMode">Input Append Mode</label>
-          <select id="appendInputMode">
-            <option value="always_new">always_new</option>
-            <option value="reuse_open">reuse_open</option>
-          </select>
-          <div class="button-row" id="runButtons">
-            <button id="runModule">Run</button>
-            <button class="secondary" id="loadRaw">Load Raw</button>
-          </div>
-          <div class="muted" id="runStatus"></div>
-        </div>
-
-        <div class="control-section" id="submoduleOutputsSection" hidden>
-          <label for="submoduleOutputsInput">Submodule Outputs (optional)</label>
-          <textarea
-            id="submoduleOutputsInput"
-            placeholder="curiosity: ...&#10;self_preservation: ...&#10;social_approval: ..."
-          ></textarea>
-          <div class="button-row">
-            <button class="secondary" id="autofillSubmoduleOutputs">Auto-fill from logs</button>
-          </div>
-          <div class="muted" id="autofillStatus"></div>
-          <div class="muted">Format: name: output (one per line)</div>
-        </div>
-
-        <div class="control-section" id="submoduleManageSection" hidden>
-          <h2>Submodules</h2>
-          <div class="submodule-manage-list" id="submoduleManageList"></div>
-          <label for="newSubmoduleName">New Submodule</label>
-          <input id="newSubmoduleName" placeholder="module_name" />
-          <label for="newSubmodulePrompt">Instructions</label>
-          <textarea id="newSubmodulePrompt"></textarea>
-          <div class="button-row">
-            <button id="addSubmodule">Add</button>
-          </div>
-          <div class="muted" id="submoduleManageStatus"></div>
-        </div>
-
-        <div class="control-section" id="modulePromptSection" hidden>
-          <label for="moduleBasePrompt">Base Prompt</label>
-          <textarea id="moduleBasePrompt"></textarea>
-          <label for="modulePrompt" id="modulePromptLabel">Prompt</label>
-          <textarea id="modulePrompt"></textarea>
-          <div class="button-row">
+        <section>
+          <h2>Prompts</h2>
+          <label for="basePrompt">Base</label>
+          <textarea id="basePrompt"></textarea>
+          <label for="decisionPrompt">Decision</label>
+          <textarea id="decisionPrompt"></textarea>
+          <label for="submodulePrompt">Submodules JSON</label>
+          <textarea id="submodulePrompt"></textarea>
+          <div class="row">
+            <button class="secondary" id="loadPrompts">Load</button>
             <button id="savePrompts">Save</button>
           </div>
-          <div class="muted" id="promptStatus"></div>
-        </div>
-
-        <div class="control-section" id="routerSection" hidden>
-          <div class="checkbox-row">
-            <input type="checkbox" id="routerDryRun" checked />
-            <label for="routerDryRun">Dry run (no side effects)</label>
-          </div>
-          <div class="button-row">
-            <button id="runRouter">Run</button>
-          </div>
-          <div class="muted" id="routerRunStatus"></div>
-        </div>
-
-        <div class="control-section" id="improveSection">
-          <h2>Self-Improvement</h2>
-          <label for="improveTriggerEvent">Trigger Event</label>
-          <input id="improveTriggerEvent" value="self_improvement.run" />
-          <label for="improveTriggerPayload">Trigger Payload (JSON)</label>
-          <textarea id="improveTriggerPayload" placeholder='{"target":"all","reason":"manual trigger"}'></textarea>
-          <label for="improveTarget">Target</label>
-          <input id="improveTarget" placeholder="base | router | decision | submodule:curiosity" />
-          <label for="improveSectionName">Job ID</label>
-          <input id="improveSectionName" value="manual-debug-job" />
-          <label for="improveReason">Reason</label>
-          <textarea id="improveReason" placeholder="Why this update should happen..."></textarea>
-          <label for="improveContent">Diff Text</label>
-          <textarea id="improveContent" placeholder="Unified diff text"></textarea>
-          <div class="button-row">
-            <button id="improveTrigger">Trigger</button>
-            <button id="improvePropose">Propose</button>
-          </div>
-          <label for="improveProposalId">Proposal ID</label>
-          <input id="improveProposalId" placeholder="proposal_id for review" />
-          <div class="button-row">
-            <button class="secondary" id="improveApprove">Approve</button>
-            <button class="secondary" id="improveReject">Reject</button>
-          </div>
-          <div class="muted" id="improveStatus"></div>
-        </div>
+          <div class="status" id="promptStatus"></div>
+        </section>
       </aside>
-    </div>
+
+      <section class="stack">
+        <div class="flow">
+          <div class="node active"><strong>Event History</strong><small>ordered input</small></div>
+          <div class="node"><strong>Cognition</strong><small>context</small></div>
+          <div class="node"><strong>Deliberation</strong><small>contributors</small></div>
+          <div class="node"><strong>Decision</strong><small>actions</small></div>
+          <div class="node"><strong>Action Execution</strong><small>dry-run safe</small></div>
+        </div>
+
+        <div class="panel">
+          <h2>Inspection</h2>
+          <div class="tabs">
+            <button class="active" data-tab="event_history">Event History</button>
+            <button data-tab="decision_context">Cognition</button>
+            <button data-tab="deliberation_contributions">Deliberation</button>
+            <button data-tab="decision_output">Decision</button>
+            <button data-tab="action_results">Action Execution</button>
+            <button data-tab="trace">Trace</button>
+            <button data-tab="raw">Raw</button>
+          </div>
+          <pre id="output">{}</pre>
+        </div>
+      </section>
+    </main>
 
     <script>
-      const statusEl = document.getElementById("status");
-      const worklogEl = document.getElementById("worklog");
-      const inputTextEl = document.getElementById("inputText");
-      const outputTextEl = document.getElementById("outputText");
-      const contextTextEl = document.getElementById("contextText");
-      const contextEditorEl = document.getElementById("contextEditor");
-      const contextEditStartButton = document.getElementById("contextEditStart");
-      const contextResendButton = document.getElementById("contextResend");
-      const contextEditCancelButton = document.getElementById("contextEditCancel");
-      const contextEditStatusEl = document.getElementById("contextEditStatus");
-      const rawTextEl = document.getElementById("rawText");
-      const moduleInput = document.getElementById("moduleInput");
-      const appendInputModeSelect = document.getElementById("appendInputMode");
-      const submoduleListEl = document.getElementById("submoduleList");
-      const moduleTitleEl = document.getElementById("moduleTitle");
-      const moduleEmptyEl = document.getElementById("moduleEmpty");
-      const inputSection = document.getElementById("inputSection");
-      const runButtons = document.getElementById("runButtons");
-      const improveTriggerEvent = document.getElementById("improveTriggerEvent");
-      const improveTriggerPayload = document.getElementById("improveTriggerPayload");
-      const improveTarget = document.getElementById("improveTarget");
-      const improveSectionName = document.getElementById("improveSectionName");
-      const improveReason = document.getElementById("improveReason");
-      const improveContent = document.getElementById("improveContent");
-      const improveProposalId = document.getElementById("improveProposalId");
-      const improveStatus = document.getElementById("improveStatus");
-      const submoduleOutputsSection = document.getElementById("submoduleOutputsSection");
-      const submoduleOutputsInput = document.getElementById("submoduleOutputsInput");
-      const autofillSubmoduleOutputsButton = document.getElementById("autofillSubmoduleOutputs");
-      const autofillStatus = document.getElementById("autofillStatus");
-      const submoduleManageSection = document.getElementById("submoduleManageSection");
-      const submoduleManageList = document.getElementById("submoduleManageList");
-      const routerSection = document.getElementById("routerSection");
-      const routerRunStatus = document.getElementById("routerRunStatus");
-      const routerDryRun = document.getElementById("routerDryRun");
-      const newSubmoduleName = document.getElementById("newSubmoduleName");
-      const newSubmodulePrompt = document.getElementById("newSubmodulePrompt");
-      const addSubmoduleButton = document.getElementById("addSubmodule");
-      const submoduleManageStatus = document.getElementById("submoduleManageStatus");
-      const modulePromptSection = document.getElementById("modulePromptSection");
-      const runStatus = document.getElementById("runStatus");
-      const modulePrompt = document.getElementById("modulePrompt");
-      const modulePromptLabel = document.getElementById("modulePromptLabel");
-      const moduleBasePrompt = document.getElementById("moduleBasePrompt");
-      const promptStatus = document.getElementById("promptStatus");
-      const flowNodes = Array.from(document.querySelectorAll(".node"));
-      const eventFilterSelect = document.getElementById("eventFilter");
-      const topLogoutButton = document.getElementById("topLogoutButton");
-      const DEBUG_UI_STATE_KEY = "tsuki_core_rust_debug_ui_state_v1";
-
       const state = {
+        lastRun: null,
+        currentTab: "event_history",
         prompts: null,
-        submodules: new Map(),
-        basePrompt: "",
-        decisionPrompt: "",
-        submoduleOutputsRaw: "",
-        appendInputMode: "always_new",
-        historyCutoffTs: null,
-        selectedWorklogTs: null,
-        selectedHistoryTs: null,
-        excludedEventIds: new Set(),
-        eventFilter: "all",
-        selectedModule: null,
-        selectedKind: null,
-        selectedResendModule: null,
-        contextEditActive: false,
-        lastInput: "",
-        lastOutput: "",
-        worklogs: [],
       };
 
-      function loadPersistedDebugState() {
+      const $ = (id) => document.getElementById(id);
+
+      function status(id, text, error = false) {
+        const el = $(id);
+        el.textContent = text;
+        el.classList.toggle("error", error);
+      }
+
+      function show(value) {
+        $("output").textContent = JSON.stringify(value ?? null, null, 2);
+      }
+
+      function currentView() {
+        const run = state.lastRun;
+        if (!run) return {};
+        if (state.currentTab === "raw") return run;
+        if (state.currentTab === "event_history") return run.event_history;
+        return run.result ? run.result[state.currentTab] : run[state.currentTab];
+      }
+
+      function refreshOutput() {
+        document.querySelectorAll(".tabs button").forEach((button) => {
+          button.classList.toggle("active", button.dataset.tab === state.currentTab);
+        });
+        show(currentView());
+      }
+
+      async function requestJson(url, options = {}) {
+        const res = await fetch(url, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
+        return text ? JSON.parse(text) : null;
+      }
+
+      function runPayload() {
+        return {
+          input: $("inputText").value.trim() || null,
+          mode: $("mode").value,
+          include_history: $("includeHistory").checked,
+          history_limit: Number($("historyLimit").value || 0),
+        };
+      }
+
+      async function runThoughtProcess() {
+        status("runStatus", "Running...");
         try {
-          const raw = localStorage.getItem(DEBUG_UI_STATE_KEY);
-          if (!raw) return;
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === "object") {
-            if (typeof parsed.historyCutoffTs === "string" || parsed.historyCutoffTs === null) {
-              state.historyCutoffTs = parsed.historyCutoffTs;
-            }
-            if (Array.isArray(parsed.excludedEventIds)) {
-              state.excludedEventIds = new Set(
-                parsed.excludedEventIds.filter((value) => typeof value === "string"),
-              );
-            }
-            if (
-              parsed.appendInputMode === "always_new" ||
-              parsed.appendInputMode === "reuse_open"
-            ) {
-              state.appendInputMode = parsed.appendInputMode;
-            }
-            if (
-              parsed.eventFilter === "all" ||
-              parsed.eventFilter === "non-debug" ||
-              parsed.eventFilter === "debug-only"
-            ) {
-              state.eventFilter = parsed.eventFilter;
-            }
-          }
-        } catch (_err) {
-          // Ignore malformed local state and continue with defaults.
+          state.lastRun = await requestJson("/admin/thought-process/run", {
+            method: "POST",
+            body: JSON.stringify(runPayload()),
+          });
+          state.currentTab = "event_history";
+          refreshOutput();
+          status("runStatus", "Done.");
+        } catch (err) {
+          status("runStatus", err.message, true);
         }
       }
 
-      function savePersistedDebugState() {
-        try {
-          const payload = {
-            historyCutoffTs: state.historyCutoffTs,
-            excludedEventIds: Array.from(state.excludedEventIds),
-            appendInputMode: state.appendInputMode,
-            eventFilter: state.eventFilter,
+      function syntheticOverride() {
+        const raw = $("syntheticInput").value.trim();
+        if (!raw) return null;
+        return JSON.parse(raw);
+      }
+
+      function componentPayload(component) {
+        const run = state.lastRun;
+        if (!run) throw new Error("Run the thought process first.");
+        const synthetic = syntheticOverride();
+        const mode = $("mode").value;
+        if (component === "cognition") {
+          return { mode, event_history: synthetic || run.event_history };
+        }
+        if (component === "deliberation") {
+          return { mode, decision_context: synthetic || run.result.decision_context };
+        }
+        if (component === "decision") {
+          if (synthetic) return { mode, ...synthetic };
+          return {
+            mode,
+            decision_context: run.result.decision_context,
+            deliberation_contributions: run.result.deliberation_contributions,
           };
-          localStorage.setItem(DEBUG_UI_STATE_KEY, JSON.stringify(payload));
-        } catch (_err) {
-          // Ignore persistence errors in debug-only UI.
         }
+        if (component === "action_execution") {
+          if (synthetic) return { mode, ...synthetic };
+          return {
+            mode,
+            available_actions: run.result.decision_context.available_actions,
+            selected_actions: run.result.decision_output.actions,
+          };
+        }
+        throw new Error("Unknown component.");
       }
 
-      function setStatus(text) {
-        statusEl.textContent = text;
-      }
-
-      function setFlowHighlight(selection) {
-        flowNodes.forEach((node) => {
-          node.classList.remove("active");
-          node.classList.remove("dim");
-        });
-        document.querySelectorAll(".submodule-chip").forEach((chip) => {
-          chip.classList.remove("active");
-        });
-        if (!selection) {
-          return;
-        }
-        const activate = (name) => {
-          flowNodes
-            .filter((node) => node.dataset.node === name)
-            .forEach((node) => node.classList.add("active"));
-        };
-        const dimOthers = (activeNames) => {
-          flowNodes.forEach((node) => {
-            if (!activeNames.includes(node.dataset.node)) {
-              node.classList.add("dim");
-            }
+      async function runComponent(component) {
+        status("componentStatus", "Running...");
+        try {
+          const result = await requestJson(`/admin/thought-process/components/${component}/run`, {
+            method: "POST",
+            body: JSON.stringify(componentPayload(component)),
           });
-        };
-        if (selection.kind === "router") {
-          activate("input");
-          activate("router");
-          dimOthers(["input", "router"]);
-        } else if (selection.kind === "submodule") {
-          activate("input");
-          activate("submodules");
-          dimOthers(["input", "submodules"]);
-          const chip = Array.from(document.querySelectorAll(".submodule-chip")).find(
-            (item) => item.textContent === selection.name,
-          );
-          if (chip) {
-            chip.classList.add("active");
-          }
-        } else if (selection.kind === "decision") {
-          activate("input");
-          activate("decision");
-          dimOthers(["input", "decision"]);
-        } else if (selection.kind === "input") {
-          activate("input");
-          dimOthers(["input"]);
-        } else if (selection.kind === "reply") {
-          activate("reply");
-          dimOthers(["reply"]);
-        } else if (selection.kind === "submodules") {
-          activate("submodules");
-          dimOthers(["submodules"]);
+          show(result);
+          status("componentStatus", $("syntheticInput").value.trim() ? "Done. Synthetic run." : "Done.");
+        } catch (err) {
+          status("componentStatus", err.message, true);
         }
       }
 
-      function formatTime(iso) {
-        if (!iso) return "";
-        const date = new Date(iso);
-        return date.toLocaleTimeString();
-      }
-
-      function setContextViewText(text) {
-        const value = typeof text === "string" && text.length > 0 ? text : "(none)";
-        contextTextEl.textContent = value;
-        if (!state.contextEditActive) {
-          contextEditorEl.value = value === "(none)" ? "" : value;
+      async function loadPrompts() {
+        status("promptStatus", "Loading...");
+        try {
+          const prompts = await requestJson("/admin/prompts/data");
+          state.prompts = prompts;
+          $("basePrompt").value = prompts.base || "";
+          $("decisionPrompt").value = prompts.decision || "";
+          $("submodulePrompt").value = JSON.stringify(prompts.submodules || [], null, 2);
+          status("promptStatus", "Loaded.");
+        } catch (err) {
+          status("promptStatus", err.message, true);
         }
-      }
-
-      function updateContextEditorButtons() {
-        const canEdit = Boolean(state.selectedResendModule);
-        contextEditStartButton.disabled = !canEdit;
-        contextResendButton.disabled = !canEdit;
-      }
-
-      function setContextEditMode(active) {
-        state.contextEditActive = active;
-        contextTextEl.hidden = active;
-        contextEditorEl.hidden = !active;
-        contextResendButton.hidden = !active;
-        contextEditCancelButton.hidden = !active;
-        contextEditStartButton.hidden = active;
-        if (active) {
-          contextEditorEl.value =
-            contextTextEl.textContent && contextTextEl.textContent !== "(none)"
-              ? contextTextEl.textContent
-              : "";
-          contextEditorEl.focus();
-        }
-        updateContextEditorButtons();
-      }
-
-      function setSelectedResendModule(moduleName) {
-        state.selectedResendModule = moduleName || null;
-        if (!state.selectedResendModule && state.contextEditActive) {
-          setContextEditMode(false);
-        }
-        updateContextEditorButtons();
-      }
-
-      function getCurrentHistoryCutoffTs() {
-        return state.historyCutoffTs;
-      }
-
-      function normalizeInputText(value) {
-        return (value || "").trim();
-      }
-
-      async function fetchPrompts() {
-        setStatus("Loading prompts...");
-        const res = await fetch("/admin/prompts/data");
-        if (!res.ok) {
-          setStatus("Failed to load prompts");
-          return;
-        }
-        const data = await res.json();
-        state.prompts = data;
-        state.submodules = new Map(data.submodules.map((item) => [item.name, item.instructions]));
-        state.basePrompt = data.base || "";
-        state.decisionPrompt = data.decision || "";
-        const template = buildSubmoduleOutputTemplate();
-        if (!state.submoduleOutputsRaw || state.submoduleOutputsRaw.trim() === "") {
-          state.submoduleOutputsRaw = template;
-        }
-        renderSubmoduleList();
-        renderSubmoduleManageList();
-        setStatus("Ready");
-      }
-
-      function buildSubmoduleOutputTemplate() {
-        return Array.from(state.submodules.keys())
-          .map((name) => `${name}: `)
-          .join("\n");
-      }
-
-      function renderSubmoduleList() {
-        submoduleListEl.innerHTML = "";
-        const names = Array.from(state.submodules.keys());
-        names.forEach((name) => {
-          const chip = document.createElement("div");
-          chip.className = "submodule-chip";
-          chip.textContent = name;
-          chip.addEventListener("click", (event) => {
-            event.stopPropagation();
-            selectModule(name, "submodule");
-          });
-          submoduleListEl.appendChild(chip);
-        });
-      }
-
-      function renderSubmoduleManageList() {
-        submoduleManageList.innerHTML = "";
-        const names = Array.from(state.submodules.keys());
-        if (names.length === 0) {
-          submoduleManageList.innerHTML = '<div class="muted">No submodules.</div>';
-          return;
-        }
-        names.forEach((name) => {
-          const item = document.createElement("div");
-          item.className = "submodule-manage-item";
-          item.innerHTML = `<span>${name}</span>`;
-          const remove = document.createElement("button");
-          remove.textContent = "Remove";
-          remove.addEventListener("click", () => removeSubmodule(name));
-          item.appendChild(remove);
-          submoduleManageList.appendChild(item);
-        });
-      }
-
-      function removeSubmodule(name) {
-        state.submodules.delete(name);
-        renderSubmoduleList();
-        renderSubmoduleManageList();
-        const template = buildSubmoduleOutputTemplate();
-        if (!state.submoduleOutputsRaw || state.submoduleOutputsRaw.trim() === "") {
-          state.submoduleOutputsRaw = template;
-        }
-        if (state.selectedModule === name) {
-          applySelection({ kind: "submodules", name: null });
-        }
-      }
-
-      function selectNode(nodeName, preserveResend = false) {
-        if (!preserveResend) {
-          setSelectedResendModule(null);
-          contextEditStatusEl.textContent = "";
-        }
-        if (nodeName === "input") {
-          applySelection({ kind: "input", name: null });
-        } else if (nodeName === "router") {
-          selectModule("router", "router", preserveResend);
-        } else if (nodeName === "decision") {
-          selectModule("decision", "decision", preserveResend);
-        } else if (nodeName === "reply") {
-          applySelection({ kind: "reply", name: null });
-        } else if (nodeName === "submodules") {
-          applySelection({ kind: "submodules", name: null });
-        }
-      }
-
-      function selectModule(name, kind, preserveResend = false) {
-        if (!preserveResend) {
-          setSelectedResendModule(null);
-          contextEditStatusEl.textContent = "";
-        }
-        applySelection({ kind, name });
-      }
-
-      function applySelection(selection) {
-        state.selectedKind = selection.kind;
-        state.selectedModule =
-          selection.name || (selection.kind === "submodules" ? "submodules" : null);
-        setFlowHighlight(selection);
-        moduleEmptyEl.hidden = true;
-        moduleTitleEl.textContent = selection.name
-          ? `Module: ${selection.name}`
-          : `Module: ${selection.kind}`;
-        inputSection.hidden = true;
-        runButtons.hidden = true;
-        submoduleOutputsSection.hidden = true;
-        submoduleManageSection.hidden = true;
-        modulePromptSection.hidden = true;
-        routerSection.hidden = true;
-        if (selection.kind === "router") {
-          inputSection.hidden = false;
-          runButtons.hidden = true;
-          routerSection.hidden = false;
-        } else if (selection.kind === "submodule") {
-          inputSection.hidden = false;
-          runButtons.hidden = false;
-          modulePromptSection.hidden = false;
-          modulePromptLabel.textContent = "Submodule Prompt";
-          moduleBasePrompt.value = state.basePrompt;
-          modulePrompt.value = state.submodules.get(selection.name) || "";
-        } else if (selection.kind === "decision") {
-          inputSection.hidden = false;
-          runButtons.hidden = false;
-          submoduleOutputsSection.hidden = false;
-          modulePromptSection.hidden = false;
-          modulePromptLabel.textContent = "Decision Prompt";
-          moduleBasePrompt.value = state.basePrompt;
-          modulePrompt.value = state.decisionPrompt;
-          const template = buildSubmoduleOutputTemplate();
-          if (!state.submoduleOutputsRaw || state.submoduleOutputsRaw.trim() === "") {
-            state.submoduleOutputsRaw = template;
-          }
-          submoduleOutputsInput.value = state.submoduleOutputsRaw;
-        } else if (selection.kind === "input") {
-          inputSection.hidden = false;
-          modulePromptSection.hidden = true;
-          runButtons.hidden = true;
-        } else if (selection.kind === "reply") {
-          modulePromptSection.hidden = true;
-          inputSection.hidden = true;
-          moduleEmptyEl.textContent = "Reply has no prompt.";
-          moduleEmptyEl.hidden = false;
-        } else if (selection.kind === "submodules") {
-          inputSection.hidden = false;
-          runButtons.hidden = false;
-          submoduleManageSection.hidden = false;
-          moduleEmptyEl.hidden = true;
-        } else {
-          moduleEmptyEl.textContent = "Select a submodule to inspect.";
-          moduleEmptyEl.hidden = false;
-        }
-        runStatus.textContent = "";
-        promptStatus.textContent = "";
-        autofillStatus.textContent = "";
-        if (!inputSection.hidden && !moduleInput.value.trim() && state.lastInput) {
-          moduleInput.value = state.lastInput;
-        }
-      }
-
-      async function fetchWorklogs() {
-        const res = await fetch("/admin/events/list?limit=500");
-        if (!res.ok) {
-          worklogEl.innerHTML = '<div class="muted">Failed to load event log.</div>';
-          return;
-        }
-        const data = await res.json();
-        state.worklogs = (data.events || []).sort((a, b) => {
-          const at = Date.parse(a.ts || "") || 0;
-          const bt = Date.parse(b.ts || "") || 0;
-          return bt - at;
-        });
-        const liveIds = new Set(
-          state.worklogs
-            .filter((event) => !isDebugEvent(event))
-            .map((event) => event.event_id),
-        );
-        state.excludedEventIds.forEach((id) => {
-          if (!liveIds.has(id)) {
-            state.excludedEventIds.delete(id);
-          }
-        });
-        if (state.historyCutoffTs) {
-          const exists = state.worklogs.some(
-            (event) => !isDebugEvent(event) && event.ts === state.historyCutoffTs,
-          );
-          if (!exists) {
-            state.historyCutoffTs = null;
-          }
-        }
-        if (state.selectedWorklogTs) {
-          const exists = state.worklogs.some((event) => event.ts === state.selectedWorklogTs);
-          if (!exists) {
-            state.selectedWorklogTs = null;
-            setSelectedResendModule(null);
-          }
-        }
-        savePersistedDebugState();
-        renderWorklogs();
-      }
-
-      function getEventTags(event) {
-        return (event.meta && event.meta.tags) || [];
-      }
-
-      function isReplyEvent(event) {
-        const tags = getEventTags(event);
-        return tags.includes("response");
-      }
-
-      function isDebugEvent(event) {
-        return getEventTags(event).includes("debug");
-      }
-
-      function isRawDebugEvent(event) {
-        const tags = getEventTags(event);
-        return tags.includes("debug") && tags.includes("llm.raw");
-      }
-
-      function getModuleNameFromSource(event) {
-        const source = typeof event?.source === "string" ? event.source.trim() : "";
-        if (!source) return "";
-        if (source === "decision") return "decision";
-        if (source.startsWith("submodule:")) {
-          return source.slice("submodule:".length);
-        }
-        return "";
-      }
-
-      function ownerSourceForModule(moduleName) {
-        if (!moduleName) return "";
-        return moduleName === "decision" ? "decision" : `submodule:${moduleName}`;
-      }
-
-      function getModeFromTags(event) {
-        return extractTagValue(getEventTags(event), "mode:");
-      }
-
-      function eventSummary(event) {
-        const payload = event.payload || {};
-        if (typeof payload.text === "string" && payload.text.trim()) {
-          return payload.text.trim();
-        }
-        if (typeof payload.output === "string" && payload.output.trim()) {
-          return payload.output.trim();
-        }
-        if (typeof payload.output_text === "string" && payload.output_text.trim()) {
-          return payload.output_text.trim();
-        }
-        return JSON.stringify(payload);
-      }
-
-      function truncate(text, maxLen) {
-        if (!text) return "";
-        if (text.length <= maxLen) return text;
-        return `${text.slice(0, maxLen)}...`;
-      }
-
-      function getEventKind(event) {
-        const tags = getEventTags(event);
-        const source = typeof event?.source === "string" ? event.source : "";
-        if (isReplyEvent(event)) return "reply";
-        if (event.source === "user" && tags.includes("input")) return "input";
-        if (source === "decision") return "decision";
-        if (source.startsWith("submodule:")) return "submodule";
-        if (tags.includes("debug") && tags.includes("llm.raw")) return "debug.raw";
-        return event.source || "event";
-      }
-
-      function resolveResendModule(kind, moduleName) {
-        if (kind === "decision") {
-          return "decision";
-        }
-        if (kind === "submodule" && moduleName && moduleName !== "submodules") {
-          return moduleName;
-        }
-        if (kind === "debug.raw" && moduleName && moduleName !== "submodules") {
-          return moduleName;
-        }
-        return null;
-      }
-
-      function isVisibleByFilter(event) {
-        if (state.eventFilter === "non-debug") return !isDebugEvent(event);
-        if (state.eventFilter === "debug-only") return isDebugEvent(event);
-        return true;
-      }
-
-      function extractTagValue(tags, prefix) {
-        const match = tags.find((tag) => tag.startsWith(prefix));
-        return match ? match.slice(prefix.length) : "";
-      }
-
-      function eventTimestamp(event) {
-        if (!event.ts) return 0;
-        const value = Date.parse(event.ts);
-        return Number.isNaN(value) ? 0 : value;
-      }
-
-      async function updateRawFromEvent(event, moduleName) {
-        rawTextEl.textContent = "(loading...)";
-        setContextViewText("(loading...)");
-        const res = await fetch("/admin/events/list?tag=debug,llm.raw&limit=200");
-        if (!res.ok) {
-          rawTextEl.textContent = "(none)";
-          setContextViewText("(none)");
-          return;
-        }
-        const data = await res.json();
-        const expectedSource = ownerSourceForModule(moduleName);
-        const candidates = (data.events || []).filter((rawEvent) => {
-          return expectedSource && rawEvent.source === expectedSource;
-        });
-        if (candidates.length === 0) {
-          rawTextEl.textContent = "(none)";
-          setContextViewText("(none)");
-          return;
-        }
-        const targetTs = eventTimestamp(event);
-        let best = candidates[0];
-        let bestDelta = Math.abs(eventTimestamp(best) - targetTs);
-        candidates.forEach((candidate) => {
-          const delta = Math.abs(eventTimestamp(candidate) - targetTs);
-          if (delta < bestDelta) {
-            best = candidate;
-            bestDelta = delta;
-          }
-        });
-        rawTextEl.textContent = JSON.stringify(best.payload.raw, null, 2);
-        setContextViewText(best.payload.context || "(none)");
-      }
-
-      function renderWorklogs() {
-        worklogEl.innerHTML = "";
-        worklogEl.classList.toggle("cutoff-at-top", !state.historyCutoffTs);
-        const visibleEvents = state.worklogs.filter(isVisibleByFilter);
-        if (visibleEvents.length === 0) {
-          worklogEl.innerHTML = '<div class="muted">No event log entries yet.</div>';
-          return;
-        }
-        visibleEvents.forEach((event) => {
-          const payload = event.payload || {};
-          const kind = getEventKind(event);
-          const moduleName = getModuleNameFromSource(event);
-          const titleLabel = event.source || "event";
-          const mode = payload.mode || getModeFromTags(event) || "-";
-          const isHistoryTarget = !isDebugEvent(event);
-          const excluded = isHistoryTarget && state.excludedEventIds.has(event.event_id);
-          const item = document.createElement("div");
-          item.className = "worklog-item";
-          if (excluded) {
-            item.classList.add("excluded");
-          }
-          if (event.ts && event.ts === state.selectedWorklogTs) {
-            item.classList.add("active");
-          }
-          if (isHistoryTarget && event.ts && event.ts === state.historyCutoffTs) {
-            item.classList.add("cutoff-anchor");
-          }
-          const summary = truncate(eventSummary(event), 120);
-          item.innerHTML = `
-            <div><strong>${titleLabel}</strong></div>
-            <div class="worklog-meta">${kind} · ${mode} · ${formatTime(event.ts)}</div>
-            <div class="muted">${summary}</div>
-            <button class="exclude-btn" type="button" title="Exclude from history" ${isHistoryTarget ? "" : "disabled"}>&times;</button>
-          `;
-          item.querySelector(".exclude-btn").addEventListener("click", (clickEvent) => {
-            clickEvent.stopPropagation();
-            if (!isHistoryTarget) {
-              return;
-            }
-            if (state.excludedEventIds.has(event.event_id)) {
-              state.excludedEventIds.delete(event.event_id);
-            } else {
-              state.excludedEventIds.add(event.event_id);
-            }
-            savePersistedDebugState();
-            renderWorklogs();
-          });
-          item.addEventListener("click", () => {
-            state.selectedWorklogTs = event.ts || null;
-            state.selectedHistoryTs = isHistoryTarget ? event.ts || null : null;
-            renderWorklogs();
-            contextEditStatusEl.textContent = "";
-            const output = payload.output || payload.output_text || payload.text || "";
-            const input = payload.input || (kind === "input" ? payload.text || "" : "");
-            const resendModule = resolveResendModule(kind, moduleName);
-            setSelectedResendModule(resendModule);
-            inputTextEl.textContent = input;
-            outputTextEl.textContent = output;
-            state.lastInput = input;
-            state.lastOutput = output;
-            moduleInput.value = state.lastInput;
-            if (kind === "reply") {
-              selectNode("reply");
-              rawTextEl.textContent = "(none)";
-              setContextViewText("(none)");
-              return;
-            }
-            if (kind === "input") {
-              selectNode("input");
-              rawTextEl.textContent = "(none)";
-              setContextViewText("(none)");
-              return;
-            }
-            if (isRawDebugEvent(event)) {
-              rawTextEl.textContent = JSON.stringify(payload.raw || null, null, 2);
-              setContextViewText(payload.context || "(none)");
-              return;
-            }
-            if (moduleName === "improve") {
-              rawTextEl.textContent = "(none)";
-              setContextViewText("(none)");
-              if (payload.proposal_id) {
-                improveProposalId.value = payload.proposal_id;
-              }
-              return;
-            }
-            if (moduleName) {
-              const nodeKind = moduleName === "decision" ? "decision" : "submodule";
-              selectModule(moduleName, nodeKind, true);
-            }
-            if (kind === "submodule" || kind === "decision") {
-              updateRawFromEvent(event, moduleName);
-            } else {
-              rawTextEl.textContent = "(none)";
-              setContextViewText("(none)");
-            }
-          });
-          worklogEl.appendChild(item);
-        });
-      }
-
-      async function runRouter() {
-        const input = moduleInput.value.trim();
-        if (!input) {
-          routerRunStatus.textContent = "Input is required.";
-          return;
-        }
-        routerRunStatus.textContent = "Running...";
-        const payload = {
-          input,
-          dry_run: routerDryRun.checked,
-          append_input_mode: state.appendInputMode,
-          exclude_event_ids: Array.from(state.excludedEventIds),
-        };
-        const cutoffTs = getCurrentHistoryCutoffTs();
-        payload.include_history = Boolean(cutoffTs);
-        if (cutoffTs) {
-          payload.history_cutoff_ts = cutoffTs;
-        }
-        const res = await fetch("/admin/modules/router/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          routerRunStatus.textContent = "Run failed.";
-          return;
-        }
-        const data = await res.json();
-        inputTextEl.textContent = input;
-        outputTextEl.textContent = data.output || "";
-        rawTextEl.textContent = "(none)";
-        setContextViewText("(none)");
-        state.lastInput = input;
-        state.lastOutput = data.output || "";
-        setFlowHighlight({ kind: "router", name: "router" });
-        routerRunStatus.textContent = "Done.";
-        await fetchWorklogs();
-      }
-
-      async function runModule() {
-        const moduleName =
-          state.selectedKind === "submodules" ? "submodules" : state.selectedModule;
-        if (!moduleName || !["submodule", "decision", "submodules"].includes(state.selectedKind)) {
-          runStatus.textContent = "Select a runnable module.";
-          return;
-        }
-        const input = moduleInput.value.trim();
-        if (!input) {
-          runStatus.textContent = "Input is required.";
-          return;
-        }
-        runStatus.textContent = "Running...";
-        const payload = { input };
-        if (state.selectedKind === "decision") {
-          payload.submodule_outputs = state.submoduleOutputsRaw || "";
-        }
-        payload.append_input_mode = state.appendInputMode;
-        payload.exclude_event_ids = Array.from(state.excludedEventIds);
-        const cutoffTs = getCurrentHistoryCutoffTs();
-        payload.include_history = Boolean(cutoffTs);
-        if (cutoffTs) {
-          payload.history_cutoff_ts = cutoffTs;
-        }
-        const res = await fetch(`/admin/modules/${encodeURIComponent(moduleName)}/run`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          runStatus.textContent = "Run failed.";
-          return;
-        }
-        const data = await res.json();
-        inputTextEl.textContent = input;
-        outputTextEl.textContent = data.output || "";
-        setContextViewText("(none)");
-        rawTextEl.textContent = "(none)";
-        state.lastInput = input;
-        state.lastOutput = data.output || "";
-        setFlowHighlight({ kind: state.selectedKind, name: moduleName });
-        runStatus.textContent = "Done.";
-        await fetchWorklogs();
-      }
-
-      async function resendWithEditedContext() {
-        const moduleName = state.selectedResendModule;
-        if (!moduleName) {
-          contextEditStatusEl.textContent = "Select an event with a runnable module.";
-          return;
-        }
-        const contextOverride = (contextEditorEl.value || "").trim();
-        if (!contextOverride) {
-          contextEditStatusEl.textContent = "Context is empty.";
-          return;
-        }
-        const input = (inputTextEl.textContent || state.lastInput || "debug resend").trim();
-        contextEditStatusEl.textContent = `Re-sending to ${moduleName}...`;
-        contextResendButton.disabled = true;
-        const payload = {
-          input,
-          context_override: contextOverride,
-          append_input_mode: state.appendInputMode,
-        };
-        const res = await fetch(`/admin/modules/${encodeURIComponent(moduleName)}/run`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        contextResendButton.disabled = false;
-        if (!res.ok) {
-          contextEditStatusEl.textContent = "Re-send failed.";
-          return;
-        }
-        const data = await res.json();
-        inputTextEl.textContent = input;
-        outputTextEl.textContent = data.output || "";
-        rawTextEl.textContent = "(none)";
-        runStatus.textContent = "Done.";
-        contextEditStatusEl.textContent = `Re-sent to ${moduleName}.`;
-        setContextEditMode(false);
-        await fetchWorklogs();
-      }
-
-      async function loadRaw() {
-        const moduleName = state.selectedModule;
-        if (!moduleName || !["submodule", "decision"].includes(state.selectedKind)) {
-          runStatus.textContent = "Select a runnable module.";
-          return;
-        }
-        const res = await fetch(`/admin/events/list?tag=debug,llm.raw&limit=20`);
-        if (!res.ok) {
-          runStatus.textContent = "Failed to load raw.";
-          return;
-        }
-        const data = await res.json();
-        const expectedSource = ownerSourceForModule(moduleName);
-        const events = (data.events || []).filter((event) => {
-          return expectedSource && event.source === expectedSource;
-        });
-        events.sort((a, b) => {
-          const at = Date.parse(a.ts || "") || 0;
-          const bt = Date.parse(b.ts || "") || 0;
-          return bt - at;
-        });
-        const latest = events[0];
-        if (!latest) {
-          runStatus.textContent = "No raw payload found.";
-          return;
-        }
-        setContextViewText(latest.payload.context || "(none)");
-        rawTextEl.textContent = JSON.stringify(latest.payload.raw, null, 2);
-      }
-
-      async function autofillSubmoduleOutputsFromLogs() {
-        const input = normalizeInputText(moduleInput.value);
-        if (!input) {
-          autofillStatus.textContent = "Input is required.";
-          return;
-        }
-        autofillStatus.textContent = "Loading...";
-        const res = await fetch("/admin/events/list?tag=debug,llm.raw&limit=500");
-        if (!res.ok) {
-          autofillStatus.textContent = "Failed to load logs.";
-          return;
-        }
-        const data = await res.json();
-        const events = (data.events || []).sort((a, b) => {
-          const at = Date.parse(a.ts || "") || 0;
-          const bt = Date.parse(b.ts || "") || 0;
-          return bt - at;
-        });
-        const matched = new Map();
-        const matchedTimes = [];
-        const submoduleNames = Array.from(state.submodules.keys());
-        events.forEach((event) => {
-          const payload = event.payload || {};
-          const tags = getEventTags(event);
-          if (!tags.includes("llm.raw")) return;
-          const mode = extractTagValue(tags, "mode:");
-          if (mode !== "module_only") return;
-          const moduleName = getModuleNameFromSource(event);
-          if (!moduleName) return;
-          if (!state.submodules.has(moduleName)) return;
-          if (matched.has(moduleName)) return;
-          const context = payload.context || "";
-          const contextInput = extractInputFromSubmoduleContext(context);
-          if (normalizeInputText(contextInput) !== input) return;
-          matched.set(moduleName, payload.output_text || "");
-          if (event.ts) {
-            matchedTimes.push(event.ts);
-          }
-        });
-        if (matched.size === 0) {
-          autofillStatus.textContent = "No matching submodule outputs found.";
-          return;
-        }
-        const lines = submoduleNames.map((name) => `${name}: ${matched.get(name) || ""}`);
-        state.submoduleOutputsRaw = lines.join("\n");
-        submoduleOutputsInput.value = state.submoduleOutputsRaw;
-        const latestTs = matchedTimes
-          .map((ts) => Date.parse(ts))
-          .filter((ts) => !Number.isNaN(ts))
-          .sort((a, b) => b - a)[0];
-        const latestLabel = latestTs ? new Date(latestTs).toLocaleTimeString() : "unknown time";
-        autofillStatus.textContent = `Filled ${matched.size}/${submoduleNames.length} modules from ${latestLabel}.`;
-      }
-
-      function extractInputFromSubmoduleContext(context) {
-        if (typeof context !== "string") return "";
-        const prefix = "User input:";
-        if (!context.startsWith(prefix)) return "";
-        const marker = "\nRecent events:";
-        const markerIndex = context.indexOf(marker);
-        if (markerIndex === -1) {
-          return context.slice(prefix.length).trim();
-        }
-        return context.slice(prefix.length, markerIndex).trim();
-      }
-
-      async function improveTrigger() {
-        improveStatus.textContent = "Triggering...";
-        const event = (improveTriggerEvent.value || "").trim();
-        if (!event) {
-          improveStatus.textContent = "Trigger event is required.";
-          return;
-        }
-        let triggerPayload = {};
-        const rawPayload = (improveTriggerPayload.value || "").trim();
-        if (rawPayload) {
-          try {
-            triggerPayload = JSON.parse(rawPayload);
-          } catch (err) {
-            improveStatus.textContent = "Trigger payload must be valid JSON.";
-            return;
-          }
-        }
-        const payload = {
-          event,
-          payload: triggerPayload,
-        };
-        const res = await fetch("/triggers", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          improveStatus.textContent = "Trigger failed.";
-          return;
-        }
-        improveStatus.textContent = "Trigger emitted.";
-        await fetchWorklogs();
-      }
-
-      async function improvePropose() {
-        const target = (improveTarget.value || "").trim();
-        const jobId = (improveSectionName.value || "").trim();
-        if (!target) {
-          improveStatus.textContent = "Target is required.";
-          return;
-        }
-        if (!jobId) {
-          improveStatus.textContent = "Job ID is required.";
-          return;
-        }
-        improveStatus.textContent = "Submitting proposal...";
-        const payload = {
-          target,
-          job_id: jobId,
-          diff_text: improveContent.value || "",
-          requires_approval: true,
-          created_by: "debug_ui",
-        };
-        const res = await fetch("/proposals", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          improveStatus.textContent = "Proposal failed.";
-          return;
-        }
-        const data = await res.json();
-        if (data.proposal_id) {
-          improveProposalId.value = data.proposal_id;
-        }
-        improveStatus.textContent = "Proposal emitted.";
-        await fetchWorklogs();
-      }
-
-      async function improveReview(review) {
-        const proposalId = (improveProposalId.value || "").trim();
-        const target = (improveTarget.value || "").trim();
-        const jobId = (improveSectionName.value || "").trim();
-        if (!proposalId) {
-          improveStatus.textContent = "Proposal ID is required.";
-          return;
-        }
-        if (!target || !jobId) {
-          improveStatus.textContent = "Target and Job ID are required.";
-          return;
-        }
-        const decision = review === "approval" ? "approved" : "rejected";
-        improveStatus.textContent = `Sending ${review}...`;
-        const payload = {
-          proposal_id: proposalId,
-          job_id: jobId,
-          target,
-          decision,
-          reviewed_by: "debug_ui",
-          review_reason: (improveReason.value || "").trim(),
-        };
-        const res = await fetch("/reviews", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          improveStatus.textContent = `Review failed (${review}).`;
-          return;
-        }
-        const data = await res.json();
-        improveStatus.textContent = data.applied
-          ? `${review} applied.`
-          : `${review} recorded.`;
-        await fetchWorklogs();
       }
 
       async function savePrompts() {
-        promptStatus.textContent = "Saving...";
-        submoduleManageStatus.textContent = "";
-        const submodules = Array.from(state.submodules.entries()).map(([name, instructions]) => ({
-          name,
-          instructions,
-        }));
-        const payload = {
-          base: state.basePrompt,
-          decision: state.decisionPrompt,
-          submodules,
-        };
-        const res = await fetch("/admin/prompts/data", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          promptStatus.textContent = "Save failed.";
-          return;
+        status("promptStatus", "Saving...");
+        try {
+          const payload = {
+            ...(state.prompts || {}),
+            base: $("basePrompt").value,
+            decision: $("decisionPrompt").value,
+            submodules: JSON.parse($("submodulePrompt").value || "[]"),
+          };
+          state.prompts = await requestJson("/admin/prompts/data", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          status("promptStatus", "Saved.");
+        } catch (err) {
+          status("promptStatus", err.message, true);
         }
-        promptStatus.textContent = "Saved.";
       }
 
-      moduleBasePrompt.addEventListener("input", () => {
-        state.basePrompt = moduleBasePrompt.value;
+      document.querySelectorAll(".tabs button").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.currentTab = button.dataset.tab;
+          refreshOutput();
+        });
       });
-
-      submoduleOutputsInput.addEventListener("input", () => {
-        state.submoduleOutputsRaw = submoduleOutputsInput.value;
+      document.querySelectorAll("[data-component]").forEach((button) => {
+        button.addEventListener("click", () => runComponent(button.dataset.component));
       });
-
-      appendInputModeSelect.addEventListener("change", () => {
-        state.appendInputMode = appendInputModeSelect.value || "always_new";
+      $("runThought").addEventListener("click", runThoughtProcess);
+      $("clearOutput").addEventListener("click", () => {
+        state.lastRun = null;
+        show({});
       });
-
-      eventFilterSelect.addEventListener("change", () => {
-        state.eventFilter = eventFilterSelect.value || "all";
-        savePersistedDebugState();
-        renderWorklogs();
-      });
-
-      contextEditStartButton.addEventListener("click", () => {
-        if (!state.selectedResendModule) {
-          contextEditStatusEl.textContent = "Select an event first.";
-          return;
-        }
-        contextEditStatusEl.textContent = "";
-        setContextEditMode(true);
-      });
-
-      contextEditCancelButton.addEventListener("click", () => {
-        contextEditStatusEl.textContent = "";
-        setContextEditMode(false);
-      });
-
-      contextResendButton.addEventListener("click", resendWithEditedContext);
-
-      modulePrompt.addEventListener("input", () => {
-        const name = state.selectedModule;
-        if (!name) return;
-        if (state.selectedKind === "decision") {
-          state.decisionPrompt = modulePrompt.value;
-        } else if (state.selectedKind === "submodule") {
-          state.submodules.set(name, modulePrompt.value);
-        }
-      });
-
-      addSubmoduleButton.addEventListener("click", () => {
-        const name = newSubmoduleName.value.trim();
-        const instructions = newSubmodulePrompt.value.trim();
-        if (!name) {
-          submoduleManageStatus.textContent = "Name is required.";
-          return;
-        }
-        if (state.submodules.has(name)) {
-          submoduleManageStatus.textContent = "Module already exists.";
-          return;
-        }
-        state.submodules.set(name, instructions);
-        newSubmoduleName.value = "";
-        newSubmodulePrompt.value = "";
-        submoduleManageStatus.textContent = "Added.";
-        state.submoduleOutputsRaw = buildSubmoduleOutputTemplate();
-        renderSubmoduleList();
-        renderSubmoduleManageList();
-      });
-
-      document.getElementById("runModule").addEventListener("click", runModule);
-      document.getElementById("runRouter").addEventListener("click", runRouter);
-      document.getElementById("loadRaw").addEventListener("click", loadRaw);
-      document.getElementById("savePrompts").addEventListener("click", savePrompts);
-      document.getElementById("improveTrigger").addEventListener("click", improveTrigger);
-      document.getElementById("improvePropose").addEventListener("click", improvePropose);
-      document
-        .getElementById("improveApprove")
-        .addEventListener("click", () => improveReview("approval"));
-      document
-        .getElementById("improveReject")
-        .addEventListener("click", () => improveReview("rejection"));
-      document.getElementById("refreshLog").addEventListener("click", fetchWorklogs);
-      document.getElementById("setCutoff").addEventListener("click", () => {
-        state.historyCutoffTs = state.selectedHistoryTs || null;
-        savePersistedDebugState();
-        renderWorklogs();
-      });
-      document.getElementById("clearCutoff").addEventListener("click", () => {
-        state.historyCutoffTs = null;
-        state.selectedHistoryTs = null;
-        savePersistedDebugState();
-        renderWorklogs();
-      });
-      autofillSubmoduleOutputsButton.addEventListener("click", autofillSubmoduleOutputsFromLogs);
-      flowNodes.forEach((node) => {
-        node.addEventListener("click", () => selectNode(node.dataset.node));
-      });
-      topLogoutButton.addEventListener("click", async () => {
-        try {
-          await fetch("/auth/logout", { method: "POST" });
-        } finally {
-          window.location.href = "/admin/login";
-        }
-      });
-
-      loadPersistedDebugState();
-      appendInputModeSelect.value = state.appendInputMode;
-      eventFilterSelect.value = state.eventFilter;
-      setContextViewText("(none)");
-      setContextEditMode(false);
-      fetchPrompts();
-      fetchWorklogs();
-      setFlowHighlight(null);
-      moduleEmptyEl.hidden = false;
-      inputSection.hidden = true;
-      submoduleOutputsSection.hidden = true;
-      submoduleManageSection.hidden = true;
-      modulePromptSection.hidden = true;
-      routerSection.hidden = true;
+      $("loadPrompts").addEventListener("click", loadPrompts);
+      $("savePrompts").addEventListener("click", savePrompts);
+      loadPrompts();
     </script>
   </body>
 </html>

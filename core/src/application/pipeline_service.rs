@@ -1,20 +1,9 @@
 use crate::app_state::AppState;
 use crate::application::debug_service;
-use crate::application::execution_service::current_prompt_overrides;
 use crate::application::history_service::latest_events;
 use crate::application::thought_process_service::run_basic_thought_process;
-use crate::debug_api::{DebugRunRequest, DebugRunResponse};
 
-use axum::http::StatusCode;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-
-pub(crate) async fn run_debug_module(
-    state: &AppState,
-    name: String,
-    payload: DebugRunRequest,
-) -> Result<DebugRunResponse, (StatusCode, String)> {
-    debug_service::run_debug_module(state, name, payload).await
-}
 
 pub(crate) async fn handle_input(raw: String, state: &AppState) {
     let trace_id = SystemTime::now()
@@ -46,7 +35,7 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
     );
 
     let prep_started = Instant::now();
-    let overrides = current_prompt_overrides(state).await;
+    let overrides = state.prompts.overrides.read().await.clone();
     println!(
         "PERF pipeline trace={} stage=prepare ms={}",
         trace_id,

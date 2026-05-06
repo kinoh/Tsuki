@@ -1,37 +1,12 @@
-use axum::http::StatusCode;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashSet;
 
 use crate::app_state::AppState;
 use crate::application::event_service::record_event;
-use crate::application::execution_service::{
-    current_prompt_overrides, format_activation_context, format_hard_trigger_results,
-    format_soft_recommendations, load_active_module_instructions, run_all_submodules_debug,
-    run_decision_debug, run_submodule_debug, run_submodule_tool,
-};
-use crate::application::history_service::{is_decision_event, is_user_input_event, latest_events};
-use crate::application::router_service::run_router;
-use crate::debug_api::{DebugRunRequest, DebugRunResponse};
 use crate::event::contracts::{
     input_sensory as emit_input_sensory, input_text as emit_input_text, named_trigger, parse_error,
 };
 use crate::input_ingress::{MediaAttachment, RouterInput};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AppendInputMode {
-    AlwaysNew,
-    ReuseOpen,
-}
-
-impl AppendInputMode {
-    fn from_request(value: Option<&str>) -> Self {
-        match value {
-            Some(raw) if raw.eq_ignore_ascii_case("reuse_open") => Self::ReuseOpen,
-            _ => Self::AlwaysNew,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize)]
 struct InputMessage {
@@ -53,123 +28,6 @@ struct InputMessage {
 enum ParsedIngress {
     Trigger { event: String, payload: Value },
     Input { input: RouterInput },
-}
-
-pub(crate) async fn run_debug_module(
-    state: &AppState,
-    name: String,
-    payload: DebugRunRequest,
-) -> Result<DebugRunResponse, (StatusCode, String)> {
-    let context_override = payload
-        .context_override
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    if payload.input.trim().is_empty() && context_override.is_none() {
-        return Err((StatusCode::BAD_REQUEST, "input is required".to_string()));
-    }
-    if context_override.is_some() && name == "submodules" {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "context_override is not supported for submodules".to_string(),
-        ));
-    }
-    let include_history = payload.include_history.unwrap_or(true);
-    let history_cutoff_ts = payload.history_cutoff_ts.as_deref();
-    let excluded_event_ids = payload
-        .exclude_event_ids
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<HashSet<_>>();
-    let append_mode = AppendInputMode::from_request(payload.append_input_mode.as_deref());
-    let dry_run = payload.dry_run.unwrap_or(false);
-    if context_override.is_none() && !dry_run {
-        maybe_append_debug_input_event(
-            state,
-            payload.input.trim(),
-            include_history,
-            history_cutoff_ts,
-            &excluded_event_ids,
-            append_mode,
-        )
-        .await;
-    }
-
-    let overrides = current_prompt_overrides(state).await;
-    let module_instructions = load_active_module_instructions(state, &overrides).await;
-    let input_text = payload.input.clone();
-    let router_input = RouterInput::from_text("message", input_text.clone());
-    let router_output = run_router(
-        &router_input,
-        &module_instructions,
-        &state.runtime.modules,
-        state,
-        &overrides,
-        dry_run,
-        |module_name, activation_snapshot, instructions, focus| {
-            let module_name = module_name.to_string();
-            let activation_snapshot = activation_snapshot.clone();
-            let instructions = instructions.to_string();
-            let focus = focus.map(str::to_string);
-            let input_text = input_text.clone();
-            async move {
-                run_submodule_tool(
-                    state,
-                    &input_text,
-                    &activation_snapshot,
-                    &module_name,
-                    &instructions,
-                    focus.as_deref(),
-                )
-                .await
-            }
-        },
-    )
-    .await;
-
-    let output = if name == "router" {
-        format!(
-            "<active_concepts_and_arousal>\n{}\n</active_concepts_and_arousal>\n\n<outputs_from_immediately_executed_submodules>\n{}\n</outputs_from_immediately_executed_submodules>\n\n<candidate_submodules_by_interest_match>\n{}\n</candidate_submodules_by_interest_match>\n\n<recalled_event_history>\n{}\n</recalled_event_history>",
-            format_activation_context(&router_output.active_concepts_and_arousal),
-            format_hard_trigger_results(&router_output.hard_trigger_results),
-            format_soft_recommendations(&router_output.soft_recommendations),
-            router_output.recalled_event_history,
-        )
-    } else if name == "decision" {
-        run_decision_debug(
-            &payload.input,
-            context_override,
-            payload.submodule_outputs.as_deref(),
-            include_history,
-            history_cutoff_ts,
-            &excluded_event_ids,
-            state,
-            &module_instructions,
-            &overrides,
-        )
-        .await?
-    } else if name == "submodules" {
-        run_all_submodules_debug(
-            &payload.input,
-            include_history,
-            history_cutoff_ts,
-            &excluded_event_ids,
-            state,
-        )
-        .await?
-    } else {
-        run_submodule_debug(
-            &name,
-            &payload.input,
-            context_override,
-            include_history,
-            history_cutoff_ts,
-            &excluded_event_ids,
-            state,
-        )
-        .await?
-    };
-    Ok(DebugRunResponse { output })
 }
 
 pub(crate) async fn parse_and_append_input(raw: &str, state: &AppState) -> Result<RouterInput, ()> {
@@ -246,63 +104,6 @@ fn parse_input_message(raw: &str) -> Result<ParsedIngress, &'static str> {
     Ok(ParsedIngress::Input {
         input: router_input,
     })
-}
-
-async fn maybe_append_debug_input_event(
-    state: &AppState,
-    input_text: &str,
-    include_history: bool,
-    cutoff_ts: Option<&str>,
-    excluded_event_ids: &HashSet<String>,
-    append_mode: AppendInputMode,
-) {
-    let normalized_input = input_text.trim();
-    if normalized_input.is_empty() {
-        return;
-    }
-    let should_append = match append_mode {
-        AppendInputMode::AlwaysNew => true,
-        AppendInputMode::ReuseOpen => {
-            if !include_history {
-                true
-            } else {
-                let events = latest_events(state, 1000, cutoff_ts, Some(excluded_event_ids)).await;
-                should_append_debug_input_for_reuse_open(normalized_input, &events)
-            }
-        }
-    };
-    if !should_append {
-        return;
-    }
-    let event = emit_input_text("user", "message", normalized_input);
-    record_event(state, event).await;
-}
-
-fn should_append_debug_input_for_reuse_open(
-    input_text: &str,
-    events: &[crate::event::Event],
-) -> bool {
-    let mut saw_decision_after_input = false;
-    for event in events {
-        if is_decision_event(event) {
-            saw_decision_after_input = true;
-            continue;
-        }
-        if !is_user_input_event(event) {
-            continue;
-        }
-        if saw_decision_after_input {
-            return true;
-        }
-        let previous_input = event
-            .payload
-            .get("text")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .trim();
-        return previous_input != input_text;
-    }
-    true
 }
 
 #[cfg(test)]

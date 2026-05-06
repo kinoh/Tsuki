@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Tsuki Core-Rust HTTP API
-  version: 1.2.0
+  version: 1.3.0
   description: |
     HTTP contract for the current core phase.
     Includes runtime APIs, notification APIs, and TTS synthesis API.
@@ -15,6 +15,7 @@ tags:
   - name: Notification
   - name: Speech
   - name: Improvement
+  - name: Admin
 
 paths:
   /events:
@@ -349,6 +350,63 @@ paths:
         '500':
           $ref: '#/components/responses/ErrorText'
 
+  /admin/thought-process/run:
+    post:
+      tags: [Admin]
+      summary: Run thought process inspection
+      operationId: adminRunThoughtProcess
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThoughtProcessRunRequest'
+      responses:
+        '200':
+          description: Thought process inspection result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThoughtProcessRunResponse'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
+  /admin/thought-process/components/{component}/run:
+    post:
+      tags: [Admin]
+      summary: Run one thought process component with its typed input
+      operationId: adminRunThoughtProcessComponent
+      parameters:
+        - name: component
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [cognition, deliberation, decision, action_execution]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThoughtProcessComponentRunRequest'
+      responses:
+        '200':
+          description: Component run result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThoughtProcessComponentRunResponse'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
 components:
   securitySchemes:
     UserTokenAuth:
@@ -582,3 +640,118 @@ components:
           nullable: true
         applied:
           type: boolean
+
+    ThoughtProcessRunMode:
+      type: string
+      enum: [dry_run, commit]
+
+    ThoughtProcessRunRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        input:
+          type: string
+          nullable: true
+        history_limit:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        include_history:
+          type: boolean
+          default: true
+        history_cutoff_ts:
+          type: string
+          format: date-time
+        exclude_event_ids:
+          type: array
+          items:
+            type: string
+        mode:
+          $ref: '#/components/schemas/ThoughtProcessRunMode'
+
+    ThoughtProcessRunResponse:
+      type: object
+      additionalProperties: false
+      required: [mode, event_history, result]
+      properties:
+        mode:
+          $ref: '#/components/schemas/ThoughtProcessRunMode'
+        event_history:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        result:
+          $ref: '#/components/schemas/ThoughtProcessInspection'
+
+    ThoughtProcessInspection:
+      type: object
+      additionalProperties: false
+      required:
+        - decision_context
+        - deliberation_contributions
+        - decision_output
+        - action_results
+        - trace
+      properties:
+        decision_context:
+          type: object
+          additionalProperties: true
+        deliberation_contributions:
+          type: object
+          additionalProperties: true
+        decision_output:
+          type: object
+          additionalProperties: true
+        action_results:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        trace:
+          type: object
+          additionalProperties: true
+
+    ThoughtProcessComponentRunRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          $ref: '#/components/schemas/ThoughtProcessRunMode'
+        event_history:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        decision_context:
+          type: object
+          additionalProperties: true
+        deliberation_contributions:
+          type: object
+          additionalProperties: true
+        available_actions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        selected_actions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    ThoughtProcessComponentRunResponse:
+      type: object
+      additionalProperties: false
+      required: [component, mode, output, trace]
+      properties:
+        component:
+          type: string
+        mode:
+          $ref: '#/components/schemas/ThoughtProcessRunMode'
+        output:
+          description: Component-specific typed output.
+          nullable: true
+        trace:
+          type: array
+          items:
+            type: object
+            additionalProperties: true

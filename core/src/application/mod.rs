@@ -3,7 +3,6 @@ pub mod concept_retrieval_service;
 pub mod conversation_recall_service;
 pub mod debug_service;
 pub mod event_service;
-pub mod execution_service;
 pub mod history_service;
 pub mod improve_approval_service;
 pub mod improve_service;

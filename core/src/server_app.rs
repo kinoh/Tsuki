@@ -33,6 +33,7 @@ use crate::app_state::{
     ResolvedPrompts, RuntimeState,
 };
 use crate::application::event_service::record_event;
+use crate::application::history_service::latest_events;
 use crate::application::module_bootstrap::{build_modules, sync_module_registry_from_prompts};
 use crate::application::skill_admin_service::{
     get_skill_detail, list_skills, upsert_skill, SkillAdminDetail, SkillCatalogItem,
@@ -42,17 +43,26 @@ use crate::application::state_record_admin_service::{
     get_state_record_detail, list_state_records, upsert_state_record, StateRecordDetail,
     StateRecordListItem, StateRecordUpsertPayload,
 };
+use crate::application::thought_process_service::{
+    build_decision_instructions, build_prompt_deliberation_contributors, emit_event_blocking,
+    run_basic_thought_process_with_mode, run_deliberation_contributors, ActionExecutionService,
+    AppCognition, CognitionComponent, DecisionService, ThoughtProcessInput, ThoughtProcessRunMode,
+};
+use crate::application::usage_service::DbLlmUsageRecorder;
 use crate::clock::now_iso8601;
 use crate::config::{load_config, Config};
 use crate::conversation_recall_store::ConversationRecallStore;
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::debug_api::{
-    DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest, DebugRunRequest,
-    DebugRunResponse, DebugTriggerRequest, DebugTriggerResponse,
+    DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
+    DebugTriggerRequest, DebugTriggerResponse, ThoughtProcessComponentRunRequest,
+    ThoughtProcessComponentRunResponse, ThoughtProcessInspection, ThoughtProcessRunRequest,
+    ThoughtProcessRunResponse,
 };
+use crate::event::contracts::input_text as emit_input_text;
 use crate::event::Event;
 use crate::event_store::EventStore;
-use crate::llm::{build_response_api_llm, ResponseApiConfig};
+use crate::llm::{build_response_api_llm, LlmUsageContext, LlmUsageRecorder, ResponseApiConfig};
 use crate::module_registry::{ModuleRegistry, ModuleRegistryReader};
 use crate::notification::FcmNotificationSender;
 use crate::prompts::{load_prompts, write_prompts, PromptOverrides};
@@ -495,7 +505,11 @@ pub(crate) async fn run_server() {
             "/prompts/data",
             get(debug_get_prompts).post(debug_update_prompts),
         )
-        .route("/modules/{name}/run", post(debug_run_module))
+        .route("/thought-process/run", post(admin_run_thought_process))
+        .route(
+            "/thought-process/components/{component}/run",
+            post(admin_run_thought_process_component),
+        )
         .route("/events/stream", get(debug_events_stream))
         .route("/events/list", get(debug_events))
         .route_layer(axum::middleware::from_fn_with_state(
@@ -1070,14 +1084,208 @@ async fn admin_upsert_skill(
     Ok(Json(result))
 }
 
-async fn debug_run_module(
-    Path(name): Path<String>,
+async fn admin_run_thought_process(
     State(state): State<AppState>,
-    Json(payload): Json<DebugRunRequest>,
-) -> Result<Json<DebugRunResponse>, (StatusCode, String)> {
-    let result =
-        crate::application::pipeline_service::run_debug_module(&state, name, payload).await?;
-    Ok(Json(result))
+    Json(payload): Json<ThoughtProcessRunRequest>,
+) -> Result<Json<ThoughtProcessRunResponse>, (StatusCode, String)> {
+    let mode = payload.mode.unwrap_or(ThoughtProcessRunMode::DryRun);
+    let event_history = admin_event_history(&state, &payload, mode).await?;
+    let overrides = state.prompts.overrides.read().await.clone();
+    let result = run_basic_thought_process_with_mode(
+        &state,
+        event_history.clone(),
+        &state.runtime.modules.runtime,
+        &state.prompts.base_or_default(&overrides),
+        &state.prompts.decision_or_default(&overrides),
+        mode,
+    )
+    .await
+    .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Json(ThoughtProcessRunResponse {
+        mode,
+        event_history,
+        result: ThoughtProcessInspection {
+            decision_context: result.decision_context,
+            deliberation_contributions: result.deliberation_contributions,
+            decision_output: result.decision_output,
+            action_results: result.action_results,
+            trace: result.trace,
+        },
+    }))
+}
+
+async fn admin_run_thought_process_component(
+    Path(component): Path<String>,
+    State(state): State<AppState>,
+    Json(payload): Json<ThoughtProcessComponentRunRequest>,
+) -> Result<Json<ThoughtProcessComponentRunResponse>, (StatusCode, String)> {
+    let mode = payload.mode.unwrap_or(ThoughtProcessRunMode::DryRun);
+    let overrides = state.prompts.overrides.read().await.clone();
+    let base = state.prompts.base_or_default(&overrides);
+    let decision_instructions = state.prompts.decision_or_default(&overrides);
+    let component = component.trim().to_ascii_lowercase();
+
+    match component.as_str() {
+        "cognition" => {
+            let event_history = payload.event_history.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "event_history is required for cognition".to_string(),
+                )
+            })?;
+            let cognition = AppCognition::new(state.clone(), mode == ThoughtProcessRunMode::DryRun);
+            let decision_context = cognition
+                .build_decision_context(&ThoughtProcessInput {
+                    events: event_history,
+                })
+                .await
+                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+            Ok(Json(ThoughtProcessComponentRunResponse {
+                component,
+                mode,
+                output: serde_json::to_value(decision_context).map_err(internal_serialize_error)?,
+                trace: Vec::new(),
+            }))
+        }
+        "deliberation" => {
+            let decision_context = payload.decision_context.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "decision_context is required for deliberation".to_string(),
+                )
+            })?;
+            let contributors = build_prompt_deliberation_contributors(
+                &state,
+                &state.runtime.modules.runtime,
+                &base,
+            )
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+            let result = run_deliberation_contributors(&contributors, &decision_context)
+                .await
+                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+            Ok(Json(ThoughtProcessComponentRunResponse {
+                component,
+                mode,
+                output: serde_json::to_value(result.contributions)
+                    .map_err(internal_serialize_error)?,
+                trace: result.traces,
+            }))
+        }
+        "decision" => {
+            let decision_context = payload.decision_context.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "decision_context is required for decision".to_string(),
+                )
+            })?;
+            let contributions = payload.deliberation_contributions.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "deliberation_contributions is required for decision".to_string(),
+                )
+            })?;
+            let usage_recorder: Arc<dyn LlmUsageRecorder> =
+                Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
+            let decision = DecisionService::new(build_response_api_llm(ResponseApiConfig {
+                model: state.runtime.modules.runtime.model.clone(),
+                instructions: build_decision_instructions(&base, &decision_instructions),
+                temperature: state.runtime.modules.runtime.temperature,
+                max_output_tokens: state.runtime.modules.runtime.max_output_tokens,
+                tools: Vec::new(),
+                tool_handler: None,
+                usage_recorder: Some(usage_recorder),
+                usage_context: Some(LlmUsageContext::new("user", "decision:admin")),
+                max_tool_rounds: 0,
+            }));
+            let output = decision
+                .decide(&decision_context, &contributions)
+                .await
+                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+            Ok(Json(ThoughtProcessComponentRunResponse {
+                component,
+                mode,
+                output: serde_json::to_value(output).map_err(internal_serialize_error)?,
+                trace: Vec::new(),
+            }))
+        }
+        "action_execution" => {
+            let available_actions = payload.available_actions.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "available_actions is required for action_execution".to_string(),
+                )
+            })?;
+            let selected_actions = payload.selected_actions.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "selected_actions is required for action_execution".to_string(),
+                )
+            })?;
+            let action_execution = ActionExecutionService::with_default_executors(
+                emit_event_blocking(state.clone()),
+                &state.runtime.modules.runtime,
+                &state,
+            );
+            let output = action_execution
+                .execute(&available_actions, &selected_actions, mode)
+                .await;
+            Ok(Json(ThoughtProcessComponentRunResponse {
+                component,
+                mode,
+                output: serde_json::to_value(output).map_err(internal_serialize_error)?,
+                trace: Vec::new(),
+            }))
+        }
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            "component must be one of cognition, deliberation, decision, action_execution"
+                .to_string(),
+        )),
+    }
+}
+
+async fn admin_event_history(
+    state: &AppState,
+    payload: &ThoughtProcessRunRequest,
+    mode: ThoughtProcessRunMode,
+) -> Result<Vec<Event>, (StatusCode, String)> {
+    let excluded_event_ids = payload
+        .exclude_event_ids
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    let mut event_history = if payload.include_history.unwrap_or(true) {
+        latest_events(
+            state,
+            payload
+                .history_limit
+                .unwrap_or(state.config.limits.decision_history),
+            payload.history_cutoff_ts.as_deref(),
+            Some(&excluded_event_ids),
+        )
+        .await
+    } else {
+        Vec::new()
+    };
+    if let Some(input) = payload
+        .input
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let event = emit_input_text("user", "message", input);
+        if mode == ThoughtProcessRunMode::Commit {
+            record_event(state, event.clone()).await;
+        }
+        event_history.push(event);
+    }
+    Ok(event_history)
+}
+
+fn internal_serialize_error(err: serde_json::Error) -> (StatusCode, String) {
+    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
 
 async fn debug_events(
