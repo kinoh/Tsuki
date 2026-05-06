@@ -274,9 +274,9 @@ pub(crate) async fn run_server() {
     let config = load_config("config.toml").expect("failed to load config");
     validate_required_config(&config);
     let port = config.server.port;
-    let auth_token = std::env::var("WEB_AUTH_TOKEN").expect("WEB_AUTH_TOKEN is required");
-    let admin_auth_password =
-        std::env::var("ADMIN_AUTH_PASSWORD").expect("ADMIN_AUTH_PASSWORD is required");
+    required_env("OPENAI_API_KEY");
+    let auth_token = required_env("WEB_AUTH_TOKEN");
+    let admin_auth_password = required_env("ADMIN_AUTH_PASSWORD");
     let admin_password_fingerprint = admin_password_fingerprint(&admin_auth_password);
     let (tx, _) = broadcast::channel(256);
     let db = Db::connect(&config.db).await.expect("failed to init db");
@@ -615,6 +615,15 @@ fn validate_required_config(config: &Config) {
             );
         }
     }
+}
+
+fn required_env(name: &str) -> String {
+    let value = std::env::var(name).unwrap_or_else(|_| panic!("{} is required", name));
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        panic!("{} must not be empty", name);
+    }
+    trimmed.to_string()
 }
 
 fn prompts_path_from_config(config: &Config) -> PathBuf {
