@@ -56,8 +56,8 @@ use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::debug_api::{
     DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
     DebugTriggerRequest, DebugTriggerResponse, ThoughtProcessComponentRunRequest,
-    ThoughtProcessComponentRunResponse, ThoughtProcessInspection, ThoughtProcessRunRequest,
-    ThoughtProcessRunResponse,
+    ThoughtProcessComponentRunResponse, ThoughtProcessEventHistoryResponse,
+    ThoughtProcessInspection, ThoughtProcessRunRequest, ThoughtProcessRunResponse,
 };
 use crate::event::contracts::input_text as emit_input_text;
 use crate::event::Event;
@@ -504,6 +504,10 @@ pub(crate) async fn run_server() {
         .route(
             "/prompts/data",
             get(debug_get_prompts).post(debug_update_prompts),
+        )
+        .route(
+            "/thought-process/event-history",
+            post(admin_preview_thought_process_event_history),
         )
         .route("/thought-process/run", post(admin_run_thought_process))
         .route(
@@ -1121,6 +1125,15 @@ async fn admin_run_thought_process(
             trace: result.trace,
         },
     }))
+}
+
+async fn admin_preview_thought_process_event_history(
+    State(state): State<AppState>,
+    Json(payload): Json<ThoughtProcessRunRequest>,
+) -> Result<Json<ThoughtProcessEventHistoryResponse>, (StatusCode, String)> {
+    let event_history =
+        admin_event_history(&state, &payload, ThoughtProcessRunMode::DryRun).await?;
+    Ok(Json(ThoughtProcessEventHistoryResponse { event_history }))
 }
 
 async fn admin_run_thought_process_component(

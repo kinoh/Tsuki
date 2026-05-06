@@ -375,6 +375,31 @@ paths:
         '500':
           $ref: '#/components/responses/ErrorText'
 
+  /admin/thought-process/event-history:
+    post:
+      tags: [Admin]
+      summary: Preview the event history used as thought process input
+      operationId: adminPreviewThoughtProcessEventHistory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThoughtProcessRunRequest'
+      responses:
+        '200':
+          description: Event history preview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThoughtProcessEventHistoryResponse'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
   /admin/thought-process/components/{component}/run:
     post:
       tags: [Admin]
@@ -682,6 +707,16 @@ components:
             $ref: '#/components/schemas/Event'
         result:
           $ref: '#/components/schemas/ThoughtProcessInspection'
+
+    ThoughtProcessEventHistoryResponse:
+      type: object
+      additionalProperties: false
+      required: [event_history]
+      properties:
+        event_history:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
 
     ThoughtProcessInspection:
       type: object

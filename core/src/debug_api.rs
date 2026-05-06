@@ -33,6 +33,11 @@ pub(crate) struct ThoughtProcessRunResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub(crate) struct ThoughtProcessEventHistoryResponse {
+    pub(crate) event_history: Vec<Event>,
+}
+
+#[derive(Debug, Serialize)]
 pub(crate) struct ThoughtProcessInspection {
     pub(crate) decision_context: DecisionContext,
     pub(crate) deliberation_contributions: DeliberationContributions,

@@ -108,22 +108,35 @@
       button:disabled { opacity: 0.45; cursor: not-allowed; }
       .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-      .flow {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(120px, 1fr));
+      .dag {
+        display: flex;
+        align-items: center;
         gap: 8px;
-        margin-bottom: 12px;
+        overflow-x: auto;
+        padding-bottom: 4px;
       }
-      .node {
+      .dag-branch {
+        display: grid;
+        gap: 6px;
+        min-width: 128px;
+      }
+      .dag-arrow {
+        color: var(--muted);
+        font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+        font-size: 13px;
+        flex: 0 0 auto;
+      }
+      .dag-node {
         border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 10px;
-        min-height: 64px;
+        padding: 8px 10px;
+        min-height: 36px;
         background: var(--surface-2);
+        color: var(--text);
+        white-space: nowrap;
       }
-      .node strong { display: block; font-size: 13px; }
-      .node small { color: var(--muted); }
-      .node.active { border-color: var(--accent); background: rgba(113, 74, 244, 0.18); }
+      .dag-node.active { border-color: var(--accent); background: rgba(113, 74, 244, 0.18); }
+      .dag-node:disabled { cursor: default; opacity: 0.6; }
       pre {
         margin: 0;
         padding: 10px;
@@ -142,11 +155,11 @@
       .status { min-height: 18px; margin-top: 8px; font-size: 12px; color: var(--muted); }
       .status.error { color: var(--danger); }
       .stack { display: grid; gap: 12px; }
-      .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-      .tabs button.active { border-color: var(--accent); background: rgba(113, 74, 244, 0.22); }
+      .inspection-stack { display: grid; gap: 10px; }
+      #promptEditor[readonly] { opacity: 0.75; }
       @media (max-width: 980px) {
         .layout { grid-template-columns: 1fr; }
-        .flow { grid-template-columns: 1fr; }
+        .dag { align-items: stretch; }
       }
     </style>
   </head>
@@ -198,57 +211,43 @@
 
           <div class="card">
             <h2>Component Run</h2>
-            <div class="row">
-              <button class="secondary" data-component="cognition">Cognition</button>
-              <button class="secondary" data-component="deliberation">Deliberation</button>
-              <button class="secondary" data-component="decision">Decision</button>
-              <button class="secondary" data-component="action_execution">Action Execution</button>
-            </div>
+            <button id="runComponent" class="secondary">Run Component</button>
             <label for="syntheticInput">Synthetic Input</label>
             <textarea id="syntheticInput" placeholder="Optional JSON override. Synthetic component runs must be treated as inspection-only."></textarea>
-            <div class="muted">When populated, this replaces the component input and the run is synthetic.</div>
+            <div class="muted">Runs the component indicated by the current DAG selection. Contributor nodes run Deliberation.</div>
             <div class="status" id="componentStatus"></div>
-          </div>
-
-          <div class="card">
-            <h2>Prompts</h2>
-            <label for="basePrompt">Base</label>
-            <textarea id="basePrompt"></textarea>
-            <label for="decisionPrompt">Decision</label>
-            <textarea id="decisionPrompt"></textarea>
-            <label for="submodulePrompt">Submodules JSON</label>
-            <textarea id="submodulePrompt"></textarea>
-            <div class="row">
-              <button class="secondary" id="loadPrompts">Load</button>
-              <button id="savePrompts">Save</button>
-            </div>
-            <div class="status" id="promptStatus"></div>
           </div>
         </aside>
 
         <div class="stack">
           <div class="card">
-            <div class="flow">
-              <div class="node active"><strong>Event History</strong><small>ordered input</small></div>
-              <div class="node"><strong>Cognition</strong><small>context</small></div>
-              <div class="node"><strong>Deliberation</strong><small>contributors</small></div>
-              <div class="node"><strong>Decision</strong><small>actions</small></div>
-              <div class="node"><strong>Action Execution</strong><small>dry-run safe</small></div>
-            </div>
+            <h2>DAG</h2>
+            <div class="dag" id="dag"></div>
           </div>
 
           <div class="card">
-            <h2>Inspection</h2>
-            <div class="tabs">
-              <button class="active" data-tab="event_history">Event History</button>
-              <button data-tab="decision_context">Cognition</button>
-              <button data-tab="deliberation_contributions">Deliberation</button>
-              <button data-tab="decision_output">Decision</button>
-              <button data-tab="action_results">Action Execution</button>
-              <button data-tab="trace">Trace</button>
-              <button data-tab="raw">Raw</button>
+            <div class="title-row">
+              <h2 id="inspectTitle">Inspecting: Event History</h2>
+              <div class="row">
+                <button class="secondary" id="loadPrompts">Load Prompts</button>
+                <button id="savePrompt">Save Prompt</button>
+              </div>
             </div>
-            <pre id="output">{}</pre>
+            <div class="inspection-stack">
+              <div>
+                <label id="contextLabel" for="contextOutput">Context</label>
+                <pre id="contextOutput">{}</pre>
+              </div>
+              <div>
+                <label id="promptLabel" for="promptEditor">Prompt</label>
+                <textarea id="promptEditor"></textarea>
+              </div>
+              <div>
+                <label id="outputLabel" for="output">Output</label>
+                <pre id="output">{}</pre>
+              </div>
+            </div>
+            <div class="status" id="promptStatus"></div>
           </div>
         </div>
       </section>
@@ -257,8 +256,10 @@
     <script>
       const state = {
         lastRun: null,
-        currentTab: "event_history",
+        eventHistoryPreview: [],
+        inspecting: { kind: "event_history", name: "Event History", component: null },
         prompts: null,
+        previewTimer: null,
       };
 
       const $ = (id) => document.getElementById(id);
@@ -273,19 +274,8 @@
         $("output").textContent = JSON.stringify(value ?? null, null, 2);
       }
 
-      function currentView() {
-        const run = state.lastRun;
-        if (!run) return {};
-        if (state.currentTab === "raw") return run;
-        if (state.currentTab === "event_history") return run.event_history;
-        return run.result ? run.result[state.currentTab] : run[state.currentTab];
-      }
-
-      function refreshOutput() {
-        document.querySelectorAll(".tabs button").forEach((button) => {
-          button.classList.toggle("active", button.dataset.tab === state.currentTab);
-        });
-        show(currentView());
+      function showContext(value) {
+        $("contextOutput").textContent = JSON.stringify(value ?? null, null, 2);
       }
 
       async function requestJson(url, options = {}) {
@@ -307,6 +297,165 @@
         };
       }
 
+      function contributorNames() {
+        const fromRun = state.lastRun?.result?.decision_context?.deliberation_contributors || [];
+        if (fromRun.length > 0) return fromRun;
+        return (state.prompts?.submodules || []).map((module) => module.name);
+      }
+
+      function componentForInspection() {
+        if (state.inspecting.component) return state.inspecting.component;
+        if (state.inspecting.kind === "contributor") return "deliberation";
+        return null;
+      }
+
+      function setInspecting(next) {
+        state.inspecting = next;
+        renderDag();
+        renderInspection();
+      }
+
+      function nodeButton(node) {
+        const button = document.createElement("button");
+        button.className = "dag-node";
+        button.type = "button";
+        button.textContent = node.name;
+        button.classList.toggle(
+          "active",
+          state.inspecting.kind === node.kind && state.inspecting.name === node.name,
+        );
+        button.addEventListener("click", () => setInspecting(node));
+        return button;
+      }
+
+      function appendArrow(parent) {
+        const arrow = document.createElement("span");
+        arrow.className = "dag-arrow";
+        arrow.textContent = "->";
+        parent.appendChild(arrow);
+      }
+
+      function renderDag() {
+        const dag = $("dag");
+        dag.textContent = "";
+        dag.appendChild(nodeButton({ kind: "event_history", name: "Event History", component: null }));
+        appendArrow(dag);
+        dag.appendChild(nodeButton({ kind: "component", name: "Cognition", component: "cognition" }));
+        appendArrow(dag);
+
+        const branch = document.createElement("div");
+        branch.className = "dag-branch";
+        const names = contributorNames();
+        if (names.length === 0) {
+          const empty = document.createElement("button");
+          empty.className = "dag-node";
+          empty.type = "button";
+          empty.textContent = "No Contributor";
+          empty.disabled = true;
+          branch.appendChild(empty);
+        } else {
+          names.forEach((name) => {
+            branch.appendChild(nodeButton({ kind: "contributor", name, component: null }));
+          });
+        }
+        dag.appendChild(branch);
+        appendArrow(dag);
+        dag.appendChild(nodeButton({ kind: "component", name: "Decision", component: "decision" }));
+        appendArrow(dag);
+        dag.appendChild(nodeButton({ kind: "component", name: "Action Execution", component: "action_execution" }));
+      }
+
+      function findContributorPrompt(name) {
+        return (state.prompts?.submodules || []).find((module) => module.name === name)?.instructions || "";
+      }
+
+      function setPrompt(value, editable) {
+        $("promptEditor").value = value || "";
+        $("promptEditor").readOnly = !editable;
+        $("savePrompt").disabled = !editable;
+      }
+
+      function contributionFor(name) {
+        const contributions = state.lastRun?.result?.deliberation_contributions;
+        const trace = state.lastRun?.result?.trace?.deliberation?.filter((item) => item.source === name) || [];
+        return {
+          intent_candidates: (contributions?.intent_candidates || []).filter((item) => item.source === name),
+          constraints: contributions?.constraints || [],
+          trace,
+        };
+      }
+
+      function renderInspection() {
+        const run = state.lastRun;
+        const inspecting = state.inspecting;
+        $("inspectTitle").textContent = `Inspecting: ${inspecting.name}`;
+        $("runComponent").disabled = componentForInspection() === null || !run;
+        status("promptStatus", "");
+
+        if (inspecting.kind === "event_history") {
+          $("contextLabel").textContent = "Context";
+          $("promptLabel").textContent = "Prompt";
+          $("outputLabel").textContent = "Output";
+          showContext(state.eventHistoryPreview);
+          setPrompt("", false);
+          show(run?.event_history || state.eventHistoryPreview);
+          return;
+        }
+
+        if (inspecting.component === "cognition") {
+          showContext(run?.event_history || state.eventHistoryPreview);
+          setPrompt("Cognition builds DecisionContext from event history using runtime code.", false);
+          show(run?.result?.decision_context || {});
+          return;
+        }
+
+        if (inspecting.kind === "contributor") {
+          showContext(run?.result?.decision_context || {});
+          setPrompt(findContributorPrompt(inspecting.name), true);
+          show(contributionFor(inspecting.name));
+          return;
+        }
+
+        if (inspecting.component === "decision") {
+          showContext({
+            decision_context: run?.result?.decision_context || null,
+            deliberation_contributions: run?.result?.deliberation_contributions || null,
+          });
+          setPrompt(state.prompts?.decision || "", true);
+          show(run?.result?.decision_output || {});
+          return;
+        }
+
+        if (inspecting.component === "action_execution") {
+          showContext({
+            available_actions: run?.result?.decision_context?.available_actions || [],
+            selected_actions: run?.result?.decision_output?.actions || [],
+          });
+          setPrompt("Action Execution uses the selected action executor. LLM-backed executors use runtime executor prompts.", false);
+          show(run?.result?.action_results || []);
+        }
+      }
+
+      async function refreshEventHistoryPreview() {
+        status("runStatus", "Loading event history...");
+        try {
+          const result = await requestJson("/admin/thought-process/event-history", {
+            method: "POST",
+            body: JSON.stringify({ ...runPayload(), mode: "dry_run" }),
+          });
+          state.eventHistoryPreview = result.event_history || [];
+          if (state.inspecting.kind === "event_history" || !state.lastRun) renderInspection();
+          status("runStatus", "");
+        } catch (err) {
+          status("runStatus", err.message, true);
+        }
+      }
+
+      function scheduleEventHistoryPreview() {
+        clearTimeout(state.previewTimer);
+        state.previewTimer = setTimeout(refreshEventHistoryPreview, 250);
+      }
+
       async function runThoughtProcess() {
         status("runStatus", "Running...");
         try {
@@ -314,8 +463,9 @@
             method: "POST",
             body: JSON.stringify(runPayload()),
           });
-          state.currentTab = "event_history";
-          refreshOutput();
+          state.eventHistoryPreview = state.lastRun.event_history || [];
+          renderDag();
+          renderInspection();
           status("runStatus", "Done.");
         } catch (err) {
           status("runStatus", err.message, true);
@@ -365,7 +515,7 @@
             method: "POST",
             body: JSON.stringify(componentPayload(component)),
           });
-          show(result);
+          show(result.output ?? result);
           status("componentStatus", $("syntheticInput").value.trim() ? "Done. Synthetic run." : "Done.");
         } catch (err) {
           status("componentStatus", err.message, true);
@@ -377,9 +527,8 @@
         try {
           const prompts = await requestJson("/admin/prompts/data");
           state.prompts = prompts;
-          $("basePrompt").value = prompts.base || "";
-          $("decisionPrompt").value = prompts.decision || "";
-          $("submodulePrompt").value = JSON.stringify(prompts.submodules || [], null, 2);
+          renderDag();
+          renderInspection();
           status("promptStatus", "Loaded.");
         } catch (err) {
           status("promptStatus", err.message, true);
@@ -389,16 +538,30 @@
       async function savePrompts() {
         status("promptStatus", "Saving...");
         try {
+          if (!state.prompts) await loadPrompts();
+          if (!state.prompts) throw new Error("Prompts are not loaded.");
           const payload = {
             ...(state.prompts || {}),
-            base: $("basePrompt").value,
-            decision: $("decisionPrompt").value,
-            submodules: JSON.parse($("submodulePrompt").value || "[]"),
+            submodules: [...(state.prompts?.submodules || [])],
           };
+          if (state.inspecting.kind === "component" && state.inspecting.component === "decision") {
+            payload.decision = $("promptEditor").value;
+          } else if (state.inspecting.kind === "contributor") {
+            const index = payload.submodules.findIndex((module) => module.name === state.inspecting.name);
+            if (index < 0) throw new Error(`Contributor prompt not found: ${state.inspecting.name}`);
+            payload.submodules[index] = {
+              ...payload.submodules[index],
+              instructions: $("promptEditor").value,
+            };
+          } else {
+            throw new Error("The inspecting item has no editable prompt.");
+          }
           state.prompts = await requestJson("/admin/prompts/data", {
             method: "POST",
             body: JSON.stringify(payload),
           });
+          renderDag();
+          renderInspection();
           status("promptStatus", "Saved.");
         } catch (err) {
           status("promptStatus", err.message, true);
@@ -413,24 +576,26 @@
         }
       }
 
-      document.querySelectorAll(".tabs button").forEach((button) => {
-        button.addEventListener("click", () => {
-          state.currentTab = button.dataset.tab;
-          refreshOutput();
-        });
-      });
-      document.querySelectorAll("[data-component]").forEach((button) => {
-        button.addEventListener("click", () => runComponent(button.dataset.component));
-      });
       $("runThought").addEventListener("click", runThoughtProcess);
+      $("runComponent").addEventListener("click", () => {
+        const component = componentForInspection();
+        if (component) runComponent(component);
+      });
       $("clearOutput").addEventListener("click", () => {
         state.lastRun = null;
-        show({});
+        renderDag();
+        renderInspection();
       });
       $("loadPrompts").addEventListener("click", loadPrompts);
-      $("savePrompts").addEventListener("click", savePrompts);
+      $("savePrompt").addEventListener("click", savePrompts);
       $("topLogoutButton").addEventListener("click", logout);
-      loadPrompts();
+      ["inputText", "historyLimit", "includeHistory"].forEach((id) => {
+        $(id).addEventListener("input", scheduleEventHistoryPreview);
+        $(id).addEventListener("change", scheduleEventHistoryPreview);
+      });
+      renderDag();
+      renderInspection();
+      loadPrompts().then(refreshEventHistoryPreview);
     </script>
   </body>
 </html>
