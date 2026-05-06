@@ -4,48 +4,74 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tsuki Thought Process</title>
+    <link rel="stylesheet" href="/admin/styles/ui-tokens.css" />
+    <link rel="stylesheet" href="/admin/styles/ui-base.css" />
     <style>
-      :root {
-        color-scheme: light;
-        --bg: #f7f8fb;
-        --panel: #ffffff;
-        --line: #d8dde8;
-        --text: #1d2430;
-        --muted: #687386;
-        --accent: #0f766e;
-        --danger: #b42318;
-      }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: var(--bg);
+        background: var(--page-bg);
         color: var(--text);
-      }
-      header {
-        padding: 16px 24px;
-        border-bottom: 1px solid var(--line);
-        background: var(--panel);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
+        font-family: "IBM Plex Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
       }
       h1, h2, h3 { margin: 0; font-weight: 650; }
       h1 { font-size: 20px; }
-      h2 { font-size: 16px; margin-bottom: 10px; }
+      h2 { font-size: 15px; margin-bottom: 10px; }
       h3 { font-size: 14px; margin-bottom: 8px; }
-      main {
+      .page {
+        max-width: 1500px;
+        margin: 0 auto;
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+      }
+      .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .title-right, .top-nav {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .top-nav a {
+        color: var(--muted);
+        font-size: 12px;
+        text-decoration: none;
+        padding-bottom: 2px;
+        border-bottom: 1px solid transparent;
+      }
+      .top-nav a.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+      .logout-btn {
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .logout-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .layout {
         display: grid;
         grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
-        gap: 16px;
-        padding: 16px;
+        gap: 12px;
       }
-      section, aside, .panel {
-        background: var(--panel);
+      .card {
+        background: var(--surface);
         border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 14px;
+        border-radius: 10px;
+        padding: 12px;
       }
       label {
         display: block;
@@ -57,27 +83,27 @@
       textarea, input, select {
         width: 100%;
         border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 9px;
+        border-radius: 8px;
+        padding: 8px;
         font: inherit;
-        background: #fff;
+        background: var(--surface-2);
         color: var(--text);
       }
       input[type="checkbox"] { width: auto; }
       textarea { min-height: 90px; resize: vertical; }
       button {
-        border: 0;
-        border-radius: 6px;
-        padding: 9px 12px;
-        background: var(--accent);
-        color: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 12px;
+        background: var(--surface-2);
+        color: var(--text);
         font-weight: 650;
         cursor: pointer;
       }
+      button:hover { border-color: var(--accent); }
       button.secondary {
-        background: #eef2f7;
+        background: transparent;
         color: var(--text);
-        border: 1px solid var(--line);
       }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
       .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -93,125 +119,137 @@
         border-radius: 8px;
         padding: 10px;
         min-height: 64px;
-        background: #fbfcfe;
+        background: var(--surface-2);
       }
       .node strong { display: block; font-size: 13px; }
       .node small { color: var(--muted); }
-      .node.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.12); }
+      .node.active { border-color: var(--accent); background: rgba(113, 74, 244, 0.18); }
       pre {
         margin: 0;
         padding: 10px;
         border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #0f172a;
-        color: #e5edf8;
+        border-radius: 8px;
+        background: var(--surface-2);
+        color: var(--text);
         overflow: auto;
         max-height: 360px;
         white-space: pre-wrap;
         word-break: break-word;
+        font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+        font-size: 12px;
       }
       .muted { color: var(--muted); font-size: 12px; }
       .status { min-height: 18px; margin-top: 8px; font-size: 12px; color: var(--muted); }
       .status.error { color: var(--danger); }
       .stack { display: grid; gap: 12px; }
       .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-      .tabs button.active { background: var(--accent); color: #fff; }
-      .tabs button { background: #eef2f7; color: var(--text); border: 1px solid var(--line); }
+      .tabs button.active { border-color: var(--accent); background: rgba(113, 74, 244, 0.22); }
       @media (max-width: 980px) {
-        main { grid-template-columns: 1fr; }
+        .layout { grid-template-columns: 1fr; }
         .flow { grid-template-columns: 1fr; }
       }
     </style>
   </head>
   <body>
-    <header>
-      <h1>Thought Process</h1>
-      <div class="row">
-        <a href="/admin/events">Events</a>
-        <a href="/admin/concept-graph">Concept Graph</a>
-        <a href="/admin/state-records">State Records</a>
-        <a href="/admin/skills">Skills</a>
-      </div>
-    </header>
-
-    <main>
-      <aside class="stack">
-        <section>
-          <h2>Run</h2>
-          <label for="inputText">Input</label>
-          <textarea id="inputText" placeholder="Optional message to append to the event history for this run"></textarea>
-          <div class="grid">
-            <div>
-              <label for="mode">Mode</label>
-              <select id="mode">
-                <option value="dry_run">dry_run</option>
-                <option value="commit">commit</option>
-              </select>
-            </div>
-            <div>
-              <label for="historyLimit">History Limit</label>
-              <input id="historyLimit" type="number" min="0" max="1000" value="40" />
-            </div>
+    <main class="page">
+      <div class="card">
+        <div class="title-row">
+          <h1>Thought Process</h1>
+          <div class="title-right">
+            <nav class="top-nav" aria-label="Admin Pages">
+              <a href="/admin/events">Events</a>
+              <a href="/admin/prompts" class="active">Prompts</a>
+              <a href="/admin/skills">Skills</a>
+              <a href="/admin/concept-graph">Concept Graph</a>
+              <a href="/admin/state-records">State</a>
+            </nav>
+            <button id="topLogoutButton" class="logout-btn" type="button">Logout</button>
           </div>
-          <label><input id="includeHistory" type="checkbox" checked /> Include event history</label>
-          <div class="row">
-            <button id="runThought">Run Thought Process</button>
-            <button class="secondary" id="clearOutput">Clear</button>
-          </div>
-          <div class="status" id="runStatus"></div>
-        </section>
-
-        <section>
-          <h2>Component Run</h2>
-          <div class="row">
-            <button class="secondary" data-component="cognition">Cognition</button>
-            <button class="secondary" data-component="deliberation">Deliberation</button>
-            <button class="secondary" data-component="decision">Decision</button>
-            <button class="secondary" data-component="action_execution">Action Execution</button>
-          </div>
-          <label for="syntheticInput">Synthetic Input</label>
-          <textarea id="syntheticInput" placeholder="Optional JSON override. Synthetic component runs must be treated as inspection-only."></textarea>
-          <div class="muted">When populated, this replaces the component input and the run is synthetic.</div>
-          <div class="status" id="componentStatus"></div>
-        </section>
-
-        <section>
-          <h2>Prompts</h2>
-          <label for="basePrompt">Base</label>
-          <textarea id="basePrompt"></textarea>
-          <label for="decisionPrompt">Decision</label>
-          <textarea id="decisionPrompt"></textarea>
-          <label for="submodulePrompt">Submodules JSON</label>
-          <textarea id="submodulePrompt"></textarea>
-          <div class="row">
-            <button class="secondary" id="loadPrompts">Load</button>
-            <button id="savePrompts">Save</button>
-          </div>
-          <div class="status" id="promptStatus"></div>
-        </section>
-      </aside>
-
-      <section class="stack">
-        <div class="flow">
-          <div class="node active"><strong>Event History</strong><small>ordered input</small></div>
-          <div class="node"><strong>Cognition</strong><small>context</small></div>
-          <div class="node"><strong>Deliberation</strong><small>contributors</small></div>
-          <div class="node"><strong>Decision</strong><small>actions</small></div>
-          <div class="node"><strong>Action Execution</strong><small>dry-run safe</small></div>
         </div>
+        <div class="muted">Inspect ordered event history, cognition, deliberation, decision, and action execution.</div>
+      </div>
 
-        <div class="panel">
-          <h2>Inspection</h2>
-          <div class="tabs">
-            <button class="active" data-tab="event_history">Event History</button>
-            <button data-tab="decision_context">Cognition</button>
-            <button data-tab="deliberation_contributions">Deliberation</button>
-            <button data-tab="decision_output">Decision</button>
-            <button data-tab="action_results">Action Execution</button>
-            <button data-tab="trace">Trace</button>
-            <button data-tab="raw">Raw</button>
+      <section class="layout">
+        <aside class="stack">
+          <div class="card">
+            <h2>Run</h2>
+            <label for="inputText">Input</label>
+            <textarea id="inputText" placeholder="Optional message to append to the event history for this run"></textarea>
+            <div class="grid">
+              <div>
+                <label for="mode">Mode</label>
+                <select id="mode">
+                  <option value="dry_run">dry_run</option>
+                  <option value="commit">commit</option>
+                </select>
+              </div>
+              <div>
+                <label for="historyLimit">History Limit</label>
+                <input id="historyLimit" type="number" min="0" max="1000" value="40" />
+              </div>
+            </div>
+            <label><input id="includeHistory" type="checkbox" checked /> Include event history</label>
+            <div class="row">
+              <button id="runThought">Run Thought Process</button>
+              <button class="secondary" id="clearOutput">Clear</button>
+            </div>
+            <div class="status" id="runStatus"></div>
           </div>
-          <pre id="output">{}</pre>
+
+          <div class="card">
+            <h2>Component Run</h2>
+            <div class="row">
+              <button class="secondary" data-component="cognition">Cognition</button>
+              <button class="secondary" data-component="deliberation">Deliberation</button>
+              <button class="secondary" data-component="decision">Decision</button>
+              <button class="secondary" data-component="action_execution">Action Execution</button>
+            </div>
+            <label for="syntheticInput">Synthetic Input</label>
+            <textarea id="syntheticInput" placeholder="Optional JSON override. Synthetic component runs must be treated as inspection-only."></textarea>
+            <div class="muted">When populated, this replaces the component input and the run is synthetic.</div>
+            <div class="status" id="componentStatus"></div>
+          </div>
+
+          <div class="card">
+            <h2>Prompts</h2>
+            <label for="basePrompt">Base</label>
+            <textarea id="basePrompt"></textarea>
+            <label for="decisionPrompt">Decision</label>
+            <textarea id="decisionPrompt"></textarea>
+            <label for="submodulePrompt">Submodules JSON</label>
+            <textarea id="submodulePrompt"></textarea>
+            <div class="row">
+              <button class="secondary" id="loadPrompts">Load</button>
+              <button id="savePrompts">Save</button>
+            </div>
+            <div class="status" id="promptStatus"></div>
+          </div>
+        </aside>
+
+        <div class="stack">
+          <div class="card">
+            <div class="flow">
+              <div class="node active"><strong>Event History</strong><small>ordered input</small></div>
+              <div class="node"><strong>Cognition</strong><small>context</small></div>
+              <div class="node"><strong>Deliberation</strong><small>contributors</small></div>
+              <div class="node"><strong>Decision</strong><small>actions</small></div>
+              <div class="node"><strong>Action Execution</strong><small>dry-run safe</small></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Inspection</h2>
+            <div class="tabs">
+              <button class="active" data-tab="event_history">Event History</button>
+              <button data-tab="decision_context">Cognition</button>
+              <button data-tab="deliberation_contributions">Deliberation</button>
+              <button data-tab="decision_output">Decision</button>
+              <button data-tab="action_results">Action Execution</button>
+              <button data-tab="trace">Trace</button>
+              <button data-tab="raw">Raw</button>
+            </div>
+            <pre id="output">{}</pre>
+          </div>
         </div>
       </section>
     </main>
@@ -367,6 +405,14 @@
         }
       }
 
+      async function logout() {
+        try {
+          await fetch("/auth/logout", { method: "POST" });
+        } finally {
+          window.location.href = "/admin/login";
+        }
+      }
+
       document.querySelectorAll(".tabs button").forEach((button) => {
         button.addEventListener("click", () => {
           state.currentTab = button.dataset.tab;
@@ -383,6 +429,7 @@
       });
       $("loadPrompts").addEventListener("click", loadPrompts);
       $("savePrompts").addEventListener("click", savePrompts);
+      $("topLogoutButton").addEventListener("click", logout);
       loadPrompts();
     </script>
   </body>
