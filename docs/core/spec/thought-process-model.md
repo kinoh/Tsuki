@@ -230,10 +230,17 @@ operation, or no external action.
 
 The action `input` should be interpreted by the executor for that action. It may reference an intent
 candidate when that is useful, but it is still action-specific executor input. For a
-conversation-facing action, the input may be an abstract realization request rather than the final
-surface text. For direct operational actions, the input may be a task description or command-like
-instruction. The common contract remains a single string so decision does not need action-specific
-schemas.
+conversation-facing action, the input should normally be an abstract realization request or
+response policy rather than the final surface text. Focus-pragmatic notation may be used for that
+request when it is useful. For operational actions, the input may be a task description or
+command-like instruction. The common contract remains a single string so decision does not need
+action-specific schemas.
+
+Direct actions are allowed only when the decision output fully determines the external effect
+without additional interpretation, realization, or tool-input construction. Conversation replies
+are not direct actions: decision selects the conversational intent or response policy, and action
+execution realizes the surface text. Operational actions that require query, command, request, or
+payload construction must be handled by an executor rather than encoded directly by decision.
 
 Actions are made available by cognition and selected by decision. Action execution
 performs only the selected external actions.
@@ -257,10 +264,10 @@ It owns:
 
 Action execution does not discover actions and does not decide which action should happen.
 
-Execution may be simple for direct actions such as `user_reply`, but it is not limited to a
-dispatcher. Complex actions may be handled by dedicated execution components that use LLMs and
-tools to carry out the selected action. Decision still only selects actions; it does not execute
-tools directly.
+Execution may be simple for true direct actions, but it is not limited to a dispatcher. Complex
+actions may be handled by dedicated execution components that use LLMs and tools to carry out the
+selected action. Decision still only selects actions; it does not execute tools directly and does
+not produce final conversation surface text.
 
 Action execution must support dry-run as an inspection mode, not as a partial external execution.
 In dry-run mode it exposes the executor input that would be used in commit mode and records that in
