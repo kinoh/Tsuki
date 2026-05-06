@@ -255,6 +255,7 @@
     </main>
 
     <script>
+      const SESSION_STORAGE_KEY = "tsuki.admin.thoughtProcess.session.v1";
       const state = {
         lastRun: null,
         eventHistoryPreview: [],
@@ -277,6 +278,64 @@
 
       function showContext(value) {
         $("contextOutput").textContent = JSON.stringify(value ?? null, null, 2);
+      }
+
+      function restoreSession() {
+        let saved = null;
+        try {
+          saved = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) || "null");
+        } catch (err) {
+          console.warn("Failed to restore Thought Process admin session", err);
+          localStorage.removeItem(SESSION_STORAGE_KEY);
+          return;
+        }
+        if (!saved || typeof saved !== "object") return;
+
+        $("inputText").value = saved.inputText || "";
+        if (saved.mode === "dry_run" || saved.mode === "commit") {
+          $("mode").value = saved.mode;
+        }
+        if (Number.isFinite(saved.historyLimit)) {
+          $("historyLimit").value = String(saved.historyLimit);
+        }
+        if (typeof saved.includeHistory === "boolean") {
+          $("includeHistory").checked = saved.includeHistory;
+        }
+        $("syntheticInput").value = saved.syntheticInput || "";
+        state.lastRun = saved.lastRun || null;
+        state.eventHistoryPreview = Array.isArray(saved.eventHistoryPreview)
+          ? saved.eventHistoryPreview
+          : [];
+        if (saved.inspecting && typeof saved.inspecting === "object") {
+          state.inspecting = {
+            kind: saved.inspecting.kind || "event_history",
+            name: saved.inspecting.name || "Event History",
+            component: saved.inspecting.component || null,
+          };
+        }
+      }
+
+      function saveSession() {
+        const session = {
+          inputText: $("inputText").value,
+          mode: $("mode").value,
+          historyLimit: Number($("historyLimit").value || 0),
+          includeHistory: $("includeHistory").checked,
+          syntheticInput: $("syntheticInput").value,
+          inspecting: state.inspecting,
+          lastRun: state.lastRun,
+          eventHistoryPreview: state.eventHistoryPreview,
+        };
+        try {
+          localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+        } catch (err) {
+          console.warn("Failed to persist Thought Process admin session", err);
+          status("runStatus", "Failed to persist browser session.", true);
+        }
+      }
+
+      function clearSession() {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
       }
 
       async function requestJson(url, options = {}) {
@@ -314,6 +373,7 @@
         state.inspecting = next;
         renderDag();
         renderInspection();
+        saveSession();
       }
 
       function nodeButton(node) {
@@ -446,6 +506,7 @@
           });
           state.eventHistoryPreview = result.event_history || [];
           if (state.inspecting.kind === "event_history" || !state.lastRun) renderInspection();
+          saveSession();
           status("runStatus", "");
         } catch (err) {
           status("runStatus", err.message, true);
@@ -467,6 +528,7 @@
           state.eventHistoryPreview = state.lastRun.event_history || [];
           renderDag();
           renderInspection();
+          saveSession();
           status("runStatus", "Done.");
         } catch (err) {
           status("runStatus", err.message, true);
@@ -517,6 +579,7 @@
             body: JSON.stringify(componentPayload(component)),
           });
           show(result.output ?? result);
+          saveSession();
           status("componentStatus", $("syntheticInput").value.trim() ? "Done. Synthetic run." : "Done.");
         } catch (err) {
           status("componentStatus", err.message, true);
@@ -584,6 +647,8 @@
       });
       $("clearOutput").addEventListener("click", () => {
         state.lastRun = null;
+        state.eventHistoryPreview = [];
+        clearSession();
         renderDag();
         renderInspection();
       });
@@ -591,12 +656,25 @@
       $("savePrompt").addEventListener("click", savePrompts);
       $("topLogoutButton").addEventListener("click", logout);
       ["inputText", "historyLimit", "includeHistory"].forEach((id) => {
-        $(id).addEventListener("input", scheduleEventHistoryPreview);
-        $(id).addEventListener("change", scheduleEventHistoryPreview);
+        $(id).addEventListener("input", () => {
+          saveSession();
+          scheduleEventHistoryPreview();
+        });
+        $(id).addEventListener("change", () => {
+          saveSession();
+          scheduleEventHistoryPreview();
+        });
       });
+      ["mode", "syntheticInput"].forEach((id) => {
+        $(id).addEventListener("input", saveSession);
+        $(id).addEventListener("change", saveSession);
+      });
+      restoreSession();
       renderDag();
       renderInspection();
-      loadPrompts().then(refreshEventHistoryPreview);
+      loadPrompts().then(() => {
+        if (state.eventHistoryPreview.length === 0) refreshEventHistoryPreview();
+      });
     </script>
   </body>
 </html>
