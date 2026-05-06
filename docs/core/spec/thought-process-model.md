@@ -34,18 +34,18 @@ events
   -> output events
 ```
 
-Events are the durable record of what happened. They are also the only primary input to a thought
-process. There is no separate "current external input" concept; an external input is simply
-an event in the event set being considered.
+Events are the durable record of what happened. Ordered event history is the only primary input to
+a thought process. There is no separate "current external input" concept; an external input is
+simply an event in the history being considered.
 
 Within a thought process, components may exchange typed data directly. Events are not required for
 every internal edge.
 
-## Events as Input
+## Event History as Input
 
-A thought process starts from an explicit event set.
+A thought process starts from explicit ordered event history.
 
-The caller may decide which recent or selected events to provide, but it should not pre-resolve
+The caller may decide how far back to retrieve events, but it should not pre-resolve
 concept graph context, recalled history, or available action choices as separate run inputs. Those
 belong to cognition.
 
@@ -53,18 +53,19 @@ The input contract should stay narrow:
 
 ```
 ThoughtProcessInput
-  events
+  event_history
 ```
 
 This keeps the run reproducible without inventing a second input channel beside the event stream.
+Cognition derives the latest external input from the ordered event history when it needs one.
 
 ## Cognition
 
 Cognition constructs the decision context.
 
-It owns interpretation of the provided events, including any access to concept graph, recall, or
-state required to build the context. It also decides which actions are available to decision for
-this thought process.
+It owns interpretation of the provided event history, including any access to concept graph,
+recall, or state required to build the context. It also decides which actions are available to
+decision for this thought process.
 
 Cognition may perform internal state updates that belong to its own responsibility, such as
 concept graph activation. Those updates are not modeled as transferable effects. In dry-run or
@@ -261,6 +262,13 @@ dispatcher. Complex actions may be handled by dedicated execution components tha
 tools to carry out the selected action. Decision still only selects actions; it does not execute
 tools directly.
 
+Action execution must support dry-run as an inspection mode, not as a partial external execution.
+In dry-run mode it exposes the executor input that would be used in commit mode and records that in
+trace, but it must not emit events, call tools, or call an LLM with tools attached. For a direct
+tool action, dry-run shows the tool name and tool input. For an LLM-mediated action, dry-run shows
+the LLM input and the fact that tools would only be available in commit mode. Commit mode performs
+the selected action and records action results.
+
 ## Trace
 
 Trace is for operators and development UI. It is not a data contract between components.
@@ -324,12 +332,12 @@ flow belongs to the thought process.
 
 ## Development UI Implications
 
-The admin prompt UI should move away from arbitrary module execution and toward inspecting a
-thought process.
+The admin prompt UI should replace arbitrary module execution with thought process inspection.
+There is no compatibility requirement for router, decision, or submodule standalone runs.
 
 Useful inspection surfaces:
 
-- event set preview
+- ordered event history preview
 - cognition output
 - available actions
 - rendered prompts and contexts per component
@@ -345,13 +353,25 @@ The UI should make clear whether a component run is preview-only, executed in dr
 executed in commit mode. Dry-run/commit is a component execution mode for observing or applying
 that component's own side effects, not a separate effect aggregation system.
 
+Component-level runs are allowed only when their inputs are the same contracts the component would
+receive inside a thought process:
+
+- cognition run: ordered event history
+- deliberation contributor run: decision context
+- decision run: decision context plus deliberation output
+- action execution run: available actions plus selected actions
+
+These runs are not standalone modules. They are thought-process component runs with explicit
+inputs. Editing an intermediate input for inspection is a synthetic run and must be labeled as such
+in the UI.
+
 ## Migration Notes
 
 The current submodule contract does not need compatibility preservation.
 
 A minimal migration path is:
 
-1. Introduce a thought process input that accepts an explicit event set.
+1. Introduce a thought process input that accepts explicit ordered event history.
 2. Rename or wrap router behavior as cognition context construction.
 3. Move concept graph and recall selection under cognition responsibility.
 4. Add deliberation contributors between cognition and decision.
@@ -363,7 +383,7 @@ A minimal migration path is:
 8. Represent user replies as actions without requiring the decision output to contain final reply
    text.
 9. Move direct external action execution out of decision.
-10. Replace submodule debug execution with thought process inspection and component-level reruns.
+10. Replace submodule debug execution with thought process inspection and component-level runs.
 
 The existing event stream remains useful as the durable history layer, but the proposed model does
 not require every reasoning step to be an event-driven autonomous module.
