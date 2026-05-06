@@ -21,7 +21,7 @@ Submodules are also not an established compatibility surface. The model can ther
 without preserving the current direct submodule invocation contract.
 
 The goal is to make each turn understandable as one bounded thought process with explicit events,
-decision context, intent candidates, selected actions, action results, and trace.
+decision context, deliberation output, selected actions, action results, and trace.
 
 ## High-Level Shape
 
@@ -76,7 +76,6 @@ Example output shape:
 DecisionContext
   context
   available_actions
-  deliberation_contributors
 ```
 
 `context` is the cognitive context used by decision. It may include interpretation,
@@ -87,66 +86,56 @@ cognition.
 Each available action should describe its name, when it is appropriate, and how to write its single
 string input.
 
-`deliberation_contributors` is the set of contributor sources that orchestration may run before
-decision. Cognition owns this selection because it already interprets the event set, concept graph,
-and recall context. Normal flow must not run all contributors unconditionally.
-
 Cognition does not produce the final user-facing response and does not decide which external
 action to execute.
 
 ## Deliberation Contributors
 
-Deliberation contributors produce optional structured intent candidates and constraints for
-decision.
+Deliberation contributors produce text contributions for decision.
 
 They are the place for former submodule-like behavior: motive lenses, risk checks, task
 decomposition, focus modeling, or other bounded analyses that are useful before action choice but
 should not execute external actions.
 
 There is no separate `Deliberation` actor. Contributor execution is part of thought process
-orchestration: after cognition constructs the decision context, the orchestrator may run zero or
-more contributors named by `DecisionContext.deliberation_contributors` against that context and
-pass their combined output to decision. A contributor should exist only when its output contract is
-stable enough to inspect, test, and tune independently.
+orchestration: after cognition constructs the decision context, the orchestrator runs all active
+contributors against that context and passes their combined output to decision.
 
-Combined output shape:
+Contributor execution is intentionally separated from concept graph activation for now. Activation
+has proven difficult to tune as an execution gate. A future router may use an LLM to decide which
+contributors should run, but the current model favors predictable always-on contributors over
+activation-driven firing.
 
-```
-DeliberationContributions
-  intent_candidates
-  constraints
-  trace
-```
-
-`intent_candidates` are candidate reasons or directions for action. They are deliberately thin:
-decision reads the candidate text directly, without relying on a schema or category label.
+Contributor output shape:
 
 ```
-IntentCandidate
-  source: string
-  text: string
+DeliberationContribution
+  source
+  text
 ```
 
-`source` identifies the deliberation contributor that produced the candidate.
+`source` identifies the deliberation contributor that produced the output.
 
-`text` is unstructured text for decision input. It may be prose or a compact notation such as
-`operation=add; motive=epistemic; target=submodule; aim=clarify boundary`. The thought process
-does not assign schema-level meaning to that notation.
+`text` is the contributor's single unstructured LLM output. It may be prose or compact notation
+such as `operation=add; motive=epistemic; target=submodule; aim=clarify boundary`. The thought
+process does not assign schema-level meaning to that notation.
 
-`constraints` are explicit restrictions that decision should obey, such as safety, scope, or
-interaction constraints. Do not add a generic `notes` field; if data is meant for decision, give it
-a specific contract, and if it is only for humans, put it in trace.
+The orchestrator aggregates contributor outputs into:
 
-`trace` is for inspection only. Decision must not depend on trace.
+```
+DeliberationOutput
+  contributions
+```
+
+`DeliberationOutput` is the aggregate output of running deliberation contributors.
 
 Existing submodules fit here when they are retained. A former submodule should no longer be treated
 as an arbitrary standalone prompt or a decision-callable tool. It should instead become a
-deliberation contributor that emits intent candidates or constraints according to its own explicit
-contract.
+deliberation contributor that emits one text contribution according to its own explicit contract.
 
 ## Focus-Pragmatic Notation
 
-Focus-pragmatic notation is one useful way to write `IntentCandidate.text`. It is not a required
+Focus-pragmatic notation is one useful way to write `DeliberationContribution.text`. It is not a required
 stage, a required top-level output shape, or a schema interpreted by the thought process.
 
 It describes a possible intent as:
@@ -178,10 +167,10 @@ Pragmatic motives:
 - `epistemic` - align understanding, correct recognition, or improve accuracy.
 - `meta` - manage conversational progress, sequencing, or transition.
 
-Example candidate:
+Example contribution:
 
 ```
-IntentCandidate
+DeliberationContribution
   source: curiosity
   text: operation=add; motive=epistemic; target=submodule; aim=clarify responsibility boundary
 ```
@@ -192,9 +181,9 @@ are conversational.
 
 ## Decision
 
-Decision chooses actions from the decision context and deliberation contributions.
+Decision chooses actions from the decision context and deliberation output.
 
-It consumes the decision context, available actions, intent candidates, and constraints. It should
+It consumes the decision context, available actions, and deliberation contribution text. It should
 not directly execute external actions or mutate durable internal state.
 
 Example output shape:
@@ -344,9 +333,8 @@ Useful inspection surfaces:
 - cognition output
 - available actions
 - rendered prompts and contexts per component
+- deliberation output
 - deliberation contributions
-- intent candidates
-- constraints
 - decision output
 - selected actions
 - action execution results
@@ -367,11 +355,11 @@ A minimal migration path is:
 2. Rename or wrap router behavior as cognition context construction.
 3. Move concept graph and recall selection under cognition responsibility.
 4. Add deliberation contributors between cognition and decision.
-5. Recast retained submodules as deliberation contributors that produce intent candidates or
-   constraints.
-6. Treat focus-pragmatic output as one possible intent candidate notation, not as a required
+5. Recast retained submodules as always-on deliberation contributors that produce one text
+   contribution each.
+6. Treat focus-pragmatic output as one possible contribution notation, not as a required
    thought-process stage or schema.
-7. Change decision behavior to choose actions from decision context and deliberation contributions.
+7. Change decision behavior to choose actions from decision context and deliberation output.
 8. Represent user replies as actions without requiring the decision output to contain final reply
    text.
 9. Move direct external action execution out of decision.
