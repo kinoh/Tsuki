@@ -1,3 +1,6 @@
+[server]
+admin_cookie_secure = true
+
 [db]
 path = "/data/core-rust.db"
 

@@ -1,5 +1,6 @@
 [server]
 port = 2953
+admin_cookie_secure = false
 
 [llm]
 model = "gpt-5.4-mini"

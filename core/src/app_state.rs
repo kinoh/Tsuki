@@ -47,6 +47,7 @@ pub(crate) struct AuthState {
     pub(crate) web_auth_token: String,
     pub(crate) admin_password: String,
     pub(crate) admin_password_fingerprint: String,
+    pub(crate) admin_cookie_secure: bool,
 }
 
 #[derive(Clone)]
@@ -110,11 +111,13 @@ impl AuthState {
         web_auth_token: String,
         admin_password: String,
         admin_password_fingerprint: String,
+        admin_cookie_secure: bool,
     ) -> Self {
         Self {
             web_auth_token,
             admin_password,
             admin_password_fingerprint,
+            admin_cookie_secure,
         }
     }
 }

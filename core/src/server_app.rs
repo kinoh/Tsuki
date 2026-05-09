@@ -422,7 +422,12 @@ pub(crate) async fn run_server() {
             mcp_registry,
             router_symbolizer,
         },
-        AuthState::new(auth_token, admin_auth_password, admin_password_fingerprint),
+        AuthState::new(
+            auth_token,
+            admin_auth_password,
+            admin_password_fingerprint,
+            config.server.admin_cookie_secure,
+        ),
         AppConfigState {
             limits: config.limits.clone(),
             router: config.router.clone(),
@@ -838,7 +843,10 @@ async fn auth_login(
 
     println!("ADMIN_AUTH_LOGIN_SUCCESS");
     Ok((
-        [(SET_COOKIE, build_admin_session_cookie(&session_id))],
+        [(
+            SET_COOKIE,
+            build_admin_session_cookie(&session_id, state.auth.admin_cookie_secure),
+        )],
         Json(AuthLoginResponse { ok: true }),
     ))
 }
@@ -876,7 +884,10 @@ async fn auth_logout(
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     println!("ADMIN_AUTH_LOGOUT");
     Ok((
-        [(SET_COOKIE, build_admin_session_clear_cookie())],
+        [(
+            SET_COOKIE,
+            build_admin_session_clear_cookie(state.auth.admin_cookie_secure),
+        )],
         Json(AuthLogoutResponse { ok: true }),
     ))
 }
@@ -2243,17 +2254,19 @@ fn admin_password_fingerprint(password: &str) -> String {
     format!("{:016x}", hash)
 }
 
-fn build_admin_session_cookie(session_id: &str) -> String {
+fn build_admin_session_cookie(session_id: &str, secure: bool) -> String {
+    let secure_attribute = if secure { "; Secure" } else { "" };
     format!(
-        "{}={}; Max-Age={}; Path=/; Secure; HttpOnly; SameSite=Strict",
-        ADMIN_SESSION_COOKIE_NAME, session_id, ADMIN_SESSION_ABSOLUTE_TTL_SECS
+        "{}={}; Max-Age={}; Path=/{}; HttpOnly; SameSite=Strict",
+        ADMIN_SESSION_COOKIE_NAME, session_id, ADMIN_SESSION_ABSOLUTE_TTL_SECS, secure_attribute
     )
 }
 
-fn build_admin_session_clear_cookie() -> String {
+fn build_admin_session_clear_cookie(secure: bool) -> String {
+    let secure_attribute = if secure { "; Secure" } else { "" };
     format!(
-        "{}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict",
-        ADMIN_SESSION_COOKIE_NAME
+        "{}=; Max-Age=0; Path=/{}; HttpOnly; SameSite=Strict",
+        ADMIN_SESSION_COOKIE_NAME, secure_attribute
     )
 }
 
@@ -2528,7 +2541,8 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
 #[cfg(test)]
 mod tests {
     use super::{
-        event_has_any_tag, event_has_tag, matches_event_for_requested_tags, normalize_event_tags,
+        build_admin_session_clear_cookie, build_admin_session_cookie, event_has_any_tag,
+        event_has_tag, matches_event_for_requested_tags, normalize_event_tags,
         parse_events_query_tags, read_spec_info_version, verify_auth,
     };
     use crate::event::contracts::response_text;
@@ -2555,6 +2569,26 @@ mod tests {
         let openapi_version = read_spec_info_version(include_str!("../../api-specs/openapi.yaml"));
         assert!(asyncapi_version.is_some());
         assert!(openapi_version.is_some());
+    }
+
+    #[test]
+    fn admin_session_cookie_uses_secure_only_when_configured() {
+        let local_cookie = build_admin_session_cookie("session-id", false);
+        assert!(local_cookie.contains("Path=/; HttpOnly; SameSite=Strict"));
+        assert!(!local_cookie.contains("Secure"));
+
+        let production_cookie = build_admin_session_cookie("session-id", true);
+        assert!(production_cookie.contains("Path=/; Secure; HttpOnly; SameSite=Strict"));
+    }
+
+    #[test]
+    fn admin_session_clear_cookie_uses_secure_only_when_configured() {
+        let local_cookie = build_admin_session_clear_cookie(false);
+        assert!(local_cookie.contains("Path=/; HttpOnly; SameSite=Strict"));
+        assert!(!local_cookie.contains("Secure"));
+
+        let production_cookie = build_admin_session_clear_cookie(true);
+        assert!(production_cookie.contains("Path=/; Secure; HttpOnly; SameSite=Strict"));
     }
 
     #[test]
