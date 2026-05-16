@@ -71,6 +71,7 @@ pub(crate) struct ResolvedPrompts {
     pub(crate) base_instructions: String,
     pub(crate) router_instructions: String,
     pub(crate) decision_instructions: String,
+    pub(crate) action_execution_instructions: String,
 }
 
 #[derive(Clone)]
@@ -155,6 +156,13 @@ impl PromptState {
             .clone()
             .unwrap_or_else(|| self.resolved.decision_instructions.clone())
     }
+
+    pub(crate) fn action_execution_or_default(&self, overrides: &PromptOverrides) -> String {
+        overrides
+            .action_execution
+            .clone()
+            .unwrap_or_else(|| self.resolved.action_execution_instructions.clone())
+    }
 }
 
 impl ResolvedPrompts {
@@ -162,11 +170,13 @@ impl ResolvedPrompts {
         base_instructions: String,
         router_instructions: String,
         decision_instructions: String,
+        action_execution_instructions: String,
     ) -> Self {
         Self {
             base_instructions,
             router_instructions,
             decision_instructions,
+            action_execution_instructions,
         }
     }
 }

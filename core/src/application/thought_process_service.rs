@@ -427,6 +427,7 @@ pub(crate) async fn run_basic_thought_process(
     runtime: &ModuleRuntime,
     base_instructions: &str,
     decision_instructions: &str,
+    action_execution_instructions: &str,
 ) -> Result<ThoughtProcessResult, ThoughtProcessError> {
     run_basic_thought_process_with_mode(
         state,
@@ -434,6 +435,7 @@ pub(crate) async fn run_basic_thought_process(
         runtime,
         base_instructions,
         decision_instructions,
+        action_execution_instructions,
         ThoughtProcessRunMode::Commit,
     )
     .await
@@ -445,6 +447,7 @@ pub(crate) async fn run_basic_thought_process_with_mode(
     runtime: &ModuleRuntime,
     base_instructions: &str,
     decision_instructions: &str,
+    action_execution_instructions: &str,
     mode: ThoughtProcessRunMode,
 ) -> Result<ThoughtProcessResult, ThoughtProcessError> {
     let usage_recorder: Arc<dyn LlmUsageRecorder> =
@@ -461,8 +464,12 @@ pub(crate) async fn run_basic_thought_process_with_mode(
         max_tool_rounds: 0,
     }));
     let emit_event = emit_event_blocking(state.clone());
-    let action_execution =
-        ActionExecutionService::with_default_executors(emit_event, runtime, state);
+    let action_execution = ActionExecutionService::with_default_executors(
+        emit_event,
+        runtime,
+        state,
+        action_execution_instructions,
+    );
     let contributors = build_prompt_deliberation_contributors(state, runtime, base_instructions)
         .await
         .map_err(ThoughtProcessError::Deliberation)?;
@@ -856,13 +863,14 @@ impl ActionExecutionService {
         emit_event: Arc<dyn Fn(Event) + Send + Sync>,
         runtime: &ModuleRuntime,
         state: &AppState,
+        user_reply_instructions: &str,
     ) -> Self {
         let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
         let reply_usage_recorder: Arc<dyn LlmUsageRecorder> =
             Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
         let reply_llm = build_response_api_llm(ResponseApiConfig {
             model: runtime.model.clone(),
-            instructions: "You are the user_reply action executor. Realize the selected conversational intent as the final message to the user. Return only the message text. Do not call tools.".to_string(),
+            instructions: user_reply_instructions.trim().to_string(),
             temperature: runtime.temperature,
             max_output_tokens: runtime.max_output_tokens,
             tools: Vec::new(),

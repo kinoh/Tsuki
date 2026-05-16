@@ -269,6 +269,11 @@ actions may be handled by dedicated execution components that use LLMs and tools
 selected action. Decision still only selects actions; it does not execute tools directly and does
 not produce final conversation surface text.
 
+Conversation surface instructions belong to the action executor prompt, not to Decision. Decision
+may pass abstract tone, focus, or constraint requests in the selected `user_reply` action input,
+but examples, style rules, and final wording policy for user-facing text should live in the
+`Action Execution` prompt section.
+
 Action execution must support dry-run as an inspection mode, not as a partial external execution.
 In dry-run mode it exposes the executor input that would be used in commit mode and records that in
 trace, but it must not emit events, call tools, or call an LLM with tools attached. For a direct

@@ -492,7 +492,7 @@
             available_actions: run?.result?.decision_context?.available_actions || [],
             selected_actions: run?.result?.decision_output?.actions || [],
           });
-          setPrompt("Action Execution uses the selected action executor. LLM-backed executors use runtime executor prompts.", false);
+          setPrompt(state.prompts?.action_execution || "", true);
           show(run?.result?.action_results || []);
         }
       }
@@ -610,6 +610,8 @@
           };
           if (state.inspecting.kind === "component" && state.inspecting.component === "decision") {
             payload.decision = $("promptEditor").value;
+          } else if (state.inspecting.kind === "component" && state.inspecting.component === "action_execution") {
+            payload.action_execution = $("promptEditor").value;
           } else if (state.inspecting.kind === "contributor") {
             const index = payload.submodules.findIndex((module) => module.name === state.inspecting.name);
             if (index < 0) throw new Error(`Contributor prompt not found: ${state.inspecting.name}`);

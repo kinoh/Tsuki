@@ -58,6 +58,7 @@ pub(crate) async fn handle_input(raw: String, state: &AppState) {
         &state.runtime.modules.runtime,
         &state.prompts.base_or_default(&overrides),
         &state.prompts.decision_or_default(&overrides),
+        &state.prompts.action_execution_or_default(&overrides),
     )
     .await;
     match result {

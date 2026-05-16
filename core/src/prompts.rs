@@ -7,6 +7,7 @@ pub struct PromptOverrides {
     pub base: Option<String>,
     pub router: Option<String>,
     pub decision: Option<String>,
+    pub action_execution: Option<String>,
     pub self_improvement: Option<String>,
     pub submodules: HashMap<String, String>,
 }
@@ -42,6 +43,10 @@ pub fn write_prompts(path: &Path, prompts: &PromptOverrides) -> Result<(), Strin
     output.push_str("```text\n");
     output.push_str(prompts.decision.as_deref().unwrap_or(""));
     output.push_str("\n```\n\n");
+    output.push_str("# Action Execution\n\n");
+    output.push_str("```text\n");
+    output.push_str(prompts.action_execution.as_deref().unwrap_or(""));
+    output.push_str("\n```\n\n");
     output.push_str("# Self Improvement\n\n");
     output.push_str("```text\n");
     output.push_str(prompts.self_improvement.as_deref().unwrap_or(""));
@@ -68,6 +73,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
         Base,
         Router,
         Decision,
+        ActionExecution,
         SelfImprovement,
         Submodule(String),
     }
@@ -87,6 +93,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
                     "# Base" => Section::Base,
                     "# Router" => Section::Router,
                     "# Decision" => Section::Decision,
+                    "# Action Execution" => Section::ActionExecution,
                     "# Self Improvement" => Section::SelfImprovement,
                     "# Submodules" => {
                         in_submodules = true;
@@ -114,6 +121,7 @@ fn parse_prompts(raw: &str) -> Result<PromptOverrides, String> {
                 Section::Base => overrides.base = Some(text),
                 Section::Router => overrides.router = Some(text),
                 Section::Decision => overrides.decision = Some(text),
+                Section::ActionExecution => overrides.action_execution = Some(text),
                 Section::SelfImprovement => overrides.self_improvement = Some(text),
                 Section::Submodule(name) => {
                     overrides.submodules.insert(name.clone(), text);
@@ -169,6 +177,15 @@ fn validate_required_core_sections(prompts: &PromptOverrides) -> Result<(), Stri
     {
         missing.push("Self Improvement".to_string());
     }
+    if prompts
+        .action_execution
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        missing.push("Action Execution".to_string());
+    }
     if missing.is_empty() {
         return Ok(());
     }
@@ -223,6 +240,7 @@ mod tests {
             base: Some("base without memory section".to_string()),
             router: Some("router without memory section".to_string()),
             decision: Some("## Memory\ndecision".to_string()),
+            action_execution: Some("action execution instructions".to_string()),
             self_improvement: Some("self improvement worker instructions".to_string()),
             submodules: [(
                 "curiosity".to_string(),
@@ -240,6 +258,7 @@ mod tests {
             base: Some("base without memory section".to_string()),
             router: Some("router without memory section".to_string()),
             decision: Some("decision without memory section".to_string()),
+            action_execution: Some("action execution instructions".to_string()),
             self_improvement: Some("self improvement worker instructions".to_string()),
             submodules: [(
                 "curiosity".to_string(),

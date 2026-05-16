@@ -98,6 +98,7 @@ struct PromptsPayload {
     #[serde(default)]
     router: Option<String>,
     decision: String,
+    action_execution: String,
     #[serde(default)]
     self_improvement: Option<String>,
     submodules: Vec<PromptModulePayload>,
@@ -308,6 +309,11 @@ pub(crate) async fn run_server() {
         "Decision",
         prompts_path.as_path(),
     );
+    let action_execution_instructions = required_prompt(
+        prompt_overrides.action_execution.as_deref(),
+        "Action Execution",
+        prompts_path.as_path(),
+    );
     required_prompt(
         prompt_overrides.self_improvement.as_deref(),
         "Self Improvement",
@@ -442,6 +448,7 @@ pub(crate) async fn run_server() {
                 base_instructions.clone(),
                 router_instructions,
                 decision_instructions,
+                action_execution_instructions,
             ),
         ),
         RuntimeState::new(
@@ -1059,6 +1066,7 @@ async fn debug_update_prompts(
             .clone()
             .or_else(|| current_overrides.router.clone()),
         decision: Some(payload.decision.clone()),
+        action_execution: Some(payload.action_execution.clone()),
         self_improvement: payload
             .self_improvement
             .clone()
@@ -1121,6 +1129,7 @@ async fn admin_run_thought_process(
         &state.runtime.modules.runtime,
         &state.prompts.base_or_default(&overrides),
         &state.prompts.decision_or_default(&overrides),
+        &state.prompts.action_execution_or_default(&overrides),
         mode,
     )
     .await
@@ -1156,6 +1165,7 @@ async fn admin_run_thought_process_component(
     let overrides = state.prompts.overrides.read().await.clone();
     let base = state.prompts.base_or_default(&overrides);
     let decision_instructions = state.prompts.decision_or_default(&overrides);
+    let action_execution_instructions = state.prompts.action_execution_or_default(&overrides);
     let component = component.trim().to_ascii_lowercase();
 
     match component.as_str() {
@@ -1259,6 +1269,7 @@ async fn admin_run_thought_process_component(
                 emit_event_blocking(state.clone()),
                 &state.runtime.modules.runtime,
                 &state,
+                &action_execution_instructions,
             );
             let output = action_execution
                 .execute(&available_actions, &selected_actions, mode)
@@ -2509,6 +2520,7 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
     let base = state.prompts.base_or_default(&overrides);
     let decision = state.prompts.decision_or_default(&overrides);
     let router = state.prompts.router_or_default(&overrides);
+    let action_execution = state.prompts.action_execution_or_default(&overrides);
     let self_improvement = overrides.self_improvement.clone().unwrap_or_default();
     let module_defs = state
         .runtime
@@ -2533,6 +2545,7 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
         base,
         router: Some(router),
         decision,
+        action_execution,
         self_improvement: Some(self_improvement),
         submodules,
     })
