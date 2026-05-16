@@ -275,10 +275,11 @@ but examples, style rules, and final wording policy for user-facing text should 
 `Action Execution` prompt section.
 
 Action execution must support dry-run as an inspection mode, not as a partial external execution.
-In dry-run mode it exposes the executor input that would be used in commit mode and records that in
-trace, but it must not emit events, call tools, or call an LLM with tools attached. For a direct
-tool action, dry-run shows the tool name and tool input. For an LLM-mediated action, dry-run shows
-the LLM input and the fact that tools would only be available in commit mode. Commit mode performs
+In dry-run mode it must not emit events, mutate application state, call external tools, or send
+messages to users. Stateless LLM realization is not an application side effect for this purpose:
+LLM-mediated conversation actions should still run so operators can inspect the realized surface
+candidate for the same selected action input. For tool-mediated actions, dry-run shows the tool
+name, tool input, and LLM/tool plan without performing the external tool call. Commit mode performs
 the selected action and records action results.
 
 ## Trace

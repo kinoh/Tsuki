@@ -770,14 +770,19 @@ impl UserReplyExecutor {
 #[async_trait]
 impl ActionExecutor for UserReplyExecutor {
     async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError> {
-        Ok(json!({
-            "mode": "llm_mediated_user_reply",
-            "llm_input": input,
-            "tools_available": false,
-        }))
+        self.realize(input).await.map(Value::String)
     }
 
     async fn commit(&self, input: &str) -> Result<String, ActionExecutionError> {
+        let text = self.realize(input).await?;
+        let event = response_text(text.clone());
+        (self.emit_event)(event);
+        Ok(text)
+    }
+}
+
+impl UserReplyExecutor {
+    async fn realize(&self, input: &str) -> Result<String, ActionExecutionError> {
         let response = self
             .llm
             .respond(LlmRequest {
@@ -787,8 +792,6 @@ impl ActionExecutor for UserReplyExecutor {
             .map_err(|err| ActionExecutionError {
                 message: err.to_string(),
             })?;
-        let event = response_text(response.text.clone());
-        (self.emit_event)(event);
         Ok(response.text)
     }
 }
@@ -969,7 +972,7 @@ impl ActionExecutionService {
                 ThoughtProcessRunMode::DryRun => executor
                     .inspect(&action.input)
                     .await
-                    .map(|value| value.to_string()),
+                    .map(action_inspection_output),
                 ThoughtProcessRunMode::Commit => executor.commit(&action.input).await,
             };
             match execution {
@@ -1121,6 +1124,13 @@ fn tool_name(tool: &async_openai::types::responses::Tool) -> Option<&str> {
     match tool {
         async_openai::types::responses::Tool::Function(def) => Some(def.name.as_str()),
         _ => None,
+    }
+}
+
+fn action_inspection_output(value: Value) -> String {
+    match value {
+        Value::String(text) => text,
+        other => other.to_string(),
     }
 }
 
@@ -1441,7 +1451,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn action_execution_dry_run_inspects_user_reply_without_emitting_or_calling_llm() {
+    async fn action_execution_dry_run_realizes_user_reply_without_emitting() {
         let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
         let emitted_for_executor = emitted.clone();
         let reply_requests = Arc::new(Mutex::new(Vec::new()));
@@ -1468,9 +1478,9 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert!(results[0].ok);
-        assert!(results[0].output.contains("llm_mediated_user_reply"));
+        assert_eq!(results[0].output, "hello surface");
         assert!(emitted.lock().expect("lock").is_empty());
-        assert!(reply_requests.lock().expect("lock").is_empty());
+        assert_eq!(reply_requests.lock().expect("lock").len(), 1);
     }
 
     #[tokio::test]
