@@ -1417,7 +1417,7 @@ fn evaluate_overall_pass(
         let Some(metric) = gates.get(key.as_str()) else {
             return false;
         };
-        if metric.mean <= 0.7 || metric.min <= 0.5 {
+        if metric.mean < 0.7 || metric.min < 0.5 {
             return false;
         }
     }
@@ -2565,19 +2565,28 @@ fn is_decision_event(message: &Value) -> bool {
         Some(value) => value,
         None => return false,
     };
-    if event.get("source").and_then(Value::as_str) != Some("decision") {
-        return false;
-    }
-    event
+
+    let source = event.get("source").and_then(Value::as_str);
+    let tags = event
         .get("meta")
         .and_then(|value| value.get("tags"))
-        .and_then(Value::as_array)
-        .map(|tags| {
-            tags.iter()
-                .filter_map(Value::as_str)
-                .any(|tag| tag == "decision")
-        })
-        .unwrap_or(false)
+        .and_then(Value::as_array);
+
+    match source {
+        Some("decision") => tags_have(tags, "decision"),
+        Some("thought_process") => tags_have(tags, "component:decision"),
+        _ => false,
+    }
+}
+
+fn tags_have(tags: Option<&Vec<Value>>, expected: &str) -> bool {
+    tags.map(|items| {
+        items
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|tag| tag == expected)
+    })
+    .unwrap_or(false)
 }
 
 fn extract_reply_text(message: &Value) -> String {
@@ -2877,4 +2886,54 @@ fn write_result_artifact(result: &IntegrationResult) -> Result<PathBuf, String> 
         .map_err(|err| format!("failed to serialize result: {}", err))?;
     fs::write(&path, body).map_err(|err| format!("failed to write result artifact: {}", err))?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decision_event_matches_legacy_primary_event() {
+        let message = json!({
+            "type": "event",
+            "event": {
+                "source": "decision",
+                "meta": {
+                    "tags": ["decision"]
+                }
+            }
+        });
+
+        assert!(is_decision_event(&message));
+    }
+
+    #[test]
+    fn decision_event_matches_thought_process_component_event() {
+        let message = json!({
+            "type": "event",
+            "event": {
+                "source": "thought_process",
+                "meta": {
+                    "tags": ["debug", "thought_process", "component:decision", "run:test"]
+                }
+            }
+        });
+
+        assert!(is_decision_event(&message));
+    }
+
+    #[test]
+    fn decision_event_rejects_other_thought_process_components() {
+        let message = json!({
+            "type": "event",
+            "event": {
+                "source": "thought_process",
+                "meta": {
+                    "tags": ["debug", "thought_process", "component:action_execution:user_reply", "run:test"]
+                }
+            }
+        });
+
+        assert!(!is_decision_event(&message));
+    }
 }

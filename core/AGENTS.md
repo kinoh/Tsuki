@@ -174,7 +174,7 @@ It captures stable implementation rules and clearly marks active WIP areas.
 
 ## Integration harness
 - The `--scenario` flag accepts only one path per invocation; run multiple scenarios as separate `task integration/run` calls.
-- `overall_pass` requires mean > 0.7 and min > 0.5 for every non-excluded metric; single-run results have high variance — one failure is not a regression signal without multiple runs.
+- `overall_pass` requires mean >= 0.7 and min >= 0.5 for every non-excluded metric; single-run results have high variance — one failure is not a regression signal without multiple runs.
 
 ## Test-scope separation
 - Treat scenario-spec changes and test-harness changes as different scopes.

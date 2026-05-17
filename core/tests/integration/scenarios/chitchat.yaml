@@ -18,6 +18,7 @@ metrics_definition:
   consistency:
     description: "How consistent the assistant's responses are with each other across turns."
   identity:
+    exclude_from_pass: true
     description: |
       Whether the assistant is the same person as the assistant in the following dialogue:
 

@@ -38,9 +38,12 @@ metrics_definition:
   recalled_context_presence:
     description: |
       Inspect debug events for the decision module.
-      Score high only when a decision `llm.raw` event payload `context` contains a non-empty
-      `recalled_event_history:` section with recalled lines clearly matching the earlier assistant-side
-      kernel explanation from restored history, especially wording equivalent to:
+      Score high only when a decision-stage event contains a non-empty recalled-history section
+      in the model input or debug payload. Accept the current `<recalled_history>` section in
+      `thought_process` events with `component:decision`, and accept equivalent structured decision
+      context fields that carry recalled conversation lines.
+      The recalled lines should clearly match the earlier assistant-side kernel explanation from
+      restored history, especially wording equivalent to:
       「カーネルは『データ同士の似てる度合い』を計算する関数だよ！」
       Return a low score if the recalled section is empty, irrelevant, or only about generic kernel facts.
 
