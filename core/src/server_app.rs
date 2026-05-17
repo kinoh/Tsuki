@@ -517,6 +517,7 @@ pub(crate) async fn run_server() {
             "/prompts/data",
             get(debug_get_prompts).post(debug_update_prompts),
         )
+        .route("/prompts/reload", post(debug_reload_prompts))
         .route(
             "/thought-process/event-history",
             post(admin_preview_thought_process_event_history),
@@ -1029,14 +1030,53 @@ async fn debug_update_prompts(
     State(state): State<AppState>,
     Json(payload): Json<PromptsPayload>,
 ) -> Result<Json<PromptsPayload>, (StatusCode, String)> {
+    apply_prompt_overrides(&state, payload_to_overrides(&state, &payload).await?, true).await?;
+    Ok(Json(payload))
+}
+
+async fn debug_reload_prompts(
+    State(state): State<AppState>,
+) -> Result<Json<PromptsPayload>, (StatusCode, String)> {
+    let overrides = load_prompts(&state.prompts.path)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    apply_prompt_overrides(&state, overrides, false).await?;
+    build_effective_prompts(&state).await.map(Json)
+}
+
+async fn payload_to_overrides(
+    state: &AppState,
+    payload: &PromptsPayload,
+) -> Result<PromptOverrides, (StatusCode, String)> {
     let mut submodules = std::collections::HashMap::new();
     for module in &payload.submodules {
         submodules.insert(module.name.clone(), module.instructions.clone());
     }
-    let desired_modules = payload
+    let current_overrides = state.prompts.overrides.read().await.clone();
+    Ok(PromptOverrides {
+        base: Some(payload.base.clone()),
+        router: payload
+            .router
+            .clone()
+            .or_else(|| current_overrides.router.clone()),
+        decision: Some(payload.decision.clone()),
+        action_execution: Some(payload.action_execution.clone()),
+        self_improvement: payload
+            .self_improvement
+            .clone()
+            .or_else(|| current_overrides.self_improvement.clone()),
+        submodules,
+    })
+}
+
+async fn apply_prompt_overrides(
+    state: &AppState,
+    overrides: PromptOverrides,
+    persist: bool,
+) -> Result<(), (StatusCode, String)> {
+    let desired_modules = overrides
         .submodules
-        .iter()
-        .map(|module| module.name.as_str())
+        .keys()
+        .map(String::as_str)
         .collect::<std::collections::HashSet<_>>();
     let active_modules = state
         .runtime
@@ -1056,34 +1096,21 @@ async fn debug_update_prompts(
                 .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
         }
     }
-    for module in &payload.submodules {
+    for (name, instructions) in &overrides.submodules {
         state
             .runtime
             .modules
             .registry
-            .upsert(&module.name, &module.instructions, true)
+            .upsert(name, instructions, true)
             .await
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     }
-    let current_overrides = state.prompts.overrides.read().await.clone();
-    let overrides = PromptOverrides {
-        base: Some(payload.base.clone()),
-        router: payload
-            .router
-            .clone()
-            .or_else(|| current_overrides.router.clone()),
-        decision: Some(payload.decision.clone()),
-        action_execution: Some(payload.action_execution.clone()),
-        self_improvement: payload
-            .self_improvement
-            .clone()
-            .or_else(|| current_overrides.self_improvement.clone()),
-        submodules,
-    };
-    write_prompts(&state.prompts.path, &overrides)
-        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    if persist {
+        write_prompts(&state.prompts.path, &overrides)
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+    }
     *state.prompts.overrides.write().await = overrides;
-    Ok(Json(payload))
+    Ok(())
 }
 
 async fn debug_get_state_records(

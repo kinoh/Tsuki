@@ -240,7 +240,8 @@
             <div class="title-row">
               <h2 id="inspectTitle">Inspecting: Event History</h2>
               <div class="row">
-                <button class="secondary" id="loadPrompts">Load Prompts</button>
+                <button class="secondary" id="resetPrompts">Reset</button>
+                <button class="secondary" id="loadPrompts">Load From File</button>
                 <button id="savePrompt">Save Prompt</button>
               </div>
             </div>
@@ -677,14 +678,27 @@
         }
       }
 
-      async function loadPrompts() {
-        status("promptStatus", "Loading...");
+      async function refreshPrompts() {
+        status("promptStatus", "Refreshing...");
         try {
           const prompts = await requestJson("/admin/prompts/data");
           state.prompts = prompts;
           renderDag();
           renderInspection();
-          status("promptStatus", "Loaded.");
+          status("promptStatus", "Reset to server state.");
+        } catch (err) {
+          status("promptStatus", err.message, true);
+        }
+      }
+
+      async function loadPrompts() {
+        status("promptStatus", "Loading from file...");
+        try {
+          const prompts = await requestJson("/admin/prompts/reload", { method: "POST" });
+          state.prompts = prompts;
+          renderDag();
+          renderInspection();
+          status("promptStatus", "Loaded from prompts.md.");
         } catch (err) {
           status("promptStatus", err.message, true);
         }
@@ -693,7 +707,7 @@
       async function savePrompts() {
         status("promptStatus", "Saving...");
         try {
-          if (!state.prompts) await loadPrompts();
+          if (!state.prompts) await refreshPrompts();
           if (!state.prompts) throw new Error("Prompts are not loaded.");
           const payload = {
             ...(state.prompts || {}),
@@ -745,6 +759,7 @@
         renderDag();
         renderInspection();
       });
+      $("resetPrompts").addEventListener("click", refreshPrompts);
       $("loadPrompts").addEventListener("click", loadPrompts);
       $("savePrompt").addEventListener("click", savePrompts);
       $("topLogoutButton").addEventListener("click", logout);
@@ -765,7 +780,7 @@
       restoreSession();
       renderDag();
       renderInspection();
-      loadPrompts().then(() => {
+      refreshPrompts().then(() => {
         if (state.eventHistoryPreview.length === 0) refreshEventHistoryPreview();
       });
     </script>
