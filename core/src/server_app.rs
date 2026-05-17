@@ -608,6 +608,13 @@ fn validate_required_config(config: &Config) {
             "config.toml [router.multimodal_embedding].primary_source must be one of: text, multimodal, hybrid"
         );
     }
+    if config.router.multimodal_embedding.enabled
+        && config.router.multimodal_embedding.shadow_enabled
+    {
+        println!(
+            "CONFIG_WARNING key=router.multimodal_embedding.shadow_enabled reason=\"shadow multimodal retrieval is executed but is not surfaced in thought-process decision context\""
+        );
+    }
     if config.tts.ja_accent_url.trim().is_empty() {
         panic!("config.toml [tts].ja_accent_url must not be empty");
     }

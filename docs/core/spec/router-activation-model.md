@@ -12,16 +12,19 @@ RouterInput
   → router_symbolization_service   (literal text description of input)
   → concept_retrieval_service      (embedding + vector search → candidates)
   → concept_activation_service     (recall_query + active-node snapshot)
-  → router event emission
+  → thought-process cognition context
 ```
 
 ## Service Responsibilities
 
-### `application/router_service`
+### `application/thought_process_service::AppCognition`
 
-Orchestrates the activation flow. Emits router state and debug events.
+Orchestrates router activation as the cognition stage of the thought process. It builds the
+Decision context from recent event history, symbolized input, concept candidates, active concepts,
+conversation recall, and available deliberation contributors.
 
-Must not own: decision planning, respond/ignore choice, execution/module selection.
+Must not own: graph persistence primitives, embedding implementation details, Decision output
+schema, or Action Execution behavior.
 
 ### `input_ingress`
 
@@ -33,7 +36,7 @@ Must not own: router behavior, LLM calls, graph access.
 
 Converts `RouterInput` into a literal text description for use in vector search.
 
-Must not own: vector search, graph activation, router event emission.
+Must not own: vector search, graph activation, or decision-context assembly.
 
 ### `router_symbolizer`
 
@@ -51,7 +54,7 @@ Must not own: activation state mutation, router event emission.
 ### `application/concept_activation_service`
 
 Converts scored candidates into active concept state (recall_query + arousal updates).
-Returns the active-node snapshot consumed by the router event.
+Returns the active-node snapshot consumed by cognition.
 
 Must not own: raw input interpretation, symbolization, downstream decision behavior.
 
@@ -65,6 +68,7 @@ Must not own: router stage ordering, OpenAI/Gemini flow decisions, decision logi
 
 - New input modalities belong in `input_ingress` (payload shape) and `router_symbolizer`
   (vendor adapter). The rest of the flow is modality-agnostic.
-- If symbolization starts serving non-router consumers, expose it as a typed domain interface
-  rather than sharing the router-internal service directly.
-- Do not add concept activation to the Decision stage — consume what Router already emitted.
+- If symbolization starts serving non-cognition consumers, expose it as a typed domain interface
+  rather than sharing the cognition-internal service directly.
+- Do not add concept graph reads to the Decision stage. Decision consumes the formal cognition
+  context and deliberation outputs.

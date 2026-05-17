@@ -67,19 +67,6 @@ pub(crate) fn role_text_output(
     emit(source, "text", json!({ "text": text }), tags)
 }
 
-pub(crate) fn router_state(payload: Value) -> Event {
-    emit("router", "state", payload, vec!["router".to_string()])
-}
-
-pub(crate) fn concept_graph_query(payload: Value) -> Event {
-    emit(
-        "router",
-        "state",
-        payload,
-        vec!["debug".to_string(), "concept_graph.query".to_string()],
-    )
-}
-
 pub(crate) fn llm_raw(source: &str, payload: Value, extra_tags: Vec<String>) -> Event {
     let mut tags = vec!["debug".to_string(), "llm.raw".to_string()];
     tags.extend(extra_tags);

@@ -8,7 +8,6 @@ pub mod improve_approval_service;
 pub mod improve_service;
 pub mod module_bootstrap;
 pub mod pipeline_service;
-pub mod router_service;
 pub mod router_symbolization_service;
 pub mod scheduler_notice_service;
 pub mod scheduler_service;
