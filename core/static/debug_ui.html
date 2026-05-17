@@ -632,6 +632,51 @@
         return JSON.parse(raw);
       }
 
+      function parseExecutableIntent(raw) {
+        const intent = {};
+        for (const segment of String(raw || "").split(";")) {
+          const trimmed = segment.trim();
+          if (!trimmed) continue;
+          const separator = trimmed.indexOf("=");
+          if (separator < 0) throw new Error(`Invalid intent candidate segment: ${trimmed}`);
+          const key = trimmed.slice(0, separator).trim();
+          const value = trimmed.slice(separator + 1).trim();
+          if (key === "operation" || key === "motive" || key === "target") {
+            intent[key] = value;
+          } else {
+            throw new Error(`Unknown intent candidate field: ${key}`);
+          }
+        }
+        for (const key of ["operation", "motive", "target"]) {
+          if (!intent[key]) throw new Error(`Intent candidate missing ${key}.`);
+        }
+        return intent;
+      }
+
+      function executableActionsForRun(run) {
+        const actions = run?.result?.decision_output?.actions || [];
+        const candidates = run?.result?.deliberation_contributions?.intent_candidates || [];
+        return actions.map((action) => {
+          if (action.name !== "user_reply") return action;
+          const source = action.payload?.source;
+          const candidate = candidates.find((item) => item.source === source);
+          if (!candidate) throw new Error(`Intent candidate not found: ${source || "(empty)"}`);
+          return {
+            name: action.name,
+            payload: parseExecutableIntent(candidate.text),
+          };
+        });
+      }
+
+      function actionContextForRun(run) {
+        const context = run?.result?.decision_context?.action_context || {};
+        return {
+          recent_event_history: context.recent_event_history || "none",
+          recalled_history: context.recalled_history || "none",
+          latest_input: context.latest_input || "none",
+        };
+      }
+
       function componentPayload(component) {
         const run = state.lastRun;
         if (!run) throw new Error("Run the thought process first.");
@@ -656,8 +701,8 @@
           return {
             mode,
             available_actions: run.result.decision_context.available_actions,
-            selected_actions: run.result.decision_output.actions,
-            action_context: run.result.decision_context.action_context,
+            selected_actions: executableActionsForRun(run),
+            action_context: actionContextForRun(run),
           };
         }
         throw new Error("Unknown component.");
