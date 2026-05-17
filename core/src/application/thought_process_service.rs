@@ -164,6 +164,12 @@ pub(crate) struct ThoughtProcessResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CognitionRunResult {
+    pub(crate) context: DecisionContext,
+    pub(crate) timings: Vec<ComponentTiming>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ThoughtProcessError {
     Cognition(String),
     Deliberation(String),
@@ -194,7 +200,7 @@ pub(crate) trait CognitionComponent: Send + Sync {
     async fn build_decision_context(
         &self,
         input: &ThoughtProcessInput,
-    ) -> Result<DecisionContext, String>;
+    ) -> Result<CognitionRunResult, String>;
 }
 
 #[async_trait]
@@ -267,8 +273,8 @@ impl ThoughtProcessService {
         let emit_observation = self.emit_component_event.as_ref();
 
         let cognition_started = Instant::now();
-        let decision_context = match self.cognition.build_decision_context(input).await {
-            Ok(context) => {
+        let cognition_run = match self.cognition.build_decision_context(input).await {
+            Ok(run) => {
                 let elapsed_ms = cognition_started.elapsed().as_millis();
                 if let Some(emit_event) = emit_observation {
                     emit_component_observation(
@@ -277,14 +283,15 @@ impl ThoughtProcessService {
                         ComponentObservation {
                             component: "cognition",
                             input: Some(json!({ "events": _trace_payload(&input.events) })),
-                            output: Some(_trace_payload(&context)),
+                            output: Some(_trace_payload(&run.context)),
                             elapsed_ms,
+                            metrics: Some(_trace_payload(&run.timings)),
                             usage: None,
                             error: None,
                         },
                     );
                 }
-                context
+                run
             }
             Err(err) => {
                 let elapsed_ms = cognition_started.elapsed().as_millis();
@@ -297,6 +304,7 @@ impl ThoughtProcessService {
                             input: Some(json!({ "events": _trace_payload(&input.events) })),
                             output: None,
                             elapsed_ms,
+                            metrics: None,
                             usage: None,
                             error: Some(err.clone()),
                         },
@@ -310,6 +318,8 @@ impl ThoughtProcessService {
             cognition_started.elapsed().as_millis(),
             true,
         ));
+        timings.extend(cognition_run.timings.clone());
+        let decision_context = cognition_run.context;
 
         let deliberation_result = run_deliberation_contributors(
             &self.contributors,
@@ -341,6 +351,7 @@ impl ThoughtProcessService {
                             input: Some(json!({ "prompt": decision_input })),
                             output: Some(_trace_payload(&result.output)),
                             elapsed_ms,
+                            metrics: None,
                             usage: result.llm_usage.clone(),
                             error: None,
                         },
@@ -359,6 +370,7 @@ impl ThoughtProcessService {
                             input: Some(json!({ "prompt": decision_input })),
                             output: None,
                             elapsed_ms,
+                            metrics: None,
                             usage: None,
                             error: Some(err.to_string()),
                         },
@@ -524,26 +536,40 @@ impl CognitionComponent for AppCognition {
     async fn build_decision_context(
         &self,
         input: &ThoughtProcessInput,
-    ) -> Result<DecisionContext, String> {
+    ) -> Result<CognitionRunResult, String> {
+        let mut timings = Vec::<ComponentTiming>::new();
         let latest_input = latest_router_input(&input.events);
         let input_text = latest_input
             .as_ref()
             .map(RouterInput::display_text)
             .unwrap_or_default();
+        let history_started = Instant::now();
         let recent_event_history = format_event_lines(&input.events);
+        timings.push(component_timing(
+            "cognition:recent_event_history",
+            history_started.elapsed().as_millis(),
+            true,
+        ));
         let mut context_parts = Vec::<String>::new();
         context_parts.push(format!(
             "<recent_event_history>\n{}\n</recent_event_history>",
             recent_event_history
         ));
         if let Some(router_input) = latest_input.as_ref() {
+            let symbolization_started = Instant::now();
             let symbolization =
                 symbolize(router_input, self.state.services.router_symbolizer.as_ref()).await;
+            timings.push(component_timing(
+                "cognition:symbolize",
+                symbolization_started.elapsed().as_millis(),
+                symbolization.error.is_none(),
+            ));
             if let Some(err) = &symbolization.error {
                 println!("COGNITION_SYMBOLIZE_ERROR error={}", err);
             }
             let concept_limit = self.state.config.router.query_terms_max.max(1);
             let active_state_limit = self.state.config.router.active_state_limit.max(1);
+            let retrieval_started = Instant::now();
             let retrieval = retrieve_concepts(
                 &symbolization.text,
                 router_input,
@@ -552,9 +578,15 @@ impl CognitionComponent for AppCognition {
                 self.state.services.activation_concept_graph.as_ref(),
             )
             .await;
+            timings.push(component_timing(
+                "cognition:concept_retrieval",
+                retrieval_started.elapsed().as_millis(),
+                retrieval.errors.is_empty(),
+            ));
             for err in &retrieval.errors {
                 println!("COGNITION_CONCEPT_RETRIEVAL_ERROR error={}", err);
             }
+            let activation_started = Instant::now();
             let activation = activate_concepts(
                 &retrieval.candidate_concepts,
                 active_state_limit,
@@ -562,13 +594,30 @@ impl CognitionComponent for AppCognition {
                 self.dry_run,
             )
             .await;
+            timings.push(component_timing(
+                "cognition:concept_activation",
+                activation_started.elapsed().as_millis(),
+                activation.errors.is_empty(),
+            ));
             for err in &activation.errors {
                 println!("COGNITION_CONCEPT_ACTIVATION_ERROR error={}", err);
             }
+            let contributors_started = Instant::now();
             let deliberation_contributors =
                 list_active_deliberation_contributors(&self.state).await?;
+            timings.push(component_timing(
+                "cognition:active_deliberation_contributors",
+                contributors_started.elapsed().as_millis(),
+                true,
+            ));
+            let recall_started = Instant::now();
             let recalled_history =
                 format_recalled_event_history(&self.state, &input_text, &HashSet::new()).await;
+            timings.push(component_timing(
+                "cognition:conversation_recall",
+                recall_started.elapsed().as_millis(),
+                true,
+            ));
             context_parts.push(format!(
                 "<latest_input>\n{}\n</latest_input>",
                 input_text.trim()
@@ -594,10 +643,13 @@ impl CognitionComponent for AppCognition {
                 "<deliberation_contributors>\n{}\n</deliberation_contributors>",
                 format_list_or_none(&deliberation_contributors)
             ));
-            return Ok(DecisionContext {
-                context: context_parts.join("\n\n"),
-                available_actions: default_available_actions(),
-                deliberation_contributors,
+            return Ok(CognitionRunResult {
+                context: DecisionContext {
+                    context: context_parts.join("\n\n"),
+                    available_actions: default_available_actions(),
+                    deliberation_contributors,
+                },
+                timings,
             });
         } else {
             context_parts.push("<latest_input>\nnone\n</latest_input>".to_string());
@@ -606,10 +658,13 @@ impl CognitionComponent for AppCognition {
             );
             context_parts.push("<recalled_history>\nnone\n</recalled_history>".to_string());
         }
-        Ok(DecisionContext {
-            context: context_parts.join("\n\n"),
-            available_actions: default_available_actions(),
-            deliberation_contributors: Vec::new(),
+        Ok(CognitionRunResult {
+            context: DecisionContext {
+                context: context_parts.join("\n\n"),
+                available_actions: default_available_actions(),
+                deliberation_contributors: Vec::new(),
+            },
+            timings,
         })
     }
 }
@@ -867,6 +922,7 @@ pub(crate) async fn run_deliberation_contributors(
                             input: Some(json!({ "decision_context": context.context.as_str() })),
                             output: Some(output_payload),
                             elapsed_ms,
+                            metrics: None,
                             usage: output.llm_usage.clone(),
                             error: None,
                         },
@@ -885,6 +941,7 @@ pub(crate) async fn run_deliberation_contributors(
                             input: Some(json!({ "decision_context": context.context.as_str() })),
                             output: None,
                             elapsed_ms,
+                            metrics: None,
                             usage: None,
                             error: Some(err.clone()),
                         },
@@ -1306,6 +1363,7 @@ impl ActionExecutionService {
                             input: Some(json!({ "action": _trace_payload(action) })),
                             output: None,
                             elapsed_ms: 0,
+                            metrics: None,
                             usage: None,
                             error: Some(error.clone()),
                         },
@@ -1339,6 +1397,7 @@ impl ActionExecutionService {
                             input: Some(json!({ "action": _trace_payload(action) })),
                             output: None,
                             elapsed_ms: 0,
+                            metrics: None,
                             usage: None,
                             error: Some(error.clone()),
                         },
@@ -1378,6 +1437,7 @@ impl ActionExecutionService {
                                 input: Some(json!({ "action": _trace_payload(action) })),
                                 output: None,
                                 elapsed_ms: 0,
+                                metrics: None,
                                 usage: None,
                                 error: Some(error.clone()),
                             },
@@ -1419,6 +1479,7 @@ impl ActionExecutionService {
                                 input: Some(json!({ "action": _trace_payload(action) })),
                                 output: Some(_trace_payload(&result)),
                                 elapsed_ms,
+                                metrics: None,
                                 usage: llm_usage,
                                 error: None,
                             },
@@ -1451,6 +1512,7 @@ impl ActionExecutionService {
                                 input: Some(json!({ "action": _trace_payload(action) })),
                                 output: None,
                                 elapsed_ms,
+                                metrics: None,
                                 usage: None,
                                 error: Some(error.clone()),
                             },
@@ -1506,6 +1568,7 @@ struct ComponentObservation<'a> {
     input: Option<Value>,
     output: Option<Value>,
     elapsed_ms: u128,
+    metrics: Option<Value>,
     usage: Option<ComponentLlmUsage>,
     error: Option<String>,
 }
@@ -1523,6 +1586,9 @@ fn emit_component_observation(
         payload.insert("output".to_string(), output);
     }
     payload.insert("elapsed_ms".to_string(), json!(observation.elapsed_ms));
+    if let Some(metrics) = observation.metrics {
+        payload.insert("metrics".to_string(), metrics);
+    }
     if let Some(usage) = observation.usage {
         payload.insert("usage".to_string(), _trace_payload(&usage));
     }
@@ -1725,12 +1791,15 @@ mod tests {
         async fn build_decision_context(
             &self,
             input: &ThoughtProcessInput,
-        ) -> Result<DecisionContext, String> {
+        ) -> Result<CognitionRunResult, String> {
             self.seen_event_count
                 .lock()
                 .expect("lock")
                 .push(input.events.len());
-            self.context.clone()
+            self.context.clone().map(|context| CognitionRunResult {
+                context,
+                timings: vec![component_timing("cognition:test", 1, true)],
+            })
         }
     }
 
@@ -2176,6 +2245,11 @@ mod tests {
         assert!(result.action_results[0].ok);
         assert_eq!(result.trace.deliberation.len(), 1);
         assert_eq!(result.trace.deliberation[0].source, "curiosity");
+        assert!(result
+            .trace
+            .timings
+            .iter()
+            .any(|timing| timing.component_key == "cognition:test"));
         assert_eq!(emitted.lock().expect("lock").len(), 2);
     }
 

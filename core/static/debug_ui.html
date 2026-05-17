@@ -488,6 +488,20 @@
         return { timings, llm_usages };
       }
 
+      function metricsForComponentWithChildren(componentKey) {
+        const trace = state.lastRun?.result?.trace || {};
+        const prefix = `${componentKey}:`;
+        const timings = (trace.timings || []).filter((item) => {
+          const key = item.component_key || "";
+          return key === componentKey || key.startsWith(prefix);
+        });
+        const llm_usages = (trace.llm_usages || []).filter((item) => {
+          const key = item.component_key || "";
+          return key === componentKey || key.startsWith(prefix);
+        });
+        return { timings, llm_usages };
+      }
+
       function componentKeysForNode(node) {
         if (node.kind === "component" && node.component === "cognition") return ["cognition"];
         if (node.kind === "component" && node.component === "decision") return ["decision"];
@@ -541,7 +555,7 @@
 
         if (inspecting.component === "cognition") {
           showContext(run?.event_history || state.eventHistoryPreview);
-          showMetrics(metricsFor("cognition"));
+          showMetrics(metricsForComponentWithChildren("cognition"));
           setPrompt("Cognition builds DecisionContext from event history using runtime code.", false);
           show(run?.result?.decision_context || {});
           return;

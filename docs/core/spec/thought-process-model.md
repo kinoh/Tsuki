@@ -304,6 +304,7 @@ Useful trace fields include:
 - rendered prompts and contexts
 - component output
 - component wall-clock timings for response-path analysis
+- component-owned sub-step timings when a component performs multiple runtime operations
 - LLM usage observations returned by component-owned LLM calls
 - available actions
 - selected actions
@@ -342,6 +343,7 @@ payload:
   input                # component-specific input snapshot
   output               # component-specific output, absent on failure
   elapsed_ms
+  metrics              # optional component-owned sub-metrics such as sub-step timings
   usage                # optional LLM usage copied from the component response
   error                # present only on failure
 ```

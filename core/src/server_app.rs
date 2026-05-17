@@ -1177,7 +1177,7 @@ async fn admin_run_thought_process_component(
                 )
             })?;
             let cognition = AppCognition::new(state.clone(), mode == ThoughtProcessRunMode::DryRun);
-            let decision_context = cognition
+            let cognition_run = cognition
                 .build_decision_context(&ThoughtProcessInput {
                     events: event_history,
                 })
@@ -1186,7 +1186,8 @@ async fn admin_run_thought_process_component(
             Ok(Json(ThoughtProcessComponentRunResponse {
                 component,
                 mode,
-                output: serde_json::to_value(decision_context).map_err(internal_serialize_error)?,
+                output: serde_json::to_value(cognition_run.context)
+                    .map_err(internal_serialize_error)?,
                 trace: Vec::new(),
             }))
         }
