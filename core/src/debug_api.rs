@@ -17,8 +17,6 @@ pub(crate) struct ThoughtProcessRunRequest {
     #[serde(default)]
     pub(crate) history_limit: Option<usize>,
     #[serde(default)]
-    pub(crate) include_history: Option<bool>,
-    #[serde(default)]
     pub(crate) history_cutoff_ts: Option<String>,
     #[serde(default)]
     pub(crate) exclude_event_ids: Option<Vec<String>>,

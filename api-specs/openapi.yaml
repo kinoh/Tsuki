@@ -681,9 +681,6 @@ components:
           type: integer
           minimum: 0
           maximum: 1000
-        include_history:
-          type: boolean
-          default: true
         history_cutoff_ts:
           type: string
           format: date-time

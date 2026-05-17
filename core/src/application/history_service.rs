@@ -62,7 +62,7 @@ pub(crate) async fn latest_events(
             .map(|event| (event.ts.clone(), event.event_id.clone()));
 
         for event in batch {
-            if is_debug_event(&event) {
+            if !is_model_context_event(&event) {
                 continue;
             }
             if excluded_event_ids
@@ -219,6 +219,19 @@ fn is_debug_event(event: &Event) -> bool {
     event.meta.tags.iter().any(|tag| tag == "debug")
 }
 
+fn is_model_context_event(event: &Event) -> bool {
+    if is_debug_event(event) {
+        return false;
+    }
+    let tags = &event.meta.tags;
+    event.source == "user"
+        || tags.iter().any(|tag| tag == "response")
+        || tags.iter().any(|tag| tag == "decision")
+        || tags.iter().any(|tag| tag == "submodule")
+        || event.source.starts_with("submodule:")
+        || is_observability_event(event)
+}
+
 fn is_observability_event(event: &Event) -> bool {
     event.meta.tags.iter().any(|tag| tag == "observe")
 }
@@ -262,5 +275,27 @@ mod tests {
         assert!(rendered.contains("observe | tool=shell_exec__execute status=ok"));
         assert!(rendered.contains("args="));
         assert!(rendered.contains("output="));
+    }
+
+    #[test]
+    fn model_context_events_exclude_operational_events() {
+        let operational = rehydrate_event(
+            "self-improvement-1".to_string(),
+            "2026-03-19T14:33:45.000000000Z".to_string(),
+            "self_improvement".to_string(),
+            "text".to_string(),
+            json!({ "status": "success" }),
+            vec!["self_improvement.module_processed".to_string()],
+        );
+
+        assert!(!is_model_context_event(&operational));
+        assert!(is_model_context_event(&input_text(
+            "user", "message", "hello"
+        )));
+        assert!(is_model_context_event(&observe_event()));
+        assert!(is_model_context_event(&decision_text(
+            "decision=respond reason=test".to_string(),
+            false
+        )));
     }
 }

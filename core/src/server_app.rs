@@ -1323,19 +1323,15 @@ async fn admin_event_history(
         .unwrap_or_default()
         .into_iter()
         .collect::<std::collections::HashSet<_>>();
-    let mut event_history = if payload.include_history.unwrap_or(true) {
-        latest_events(
-            state,
-            payload
-                .history_limit
-                .unwrap_or(state.config.limits.decision_history),
-            payload.history_cutoff_ts.as_deref(),
-            Some(&excluded_event_ids),
-        )
-        .await
-    } else {
-        Vec::new()
-    };
+    let mut event_history = latest_events(
+        state,
+        payload
+            .history_limit
+            .unwrap_or(state.config.limits.decision_history),
+        payload.history_cutoff_ts.as_deref(),
+        Some(&excluded_event_ids),
+    )
+    .await;
     if let Some(input) = payload
         .input
         .as_deref()

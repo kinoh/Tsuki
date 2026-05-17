@@ -212,7 +212,6 @@
                 <input id="historyLimit" type="number" min="0" max="1000" value="40" />
               </div>
             </div>
-            <label><input id="includeHistory" type="checkbox" checked /> Include event history</label>
             <div class="row">
               <button id="runThought">Run Thought Process</button>
               <button class="secondary" id="clearOutput">Clear</button>
@@ -316,9 +315,6 @@
         if (Number.isFinite(saved.historyLimit)) {
           $("historyLimit").value = String(saved.historyLimit);
         }
-        if (typeof saved.includeHistory === "boolean") {
-          $("includeHistory").checked = saved.includeHistory;
-        }
         $("syntheticInput").value = saved.syntheticInput || "";
         state.lastRun = saved.lastRun || null;
         state.eventHistoryPreview = Array.isArray(saved.eventHistoryPreview)
@@ -338,7 +334,6 @@
           inputText: $("inputText").value,
           mode: $("mode").value,
           historyLimit: Number($("historyLimit").value || 0),
-          includeHistory: $("includeHistory").checked,
           syntheticInput: $("syntheticInput").value,
           inspecting: state.inspecting,
           lastRun: state.lastRun,
@@ -370,7 +365,6 @@
         return {
           input: $("inputText").value.trim() || null,
           mode: $("mode").value,
-          include_history: $("includeHistory").checked,
           history_limit: Number($("historyLimit").value || 0),
         };
       }
@@ -753,7 +747,7 @@
       $("loadPrompts").addEventListener("click", loadPrompts);
       $("savePrompt").addEventListener("click", savePrompts);
       $("topLogoutButton").addEventListener("click", logout);
-      ["inputText", "historyLimit", "includeHistory"].forEach((id) => {
+      ["inputText", "historyLimit"].forEach((id) => {
         $(id).addEventListener("input", () => {
           saveSession();
           scheduleEventHistoryPreview();

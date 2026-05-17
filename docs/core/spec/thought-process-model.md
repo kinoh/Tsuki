@@ -49,6 +49,10 @@ The caller may decide how far back to retrieve events, but it should not pre-res
 concept graph context, recalled history, or available action choices as separate run inputs. Those
 belong to cognition.
 
+History limits apply to events that are eligible for model context, not to raw event-store rows.
+Operational records such as scheduler and self-improvement maintenance events may be scanned, but
+they must not consume history budget when they are omitted from the model-facing context.
+
 The input contract should stay narrow:
 
 ```
@@ -431,6 +435,8 @@ Useful inspection surfaces:
 The UI should make clear whether a component run is preview-only, executed in dry-run mode, or
 executed in commit mode. Dry-run/commit is a component execution mode for observing or applying
 that component's own side effects, not a separate effect aggregation system.
+History preview uses a numeric history limit only; setting the limit to `0` is the way to inspect a
+run without prior event history.
 
 Component-level runs are allowed only when their inputs are the same contracts the component would
 receive inside a thought process:
