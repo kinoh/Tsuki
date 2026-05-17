@@ -291,6 +291,8 @@ Useful trace fields include:
 - component input preview
 - rendered prompts and contexts
 - component output
+- component wall-clock timings for response-path analysis
+- LLM usage observations returned by component-owned LLM calls
 - available actions
 - selected actions
 - intended state changes in dry-run mode
@@ -299,6 +301,9 @@ Useful trace fields include:
 - logs and timing
 
 Because trace is observability data, downstream components must not rely on it for behavior.
+LLM usage persistence remains owned by the LLM usage recorder. Thought process trace may copy
+usage values and usage record identifiers returned from LLM calls so an inspection run can show
+token consumption without making the usage table aware of thought process runs.
 
 ## Analysis Components
 

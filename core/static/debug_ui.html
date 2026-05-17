@@ -446,6 +446,20 @@
         };
       }
 
+      function metricsFor(componentKey) {
+        const trace = state.lastRun?.result?.trace || {};
+        const timings = (trace.timings || []).filter((item) => item.component_key === componentKey);
+        const llm_usages = (trace.llm_usages || []).filter((item) => item.component_key === componentKey);
+        return { timings, llm_usages };
+      }
+
+      function metricsWithPrefix(prefix) {
+        const trace = state.lastRun?.result?.trace || {};
+        const timings = (trace.timings || []).filter((item) => (item.component_key || "").startsWith(prefix));
+        const llm_usages = (trace.llm_usages || []).filter((item) => (item.component_key || "").startsWith(prefix));
+        return { timings, llm_usages };
+      }
+
       function renderInspection() {
         const run = state.lastRun;
         const inspecting = state.inspecting;
@@ -464,14 +478,20 @@
         }
 
         if (inspecting.component === "cognition") {
-          showContext(run?.event_history || state.eventHistoryPreview);
+          showContext({
+            event_history: run?.event_history || state.eventHistoryPreview,
+            metrics: metricsFor("cognition"),
+          });
           setPrompt("Cognition builds DecisionContext from event history using runtime code.", false);
           show(run?.result?.decision_context || {});
           return;
         }
 
         if (inspecting.kind === "contributor") {
-          showContext(run?.result?.decision_context || {});
+          showContext({
+            decision_context: run?.result?.decision_context || {},
+            metrics: metricsFor(`deliberation:${inspecting.name}`),
+          });
           setPrompt(findContributorPrompt(inspecting.name), true);
           show(contributionFor(inspecting.name));
           return;
@@ -481,6 +501,7 @@
           showContext({
             decision_context: run?.result?.decision_context || null,
             deliberation_contributions: run?.result?.deliberation_contributions || null,
+            metrics: metricsFor("decision"),
           });
           setPrompt(state.prompts?.decision || "", true);
           show(run?.result?.decision_output || {});
@@ -491,6 +512,7 @@
           showContext({
             available_actions: run?.result?.decision_context?.available_actions || [],
             selected_actions: run?.result?.decision_output?.actions || [],
+            metrics: metricsWithPrefix("action_execution:"),
           });
           setPrompt(state.prompts?.action_execution || "", true);
           show(run?.result?.action_results || []);

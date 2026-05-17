@@ -24,6 +24,8 @@ pub struct LlmResponse {
     pub text: String,
     pub raw: Value,
     pub tool_calls: Vec<ToolCallTrace>,
+    pub usage: Option<LlmUsage>,
+    pub usage_stat_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -271,19 +273,23 @@ impl LlmAdapter for ResponseApiAdapter {
             .unwrap_or_else(|_| json!({ "error": "failed to serialize response" }));
         let usage = extract_usage_from_raw(&raw);
         let response_id = response.id.clone();
+        let mut usage_stat_id = None;
         if let (Some(recorder), Some(context), Some(usage_value)) = (
             &self.config.usage_recorder,
             &self.config.usage_context,
             &usage,
         ) {
-            if let Err(err) = recorder
+            match recorder
                 .record_usage(&response_id, usage_value, context)
                 .await
             {
-                eprintln!(
-                    "LLM_USAGE_RECORD_ERROR user_id={} agent_name={} response_id={} error={}",
-                    context.user_id, context.agent_name, response_id, err
-                );
+                Ok(()) => usage_stat_id = Some(response_id.clone()),
+                Err(err) => {
+                    eprintln!(
+                        "LLM_USAGE_RECORD_ERROR user_id={} agent_name={} response_id={} error={}",
+                        context.user_id, context.agent_name, response_id, err
+                    );
+                }
             }
         }
         println!(
@@ -299,6 +305,8 @@ impl LlmAdapter for ResponseApiAdapter {
             text,
             raw,
             tool_calls,
+            usage,
+            usage_stat_id,
         })
     }
 }

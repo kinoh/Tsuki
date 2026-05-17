@@ -1248,7 +1248,7 @@ async fn admin_run_thought_process_component(
             Ok(Json(ThoughtProcessComponentRunResponse {
                 component,
                 mode,
-                output: serde_json::to_value(output).map_err(internal_serialize_error)?,
+                output: serde_json::to_value(output.output).map_err(internal_serialize_error)?,
                 trace: Vec::new(),
             }))
         }
@@ -1277,7 +1277,8 @@ async fn admin_run_thought_process_component(
             Ok(Json(ThoughtProcessComponentRunResponse {
                 component,
                 mode,
-                output: serde_json::to_value(output).map_err(internal_serialize_error)?,
+                output: serde_json::to_value(output.action_results)
+                    .map_err(internal_serialize_error)?,
                 trace: Vec::new(),
             }))
         }

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::HashMap, collections::HashSet, sync::Arc};
+use std::{collections::HashMap, collections::HashSet, sync::Arc, time::Instant};
 use tokio::runtime::Handle;
 
 use crate::{
@@ -19,8 +19,8 @@ use crate::{
     },
     input_ingress::{MediaAttachment, RouterInput},
     llm::{
-        build_response_api_llm, LlmAdapter, LlmRequest, LlmUsageContext, LlmUsageRecorder,
-        ResponseApiConfig,
+        build_response_api_llm, LlmAdapter, LlmRequest, LlmResponse, LlmUsage, LlmUsageContext,
+        LlmUsageRecorder, ResponseApiConfig,
     },
     module_registry::ModuleRegistryReader,
 };
@@ -84,12 +84,34 @@ pub(crate) struct ActionResult {
 pub(crate) struct ThoughtProcessTrace {
     #[serde(default)]
     pub(crate) deliberation: Vec<ComponentTrace>,
+    #[serde(default)]
+    pub(crate) timings: Vec<ComponentTiming>,
+    #[serde(default)]
+    pub(crate) llm_usages: Vec<ComponentLlmUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ComponentTrace {
     pub(crate) source: String,
     pub(crate) payload: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ComponentTiming {
+    pub(crate) component_key: String,
+    pub(crate) elapsed_ms: u128,
+    pub(crate) ok: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ComponentLlmUsage {
+    pub(crate) component_key: String,
+    pub(crate) usage_stat_id: Option<String>,
+    pub(crate) input_tokens: Option<i64>,
+    pub(crate) output_tokens: Option<i64>,
+    pub(crate) total_tokens: Option<i64>,
+    pub(crate) reasoning_tokens: Option<i64>,
+    pub(crate) cached_input_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -149,6 +171,7 @@ pub(crate) trait DeliberationContributor: Send + Sync {
 pub(crate) struct DeliberationContributorResult {
     pub(crate) contributions: DeliberationContributions,
     pub(crate) trace: Option<ComponentTrace>,
+    pub(crate) llm_usage: Option<ComponentLlmUsage>,
 }
 
 pub(crate) struct ThoughtProcessService {
@@ -187,40 +210,73 @@ impl ThoughtProcessService {
         mode: ThoughtProcessRunMode,
     ) -> Result<ThoughtProcessResult, ThoughtProcessError> {
         println!("THOUGHT_PROCESS stage=start events={}", input.events.len());
+        let total_started = Instant::now();
+        let mut timings = Vec::<ComponentTiming>::new();
+        let mut llm_usages = Vec::<ComponentLlmUsage>::new();
+
+        let cognition_started = Instant::now();
         let decision_context = self
             .cognition
             .build_decision_context(input)
             .await
             .map_err(ThoughtProcessError::Cognition)?;
+        timings.push(component_timing(
+            "cognition",
+            cognition_started.elapsed().as_millis(),
+            true,
+        ));
+
         let deliberation_result =
             run_deliberation_contributors(&self.contributors, &decision_context)
                 .await
                 .map_err(ThoughtProcessError::Deliberation)?;
-        let decision_output = self
+        timings.extend(deliberation_result.timings);
+        llm_usages.extend(deliberation_result.llm_usages);
+
+        let decision_started = Instant::now();
+        let decision_result = self
             .decision
             .decide(&decision_context, &deliberation_result.contributions)
             .await
             .map_err(ThoughtProcessError::Decision)?;
-        let action_results = self
+        timings.push(component_timing(
+            "decision",
+            decision_started.elapsed().as_millis(),
+            true,
+        ));
+        if let Some(usage) = decision_result.llm_usage {
+            llm_usages.push(usage);
+        }
+
+        let action_run = self
             .action_execution
             .execute(
                 &decision_context.available_actions,
-                &decision_output.actions,
+                &decision_result.output.actions,
                 mode,
             )
             .await;
+        timings.extend(action_run.timings);
+        llm_usages.extend(action_run.llm_usages);
+        timings.push(component_timing(
+            "total",
+            total_started.elapsed().as_millis(),
+            true,
+        ));
         println!(
             "THOUGHT_PROCESS stage=end actions={} action_results={}",
-            decision_output.actions.len(),
-            action_results.len()
+            decision_result.output.actions.len(),
+            action_run.action_results.len()
         );
         Ok(ThoughtProcessResult {
             decision_context,
             deliberation_contributions: deliberation_result.contributions,
-            decision_output,
-            action_results,
+            decision_output: decision_result.output,
+            action_results: action_run.action_results,
             trace: ThoughtProcessTrace {
                 deliberation: deliberation_result.traces,
+                timings,
+                llm_usages,
             },
         })
     }
@@ -303,6 +359,7 @@ impl DeliberationContributor for PromptDeliberationContributor {
             .respond(LlmRequest { input })
             .await
             .map_err(|err| err.to_string())?;
+        let llm_usage = component_llm_usage(&format!("deliberation:{}", self.name), &response);
         let text = response.text.trim().to_string();
         println!(
             "THOUGHT_CONTRIBUTOR stage=end source={} text_len={}",
@@ -310,7 +367,10 @@ impl DeliberationContributor for PromptDeliberationContributor {
             text.len()
         );
         if text.is_empty() {
-            Ok(DeliberationContributorResult::default())
+            Ok(DeliberationContributorResult {
+                llm_usage,
+                ..DeliberationContributorResult::default()
+            })
         } else {
             Ok(DeliberationContributorResult {
                 contributions: DeliberationContributions {
@@ -321,6 +381,7 @@ impl DeliberationContributor for PromptDeliberationContributor {
                     constraints: Vec::new(),
                 },
                 trace: None,
+                llm_usage,
             })
         }
     }
@@ -565,7 +626,7 @@ impl DecisionService {
         &self,
         context: &DecisionContext,
         contributions: &DeliberationContributions,
-    ) -> Result<DecisionOutput, DecisionError> {
+    ) -> Result<DecisionRunResult, DecisionError> {
         println!(
             "THOUGHT_DECISION stage=start context_len={} available_actions={} intent_candidates={} constraints={}",
             context.context.len(),
@@ -582,12 +643,27 @@ impl DecisionService {
             .map_err(|err| DecisionError::Llm(err.to_string()))?;
         let output = parse_decision_output(&response.text)?;
         validate_decision_actions(context, &output)?;
+        let llm_usage = component_llm_usage("decision", &response);
         println!(
             "THOUGHT_DECISION stage=end actions={} reason_len={}",
             output.actions.len(),
             output.reason.len()
         );
-        Ok(output)
+        Ok(DecisionRunResult { output, llm_usage })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DecisionRunResult {
+    pub(crate) output: DecisionOutput,
+    pub(crate) llm_usage: Option<ComponentLlmUsage>,
+}
+
+impl std::ops::Deref for DecisionRunResult {
+    type Target = DecisionOutput;
+
+    fn deref(&self) -> &Self::Target {
+        &self.output
     }
 }
 
@@ -595,6 +671,8 @@ impl DecisionService {
 pub(crate) struct DeliberationRunResult {
     pub(crate) contributions: DeliberationContributions,
     pub(crate) traces: Vec<ComponentTrace>,
+    pub(crate) timings: Vec<ComponentTiming>,
+    pub(crate) llm_usages: Vec<ComponentLlmUsage>,
 }
 
 pub(crate) async fn run_deliberation_contributors(
@@ -613,13 +691,22 @@ pub(crate) async fn run_deliberation_contributors(
     );
     let mut combined = DeliberationContributions::default();
     let mut traces = Vec::<ComponentTrace>::new();
+    let mut timings = Vec::<ComponentTiming>::new();
+    let mut llm_usages = Vec::<ComponentLlmUsage>::new();
     let mut executed = HashSet::<String>::new();
     for contributor in contributors {
         if !selected.contains(contributor.source()) {
             continue;
         }
         executed.insert(contributor.source().to_string());
+        let component_key = format!("deliberation:{}", contributor.source());
+        let started = Instant::now();
         let output = contributor.contribute(context).await?;
+        timings.push(component_timing(
+            &component_key,
+            started.elapsed().as_millis(),
+            true,
+        ));
         combined
             .intent_candidates
             .extend(output.contributions.intent_candidates);
@@ -628,6 +715,9 @@ pub(crate) async fn run_deliberation_contributors(
             .extend(output.contributions.constraints);
         if let Some(trace) = output.trace {
             traces.push(trace);
+        }
+        if let Some(usage) = output.llm_usage {
+            llm_usages.push(usage);
         }
     }
     let missing = selected
@@ -650,6 +740,8 @@ pub(crate) async fn run_deliberation_contributors(
     Ok(DeliberationRunResult {
         contributions: combined,
         traces,
+        timings,
+        llm_usages,
     })
 }
 
@@ -749,8 +841,14 @@ impl std::error::Error for ActionExecutionError {}
 
 #[async_trait]
 pub(crate) trait ActionExecutor: Send + Sync {
-    async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError>;
-    async fn commit(&self, input: &str) -> Result<String, ActionExecutionError>;
+    async fn inspect(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError>;
+    async fn commit(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct ActionExecutorOutput {
+    pub(crate) output: String,
+    pub(crate) llm_usage: Option<ComponentLlmUsage>,
 }
 
 pub(crate) struct UserReplyExecutor {
@@ -769,20 +867,20 @@ impl UserReplyExecutor {
 
 #[async_trait]
 impl ActionExecutor for UserReplyExecutor {
-    async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError> {
-        self.realize(input).await.map(Value::String)
+    async fn inspect(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError> {
+        self.realize(input).await
     }
 
-    async fn commit(&self, input: &str) -> Result<String, ActionExecutionError> {
-        let text = self.realize(input).await?;
-        let event = response_text(text.clone());
+    async fn commit(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError> {
+        let output = self.realize(input).await?;
+        let event = response_text(output.output.clone());
         (self.emit_event)(event);
-        Ok(text)
+        Ok(output)
     }
 }
 
 impl UserReplyExecutor {
-    async fn realize(&self, input: &str) -> Result<String, ActionExecutionError> {
+    async fn realize(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError> {
         let response = self
             .llm
             .respond(LlmRequest {
@@ -792,7 +890,11 @@ impl UserReplyExecutor {
             .map_err(|err| ActionExecutionError {
                 message: err.to_string(),
             })?;
-        Ok(response.text)
+        let llm_usage = component_llm_usage("action_execution:user_reply", &response);
+        Ok(ActionExecutorOutput {
+            output: response.text,
+            llm_usage,
+        })
     }
 }
 
@@ -808,16 +910,20 @@ impl PerformTaskExecutor {
 
 #[async_trait]
 impl ActionExecutor for PerformTaskExecutor {
-    async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError> {
-        Ok(json!({
+    async fn inspect(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError> {
+        Ok(ActionExecutorOutput {
+            output: json!({
             "mode": "llm_mediated_task",
             "llm_input": input,
             "tools_available": false,
             "tools_available_in_commit": true,
-        }))
+            })
+            .to_string(),
+            llm_usage: None,
+        })
     }
 
-    async fn commit(&self, input: &str) -> Result<String, ActionExecutionError> {
+    async fn commit(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError> {
         let response = self
             .llm
             .respond(LlmRequest {
@@ -827,13 +933,32 @@ impl ActionExecutor for PerformTaskExecutor {
             .map_err(|err| ActionExecutionError {
                 message: err.to_string(),
             })?;
-        Ok(response.text)
+        let llm_usage = component_llm_usage("action_execution:perform_task", &response);
+        Ok(ActionExecutorOutput {
+            output: response.text,
+            llm_usage,
+        })
     }
 }
 
 pub(crate) struct ActionExecutionService {
     executors: HashMap<String, Arc<dyn ActionExecutor>>,
     emit_event: Option<Arc<dyn Fn(Event) + Send + Sync>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct ActionExecutionRunResult {
+    pub(crate) action_results: Vec<ActionResult>,
+    pub(crate) timings: Vec<ComponentTiming>,
+    pub(crate) llm_usages: Vec<ComponentLlmUsage>,
+}
+
+impl std::ops::Deref for ActionExecutionRunResult {
+    type Target = Vec<ActionResult>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.action_results
+    }
 }
 
 impl ActionExecutionService {
@@ -920,9 +1045,12 @@ impl ActionExecutionService {
         available_actions: &[AvailableAction],
         selected_actions: &[Action],
         mode: ThoughtProcessRunMode,
-    ) -> Vec<ActionResult> {
+    ) -> ActionExecutionRunResult {
         let mut results = Vec::with_capacity(selected_actions.len());
+        let mut timings = Vec::<ComponentTiming>::new();
+        let mut llm_usages = Vec::<ComponentLlmUsage>::new();
         for action in selected_actions {
+            let component_key = format!("action_execution:{}", action.name);
             if !available_actions
                 .iter()
                 .any(|available| available.name == action.name)
@@ -941,6 +1069,7 @@ impl ActionExecutionService {
                 if mode == ThoughtProcessRunMode::Commit {
                     self.emit_action_result(&result);
                 }
+                timings.push(component_timing(&component_key, 0, false));
                 results.push(result);
                 continue;
             }
@@ -959,6 +1088,7 @@ impl ActionExecutionService {
                 if mode == ThoughtProcessRunMode::Commit {
                     self.emit_action_result(&result);
                 }
+                timings.push(component_timing(&component_key, 0, false));
                 results.push(result);
                 continue;
             };
@@ -968,24 +1098,27 @@ impl ActionExecutionService {
                 action.input.len(),
                 mode
             );
+            let started = Instant::now();
             let execution = match mode {
-                ThoughtProcessRunMode::DryRun => executor
-                    .inspect(&action.input)
-                    .await
-                    .map(action_inspection_output),
+                ThoughtProcessRunMode::DryRun => executor.inspect(&action.input).await,
                 ThoughtProcessRunMode::Commit => executor.commit(&action.input).await,
             };
+            let elapsed_ms = started.elapsed().as_millis();
             match execution {
                 Ok(output) => {
                     println!("THOUGHT_ACTION stage=end name={} ok=true", action.name);
                     let result = ActionResult {
                         name: action.name.clone(),
                         ok: true,
-                        output,
+                        output: output.output,
                         error: None,
                     };
                     if mode == ThoughtProcessRunMode::Commit {
                         self.emit_action_result(&result);
+                    }
+                    timings.push(component_timing(&component_key, elapsed_ms, true));
+                    if let Some(usage) = output.llm_usage {
+                        llm_usages.push(usage);
                     }
                     results.push(result);
                 }
@@ -1004,11 +1137,16 @@ impl ActionExecutionService {
                     if mode == ThoughtProcessRunMode::Commit {
                         self.emit_action_result(&result);
                     }
+                    timings.push(component_timing(&component_key, elapsed_ms, false));
                     results.push(result);
                 }
             }
         }
-        results
+        ActionExecutionRunResult {
+            action_results: results,
+            timings,
+            llm_usages,
+        }
     }
 
     fn emit_action_result(&self, result: &ActionResult) {
@@ -1127,10 +1265,37 @@ fn tool_name(tool: &async_openai::types::responses::Tool) -> Option<&str> {
     }
 }
 
-fn action_inspection_output(value: Value) -> String {
-    match value {
-        Value::String(text) => text,
-        other => other.to_string(),
+fn component_timing(
+    component_key: impl Into<String>,
+    elapsed_ms: u128,
+    ok: bool,
+) -> ComponentTiming {
+    ComponentTiming {
+        component_key: component_key.into(),
+        elapsed_ms,
+        ok,
+    }
+}
+
+fn component_llm_usage(component_key: &str, response: &LlmResponse) -> Option<ComponentLlmUsage> {
+    response.usage.as_ref().map(|usage| {
+        component_llm_usage_from_usage(component_key, response.usage_stat_id.clone(), usage)
+    })
+}
+
+fn component_llm_usage_from_usage(
+    component_key: &str,
+    usage_stat_id: Option<String>,
+    usage: &LlmUsage,
+) -> ComponentLlmUsage {
+    ComponentLlmUsage {
+        component_key: component_key.to_string(),
+        usage_stat_id,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: usage.total_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
     }
 }
 
@@ -1154,6 +1319,8 @@ mod tests {
                     text: text.clone(),
                     raw: json!({}),
                     tool_calls: Vec::new(),
+                    usage: None,
+                    usage_stat_id: None,
                 }),
                 Err(err) => Err(LlmError::new(err.clone())),
             }
@@ -1164,13 +1331,16 @@ mod tests {
 
     #[async_trait]
     impl ActionExecutor for FailingExecutor {
-        async fn inspect(&self, _input: &str) -> Result<Value, ActionExecutionError> {
+        async fn inspect(
+            &self,
+            _input: &str,
+        ) -> Result<ActionExecutorOutput, ActionExecutionError> {
             Err(ActionExecutionError {
                 message: "boom".to_string(),
             })
         }
 
-        async fn commit(&self, _input: &str) -> Result<String, ActionExecutionError> {
+        async fn commit(&self, _input: &str) -> Result<ActionExecutorOutput, ActionExecutionError> {
             Err(ActionExecutionError {
                 message: "boom".to_string(),
             })
@@ -1181,12 +1351,18 @@ mod tests {
 
     #[async_trait]
     impl ActionExecutor for EchoExecutor {
-        async fn inspect(&self, input: &str) -> Result<Value, ActionExecutionError> {
-            Ok(json!({ "input": input }))
+        async fn inspect(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError> {
+            Ok(ActionExecutorOutput {
+                output: json!({ "input": input }).to_string(),
+                llm_usage: None,
+            })
         }
 
-        async fn commit(&self, input: &str) -> Result<String, ActionExecutionError> {
-            Ok(format!("executed: {}", input))
+        async fn commit(&self, input: &str) -> Result<ActionExecutorOutput, ActionExecutionError> {
+            Ok(ActionExecutorOutput {
+                output: format!("executed: {}", input),
+                llm_usage: None,
+            })
         }
     }
 
@@ -1554,6 +1730,7 @@ mod tests {
                     source: "curiosity".to_string(),
                     payload: json!({"prompt": "rendered"}),
                 }),
+                llm_usage: None,
             }),
             seen_contexts: contributor_contexts.clone(),
         });
