@@ -36,6 +36,13 @@ pub(crate) struct DecisionContext {
     pub(crate) context: String,
     pub(crate) available_actions: Vec<AvailableAction>,
     pub(crate) deliberation_contributors: Vec<String>,
+    pub(crate) action_context: ActionExecutionContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ActionExecutionContext {
+    pub(crate) recent_event_history: String,
+    pub(crate) latest_input: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -393,6 +400,7 @@ impl ThoughtProcessService {
             .execute(
                 &decision_context.available_actions,
                 &decision_result.output.actions,
+                &decision_context.action_context,
                 mode,
                 emit_observation,
                 &run_id,
@@ -678,6 +686,10 @@ impl CognitionComponent for AppCognition {
                     context: context_parts.join("\n\n"),
                     available_actions: default_available_actions(),
                     deliberation_contributors,
+                    action_context: ActionExecutionContext {
+                        recent_event_history,
+                        latest_input: input_text.trim().to_string(),
+                    },
                 },
                 timings,
             });
@@ -693,6 +705,10 @@ impl CognitionComponent for AppCognition {
                 context: context_parts.join("\n\n"),
                 available_actions: default_available_actions(),
                 deliberation_contributors: Vec::new(),
+                action_context: ActionExecutionContext {
+                    recent_event_history,
+                    latest_input: "none".to_string(),
+                },
             },
             timings,
         })
@@ -1126,14 +1142,20 @@ fn validate_focus_pragmatic_intent(intent: &FocusPragmaticIntent) -> Result<(), 
     Ok(())
 }
 
-fn action_executor_input(action: &Action) -> Result<String, ActionExecutionError> {
+fn action_executor_input(
+    action: &Action,
+    action_context: &ActionExecutionContext,
+) -> Result<String, ActionExecutionError> {
     validate_action_payload(action).map_err(|err| ActionExecutionError { message: err })?;
     match &action.payload {
-        ActionPayload::UserReply(intent) => {
-            serde_json::to_string(intent).map_err(|err| ActionExecutionError {
-                message: err.to_string(),
-            })
-        }
+        ActionPayload::UserReply(intent) => serde_json::to_string(&json!({
+            "intent": intent,
+            "recent_event_history": action_context.recent_event_history,
+            "latest_input": action_context.latest_input,
+        }))
+        .map_err(|err| ActionExecutionError {
+            message: err.to_string(),
+        }),
         ActionPayload::PerformTask(payload) => Ok(payload.task.clone()),
     }
 }
@@ -1356,6 +1378,7 @@ impl ActionExecutionService {
         &self,
         available_actions: &[AvailableAction],
         selected_actions: &[Action],
+        action_context: &ActionExecutionContext,
         mode: ThoughtProcessRunMode,
         emit_component_event: Option<&Arc<dyn Fn(Event) + Send + Sync>>,
         run_id: &str,
@@ -1390,7 +1413,10 @@ impl ActionExecutionService {
                         run_id,
                         ComponentObservation {
                             component: component_key.as_str(),
-                            input: Some(json!({ "action": _trace_payload(action) })),
+                            input: Some(json!({
+                                "action": _trace_payload(action),
+                                "action_context": _trace_payload(action_context),
+                            })),
                             output: None,
                             elapsed_ms: 0,
                             metrics: None,
@@ -1424,7 +1450,10 @@ impl ActionExecutionService {
                         run_id,
                         ComponentObservation {
                             component: component_key.as_str(),
-                            input: Some(json!({ "action": _trace_payload(action) })),
+                            input: Some(json!({
+                                "action": _trace_payload(action),
+                                "action_context": _trace_payload(action_context),
+                            })),
                             output: None,
                             elapsed_ms: 0,
                             metrics: None,
@@ -1444,7 +1473,7 @@ impl ActionExecutionService {
                     .unwrap_or_default(),
                 mode
             );
-            let executor_input = match action_executor_input(action) {
+            let executor_input = match action_executor_input(action, action_context) {
                 Ok(input) => input,
                 Err(err) => {
                     let error = err.to_string();
@@ -1464,7 +1493,10 @@ impl ActionExecutionService {
                             run_id,
                             ComponentObservation {
                                 component: component_key.as_str(),
-                                input: Some(json!({ "action": _trace_payload(action) })),
+                                input: Some(json!({
+                                    "action": _trace_payload(action),
+                                    "action_context": _trace_payload(action_context),
+                                })),
                                 output: None,
                                 elapsed_ms: 0,
                                 metrics: None,
@@ -1506,7 +1538,10 @@ impl ActionExecutionService {
                             run_id,
                             ComponentObservation {
                                 component: component_key.as_str(),
-                                input: Some(json!({ "action": _trace_payload(action) })),
+                                input: Some(json!({
+                                    "action": _trace_payload(action),
+                                    "action_context": _trace_payload(action_context),
+                                })),
                                 output: Some(_trace_payload(&result)),
                                 elapsed_ms,
                                 metrics: None,
@@ -1539,7 +1574,10 @@ impl ActionExecutionService {
                             run_id,
                             ComponentObservation {
                                 component: component_key.as_str(),
-                                input: Some(json!({ "action": _trace_payload(action) })),
+                                input: Some(json!({
+                                    "action": _trace_payload(action),
+                                    "action_context": _trace_payload(action_context),
+                                })),
                                 output: None,
                                 elapsed_ms,
                                 metrics: None,
@@ -1861,6 +1899,15 @@ mod tests {
             context: "The user greeted Tsuki.".to_string(),
             available_actions: default_available_actions(),
             deliberation_contributors: vec!["curiosity".to_string()],
+            action_context: action_execution_context(),
+        }
+    }
+
+    fn action_execution_context() -> ActionExecutionContext {
+        ActionExecutionContext {
+            recent_event_history: "ts | role | message\n2026-05-17 12:00:00 | user | hi"
+                .to_string(),
+            latest_input: "hi".to_string(),
         }
     }
 
@@ -2000,6 +2047,7 @@ mod tests {
             .execute(
                 &default_available_actions(),
                 &[user_reply_action("greeting", "return a light greeting")],
+                &action_execution_context(),
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -2036,6 +2084,7 @@ mod tests {
                         task: "inspect logs".to_string(),
                     }),
                 }],
+                &action_execution_context(),
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -2058,6 +2107,7 @@ mod tests {
             .execute(
                 &default_available_actions(),
                 &[perform_task_action("inspect logs")],
+                &action_execution_context(),
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -2082,6 +2132,7 @@ mod tests {
             .execute(
                 &default_available_actions(),
                 &[perform_task_action("inspect logs")],
+                &action_execution_context(),
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -2108,6 +2159,7 @@ mod tests {
             .execute(
                 &default_available_actions(),
                 &[perform_task_action("inspect logs")],
+                &action_execution_context(),
                 ThoughtProcessRunMode::Commit,
                 Some(&emit_observation),
                 "run-1",
@@ -2140,6 +2192,7 @@ mod tests {
             .execute(
                 &default_available_actions(),
                 &[user_reply_action("greeting", "return a light greeting")],
+                &action_execution_context(),
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -2170,6 +2223,7 @@ mod tests {
             .execute(
                 &default_available_actions(),
                 &[user_reply_action("affiliation", "respond warmly")],
+                &action_execution_context(),
                 ThoughtProcessRunMode::DryRun,
                 None,
                 "test-run",
@@ -2180,7 +2234,11 @@ mod tests {
         assert!(results[0].ok);
         assert_eq!(results[0].output, "hello surface");
         assert!(emitted.lock().expect("lock").is_empty());
-        assert_eq!(reply_requests.lock().expect("lock").len(), 1);
+        let reply_requests = reply_requests.lock().expect("lock");
+        assert_eq!(reply_requests.len(), 1);
+        assert!(reply_requests[0].input.contains("\"recent_event_history\""));
+        assert!(reply_requests[0].input.contains("\"latest_input\":\"hi\""));
+        assert!(reply_requests[0].input.contains("\"intent\""));
     }
 
     #[tokio::test]
@@ -2200,6 +2258,7 @@ mod tests {
             .execute(
                 &default_available_actions(),
                 &[perform_task_action("inspect logs")],
+                &action_execution_context(),
                 ThoughtProcessRunMode::DryRun,
                 None,
                 "test-run",

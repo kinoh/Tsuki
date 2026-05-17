@@ -1274,6 +1274,12 @@ async fn admin_run_thought_process_component(
                     "selected_actions is required for action_execution".to_string(),
                 )
             })?;
+            let action_context = payload.action_context.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "action_context is required for action_execution".to_string(),
+                )
+            })?;
             let action_execution = ActionExecutionService::with_default_executors(
                 emit_event_blocking(state.clone()),
                 &state.runtime.modules.runtime,
@@ -1281,7 +1287,14 @@ async fn admin_run_thought_process_component(
                 &action_execution_instructions,
             );
             let output = action_execution
-                .execute(&available_actions, &selected_actions, mode, None, "admin")
+                .execute(
+                    &available_actions,
+                    &selected_actions,
+                    &action_context,
+                    mode,
+                    None,
+                    "admin",
+                )
                 .await;
             Ok(Json(ThoughtProcessComponentRunResponse {
                 component,

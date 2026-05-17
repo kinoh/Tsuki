@@ -3,8 +3,9 @@ use serde_json::Value;
 
 use crate::{
     application::thought_process_service::{
-        Action, ActionResult, AvailableAction, ComponentTrace, DecisionContext, DecisionOutput,
-        DeliberationContributions, ThoughtProcessRunMode, ThoughtProcessTrace,
+        Action, ActionExecutionContext, ActionResult, AvailableAction, ComponentTrace,
+        DecisionContext, DecisionOutput, DeliberationContributions, ThoughtProcessRunMode,
+        ThoughtProcessTrace,
     },
     event::Event,
 };
@@ -60,6 +61,8 @@ pub(crate) struct ThoughtProcessComponentRunRequest {
     pub(crate) available_actions: Option<Vec<AvailableAction>>,
     #[serde(default)]
     pub(crate) selected_actions: Option<Vec<Action>>,
+    #[serde(default)]
+    pub(crate) action_context: Option<ActionExecutionContext>,
 }
 
 #[derive(Debug, Serialize)]

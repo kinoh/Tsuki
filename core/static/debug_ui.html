@@ -584,6 +584,7 @@
           showContext({
             available_actions: run?.result?.decision_context?.available_actions || [],
             selected_actions: run?.result?.decision_output?.actions || [],
+            action_context: run?.result?.decision_context?.action_context || null,
           });
           showMetrics(metricsWithPrefix("action_execution:"));
           setPrompt(state.prompts?.action_execution || "", true);
@@ -660,6 +661,7 @@
             mode,
             available_actions: run.result.decision_context.available_actions,
             selected_actions: run.result.decision_output.actions,
+            action_context: run.result.decision_context.action_context,
           };
         }
         throw new Error("Unknown component.");

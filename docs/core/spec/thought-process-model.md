@@ -77,6 +77,7 @@ Example output shape:
 DecisionContext
   context
   available_actions
+  action_context
 ```
 
 `context` is the cognitive context used by decision. It may include interpretation,
@@ -86,6 +87,11 @@ cognition.
 `available_actions` is the set of actions decision may choose from in this thought process.
 Each available action should describe its name, when it is appropriate, and how to write its typed
 payload.
+
+`action_context` is the bounded conversational context that action execution needs to realize
+selected actions. It includes recent event history and the latest input because user-facing
+execution must preserve conversational flow without requiring the executor to parse the full
+decision context.
 
 Cognition does not produce the final user-facing response and does not decide which external
 action to execute.
@@ -283,8 +289,9 @@ selected action. Decision still only selects actions; it does not execute tools 
 not produce final conversation surface text.
 
 Conversation surface instructions belong to the action executor prompt, not to Decision. Decision
-passes only the selected focus-pragmatic intent in the `user_reply` payload. Examples, style rules,
-and final wording policy for user-facing text live in the `Action Execution` prompt section.
+passes the selected focus-pragmatic intent in the `user_reply` payload; orchestration also passes
+the action context produced by cognition. Examples, style rules, and final wording policy for
+user-facing text live in the `Action Execution` prompt section.
 
 Action execution must support dry-run as an inspection mode, not as a partial external execution.
 In dry-run mode it must not emit events, mutate application state, call external tools, or send
@@ -431,7 +438,7 @@ receive inside a thought process:
 - cognition run: ordered event history
 - deliberation contributor run: decision context
 - decision run: decision context plus deliberation output
-- action execution run: available actions plus selected actions
+- action execution run: available actions plus selected actions plus action context
 
 These runs execute one thought-process component in isolation, but they are not legacy
 module-specific debug runs. Each run must use the same typed input that the component would receive

@@ -772,6 +772,9 @@ components:
           items:
             type: object
             additionalProperties: true
+        action_context:
+          type: object
+          additionalProperties: true
 
     ThoughtProcessComponentRunResponse:
       type: object
