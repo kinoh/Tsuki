@@ -41,6 +41,7 @@ const DEFAULT_TRIGGER_WAIT_TAGS: [&str; 2] = [
     "self_improvement.module_processed",
     "self_improvement.trigger_processed",
 ];
+const JUDGE_EVENT_STRING_MAX_CHARS: usize = 8_000;
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -2618,20 +2619,53 @@ fn filter_events(events: Vec<Value>, include_debug_events: bool) -> Vec<Value> {
             .collect()
     };
 
-    // Strip binary image data from sensory events to avoid exceeding judge context limits.
-    filtered
-        .into_iter()
-        .map(|mut event| {
-            if let Some(payload) = event.get_mut("payload") {
-                if let Some(obj) = payload.as_object_mut() {
-                    if obj.contains_key("images") {
-                        obj.remove("images");
-                    }
+    // Strip binary image data from events before sending them to the judge.
+    filtered.into_iter().map(sanitize_judge_value).collect()
+}
+
+fn sanitize_judge_value(value: Value) -> Value {
+    match value {
+        Value::Object(mut object) => {
+            for key in [
+                "data",
+                "image",
+                "images",
+                "image_data",
+                "base64",
+                "data_url",
+                "dataUrl",
+            ] {
+                if object.remove(key).is_some() {
+                    object.insert(key.to_string(), Value::String("[omitted]".to_string()));
                 }
             }
-            event
-        })
-        .collect()
+
+            for nested in object.values_mut() {
+                let sanitized = sanitize_judge_value(std::mem::take(nested));
+                *nested = sanitized;
+            }
+            Value::Object(object)
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(sanitize_judge_value).collect()),
+        Value::String(text) => Value::String(truncate_judge_string(text)),
+        other => other,
+    }
+}
+
+fn truncate_judge_string(text: String) -> String {
+    if text.chars().count() <= JUDGE_EVENT_STRING_MAX_CHARS {
+        return text;
+    }
+
+    let truncated = text
+        .chars()
+        .take(JUDGE_EVENT_STRING_MAX_CHARS)
+        .collect::<String>();
+    format!(
+        "{}...[truncated {} chars]",
+        truncated,
+        text.chars().count() - JUDGE_EVENT_STRING_MAX_CHARS
+    )
 }
 
 async fn judge_run(
