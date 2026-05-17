@@ -569,18 +569,48 @@ impl CognitionComponent for AppCognition {
             }
             let concept_limit = self.state.config.router.query_terms_max.max(1);
             let active_state_limit = self.state.config.router.active_state_limit.max(1);
-            let retrieval_started = Instant::now();
-            let retrieval = retrieve_concepts(
-                &symbolization.text,
-                router_input,
-                concept_limit,
-                &self.state.config.router.multimodal_embedding,
-                self.state.services.activation_concept_graph.as_ref(),
-            )
-            .await;
+            let concept_task = async {
+                let retrieval_started = Instant::now();
+                let retrieval = retrieve_concepts(
+                    &symbolization.text,
+                    router_input,
+                    concept_limit,
+                    &self.state.config.router.multimodal_embedding,
+                    self.state.services.activation_concept_graph.as_ref(),
+                )
+                .await;
+                let retrieval_elapsed = retrieval_started.elapsed().as_millis();
+                let activation_started = Instant::now();
+                let activation = activate_concepts(
+                    &retrieval.candidate_concepts,
+                    active_state_limit,
+                    self.state.services.activation_concept_graph.as_ref(),
+                    self.dry_run,
+                )
+                .await;
+                let activation_elapsed = activation_started.elapsed().as_millis();
+                (retrieval, retrieval_elapsed, activation, activation_elapsed)
+            };
+            let contributors_task = async {
+                let contributors_started = Instant::now();
+                let result = list_active_deliberation_contributors(&self.state).await;
+                (result, contributors_started.elapsed().as_millis())
+            };
+            let recall_task = async {
+                let recall_started = Instant::now();
+                let recalled_history =
+                    format_recalled_event_history(&self.state, &input_text, &HashSet::new()).await;
+                (recalled_history, recall_started.elapsed().as_millis())
+            };
+            let (
+                (retrieval, retrieval_elapsed, activation, activation_elapsed),
+                (deliberation_contributors, contributors_elapsed),
+                (recalled_history, recall_elapsed),
+            ) = tokio::join!(concept_task, contributors_task, recall_task);
+            let deliberation_contributors = deliberation_contributors?;
             timings.push(component_timing(
                 "cognition:concept_retrieval",
-                retrieval_started.elapsed().as_millis(),
+                retrieval_elapsed,
                 retrieval.errors.is_empty(),
             ));
             timings.extend(retrieval.timings.iter().map(|metric| {
@@ -593,17 +623,9 @@ impl CognitionComponent for AppCognition {
             for err in &retrieval.errors {
                 println!("COGNITION_CONCEPT_RETRIEVAL_ERROR error={}", err);
             }
-            let activation_started = Instant::now();
-            let activation = activate_concepts(
-                &retrieval.candidate_concepts,
-                active_state_limit,
-                self.state.services.activation_concept_graph.as_ref(),
-                self.dry_run,
-            )
-            .await;
             timings.push(component_timing(
                 "cognition:concept_activation",
-                activation_started.elapsed().as_millis(),
+                activation_elapsed,
                 activation.errors.is_empty(),
             ));
             timings.extend(activation.timings.iter().map(|metric| {
@@ -616,20 +638,14 @@ impl CognitionComponent for AppCognition {
             for err in &activation.errors {
                 println!("COGNITION_CONCEPT_ACTIVATION_ERROR error={}", err);
             }
-            let contributors_started = Instant::now();
-            let deliberation_contributors =
-                list_active_deliberation_contributors(&self.state).await?;
             timings.push(component_timing(
                 "cognition:active_deliberation_contributors",
-                contributors_started.elapsed().as_millis(),
+                contributors_elapsed,
                 true,
             ));
-            let recall_started = Instant::now();
-            let recalled_history =
-                format_recalled_event_history(&self.state, &input_text, &HashSet::new()).await;
             timings.push(component_timing(
                 "cognition:conversation_recall",
-                recall_started.elapsed().as_millis(),
+                recall_elapsed,
                 true,
             ));
             context_parts.push(format!(

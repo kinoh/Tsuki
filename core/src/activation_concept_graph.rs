@@ -3,7 +3,7 @@ use neo4rs::{query, Graph};
 use safetensors::{tensor::TensorView, Dtype, SafeTensors};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -164,6 +164,12 @@ struct EpisodeEntry {
     summary: String,
     valence: f64,
     weight: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RecallNeighbors {
+    relations_by_concept: HashMap<String, Vec<RelationEdge>>,
+    episodes_by_concept: HashMap<String, Vec<EpisodeEntry>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1261,6 +1267,141 @@ impl ActivationConceptGraphStore {
         Ok(episodes)
     }
 
+    async fn fetch_recall_neighbors(&self, concepts: &[String]) -> Result<RecallNeighbors, String> {
+        if concepts.is_empty() {
+            return Ok(RecallNeighbors::default());
+        }
+        let names = concepts.to_vec();
+        let mut neighbors = RecallNeighbors::default();
+        let relations = query(
+            "MATCH (c:Concept)-[r:IS_A|PART_OF|EVOKES]->(d:Concept)
+             WHERE c.name IN $names
+             RETURN c.name AS concept,
+                    c.name AS from,
+                    d.name AS to,
+                    type(r) AS type,
+                    coalesce(r.weight, $default_weight) AS weight
+             UNION ALL
+             MATCH (c:Concept)<-[r:IS_A|PART_OF|EVOKES]-(d:Concept)
+             WHERE c.name IN $names
+             RETURN c.name AS concept,
+                    d.name AS from,
+                    c.name AS to,
+                    type(r) AS type,
+                    coalesce(r.weight, $default_weight) AS weight",
+        )
+        .param("names", names.clone())
+        .param("default_weight", DEFAULT_RELATION_WEIGHT);
+        let mut result = self
+            .graph
+            .execute(relations)
+            .await
+            .map_err(|err| err.to_string())?;
+        while let Ok(Some(row)) = result.next().await {
+            let concept: String = row.get("concept").unwrap_or_default();
+            if concept.is_empty() {
+                continue;
+            }
+            neighbors
+                .relations_by_concept
+                .entry(concept)
+                .or_default()
+                .push(RelationEdge {
+                    from: row.get("from").unwrap_or_default(),
+                    to: row.get("to").unwrap_or_default(),
+                    relation_type: row.get("type").unwrap_or_default(),
+                    weight: row.get("weight").unwrap_or(DEFAULT_RELATION_WEIGHT),
+                });
+        }
+
+        let episodes = query(
+            "MATCH (c:Concept)-[r:EVOKES]->(e:Episode)
+             WHERE c.name IN $names
+             RETURN c.name AS concept,
+                    e.summary AS summary,
+                    e.valence AS valence,
+                    coalesce(r.weight, $default_weight) AS weight",
+        )
+        .param("names", names)
+        .param("default_weight", DEFAULT_RELATION_WEIGHT);
+        let mut result = self
+            .graph
+            .execute(episodes)
+            .await
+            .map_err(|err| err.to_string())?;
+        while let Ok(Some(row)) = result.next().await {
+            let concept: String = row.get("concept").unwrap_or_default();
+            if concept.is_empty() {
+                continue;
+            }
+            neighbors
+                .episodes_by_concept
+                .entry(concept)
+                .or_default()
+                .push(EpisodeEntry {
+                    summary: row.get("summary").unwrap_or_default(),
+                    valence: row.get("valence").unwrap_or(DEFAULT_VALENCE),
+                    weight: row.get("weight").unwrap_or(DEFAULT_RELATION_WEIGHT),
+                });
+        }
+        Ok(neighbors)
+    }
+
+    async fn fetch_concept_states(
+        &self,
+        concepts: &[String],
+        now: i64,
+    ) -> Result<HashMap<String, ConceptState>, String> {
+        if concepts.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let q = query(
+            "MATCH (c:Concept)
+             WHERE c.name IN $names
+             RETURN c.name AS name,
+                    c.valence AS valence,
+                    c.arousal_level AS arousal_level,
+                    c.accessed_at AS accessed_at",
+        )
+        .param("names", concepts.to_vec());
+        let mut result = self.graph.execute(q).await.map_err(|err| err.to_string())?;
+        let mut states = HashMap::<String, ConceptState>::new();
+        while let Ok(Some(row)) = result.next().await {
+            let name: String = row.get("name").unwrap_or_default();
+            if name.is_empty() {
+                continue;
+            }
+            let accessed_at: i64 = row.get("accessed_at").unwrap_or(DEFAULT_ACCESSED_AT);
+            states.insert(
+                name,
+                ConceptState {
+                    valence: row.get("valence").unwrap_or(DEFAULT_VALENCE),
+                    arousal_level: row.get("arousal_level").unwrap_or(DEFAULT_AROUSAL_LEVEL),
+                    accessed_at: if accessed_at > 0 { accessed_at } else { now },
+                },
+            );
+        }
+        Ok(states)
+    }
+
+    async fn preload_concept_states(
+        &self,
+        cache: &mut HashMap<String, ConceptState>,
+        concepts: &HashSet<String>,
+        now: i64,
+    ) -> Result<(), String> {
+        let missing = concepts
+            .iter()
+            .filter(|name| !cache.contains_key(name.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        cache.extend(self.fetch_concept_states(&missing, now).await?);
+        Ok(())
+    }
+
     async fn get_concept_state_cached(
         &self,
         cache: &mut HashMap<String, ConceptState>,
@@ -2016,95 +2157,128 @@ impl ConceptGraphOps for ActivationConceptGraphStore {
         let now = self.now_ms();
         let mut cache: HashMap<String, ConceptState> = HashMap::new();
         let mut visited: HashMap<String, u32> = HashMap::new();
-        let mut queue: VecDeque<(String, u32)> = VecDeque::new();
+        let mut frontier: Vec<String> = Vec::new();
         let mut propositions: HashMap<String, Proposition> = HashMap::new();
         for seed in seeds {
             if !visited.contains_key(seed.as_str()) {
                 visited.insert(seed.clone(), 0);
-                queue.push_back((seed, 0));
+                frontier.push(seed);
             }
         }
-        while let Some((concept, hop)) = queue.pop_front() {
-            if hop >= max_hop {
-                continue;
+        for hop in 0..max_hop {
+            if frontier.is_empty() {
+                break;
             }
             let next_hop = hop + 1;
-            let relations = self.fetch_relations(concept.as_str()).await?;
-            for edge in relations {
-                if edge.from == edge.to {
-                    continue;
-                }
-                let forward = edge.from == concept;
-                let target = if forward {
-                    edge.to.clone()
-                } else {
-                    edge.from.clone()
-                };
-                if let Some(target_state) = self
-                    .get_concept_state_cached(&mut cache, target.as_str(), now)
-                    .await?
+            let neighbors = self.fetch_recall_neighbors(&frontier).await?;
+            let mut state_names = HashSet::<String>::new();
+            for concept in &frontier {
+                if neighbors
+                    .episodes_by_concept
+                    .get(concept.as_str())
+                    .map(|items| !items.is_empty())
+                    .unwrap_or(false)
                 {
-                    let hop_decay = Self::hop_decay(next_hop);
-                    let direction_penalty = if forward { 1.0 } else { REVERSE_PENALTY };
-                    let arousal =
-                        self.arousal(target_state.arousal_level, target_state.accessed_at, now);
-                    let score = arousal * hop_decay * direction_penalty * edge.weight;
-                    let text = format!(
-                        "{} {} {}",
-                        edge.from,
-                        Self::render_relation_type(edge.relation_type.as_str()),
-                        edge.to
-                    );
-                    let proposition = Proposition {
-                        text: text.clone(),
-                        score,
-                        valence: Some(target_state.valence),
-                    };
-                    let entry = propositions.entry(text).or_insert(proposition);
-                    if score > entry.score {
-                        entry.score = score;
-                        entry.valence = Some(target_state.valence);
-                    }
-                    if visited
-                        .get(target.as_str())
-                        .map(|existing| next_hop < *existing)
-                        .unwrap_or(true)
-                    {
-                        visited.insert(target.clone(), next_hop);
-                        queue.push_back((target.clone(), next_hop));
-                    }
-                    // Keep submodule trigger nodes from self-sustaining activation across turns.
-                    if !dry_run && !target.starts_with("submodule:") {
-                        self.maybe_update_arousal(&mut cache, target.as_str(), hop_decay, now)
-                            .await?;
+                    state_names.insert(concept.clone());
+                }
+                if let Some(relations) = neighbors.relations_by_concept.get(concept.as_str()) {
+                    for edge in relations {
+                        if edge.from == edge.to {
+                            continue;
+                        }
+                        let forward = edge.from == *concept;
+                        let target = if forward { &edge.to } else { &edge.from };
+                        state_names.insert(target.clone());
                     }
                 }
             }
-            let episodes = self.fetch_episodes(concept.as_str()).await?;
-            if !episodes.is_empty() {
-                if let Some(concept_state) = self
-                    .get_concept_state_cached(&mut cache, concept.as_str(), now)
-                    .await?
-                {
-                    let hop_decay = Self::hop_decay(next_hop);
-                    let arousal =
-                        self.arousal(concept_state.arousal_level, concept_state.accessed_at, now);
-                    for episode in episodes {
-                        let score = arousal * hop_decay * episode.weight;
-                        let text = format!("{} evokes {}", concept, episode.summary);
-                        let proposition = Proposition {
-                            text: text.clone(),
-                            score,
-                            valence: Some(episode.valence),
+            self.preload_concept_states(&mut cache, &state_names, now)
+                .await?;
+            let mut next_frontier = Vec::<String>::new();
+            let mut arousal_updates = HashMap::<String, f64>::new();
+            for concept in &frontier {
+                if let Some(relations) = neighbors.relations_by_concept.get(concept.as_str()) {
+                    for edge in relations {
+                        if edge.from == edge.to {
+                            continue;
+                        }
+                        let forward = edge.from == *concept;
+                        let target = if forward {
+                            edge.to.clone()
+                        } else {
+                            edge.from.clone()
                         };
-                        let entry = propositions.entry(text).or_insert(proposition);
-                        if score > entry.score {
-                            entry.score = score;
-                            entry.valence = Some(concept_state.valence);
+                        if let Some(target_state) = cache.get(target.as_str()) {
+                            let hop_decay = Self::hop_decay(next_hop);
+                            let direction_penalty = if forward { 1.0 } else { REVERSE_PENALTY };
+                            let arousal = self.arousal(
+                                target_state.arousal_level,
+                                target_state.accessed_at,
+                                now,
+                            );
+                            let score = arousal * hop_decay * direction_penalty * edge.weight;
+                            let text = format!(
+                                "{} {} {}",
+                                edge.from,
+                                Self::render_relation_type(edge.relation_type.as_str()),
+                                edge.to
+                            );
+                            let proposition = Proposition {
+                                text: text.clone(),
+                                score,
+                                valence: Some(target_state.valence),
+                            };
+                            let entry = propositions.entry(text).or_insert(proposition);
+                            if score > entry.score {
+                                entry.score = score;
+                                entry.valence = Some(target_state.valence);
+                            }
+                            if visited
+                                .get(target.as_str())
+                                .map(|existing| next_hop < *existing)
+                                .unwrap_or(true)
+                            {
+                                visited.insert(target.clone(), next_hop);
+                                next_frontier.push(target.clone());
+                            }
+                            // Keep submodule trigger nodes from self-sustaining activation across turns.
+                            if !dry_run && !target.starts_with("submodule:") {
+                                let entry = arousal_updates.entry(target).or_insert(0.0);
+                                *entry = (*entry).max(hop_decay);
+                            }
+                        }
+                    }
+                }
+                if let Some(episodes) = neighbors.episodes_by_concept.get(concept.as_str()) {
+                    if let Some(concept_state) = cache.get(concept.as_str()) {
+                        let hop_decay = Self::hop_decay(next_hop);
+                        let arousal = self.arousal(
+                            concept_state.arousal_level,
+                            concept_state.accessed_at,
+                            now,
+                        );
+                        for episode in episodes {
+                            let score = arousal * hop_decay * episode.weight;
+                            let text = format!("{} evokes {}", concept, episode.summary);
+                            let proposition = Proposition {
+                                text: text.clone(),
+                                score,
+                                valence: Some(episode.valence),
+                            };
+                            let entry = propositions.entry(text).or_insert(proposition);
+                            if score > entry.score {
+                                entry.score = score;
+                                entry.valence = Some(concept_state.valence);
+                            }
                         }
                     }
                 }
             }
+            for (target, level) in arousal_updates {
+                self.maybe_update_arousal(&mut cache, target.as_str(), level, now)
+                    .await?;
+            }
+            frontier = next_frontier;
         }
         let mut items = propositions.into_values().collect::<Vec<_>>();
         items.sort_by(|a, b| {
