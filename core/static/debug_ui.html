@@ -108,6 +108,7 @@
       }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
       .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .run-actions { margin-top: 12px; }
       .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .dag {
         display: flex;
@@ -212,7 +213,7 @@
                 <input id="historyLimit" type="number" min="0" max="1000" value="40" />
               </div>
             </div>
-            <div class="row">
+            <div class="row run-actions">
               <button id="runThought">Run Thought Process</button>
               <button class="secondary" id="clearOutput">Clear</button>
             </div>
