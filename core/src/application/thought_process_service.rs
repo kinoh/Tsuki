@@ -893,7 +893,7 @@ pub(crate) fn build_decision_instructions(
         base_instructions.trim(),
         decision_instructions.trim(),
         "You are the Decision component of the thought process.",
-        "Return JSON only with shape {\"actions\":[{\"name\":\"user_reply\",\"payload\":{\"source\":\"...\"}}],\"intent_scores\":[{\"source\":\"...\",\"relevance\":1,\"specificity\":1,\"conversational_fit\":1,\"grounding\":1}]}. Select only actions listed in the input. For user_reply, choose exactly one deliberation candidate by source. Use perform_task with payload {\"task\":\"...\"} only for complex external work that requires tools."
+        "Return JSON only with shape {\"actions\":[{\"name\":\"user_reply\",\"payload\":{\"source\":\"...\"}}],\"intent_scores\":[{\"source\":\"...\",\"relevance\":1,\"specificity\":1,\"conversational_fit\":1,\"grounding\":1}]}. Select only actions listed in the input. The actions array is an ordered action plan. Decision is responsible for listing every action needed to realize the selected intent; external work and user-visible speech are separate actions. perform_task carries out external work and does not substitute for user_reply. If the selected intent requires the user to receive an answer, completion notice, failure notice, or result summary, include a user_reply action in the ordered plan even when perform_task is also present. A later user_reply may use the results of earlier actions; keep its payload as {\"source\":\"...\"} and choose exactly one deliberation candidate by source. Use perform_task with payload {\"task\":\"...\"} only for complex external work that requires tools."
     )
 }
 
@@ -1089,7 +1089,7 @@ fn render_decision_input(
     contributions: &DeliberationContributions,
 ) -> String {
     format!(
-        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"user_reply\",\"payload\":{{\"source\":\"...\"}}}}],\"intent_scores\":[{{\"source\":\"...\",\"relevance\":1,\"specificity\":1,\"conversational_fit\":1,\"grounding\":1}}]}}",
+        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"user_reply\",\"payload\":{{\"source\":\"...\"}}}}],\"intent_scores\":[{{\"source\":\"...\",\"relevance\":1,\"specificity\":1,\"conversational_fit\":1,\"grounding\":1}}]}}\nActions are ordered. Include all actions needed to realize the selected intent. perform_task does not send a user-visible reply; include a later user_reply when the user should receive the result, completion, failure, or summary. A later user_reply can use previous action results without adding fields to its payload.",
         context.context,
         format_intent_candidates(&contributions.intent_candidates),
         format_constraints(&contributions.constraints),
@@ -1298,6 +1298,7 @@ fn parse_pragmatic_motive(raw: &str) -> Result<PragmaticMotive, String> {
 fn action_executor_input(
     action: &ExecutableAction,
     action_context: &ActionExecutionContext,
+    prior_action_results: &[ActionResult],
 ) -> Result<String, ActionExecutionError> {
     match &action.payload {
         ExecutableActionPayload::UserReply(intent) => serde_json::to_string(&json!({
@@ -1305,11 +1306,21 @@ fn action_executor_input(
             "recent_event_history": action_context.recent_event_history,
             "recalled_history": action_context.recalled_history,
             "latest_input": action_context.latest_input,
+            "prior_action_results": prior_action_results,
         }))
         .map_err(|err| ActionExecutionError {
             message: err.to_string(),
         }),
-        ExecutableActionPayload::PerformTask(payload) => Ok(payload.task.clone()),
+        ExecutableActionPayload::PerformTask(payload) => serde_json::to_string(&json!({
+            "task": payload.task,
+            "recent_event_history": action_context.recent_event_history,
+            "recalled_history": action_context.recalled_history,
+            "latest_input": action_context.latest_input,
+            "prior_action_results": prior_action_results,
+        }))
+        .map_err(|err| ActionExecutionError {
+            message: err.to_string(),
+        }),
     }
 }
 
@@ -1508,7 +1519,7 @@ impl ActionExecutionService {
             .collect::<Vec<_>>();
         let task_llm = build_response_api_llm(ResponseApiConfig {
             model: runtime.model.clone(),
-            instructions: "You are an execution component. Carry out the selected external action using available tools when needed. Return a concise execution result for the action result log. Do not message the user directly.".to_string(),
+            instructions: "You are an execution component. You receive JSON containing task, recent_event_history, recalled_history, latest_input, and prior_action_results. Carry out the selected external action using available tools when needed, using the context fields as grounding for the task. Return a concise execution result for the action result log. Do not message the user directly.".to_string(),
             temperature: runtime.temperature,
             max_output_tokens: runtime.max_output_tokens,
             tools: task_tools,
@@ -1626,7 +1637,7 @@ impl ActionExecutionService {
                     .unwrap_or_default(),
                 mode
             );
-            let executor_input = match action_executor_input(action, action_context) {
+            let executor_input = match action_executor_input(action, action_context, &results) {
                 Ok(input) => input,
                 Err(err) => {
                     let error = err.to_string();
@@ -2237,6 +2248,8 @@ mod tests {
         assert!(requests[0].input.contains("name: user_reply"));
         assert!(requests[0].input.contains("name: perform_task"));
         assert!(requests[0].input.contains("Return JSON only"));
+        assert!(requests[0].input.contains("Actions are ordered"));
+        assert!(requests[0].input.contains("perform_task does not send"));
     }
 
     #[tokio::test]
@@ -2351,7 +2364,8 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert!(results[0].ok);
-        assert_eq!(results[0].output, "executed: inspect logs");
+        assert!(results[0].output.contains("inspect logs"));
+        assert!(results[0].output.contains("\"latest_input\":\"hi\""));
     }
 
     #[tokio::test]
@@ -2384,7 +2398,10 @@ mod tests {
         assert_eq!(event.modality, "state");
         assert_eq!(event.payload["run_id"], "run-1");
         assert_eq!(event.payload["component"], "action_execution:perform_task");
-        assert_eq!(event.payload["output"]["output"], "executed: inspect logs");
+        assert!(event.payload["output"]["output"]
+            .as_str()
+            .expect("output string")
+            .contains("inspect logs"));
         assert!(event.payload.get("stage").is_none());
         assert!(event.payload.get("ok").is_none());
         assert!(event.payload.get("error").is_none());
@@ -2449,6 +2466,9 @@ mod tests {
         assert!(reply_requests[0].input.contains("\"recent_event_history\""));
         assert!(reply_requests[0].input.contains("\"latest_input\":\"hi\""));
         assert!(reply_requests[0].input.contains("\"intent\""));
+        assert!(reply_requests[0]
+            .input
+            .contains("\"prior_action_results\":[]"));
     }
 
     #[tokio::test]
@@ -2479,7 +2499,60 @@ mod tests {
         assert!(results[0].ok);
         assert!(results[0].output.contains("llm_mediated_task"));
         assert!(results[0].output.contains("tools_available_in_commit"));
+        assert!(results[0]
+            .output
+            .contains("\\\"latest_input\\\":\\\"hi\\\""));
         assert!(task_requests.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn action_execution_passes_prior_results_to_later_user_reply() {
+        let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
+        let emitted_for_reply = emitted.clone();
+        let reply_requests = Arc::new(Mutex::new(Vec::new()));
+        let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
+        executors.insert("perform_task".to_string(), Arc::new(EchoExecutor));
+        executors.insert(
+            "user_reply".to_string(),
+            Arc::new(UserReplyExecutor::new(
+                Arc::new(move |event| {
+                    emitted_for_reply.lock().expect("lock").push(event);
+                }),
+                Arc::new(StaticLlm {
+                    response: Ok("task result surfaced".to_string()),
+                    requests: reply_requests.clone(),
+                }),
+            )),
+        );
+        let service = ActionExecutionService::new(executors);
+
+        let results = service
+            .execute(
+                &default_available_actions(),
+                &[
+                    perform_task_action("inspect logs"),
+                    user_reply_action("report task result"),
+                ],
+                &action_execution_context(),
+                ThoughtProcessRunMode::Commit,
+                None,
+                "test-run",
+            )
+            .await;
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|result| result.ok));
+        let reply_requests = reply_requests.lock().expect("lock");
+        assert_eq!(reply_requests.len(), 1);
+        assert!(reply_requests[0].input.contains("\"prior_action_results\""));
+        assert!(reply_requests[0]
+            .input
+            .contains("\"name\":\"perform_task\""));
+        assert!(reply_requests[0].input.contains("executed:"));
+        let emitted = emitted.lock().expect("lock");
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].source, "assistant");
+        assert_eq!(emitted[0].payload["text"], "task result surfaced");
     }
 
     #[tokio::test]
