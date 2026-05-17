@@ -689,10 +689,7 @@ pub(crate) async fn run_deliberation_contributors(
         contributors.len(),
         selected.len()
     );
-    let mut combined = DeliberationContributions::default();
-    let mut traces = Vec::<ComponentTrace>::new();
-    let mut timings = Vec::<ComponentTiming>::new();
-    let mut llm_usages = Vec::<ComponentLlmUsage>::new();
+    let mut tasks = Vec::new();
     let mut executed = HashSet::<String>::new();
     for contributor in contributors {
         if !selected.contains(contributor.source()) {
@@ -700,13 +697,29 @@ pub(crate) async fn run_deliberation_contributors(
         }
         executed.insert(contributor.source().to_string());
         let component_key = format!("deliberation:{}", contributor.source());
-        let started = Instant::now();
-        let output = contributor.contribute(context).await?;
-        timings.push(component_timing(
-            &component_key,
-            started.elapsed().as_millis(),
-            true,
-        ));
+        tasks.push(async move {
+            let started = Instant::now();
+            let output = contributor.contribute(context).await;
+            let elapsed_ms = started.elapsed().as_millis();
+            (component_key, output, elapsed_ms)
+        });
+    }
+    let outputs = futures::future::join_all(tasks).await;
+    let mut combined = DeliberationContributions::default();
+    let mut traces = Vec::<ComponentTrace>::new();
+    let mut timings = Vec::<ComponentTiming>::new();
+    let mut llm_usages = Vec::<ComponentLlmUsage>::new();
+    for (component_key, output, elapsed_ms) in outputs {
+        let output = match output {
+            Ok(output) => {
+                timings.push(component_timing(&component_key, elapsed_ms, true));
+                output
+            }
+            Err(err) => {
+                timings.push(component_timing(&component_key, elapsed_ms, false));
+                return Err(err);
+            }
+        };
         combined
             .intent_candidates
             .extend(output.contributions.intent_candidates);
