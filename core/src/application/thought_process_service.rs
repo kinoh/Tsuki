@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::HashMap, collections::HashSet, sync::Arc, time::Instant};
 use tokio::runtime::Handle;
+use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
@@ -14,7 +15,7 @@ use crate::{
         router_symbolization_service::symbolize, usage_service::DbLlmUsageRecorder,
     },
     event::{
-        contracts::{action_result, response_text},
+        contracts::{action_result, response_text, thought_process_component},
         Event,
     },
     input_ingress::{MediaAttachment, RouterInput},
@@ -179,6 +180,7 @@ pub(crate) struct ThoughtProcessService {
     contributors: Vec<Arc<dyn DeliberationContributor>>,
     decision: DecisionService,
     action_execution: ActionExecutionService,
+    emit_component_event: Option<Arc<dyn Fn(Event) + Send + Sync>>,
 }
 
 impl ThoughtProcessService {
@@ -193,7 +195,16 @@ impl ThoughtProcessService {
             contributors,
             decision,
             action_execution,
+            emit_component_event: None,
         }
+    }
+
+    pub(crate) fn with_component_event_emitter(
+        mut self,
+        emit_component_event: Arc<dyn Fn(Event) + Send + Sync>,
+    ) -> Self {
+        self.emit_component_event = Some(emit_component_event);
+        self
     }
 
     pub(crate) async fn run(
@@ -210,35 +221,113 @@ impl ThoughtProcessService {
         mode: ThoughtProcessRunMode,
     ) -> Result<ThoughtProcessResult, ThoughtProcessError> {
         println!("THOUGHT_PROCESS stage=start events={}", input.events.len());
+        let run_id = Uuid::new_v4().to_string();
         let total_started = Instant::now();
         let mut timings = Vec::<ComponentTiming>::new();
         let mut llm_usages = Vec::<ComponentLlmUsage>::new();
+        let emit_observation = self.emit_component_event.as_ref();
 
         let cognition_started = Instant::now();
-        let decision_context = self
-            .cognition
-            .build_decision_context(input)
-            .await
-            .map_err(ThoughtProcessError::Cognition)?;
+        let decision_context = match self.cognition.build_decision_context(input).await {
+            Ok(context) => {
+                let elapsed_ms = cognition_started.elapsed().as_millis();
+                if let Some(emit_event) = emit_observation {
+                    emit_component_observation(
+                        emit_event,
+                        &run_id,
+                        ComponentObservation {
+                            component: "cognition",
+                            input: Some(json!({ "events": _trace_payload(&input.events) })),
+                            output: Some(_trace_payload(&context)),
+                            elapsed_ms,
+                            usage: None,
+                            error: None,
+                        },
+                    );
+                }
+                context
+            }
+            Err(err) => {
+                let elapsed_ms = cognition_started.elapsed().as_millis();
+                if let Some(emit_event) = emit_observation {
+                    emit_component_observation(
+                        emit_event,
+                        &run_id,
+                        ComponentObservation {
+                            component: "cognition",
+                            input: Some(json!({ "events": _trace_payload(&input.events) })),
+                            output: None,
+                            elapsed_ms,
+                            usage: None,
+                            error: Some(err.clone()),
+                        },
+                    );
+                }
+                return Err(ThoughtProcessError::Cognition(err));
+            }
+        };
         timings.push(component_timing(
             "cognition",
             cognition_started.elapsed().as_millis(),
             true,
         ));
 
-        let deliberation_result =
-            run_deliberation_contributors(&self.contributors, &decision_context)
-                .await
-                .map_err(ThoughtProcessError::Deliberation)?;
+        let deliberation_result = run_deliberation_contributors(
+            &self.contributors,
+            &decision_context,
+            emit_observation,
+            &run_id,
+        )
+        .await
+        .map_err(ThoughtProcessError::Deliberation)?;
         timings.extend(deliberation_result.timings);
         llm_usages.extend(deliberation_result.llm_usages);
 
         let decision_started = Instant::now();
-        let decision_result = self
+        let decision_input =
+            render_decision_input(&decision_context, &deliberation_result.contributions);
+        let decision_result = match self
             .decision
             .decide(&decision_context, &deliberation_result.contributions)
             .await
-            .map_err(ThoughtProcessError::Decision)?;
+        {
+            Ok(result) => {
+                let elapsed_ms = decision_started.elapsed().as_millis();
+                if let Some(emit_event) = emit_observation {
+                    emit_component_observation(
+                        emit_event,
+                        &run_id,
+                        ComponentObservation {
+                            component: "decision",
+                            input: Some(json!({ "prompt": decision_input })),
+                            output: Some(_trace_payload(&result.output)),
+                            elapsed_ms,
+                            usage: result.llm_usage.clone(),
+                            error: None,
+                        },
+                    );
+                }
+                result
+            }
+            Err(err) => {
+                let elapsed_ms = decision_started.elapsed().as_millis();
+                if let Some(emit_event) = emit_observation {
+                    emit_component_observation(
+                        emit_event,
+                        &run_id,
+                        ComponentObservation {
+                            component: "decision",
+                            input: Some(json!({ "prompt": decision_input })),
+                            output: None,
+                            elapsed_ms,
+                            usage: None,
+                            error: Some(err.to_string()),
+                        },
+                    );
+                }
+                return Err(ThoughtProcessError::Decision(err));
+            }
+        };
         timings.push(component_timing(
             "decision",
             decision_started.elapsed().as_millis(),
@@ -254,6 +343,8 @@ impl ThoughtProcessService {
                 &decision_context.available_actions,
                 &decision_result.output.actions,
                 mode,
+                emit_observation,
+                &run_id,
             )
             .await;
         timings.extend(action_run.timings);
@@ -526,7 +617,7 @@ pub(crate) async fn run_basic_thought_process_with_mode(
     }));
     let emit_event = emit_event_blocking(state.clone());
     let action_execution = ActionExecutionService::with_default_executors(
-        emit_event,
+        emit_event.clone(),
         runtime,
         state,
         action_execution_instructions,
@@ -534,14 +625,20 @@ pub(crate) async fn run_basic_thought_process_with_mode(
     let contributors = build_prompt_deliberation_contributors(state, runtime, base_instructions)
         .await
         .map_err(ThoughtProcessError::Deliberation)?;
-    ThoughtProcessService::new(
+    let service = ThoughtProcessService::new(
         Arc::new(AppCognition::new(state.clone(), false)),
         contributors,
         decision,
         action_execution,
-    )
-    .run_with_mode(&ThoughtProcessInput { events }, mode)
-    .await
+    );
+    let service = if mode == ThoughtProcessRunMode::Commit {
+        service.with_component_event_emitter(emit_event)
+    } else {
+        service
+    };
+    service
+        .run_with_mode(&ThoughtProcessInput { events }, mode)
+        .await
 }
 
 pub(crate) async fn build_prompt_deliberation_contributors(
@@ -678,6 +775,8 @@ pub(crate) struct DeliberationRunResult {
 pub(crate) async fn run_deliberation_contributors(
     contributors: &[Arc<dyn DeliberationContributor>],
     context: &DecisionContext,
+    emit_component_event: Option<&Arc<dyn Fn(Event) + Send + Sync>>,
+    run_id: &str,
 ) -> Result<DeliberationRunResult, String> {
     let selected = context
         .deliberation_contributors
@@ -713,10 +812,43 @@ pub(crate) async fn run_deliberation_contributors(
         let output = match output {
             Ok(output) => {
                 timings.push(component_timing(&component_key, elapsed_ms, true));
+                if let Some(emit_event) = emit_component_event {
+                    let component = component_key.as_str();
+                    let output_payload = json!({
+                        "contributions": _trace_payload(&output.contributions),
+                        "trace": output.trace.as_ref().map(_trace_payload),
+                    });
+                    emit_component_observation(
+                        emit_event,
+                        run_id,
+                        ComponentObservation {
+                            component,
+                            input: Some(json!({ "decision_context": context.context.as_str() })),
+                            output: Some(output_payload),
+                            elapsed_ms,
+                            usage: output.llm_usage.clone(),
+                            error: None,
+                        },
+                    );
+                }
                 output
             }
             Err(err) => {
                 timings.push(component_timing(&component_key, elapsed_ms, false));
+                if let Some(emit_event) = emit_component_event {
+                    emit_component_observation(
+                        emit_event,
+                        run_id,
+                        ComponentObservation {
+                            component: component_key.as_str(),
+                            input: Some(json!({ "decision_context": context.context.as_str() })),
+                            output: None,
+                            elapsed_ms,
+                            usage: None,
+                            error: Some(err.clone()),
+                        },
+                    );
+                }
                 return Err(err);
             }
         };
@@ -1058,6 +1190,8 @@ impl ActionExecutionService {
         available_actions: &[AvailableAction],
         selected_actions: &[Action],
         mode: ThoughtProcessRunMode,
+        emit_component_event: Option<&Arc<dyn Fn(Event) + Send + Sync>>,
+        run_id: &str,
     ) -> ActionExecutionRunResult {
         let mut results = Vec::with_capacity(selected_actions.len());
         let mut timings = Vec::<ComponentTiming>::new();
@@ -1077,12 +1211,26 @@ impl ActionExecutionService {
                     name: action.name.clone(),
                     ok: false,
                     output: String::new(),
-                    error: Some(error),
+                    error: Some(error.clone()),
                 };
                 if mode == ThoughtProcessRunMode::Commit {
                     self.emit_action_result(&result);
                 }
                 timings.push(component_timing(&component_key, 0, false));
+                if let Some(emit_event) = emit_component_event {
+                    emit_component_observation(
+                        emit_event,
+                        run_id,
+                        ComponentObservation {
+                            component: component_key.as_str(),
+                            input: Some(json!({ "action": _trace_payload(action) })),
+                            output: None,
+                            elapsed_ms: 0,
+                            usage: None,
+                            error: Some(error.clone()),
+                        },
+                    );
+                }
                 results.push(result);
                 continue;
             }
@@ -1096,12 +1244,26 @@ impl ActionExecutionService {
                     name: action.name.clone(),
                     ok: false,
                     output: String::new(),
-                    error: Some(error),
+                    error: Some(error.clone()),
                 };
                 if mode == ThoughtProcessRunMode::Commit {
                     self.emit_action_result(&result);
                 }
                 timings.push(component_timing(&component_key, 0, false));
+                if let Some(emit_event) = emit_component_event {
+                    emit_component_observation(
+                        emit_event,
+                        run_id,
+                        ComponentObservation {
+                            component: component_key.as_str(),
+                            input: Some(json!({ "action": _trace_payload(action) })),
+                            output: None,
+                            elapsed_ms: 0,
+                            usage: None,
+                            error: Some(error.clone()),
+                        },
+                    );
+                }
                 results.push(result);
                 continue;
             };
@@ -1130,8 +1292,23 @@ impl ActionExecutionService {
                         self.emit_action_result(&result);
                     }
                     timings.push(component_timing(&component_key, elapsed_ms, true));
-                    if let Some(usage) = output.llm_usage {
+                    let llm_usage = output.llm_usage;
+                    if let Some(usage) = llm_usage.clone() {
                         llm_usages.push(usage);
+                    }
+                    if let Some(emit_event) = emit_component_event {
+                        emit_component_observation(
+                            emit_event,
+                            run_id,
+                            ComponentObservation {
+                                component: component_key.as_str(),
+                                input: Some(json!({ "action": _trace_payload(action) })),
+                                output: Some(_trace_payload(&result)),
+                                elapsed_ms,
+                                usage: llm_usage,
+                                error: None,
+                            },
+                        );
                     }
                     results.push(result);
                 }
@@ -1145,12 +1322,26 @@ impl ActionExecutionService {
                         name: action.name.clone(),
                         ok: false,
                         output: String::new(),
-                        error: Some(error),
+                        error: Some(error.clone()),
                     };
                     if mode == ThoughtProcessRunMode::Commit {
                         self.emit_action_result(&result);
                     }
                     timings.push(component_timing(&component_key, elapsed_ms, false));
+                    if let Some(emit_event) = emit_component_event {
+                        emit_component_observation(
+                            emit_event,
+                            run_id,
+                            ComponentObservation {
+                                component: component_key.as_str(),
+                                input: Some(json!({ "action": _trace_payload(action) })),
+                                output: None,
+                                elapsed_ms,
+                                usage: None,
+                                error: Some(error.clone()),
+                            },
+                        );
+                    }
                     results.push(result);
                 }
             }
@@ -1196,6 +1387,39 @@ pub(crate) fn default_available_actions() -> Vec<AvailableAction> {
 #[allow(dead_code)]
 fn _trace_payload(value: impl Serialize) -> Value {
     serde_json::to_value(value).unwrap_or_else(|err| json!({ "error": err.to_string() }))
+}
+
+struct ComponentObservation<'a> {
+    component: &'a str,
+    input: Option<Value>,
+    output: Option<Value>,
+    elapsed_ms: u128,
+    usage: Option<ComponentLlmUsage>,
+    error: Option<String>,
+}
+
+fn emit_component_observation(
+    emit_event: &Arc<dyn Fn(Event) + Send + Sync>,
+    run_id: &str,
+    observation: ComponentObservation<'_>,
+) {
+    let mut payload = serde_json::Map::new();
+    if let Some(input) = observation.input {
+        payload.insert("input".to_string(), input);
+    }
+    if let Some(output) = observation.output {
+        payload.insert("output".to_string(), output);
+    }
+    payload.insert("elapsed_ms".to_string(), json!(observation.elapsed_ms));
+    if let Some(usage) = observation.usage {
+        payload.insert("usage".to_string(), _trace_payload(&usage));
+    }
+    emit_event(thought_process_component(
+        run_id,
+        observation.component,
+        payload,
+        observation.error.as_deref(),
+    ));
 }
 
 pub(crate) fn emit_event_blocking(state: AppState) -> Arc<dyn Fn(Event) + Send + Sync> {
@@ -1529,6 +1753,8 @@ mod tests {
                     input: "hello".to_string(),
                 }],
                 ThoughtProcessRunMode::Commit,
+                None,
+                "test-run",
             )
             .await;
 
@@ -1561,6 +1787,8 @@ mod tests {
                     input: "inspect logs".to_string(),
                 }],
                 ThoughtProcessRunMode::Commit,
+                None,
+                "test-run",
             )
             .await;
 
@@ -1584,6 +1812,8 @@ mod tests {
                     input: "inspect logs".to_string(),
                 }],
                 ThoughtProcessRunMode::Commit,
+                None,
+                "test-run",
             )
             .await;
 
@@ -1609,12 +1839,54 @@ mod tests {
                     input: "inspect logs".to_string(),
                 }],
                 ThoughtProcessRunMode::Commit,
+                None,
+                "test-run",
             )
             .await;
 
         assert_eq!(results.len(), 1);
         assert!(results[0].ok);
         assert_eq!(results[0].output, "executed: inspect logs");
+    }
+
+    #[tokio::test]
+    async fn action_execution_emits_component_observation_when_requested() {
+        let emitted = Arc::new(Mutex::new(Vec::<Event>::new()));
+        let emitted_for_observation = emitted.clone();
+        let emit_observation: Arc<dyn Fn(Event) + Send + Sync> = Arc::new(move |event| {
+            emitted_for_observation.lock().expect("lock").push(event);
+        });
+        let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
+        executors.insert("perform_task".to_string(), Arc::new(EchoExecutor));
+        let service = ActionExecutionService::new(executors);
+
+        let results = service
+            .execute(
+                &default_available_actions(),
+                &[Action {
+                    name: "perform_task".to_string(),
+                    input: "inspect logs".to_string(),
+                }],
+                ThoughtProcessRunMode::Commit,
+                Some(&emit_observation),
+                "run-1",
+            )
+            .await;
+
+        assert_eq!(results.len(), 1);
+        let emitted = emitted.lock().expect("lock");
+        assert_eq!(emitted.len(), 1);
+        let event = &emitted[0];
+        assert_eq!(event.source, "thought_process");
+        assert_eq!(event.modality, "state");
+        assert_eq!(event.payload["run_id"], "run-1");
+        assert_eq!(event.payload["component"], "action_execution:perform_task");
+        assert_eq!(event.payload["output"]["output"], "executed: inspect logs");
+        assert!(event.payload.get("stage").is_none());
+        assert!(event.payload.get("ok").is_none());
+        assert!(event.payload.get("error").is_none());
+        assert!(event.meta.tags.iter().any(|tag| tag == "debug"));
+        assert!(event.meta.tags.iter().any(|tag| tag == "thought_process"));
     }
 
     #[tokio::test]
@@ -1631,6 +1903,8 @@ mod tests {
                     input: "hello".to_string(),
                 }],
                 ThoughtProcessRunMode::Commit,
+                None,
+                "test-run",
             )
             .await;
 
@@ -1662,6 +1936,8 @@ mod tests {
                     input: "operation=add; motive=affiliation".to_string(),
                 }],
                 ThoughtProcessRunMode::DryRun,
+                None,
+                "test-run",
             )
             .await;
 
@@ -1693,6 +1969,8 @@ mod tests {
                     input: "inspect logs".to_string(),
                 }],
                 ThoughtProcessRunMode::DryRun,
+                None,
+                "test-run",
             )
             .await;
 

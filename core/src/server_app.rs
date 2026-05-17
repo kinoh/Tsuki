@@ -1204,9 +1204,10 @@ async fn admin_run_thought_process_component(
             )
             .await
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
-            let result = run_deliberation_contributors(&contributors, &decision_context)
-                .await
-                .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
+            let result =
+                run_deliberation_contributors(&contributors, &decision_context, None, "admin")
+                    .await
+                    .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err))?;
             Ok(Json(ThoughtProcessComponentRunResponse {
                 component,
                 mode,
@@ -1272,7 +1273,7 @@ async fn admin_run_thought_process_component(
                 &action_execution_instructions,
             );
             let output = action_execution
-                .execute(&available_actions, &selected_actions, mode)
+                .execute(&available_actions, &selected_actions, mode, None, "admin")
                 .await;
             Ok(Json(ThoughtProcessComponentRunResponse {
                 component,

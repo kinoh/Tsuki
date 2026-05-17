@@ -122,6 +122,29 @@ pub(crate) fn action_result(
     )
 }
 
+pub(crate) fn thought_process_component(
+    run_id: &str,
+    component: &str,
+    mut payload: serde_json::Map<String, Value>,
+    error: Option<&str>,
+) -> Event {
+    payload.insert("run_id".to_string(), json!(run_id));
+    payload.insert("component".to_string(), json!(component));
+    if let Some(error) = error {
+        payload.insert("error".to_string(), json!(error));
+    }
+    let mut tags = vec![
+        "debug".to_string(),
+        "thought_process".to_string(),
+        format!("component:{}", component),
+        format!("run:{}", run_id),
+    ];
+    if error.is_some() {
+        tags.push("error".to_string());
+    }
+    emit("thought_process", "state", Value::Object(payload), tags)
+}
+
 pub(crate) fn self_improvement_module_processed(payload: Value) -> Event {
     emit(
         "self_improvement",

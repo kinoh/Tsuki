@@ -305,6 +305,44 @@ LLM usage persistence remains owned by the LLM usage recorder. Thought process t
 usage values and usage record identifiers returned from LLM calls so an inspection run can show
 token consumption without making the usage table aware of thought process runs.
 
+## Runtime Observability Events
+
+In commit-mode runtime execution, the thought process orchestrator emits debug-only component
+observation events as part of the normal event stream. The owner is application orchestration. The
+target boundary is runtime observability: admin/debug consumers use these events to inspect and
+tune actual response-path behavior. They are not primary conversation events and must not be
+included in model input history.
+
+The event contract is:
+
+```
+source: thought_process
+modality: state
+tags:
+  - debug
+  - thought_process
+  - component:{component_key}
+  - run:{run_id}
+  - error              # only when the component failed
+payload:
+  run_id
+  component
+  input                # component-specific input snapshot
+  output               # component-specific output, absent on failure
+  elapsed_ms
+  usage                # optional LLM usage copied from the component response
+  error                # present only on failure
+```
+
+`run_id` correlates component observations that belong to the same thought process. It is a
+correlation key, not an ordering or transaction guarantee. The event does not carry a `stage`
+field because event stream timing is not a control-plane contract. It also does not carry `ok`;
+failure is represented by the presence of `error` and the `error` tag.
+
+Expected producers are cognition, deliberation contributors, decision, and action execution.
+Expected consumers are the admin prompt/debug UI, event-log inspection, and response-path analysis.
+Compatibility Impact: breaking-by-default (no compatibility layer).
+
 ## Analysis Components
 
 The future model may contain multiple cognitive analysis components, but they do not all need to
