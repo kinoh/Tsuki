@@ -56,7 +56,7 @@ pub(crate) struct IntentCandidate {
 pub(crate) struct AvailableAction {
     pub(crate) name: String,
     pub(crate) description: String,
-    pub(crate) input_description: String,
+    pub(crate) payload_description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,7 +70,46 @@ pub(crate) struct DecisionOutput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Action {
     pub(crate) name: String,
-    pub(crate) input: String,
+    pub(crate) payload: ActionPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ActionPayload {
+    UserReply(FocusPragmaticIntent),
+    PerformTask(PerformTaskPayload),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct FocusPragmaticIntent {
+    pub(crate) operation: FocusOperation,
+    pub(crate) motive: PragmaticMotive,
+    pub(crate) target: String,
+    pub(crate) aim: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FocusOperation {
+    Paraphrase,
+    Switch,
+    Add,
+    TopicShift,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PragmaticMotive {
+    Affiliation,
+    SelfInterest,
+    Play,
+    Epistemic,
+    Meta,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PerformTaskPayload {
+    pub(crate) task: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -378,6 +417,7 @@ pub(crate) enum DecisionError {
     Llm(String),
     InvalidJson(String),
     UnavailableAction(String),
+    InvalidActionPayload(String),
 }
 
 impl std::fmt::Display for DecisionError {
@@ -388,6 +428,7 @@ impl std::fmt::Display for DecisionError {
             Self::UnavailableAction(name) => {
                 write!(f, "decision selected unavailable action: {}", name)
             }
+            Self::InvalidActionPayload(err) => write!(f, "invalid action payload: {}", err),
         }
     }
 }
@@ -701,7 +742,7 @@ pub(crate) fn build_decision_instructions(
         base_instructions.trim(),
         decision_instructions.trim(),
         "You are the Decision component of the thought process.",
-        "Return JSON only with shape {\"actions\":[{\"name\":\"...\",\"input\":\"...\"}],\"reason\":\"...\"}. Select only actions listed in the input. Use user_reply for conversational responses, but pass an abstract response policy or realization request instead of final surface text. Use perform_task for complex external work that requires tools."
+        "Return JSON only with shape {\"actions\":[{\"name\":\"user_reply\",\"payload\":{\"operation\":\"paraphrase|switch|add|topic_shift\",\"motive\":\"affiliation|self_interest|play|epistemic|meta\",\"target\":\"...\",\"aim\":\"...\"}}],\"reason\":\"...\"}. Select only actions listed in the input. For user_reply, choose exactly one focus-pragmatic intent; do not blend multiple deliberation candidates. Use perform_task with payload {\"task\":\"...\"} only for complex external work that requires tools."
     )
 }
 
@@ -895,7 +936,7 @@ fn render_decision_input(
     contributions: &DeliberationContributions,
 ) -> String {
     format!(
-        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"...\",\"input\":\"...\"}}],\"reason\":\"...\"}}",
+        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"user_reply\",\"payload\":{{\"operation\":\"paraphrase|switch|add|topic_shift\",\"motive\":\"affiliation|self_interest|play|epistemic|meta\",\"target\":\"...\",\"aim\":\"...\"}}}}],\"reason\":\"...\"}}",
         context.context,
         format_intent_candidates(&contributions.intent_candidates),
         format_constraints(&contributions.constraints),
@@ -920,8 +961,8 @@ fn format_available_actions(actions: &[AvailableAction]) -> String {
         .iter()
         .map(|action| {
             format!(
-                "- name: {}\n  description: {}\n  input: {}",
-                action.name, action.description, action.input_description
+                "- name: {}\n  description: {}\n  payload: {}",
+                action.name, action.description, action.payload_description
             )
         })
         .collect::<Vec<_>>()
@@ -967,8 +1008,47 @@ fn validate_decision_actions(
         {
             return Err(DecisionError::UnavailableAction(action.name.clone()));
         }
+        validate_action_payload(action).map_err(DecisionError::InvalidActionPayload)?;
     }
     Ok(())
+}
+
+fn validate_action_payload(action: &Action) -> Result<(), String> {
+    match (action.name.as_str(), &action.payload) {
+        ("user_reply", ActionPayload::UserReply(intent)) => validate_focus_pragmatic_intent(intent),
+        ("perform_task", ActionPayload::PerformTask(payload)) => {
+            if payload.task.trim().is_empty() {
+                Err("perform_task payload.task must not be empty".to_string())
+            } else {
+                Ok(())
+            }
+        }
+        ("user_reply", _) => Err("user_reply requires focus-pragmatic payload".to_string()),
+        ("perform_task", _) => Err("perform_task requires {\"task\":\"...\"} payload".to_string()),
+        _ => Ok(()),
+    }
+}
+
+fn validate_focus_pragmatic_intent(intent: &FocusPragmaticIntent) -> Result<(), String> {
+    if intent.target.trim().is_empty() {
+        return Err("user_reply payload.target must not be empty".to_string());
+    }
+    if intent.aim.trim().is_empty() {
+        return Err("user_reply payload.aim must not be empty".to_string());
+    }
+    Ok(())
+}
+
+fn action_executor_input(action: &Action) -> Result<String, ActionExecutionError> {
+    validate_action_payload(action).map_err(|err| ActionExecutionError { message: err })?;
+    match &action.payload {
+        ActionPayload::UserReply(intent) => {
+            serde_json::to_string(intent).map_err(|err| ActionExecutionError {
+                message: err.to_string(),
+            })
+        }
+        ActionPayload::PerformTask(payload) => Ok(payload.task.clone()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1268,15 +1348,49 @@ impl ActionExecutionService {
                 continue;
             };
             println!(
-                "THOUGHT_ACTION stage=execute name={} input_len={} mode={:?}",
+                "THOUGHT_ACTION stage=execute name={} payload_len={} mode={:?}",
                 action.name,
-                action.input.len(),
+                serde_json::to_string(&action.payload)
+                    .map(|value| value.len())
+                    .unwrap_or_default(),
                 mode
             );
+            let executor_input = match action_executor_input(action) {
+                Ok(input) => input,
+                Err(err) => {
+                    let error = err.to_string();
+                    let result = ActionResult {
+                        name: action.name.clone(),
+                        ok: false,
+                        output: String::new(),
+                        error: Some(error.clone()),
+                    };
+                    if mode == ThoughtProcessRunMode::Commit {
+                        self.emit_action_result(&result);
+                    }
+                    timings.push(component_timing(&component_key, 0, false));
+                    if let Some(emit_event) = emit_component_event {
+                        emit_component_observation(
+                            emit_event,
+                            run_id,
+                            ComponentObservation {
+                                component: component_key.as_str(),
+                                input: Some(json!({ "action": _trace_payload(action) })),
+                                output: None,
+                                elapsed_ms: 0,
+                                usage: None,
+                                error: Some(error.clone()),
+                            },
+                        );
+                    }
+                    results.push(result);
+                    continue;
+                }
+            };
             let started = Instant::now();
             let execution = match mode {
-                ThoughtProcessRunMode::DryRun => executor.inspect(&action.input).await,
-                ThoughtProcessRunMode::Commit => executor.commit(&action.input).await,
+                ThoughtProcessRunMode::DryRun => executor.inspect(&executor_input).await,
+                ThoughtProcessRunMode::Commit => executor.commit(&executor_input).await,
             };
             let elapsed_ms = started.elapsed().as_millis();
             match execution {
@@ -1370,16 +1484,14 @@ pub(crate) fn default_available_actions() -> Vec<AvailableAction> {
         AvailableAction {
             name: "user_reply".to_string(),
             description: "Realize a conversational response and send it to the user.".to_string(),
-            input_description:
-                "An abstract response policy or realization request, not the final surface text."
-                    .to_string(),
+            payload_description:
+                "{\"operation\":\"paraphrase|switch|add|topic_shift\",\"motive\":\"affiliation|self_interest|play|epistemic|meta\",\"target\":\"current focus\",\"aim\":\"compact conversational intent\"}".to_string(),
         },
         AvailableAction {
             name: "perform_task".to_string(),
             description: "Carry out complex external work using the execution component and tools."
                 .to_string(),
-            input_description: "A concise task description for the execution component."
-                .to_string(),
+            payload_description: "{\"task\":\"concise task description\"}".to_string(),
         },
     ]
 }
@@ -1657,6 +1769,27 @@ mod tests {
         DeliberationContributions::default()
     }
 
+    fn user_reply_action(target: &str, aim: &str) -> Action {
+        Action {
+            name: "user_reply".to_string(),
+            payload: ActionPayload::UserReply(FocusPragmaticIntent {
+                operation: FocusOperation::Add,
+                motive: PragmaticMotive::Affiliation,
+                target: target.to_string(),
+                aim: aim.to_string(),
+            }),
+        }
+    }
+
+    fn perform_task_action(task: &str) -> Action {
+        Action {
+            name: "perform_task".to_string(),
+            payload: ActionPayload::PerformTask(PerformTaskPayload {
+                task: task.to_string(),
+            }),
+        }
+    }
+
     #[tokio::test]
     async fn decision_rejects_invalid_json_without_actions() {
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -1678,7 +1811,8 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let service = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
-                r#"{"actions":[{"name":"shell_exec","input":"date"}],"reason":"test"}"#.to_string(),
+                r#"{"actions":[{"name":"shell_exec","payload":{"task":"date"}}],"reason":"test"}"#
+                    .to_string(),
             ),
             requests,
         }));
@@ -1695,11 +1829,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn decision_renders_context_and_available_actions_for_llm() {
+    async fn decision_rejects_legacy_action_input_field() {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let service = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
                 r#"{"actions":[{"name":"user_reply","input":"hi"}],"reason":"test"}"#.to_string(),
+            ),
+            requests,
+        }));
+
+        let err = service
+            .decide(&decision_context(), &empty_contributions())
+            .await
+            .expect_err("legacy input must be rejected");
+
+        assert!(matches!(err, DecisionError::InvalidJson(_)));
+    }
+
+    #[tokio::test]
+    async fn decision_renders_context_and_available_actions_for_llm() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let service = DecisionService::new(Arc::new(StaticLlm {
+            response: Ok(
+                r#"{"actions":[{"name":"user_reply","payload":{"operation":"add","motive":"affiliation","target":"greeting","aim":"return a light greeting"}}],"reason":"test"}"#.to_string(),
             ),
             requests: requests.clone(),
         }));
@@ -1748,10 +1900,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[Action {
-                    name: "user_reply".to_string(),
-                    input: "hello".to_string(),
-                }],
+                &[user_reply_action("greeting", "return a light greeting")],
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -1784,7 +1933,9 @@ mod tests {
                 &default_available_actions(),
                 &[Action {
                     name: "shell_exec".to_string(),
-                    input: "inspect logs".to_string(),
+                    payload: ActionPayload::PerformTask(PerformTaskPayload {
+                        task: "inspect logs".to_string(),
+                    }),
                 }],
                 ThoughtProcessRunMode::Commit,
                 None,
@@ -1807,10 +1958,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[Action {
-                    name: "perform_task".to_string(),
-                    input: "inspect logs".to_string(),
-                }],
+                &[perform_task_action("inspect logs")],
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -1834,10 +1982,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[Action {
-                    name: "perform_task".to_string(),
-                    input: "inspect logs".to_string(),
-                }],
+                &[perform_task_action("inspect logs")],
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -1863,10 +2008,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[Action {
-                    name: "perform_task".to_string(),
-                    input: "inspect logs".to_string(),
-                }],
+                &[perform_task_action("inspect logs")],
                 ThoughtProcessRunMode::Commit,
                 Some(&emit_observation),
                 "run-1",
@@ -1898,10 +2040,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[Action {
-                    name: "user_reply".to_string(),
-                    input: "hello".to_string(),
-                }],
+                &[user_reply_action("greeting", "return a light greeting")],
                 ThoughtProcessRunMode::Commit,
                 None,
                 "test-run",
@@ -1931,10 +2070,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[Action {
-                    name: "user_reply".to_string(),
-                    input: "operation=add; motive=affiliation".to_string(),
-                }],
+                &[user_reply_action("affiliation", "respond warmly")],
                 ThoughtProcessRunMode::DryRun,
                 None,
                 "test-run",
@@ -1964,10 +2100,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[Action {
-                    name: "perform_task".to_string(),
-                    input: "inspect logs".to_string(),
-                }],
+                &[perform_task_action("inspect logs")],
                 ThoughtProcessRunMode::DryRun,
                 None,
                 "test-run",
@@ -1991,7 +2124,7 @@ mod tests {
         let decision_requests = Arc::new(Mutex::new(Vec::new()));
         let decision = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
-                r#"{"actions":[{"name":"user_reply","input":"hi"}],"reason":"greeting"}"#
+                r#"{"actions":[{"name":"user_reply","payload":{"operation":"add","motive":"affiliation","target":"greeting","aim":"return a light greeting"}}],"reason":"greeting"}"#
                     .to_string(),
             ),
             requests: decision_requests,
@@ -2095,7 +2228,7 @@ mod tests {
         let decision_requests = Arc::new(Mutex::new(Vec::new()));
         let decision = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
-                r#"{"actions":[{"name":"user_reply","input":"hi"}],"reason":"greeting"}"#
+                r#"{"actions":[{"name":"user_reply","payload":{"operation":"add","motive":"affiliation","target":"greeting","aim":"return a light greeting"}}],"reason":"greeting"}"#
                     .to_string(),
             ),
             requests: decision_requests.clone(),

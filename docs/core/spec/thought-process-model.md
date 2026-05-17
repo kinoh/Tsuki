@@ -84,8 +84,8 @@ focus, relevant history, recalled facts, active concepts, and other compact cont
 cognition.
 
 `available_actions` is the set of actions decision may choose from in this thought process.
-Each available action should describe its name, when it is appropriate, and how to write its single
-string input.
+Each available action should describe its name, when it is appropriate, and how to write its typed
+payload.
 
 Cognition does not produce the final user-facing response and does not decide which external
 action to execute.
@@ -221,20 +221,33 @@ An action selected by decision has a uniform shape:
 ```
 Action
   name: string
-  input: string
+  payload: action-specific payload
 ```
 
 `user_reply` is an action, but actions are not limited to conversation replies. The same decision
 may select a reply, a task execution, a notification, a schedule operation, a concept-graph-facing
 operation, or no external action.
 
-The action `input` should be interpreted by the executor for that action. It may reference an intent
-candidate when that is useful, but it is still action-specific executor input. For a
-conversation-facing action, the input should normally be an abstract realization request or
-response policy rather than the final surface text. Focus-pragmatic notation may be used for that
-request when it is useful. For operational actions, the input may be a task description or
-command-like instruction. The common contract remains a single string so decision does not need
-action-specific schemas.
+The action `payload` is action-specific and typed. Conversation-facing `user_reply` actions must
+carry a single focus-pragmatic intent:
+
+```
+FocusPragmaticIntent
+  operation: paraphrase | switch | add | topic_shift
+  motive: affiliation | self_interest | play | epistemic | meta
+  target: string
+  aim: string
+```
+
+Decision must select one conversational intent rather than blending multiple deliberation
+candidates. It may minimally repair the selected intent so it fits the current context, but it
+must not use the payload as a free-form response-policy field. Operational `perform_task` actions
+carry:
+
+```
+PerformTaskPayload
+  task: string
+```
 
 Direct actions are allowed only when the decision output fully determines the external effect
 without additional interpretation, realization, or tool-input construction. Conversation replies
@@ -270,16 +283,15 @@ selected action. Decision still only selects actions; it does not execute tools 
 not produce final conversation surface text.
 
 Conversation surface instructions belong to the action executor prompt, not to Decision. Decision
-may pass abstract tone, focus, or constraint requests in the selected `user_reply` action input,
-but examples, style rules, and final wording policy for user-facing text should live in the
-`Action Execution` prompt section.
+passes only the selected focus-pragmatic intent in the `user_reply` payload. Examples, style rules,
+and final wording policy for user-facing text live in the `Action Execution` prompt section.
 
 Action execution must support dry-run as an inspection mode, not as a partial external execution.
 In dry-run mode it must not emit events, mutate application state, call external tools, or send
 messages to users. Stateless LLM realization is not an application side effect for this purpose:
 LLM-mediated conversation actions should still run so operators can inspect the realized surface
-candidate for the same selected action input. For tool-mediated actions, dry-run shows the tool
-name, tool input, and LLM/tool plan without performing the external tool call. Commit mode performs
+candidate for the same selected action payload. For tool-mediated actions, dry-run shows the tool
+name, tool payload, and LLM/tool plan without performing the external tool call. Commit mode performs
 the selected action and records action results.
 
 ## Trace
