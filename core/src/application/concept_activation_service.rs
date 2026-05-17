@@ -1,11 +1,20 @@
 use crate::activation_concept_graph::ConceptGraphOps;
 use crate::activation_concept_graph::{ActiveGraphNode, ConceptGraphActivationReader};
+use std::time::Instant;
 
 const RECALL_MAX_HOP: u32 = 2;
 
 pub(crate) struct ConceptActivationResult {
     pub(crate) active_concepts_and_arousal: String,
     pub(crate) errors: Vec<String>,
+    pub(crate) timings: Vec<ConceptActivationTiming>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConceptActivationTiming {
+    pub(crate) key: String,
+    pub(crate) elapsed_ms: u128,
+    pub(crate) ok: bool,
 }
 
 pub(crate) async fn activate_concepts<G>(
@@ -18,17 +27,33 @@ where
     G: ConceptGraphActivationReader + ConceptGraphOps + ?Sized,
 {
     let mut errors = Vec::<String>::new();
+    let mut timings = Vec::<ConceptActivationTiming>::new();
 
     if !seeds.is_empty() {
-        if let Err(err) = graph
+        let recall_started = Instant::now();
+        let recall_result = graph
             .recall_query(seeds.to_vec(), RECALL_MAX_HOP, dry_run)
-            .await
-        {
+            .await;
+        let recall_ok = recall_result.is_ok();
+        timings.push(concept_activation_timing(
+            "concept_activation:recall_query",
+            recall_started.elapsed().as_millis(),
+            recall_ok,
+        ));
+        if let Err(err) = recall_result {
             errors.push(format!("recall_query seeds={:?}: {}", seeds, err));
         }
     }
 
-    let active_concepts_and_arousal = match graph.active_nodes(active_state_limit).await {
+    let active_nodes_started = Instant::now();
+    let active_nodes_result = graph.active_nodes(active_state_limit).await;
+    let active_nodes_ok = active_nodes_result.is_ok();
+    timings.push(concept_activation_timing(
+        "concept_activation:active_nodes",
+        active_nodes_started.elapsed().as_millis(),
+        active_nodes_ok,
+    ));
+    let active_concepts_and_arousal = match active_nodes_result {
         Ok(nodes) => render_active_nodes(nodes.as_slice()),
         Err(err) => {
             errors.push(format!("active_nodes: {}", err));
@@ -39,6 +64,19 @@ where
     ConceptActivationResult {
         active_concepts_and_arousal,
         errors,
+        timings,
+    }
+}
+
+fn concept_activation_timing(
+    key: impl Into<String>,
+    elapsed_ms: u128,
+    ok: bool,
+) -> ConceptActivationTiming {
+    ConceptActivationTiming {
+        key: key.into(),
+        elapsed_ms,
+        ok,
     }
 }
 

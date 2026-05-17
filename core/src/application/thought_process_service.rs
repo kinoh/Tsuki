@@ -583,6 +583,13 @@ impl CognitionComponent for AppCognition {
                 retrieval_started.elapsed().as_millis(),
                 retrieval.errors.is_empty(),
             ));
+            timings.extend(retrieval.timings.iter().map(|metric| {
+                component_timing(
+                    format!("cognition:{}", metric.key),
+                    metric.elapsed_ms,
+                    metric.ok,
+                )
+            }));
             for err in &retrieval.errors {
                 println!("COGNITION_CONCEPT_RETRIEVAL_ERROR error={}", err);
             }
@@ -599,6 +606,13 @@ impl CognitionComponent for AppCognition {
                 activation_started.elapsed().as_millis(),
                 activation.errors.is_empty(),
             ));
+            timings.extend(activation.timings.iter().map(|metric| {
+                component_timing(
+                    format!("cognition:{}", metric.key),
+                    metric.elapsed_ms,
+                    metric.ok,
+                )
+            }));
             for err in &activation.errors {
                 println!("COGNITION_CONCEPT_ACTIVATION_ERROR error={}", err);
             }

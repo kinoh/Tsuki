@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Instant;
 
 use crate::activation_concept_graph::ConceptGraphActivationReader;
 use crate::config::RouterMultimodalEmbeddingConfig;
@@ -10,6 +11,14 @@ pub(crate) struct ConceptRetrievalResult {
     pub(crate) multimodal_candidate_concepts: Vec<String>,
     pub(crate) candidate_source: String,
     pub(crate) errors: Vec<String>,
+    pub(crate) timings: Vec<ConceptRetrievalTiming>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConceptRetrievalTiming {
+    pub(crate) key: String,
+    pub(crate) elapsed_ms: u128,
+    pub(crate) ok: bool,
 }
 
 /// Retrieves concept candidates from the graph.
@@ -24,6 +33,7 @@ pub(crate) async fn retrieve_concepts(
     multimodal_config: &RouterMultimodalEmbeddingConfig,
     graph: &dyn ConceptGraphActivationReader,
 ) -> ConceptRetrievalResult {
+    let mut timings = Vec::<ConceptRetrievalTiming>::new();
     let query_text = query_text.trim();
     if query_text.is_empty() {
         return ConceptRetrievalResult {
@@ -32,13 +42,19 @@ pub(crate) async fn retrieve_concepts(
             multimodal_candidate_concepts: Vec::new(),
             candidate_source: "none".to_string(),
             errors: Vec::new(),
+            timings,
         };
     }
 
-    let text_candidate_concepts = graph
-        .concept_search(query_text, limit)
-        .await
-        .unwrap_or_default();
+    let text_started = Instant::now();
+    let text_result = graph.concept_search(query_text, limit).await;
+    let text_ok = text_result.is_ok();
+    let text_candidate_concepts = text_result.unwrap_or_default();
+    timings.push(concept_retrieval_timing(
+        "concept_retrieval:text_search",
+        text_started.elapsed().as_millis(),
+        text_ok,
+    ));
 
     let requested_multimodal = multimodal_config.enabled
         && (multimodal_config.shadow_enabled
@@ -49,7 +65,15 @@ pub(crate) async fn retrieve_concepts(
 
     let mut errors = Vec::<String>::new();
     let multimodal_candidate_concepts = if requested_multimodal {
-        match graph.concept_search_multimodal(input, limit).await {
+        let multimodal_started = Instant::now();
+        let result = graph.concept_search_multimodal(input, limit).await;
+        let ok = result.is_ok();
+        timings.push(concept_retrieval_timing(
+            "concept_retrieval:multimodal_search",
+            multimodal_started.elapsed().as_millis(),
+            ok,
+        ));
+        match result {
             Ok(items) => items,
             Err(err) => {
                 errors.push(err);
@@ -61,11 +85,17 @@ pub(crate) async fn retrieve_concepts(
     };
 
     let candidate_source = resolve_candidate_source(multimodal_config.primary_source.as_str());
+    let merge_started = Instant::now();
     let candidate_concepts = match candidate_source.as_str() {
         "multimodal" => multimodal_candidate_concepts.clone(),
         "hybrid" => merge_unique(&multimodal_candidate_concepts, &text_candidate_concepts),
         _ => text_candidate_concepts.clone(),
     };
+    timings.push(concept_retrieval_timing(
+        "concept_retrieval:merge_candidates",
+        merge_started.elapsed().as_millis(),
+        true,
+    ));
 
     let record_multimodal = multimodal_config.shadow_enabled || candidate_source != "text";
 
@@ -79,6 +109,19 @@ pub(crate) async fn retrieve_concepts(
         },
         candidate_source,
         errors,
+        timings,
+    }
+}
+
+fn concept_retrieval_timing(
+    key: impl Into<String>,
+    elapsed_ms: u128,
+    ok: bool,
+) -> ConceptRetrievalTiming {
+    ConceptRetrievalTiming {
+        key: key.into(),
+        elapsed_ms,
+        ok,
     }
 }
 
