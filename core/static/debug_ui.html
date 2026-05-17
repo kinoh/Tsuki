@@ -136,6 +136,16 @@
         color: var(--text);
         white-space: nowrap;
       }
+      .dag-node-label { display: block; }
+      .dag-node-metrics {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 10px;
+        font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+        font-weight: 500;
+        line-height: 1.2;
+      }
       .dag-node.active { border-color: var(--accent); background: rgba(113, 74, 244, 0.18); }
       .dag-node:disabled { cursor: default; opacity: 0.6; }
       pre {
@@ -247,6 +257,10 @@
                 <label id="outputLabel" for="output">Output</label>
                 <pre id="output">{}</pre>
               </div>
+              <div>
+                <label for="metricsOutput">Metrics</label>
+                <pre id="metricsOutput">{}</pre>
+              </div>
             </div>
             <div class="status" id="promptStatus"></div>
           </div>
@@ -278,6 +292,10 @@
 
       function showContext(value) {
         $("contextOutput").textContent = JSON.stringify(value ?? null, null, 2);
+      }
+
+      function showMetrics(value) {
+        $("metricsOutput").textContent = JSON.stringify(value ?? null, null, 2);
       }
 
       function restoreSession() {
@@ -380,7 +398,17 @@
         const button = document.createElement("button");
         button.className = "dag-node";
         button.type = "button";
-        button.textContent = node.name;
+        const label = document.createElement("span");
+        label.className = "dag-node-label";
+        label.textContent = node.name;
+        button.appendChild(label);
+        const summary = metricsSummaryForNode(node);
+        if (summary) {
+          const metrics = document.createElement("span");
+          metrics.className = "dag-node-metrics";
+          metrics.textContent = summary;
+          button.appendChild(metrics);
+        }
         button.classList.toggle(
           "active",
           state.inspecting.kind === node.kind && state.inspecting.name === node.name,
@@ -460,6 +488,39 @@
         return { timings, llm_usages };
       }
 
+      function componentKeysForNode(node) {
+        if (node.kind === "component" && node.component === "cognition") return ["cognition"];
+        if (node.kind === "component" && node.component === "decision") return ["decision"];
+        if (node.kind === "component" && node.component === "action_execution") return ["action_execution:"];
+        if (node.kind === "contributor") return [`deliberation:${node.name}`];
+        return [];
+      }
+
+      function metricsForNode(node) {
+        const keys = componentKeysForNode(node);
+        if (keys.length === 0) return { timings: [], llm_usages: [] };
+        if (keys[0].endsWith(":")) return metricsWithPrefix(keys[0]);
+        return metricsFor(keys[0]);
+      }
+
+      function sumNumbers(items, field) {
+        return items.reduce((sum, item) => sum + Number(item?.[field] || 0), 0);
+      }
+
+      function metricsSummary(metrics) {
+        const elapsed = sumNumbers(metrics.timings || [], "elapsed_ms");
+        const tokens = sumNumbers(metrics.llm_usages || [], "total_tokens");
+        if (!elapsed && !tokens) return "";
+        const parts = [];
+        if (elapsed) parts.push(`${elapsed}ms`);
+        if (tokens) parts.push(`${tokens}tok`);
+        return parts.join(" / ");
+      }
+
+      function metricsSummaryForNode(node) {
+        return metricsSummary(metricsForNode(node));
+      }
+
       function renderInspection() {
         const run = state.lastRun;
         const inspecting = state.inspecting;
@@ -472,26 +533,23 @@
           $("promptLabel").textContent = "Prompt";
           $("outputLabel").textContent = "Output";
           showContext(state.eventHistoryPreview);
+          showMetrics({});
           setPrompt("", false);
           show(run?.event_history || state.eventHistoryPreview);
           return;
         }
 
         if (inspecting.component === "cognition") {
-          showContext({
-            event_history: run?.event_history || state.eventHistoryPreview,
-            metrics: metricsFor("cognition"),
-          });
+          showContext(run?.event_history || state.eventHistoryPreview);
+          showMetrics(metricsFor("cognition"));
           setPrompt("Cognition builds DecisionContext from event history using runtime code.", false);
           show(run?.result?.decision_context || {});
           return;
         }
 
         if (inspecting.kind === "contributor") {
-          showContext({
-            decision_context: run?.result?.decision_context || {},
-            metrics: metricsFor(`deliberation:${inspecting.name}`),
-          });
+          showContext(run?.result?.decision_context || {});
+          showMetrics(metricsFor(`deliberation:${inspecting.name}`));
           setPrompt(findContributorPrompt(inspecting.name), true);
           show(contributionFor(inspecting.name));
           return;
@@ -501,8 +559,8 @@
           showContext({
             decision_context: run?.result?.decision_context || null,
             deliberation_contributions: run?.result?.deliberation_contributions || null,
-            metrics: metricsFor("decision"),
           });
+          showMetrics(metricsFor("decision"));
           setPrompt(state.prompts?.decision || "", true);
           show(run?.result?.decision_output || {});
           return;
@@ -512,8 +570,8 @@
           showContext({
             available_actions: run?.result?.decision_context?.available_actions || [],
             selected_actions: run?.result?.decision_output?.actions || [],
-            metrics: metricsWithPrefix("action_execution:"),
           });
+          showMetrics(metricsWithPrefix("action_execution:"));
           setPrompt(state.prompts?.action_execution || "", true);
           show(run?.result?.action_results || []);
         }
