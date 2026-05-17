@@ -415,7 +415,13 @@ pub(crate) async fn run_server() {
         .symbolizer_model
         .clone()
         .unwrap_or_else(|| config.llm.model.clone());
-    let router_symbolizer = Arc::new(build_response_api_symbolizer(symbolizer_model));
+    let router_symbolizer = Arc::new(build_response_api_symbolizer(
+        symbolizer_model,
+        config
+            .internal_prompts
+            .router_symbolizer_instructions
+            .clone(),
+    ));
 
     let state = AppState::new(
         AppServices {
@@ -577,6 +583,32 @@ pub(crate) async fn run_server() {
 fn validate_required_config(config: &Config) {
     if config.prompts.path.trim().is_empty() {
         panic!("config.toml [prompts].path must not be empty");
+    }
+    if config
+        .internal_prompts
+        .decision_action_planning_instructions
+        .trim()
+        .is_empty()
+    {
+        panic!(
+            "config.toml [internal_prompts].decision_action_planning_instructions must not be empty"
+        );
+    }
+    if config
+        .internal_prompts
+        .router_symbolizer_instructions
+        .trim()
+        .is_empty()
+    {
+        panic!("config.toml [internal_prompts].router_symbolizer_instructions must not be empty");
+    }
+    if config
+        .internal_prompts
+        .perform_task_instructions
+        .trim()
+        .is_empty()
+    {
+        panic!("config.toml [internal_prompts].perform_task_instructions must not be empty");
     }
     if config.concept_graph.memgraph_uri.trim().is_empty() {
         panic!("config.toml [concept_graph].memgraph_uri must not be empty");
@@ -1268,7 +1300,15 @@ async fn admin_run_thought_process_component(
                 Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
             let decision = DecisionService::new(build_response_api_llm(ResponseApiConfig {
                 model: state.runtime.modules.runtime.model.clone(),
-                instructions: build_decision_instructions(&base, &decision_instructions),
+                instructions: build_decision_instructions(
+                    &base,
+                    &decision_instructions,
+                    state
+                        .config
+                        .internal_prompts
+                        .decision_action_planning_instructions
+                        .as_str(),
+                ),
                 temperature: state.runtime.modules.runtime.temperature,
                 max_output_tokens: state.runtime.modules.runtime.max_output_tokens,
                 tools: Vec::new(),
@@ -1312,6 +1352,11 @@ async fn admin_run_thought_process_component(
                 &state.runtime.modules.runtime,
                 &state,
                 &action_execution_instructions,
+                state
+                    .config
+                    .internal_prompts
+                    .perform_task_instructions
+                    .as_str(),
             );
             let output = action_execution
                 .execute(

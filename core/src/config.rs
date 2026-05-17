@@ -192,8 +192,11 @@ pub struct PromptsConfig {
 pub struct InternalPromptConfig {
     pub decision_context_template: String,
     pub submodule_context_template: String,
+    pub decision_action_planning_instructions: String,
+    pub router_symbolizer_instructions: String,
     pub deliberation_contributor_instructions: String,
     pub deliberation_contributor_context_template: String,
+    pub perform_task_instructions: String,
     pub mcp_trigger_extract_instructions: String,
     pub mcp_trigger_extract_prompt_template: String,
     pub mcp_trigger_extract_retry_prompt_template: String,

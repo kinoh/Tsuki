@@ -798,7 +798,15 @@ pub(crate) async fn run_basic_thought_process_with_mode(
         Arc::new(DbLlmUsageRecorder::new(state.services.db.clone()));
     let decision = DecisionService::new(build_response_api_llm(ResponseApiConfig {
         model: runtime.model.clone(),
-        instructions: build_decision_instructions(base_instructions, decision_instructions),
+        instructions: build_decision_instructions(
+            base_instructions,
+            decision_instructions,
+            state
+                .config
+                .internal_prompts
+                .decision_action_planning_instructions
+                .as_str(),
+        ),
         temperature: runtime.temperature,
         max_output_tokens: runtime.max_output_tokens,
         tools: Vec::new(),
@@ -813,6 +821,11 @@ pub(crate) async fn run_basic_thought_process_with_mode(
         runtime,
         state,
         action_execution_instructions,
+        state
+            .config
+            .internal_prompts
+            .perform_task_instructions
+            .as_str(),
     );
     let contributors = build_prompt_deliberation_contributors(state, runtime, base_instructions)
         .await
@@ -887,14 +900,13 @@ pub(crate) async fn build_prompt_deliberation_contributors(
 pub(crate) fn build_decision_instructions(
     base_instructions: &str,
     decision_instructions: &str,
+    action_planning_instructions: &str,
 ) -> String {
-    format!(
-        "{}\n\n{}\n\n{}\n{}",
-        base_instructions.trim(),
-        decision_instructions.trim(),
-        "You are the Decision component of the thought process.",
-        "Return JSON only with shape {\"actions\":[{\"name\":\"user_reply\",\"payload\":{\"source\":\"...\"}}],\"intent_scores\":[{\"source\":\"...\",\"relevance\":1,\"specificity\":1,\"conversational_fit\":1,\"grounding\":1}]}. Select only actions listed in the input. The actions array is an ordered action plan. Decision is responsible for listing every action needed to realize the selected intent; external work and user-visible speech are separate actions. perform_task carries out external work and does not substitute for user_reply. If the selected intent requires the user to receive an answer, completion notice, failure notice, or result summary, include a user_reply action in the ordered plan even when perform_task is also present. A later user_reply may use the results of earlier actions; keep its payload as {\"source\":\"...\"} and choose exactly one deliberation candidate by source. Use perform_task with payload {\"task\":\"...\"} only for complex external work that requires tools."
-    )
+    compose_prompt_sections(&[
+        base_instructions,
+        decision_instructions,
+        action_planning_instructions,
+    ])
 }
 
 fn compose_prompt_sections(sections: &[&str]) -> String {
@@ -1089,7 +1101,7 @@ fn render_decision_input(
     contributions: &DeliberationContributions,
 ) -> String {
     format!(
-        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"user_reply\",\"payload\":{{\"source\":\"...\"}}}}],\"intent_scores\":[{{\"source\":\"...\",\"relevance\":1,\"specificity\":1,\"conversational_fit\":1,\"grounding\":1}}]}}\nActions are ordered. Include all actions needed to realize the selected intent. perform_task does not send a user-visible reply; include a later user_reply when the user should receive the result, completion, failure, or summary. A later user_reply can use previous action results without adding fields to its payload.",
+        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}",
         context.context,
         format_intent_candidates(&contributions.intent_candidates),
         format_constraints(&contributions.constraints),
@@ -1490,6 +1502,7 @@ impl ActionExecutionService {
         runtime: &ModuleRuntime,
         state: &AppState,
         user_reply_instructions: &str,
+        perform_task_instructions: &str,
     ) -> Self {
         let mut executors = HashMap::<String, Arc<dyn ActionExecutor>>::new();
         let reply_usage_recorder: Arc<dyn LlmUsageRecorder> =
@@ -1519,7 +1532,7 @@ impl ActionExecutionService {
             .collect::<Vec<_>>();
         let task_llm = build_response_api_llm(ResponseApiConfig {
             model: runtime.model.clone(),
-            instructions: "You are an execution component. You receive JSON containing task, recent_event_history, recalled_history, latest_input, and prior_action_results. Carry out the selected external action using available tools when needed, using the context fields as grounding for the task. Return a concise execution result for the action result log. Do not message the user directly.".to_string(),
+            instructions: perform_task_instructions.trim().to_string(),
             temperature: runtime.temperature,
             max_output_tokens: runtime.max_output_tokens,
             tools: task_tools,
@@ -2247,9 +2260,6 @@ mod tests {
         assert!(requests[0].input.contains("do not execute external tasks"));
         assert!(requests[0].input.contains("name: user_reply"));
         assert!(requests[0].input.contains("name: perform_task"));
-        assert!(requests[0].input.contains("Return JSON only"));
-        assert!(requests[0].input.contains("Actions are ordered"));
-        assert!(requests[0].input.contains("perform_task does not send"));
     }
 
     #[tokio::test]

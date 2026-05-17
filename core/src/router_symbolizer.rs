@@ -11,22 +11,19 @@ use async_trait::async_trait;
 
 use crate::input_ingress::{MediaAttachment, RouterInput};
 
-const SYMBOLIZER_INSTRUCTIONS: &str = "\
-You are a router symbolizer. Describe the provided input literally and concisely in plain text. \
-Include what you observe factually and the sensory impression it conveys. \
-Output only the description, no commentary.";
-
 /// Production backend that calls the OpenAI Responses API with vision support.
 pub(crate) struct ResponseApiSymbolizerBackend {
     client: Client<OpenAIConfig>,
     model: String,
+    instructions: String,
 }
 
 impl ResponseApiSymbolizerBackend {
-    pub(crate) fn new(model: impl Into<String>) -> Self {
+    pub(crate) fn new(model: impl Into<String>, instructions: impl Into<String>) -> Self {
         Self {
             client: Client::new(),
             model: model.into(),
+            instructions: instructions.into(),
         }
     }
 }
@@ -62,7 +59,7 @@ impl SymbolizerBackend for ResponseApiSymbolizerBackend {
 
         let built = CreateResponseArgs::default()
             .model(self.model.as_str())
-            .instructions(SYMBOLIZER_INSTRUCTIONS)
+            .instructions(self.instructions.as_str())
             .input(input_param)
             .build()
             .map_err(|err| format!("symbolizer request build failed: {}", err))?;
@@ -107,8 +104,9 @@ fn image_content(attachment: &MediaAttachment) -> InputImageContent {
 
 pub(crate) fn build_response_api_symbolizer(
     model: impl Into<String>,
+    instructions: impl Into<String>,
 ) -> OpenAIRouterSymbolizer<ResponseApiSymbolizerBackend> {
-    OpenAIRouterSymbolizer::new(ResponseApiSymbolizerBackend::new(model))
+    OpenAIRouterSymbolizer::new(ResponseApiSymbolizerBackend::new(model, instructions))
 }
 
 /// Converts a RouterInput into a literal text description for embedding and decision context.
