@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::HashMap, collections::HashSet, sync::Arc, time::Instant};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 use tokio::runtime::Handle;
 use uuid::Uuid;
 
@@ -42,6 +43,7 @@ pub(crate) struct DecisionContext {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ActionExecutionContext {
     pub(crate) recent_event_history: String,
+    pub(crate) recalled_history: String,
     pub(crate) latest_input: String,
 }
 
@@ -67,14 +69,26 @@ pub(crate) struct AvailableAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct DecisionOutput {
     #[serde(default)]
     pub(crate) actions: Vec<Action>,
     #[serde(default)]
-    pub(crate) reason: String,
+    pub(crate) intent_scores: Vec<IntentScore>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct IntentScore {
+    pub(crate) source: String,
+    pub(crate) relevance: u8,
+    pub(crate) specificity: u8,
+    pub(crate) conversational_fit: u8,
+    pub(crate) grounding: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Action {
     pub(crate) name: String,
     pub(crate) payload: ActionPayload,
@@ -83,16 +97,36 @@ pub(crate) struct Action {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum ActionPayload {
-    UserReply(FocusPragmaticIntent),
+    UserReply(UserReplySelection),
     PerformTask(PerformTaskPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UserReplySelection {
+    pub(crate) source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct FocusPragmaticIntent {
     pub(crate) operation: FocusOperation,
     pub(crate) motive: PragmaticMotive,
     pub(crate) target: String,
-    pub(crate) aim: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExecutableAction {
+    pub(crate) name: String,
+    pub(crate) payload: ExecutableActionPayload,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ExecutableActionPayload {
+    UserReply(FocusPragmaticIntent),
+    PerformTask(PerformTaskPayload),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +149,7 @@ pub(crate) enum PragmaticMotive {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PerformTaskPayload {
     pub(crate) task: String,
 }
@@ -395,11 +430,17 @@ impl ThoughtProcessService {
             llm_usages.push(usage);
         }
 
+        let executable_actions = resolve_executable_actions(
+            &decision_result.output.actions,
+            &deliberation_result.contributions,
+        )
+        .map_err(ThoughtProcessError::Decision)?;
+
         let action_run = self
             .action_execution
             .execute(
                 &decision_context.available_actions,
-                &decision_result.output.actions,
+                &executable_actions,
                 &decision_context.action_context,
                 mode,
                 emit_observation,
@@ -438,6 +479,8 @@ pub(crate) enum DecisionError {
     InvalidJson(String),
     UnavailableAction(String),
     InvalidActionPayload(String),
+    UnavailableIntentSource(String),
+    InvalidIntentCandidate(String),
 }
 
 impl std::fmt::Display for DecisionError {
@@ -449,6 +492,10 @@ impl std::fmt::Display for DecisionError {
                 write!(f, "decision selected unavailable action: {}", name)
             }
             Self::InvalidActionPayload(err) => write!(f, "invalid action payload: {}", err),
+            Self::UnavailableIntentSource(source) => {
+                write!(f, "decision selected unavailable intent source: {}", source)
+            }
+            Self::InvalidIntentCandidate(err) => write!(f, "invalid intent candidate: {}", err),
         }
     }
 }
@@ -563,6 +610,7 @@ impl CognitionComponent for AppCognition {
             "<recent_event_history>\n{}\n</recent_event_history>",
             recent_event_history
         ));
+        context_parts.push(format_time_context(&input.events));
         if let Some(router_input) = latest_input.as_ref() {
             let symbolization_started = Instant::now();
             let symbolization =
@@ -688,6 +736,7 @@ impl CognitionComponent for AppCognition {
                     deliberation_contributors,
                     action_context: ActionExecutionContext {
                         recent_event_history,
+                        recalled_history,
                         latest_input: input_text.trim().to_string(),
                     },
                 },
@@ -707,6 +756,7 @@ impl CognitionComponent for AppCognition {
                 deliberation_contributors: Vec::new(),
                 action_context: ActionExecutionContext {
                     recent_event_history,
+                    recalled_history: "none".to_string(),
                     latest_input: "none".to_string(),
                 },
             },
@@ -843,7 +893,7 @@ pub(crate) fn build_decision_instructions(
         base_instructions.trim(),
         decision_instructions.trim(),
         "You are the Decision component of the thought process.",
-        "Return JSON only with shape {\"actions\":[{\"name\":\"user_reply\",\"payload\":{\"operation\":\"paraphrase|switch|add|topic_shift\",\"motive\":\"affiliation|self_interest|play|epistemic|meta\",\"target\":\"...\",\"aim\":\"...\"}}],\"reason\":\"...\"}. Select only actions listed in the input. For user_reply, choose exactly one focus-pragmatic intent; do not blend multiple deliberation candidates. Use perform_task with payload {\"task\":\"...\"} only for complex external work that requires tools."
+        "Return JSON only with shape {\"actions\":[{\"name\":\"user_reply\",\"payload\":{\"source\":\"...\"}}],\"intent_scores\":[{\"source\":\"...\",\"relevance\":1,\"specificity\":1,\"conversational_fit\":1,\"grounding\":1}]}. Select only actions listed in the input. For user_reply, choose exactly one deliberation candidate by source. Use perform_task with payload {\"task\":\"...\"} only for complex external work that requires tools."
     )
 }
 
@@ -884,9 +934,9 @@ impl DecisionService {
         validate_decision_actions(context, &output)?;
         let llm_usage = component_llm_usage("decision", &response);
         println!(
-            "THOUGHT_DECISION stage=end actions={} reason_len={}",
+            "THOUGHT_DECISION stage=end actions={} intent_scores={}",
             output.actions.len(),
-            output.reason.len()
+            output.intent_scores.len()
         );
         Ok(DecisionRunResult { output, llm_usage })
     }
@@ -1039,7 +1089,7 @@ fn render_decision_input(
     contributions: &DeliberationContributions,
 ) -> String {
     format!(
-        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"user_reply\",\"payload\":{{\"operation\":\"paraphrase|switch|add|topic_shift\",\"motive\":\"affiliation|self_interest|play|epistemic|meta\",\"target\":\"...\",\"aim\":\"...\"}}}}],\"reason\":\"...\"}}",
+        "Context:\n{}\n\nDeliberation contributions:\n{}\n\nConstraints:\n{}\n\nAvailable actions:\n{}\n\nReturn JSON only with shape: {{\"actions\":[{{\"name\":\"user_reply\",\"payload\":{{\"source\":\"...\"}}}}],\"intent_scores\":[{{\"source\":\"...\",\"relevance\":1,\"specificity\":1,\"conversational_fit\":1,\"grounding\":1}}]}}",
         context.context,
         format_intent_candidates(&contributions.intent_candidates),
         format_constraints(&contributions.constraints),
@@ -1113,12 +1163,41 @@ fn validate_decision_actions(
         }
         validate_action_payload(action).map_err(DecisionError::InvalidActionPayload)?;
     }
+    validate_intent_scores(&output.intent_scores).map_err(DecisionError::InvalidActionPayload)?;
+    Ok(())
+}
+
+fn validate_intent_scores(scores: &[IntentScore]) -> Result<(), String> {
+    for score in scores {
+        if score.source.trim().is_empty() {
+            return Err("intent_scores.source must not be empty".to_string());
+        }
+        for (field, value) in [
+            ("relevance", score.relevance),
+            ("specificity", score.specificity),
+            ("conversational_fit", score.conversational_fit),
+            ("grounding", score.grounding),
+        ] {
+            if !(1..=5).contains(&value) {
+                return Err(format!(
+                    "intent_scores.{} must be an integer from 1 to 5",
+                    field
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
 fn validate_action_payload(action: &Action) -> Result<(), String> {
     match (action.name.as_str(), &action.payload) {
-        ("user_reply", ActionPayload::UserReply(intent)) => validate_focus_pragmatic_intent(intent),
+        ("user_reply", ActionPayload::UserReply(selection)) => {
+            if selection.source.trim().is_empty() {
+                Err("user_reply payload.source must not be empty".to_string())
+            } else {
+                Ok(())
+            }
+        }
         ("perform_task", ActionPayload::PerformTask(payload)) => {
             if payload.task.trim().is_empty() {
                 Err("perform_task payload.task must not be empty".to_string())
@@ -1126,7 +1205,7 @@ fn validate_action_payload(action: &Action) -> Result<(), String> {
                 Ok(())
             }
         }
-        ("user_reply", _) => Err("user_reply requires focus-pragmatic payload".to_string()),
+        ("user_reply", _) => Err("user_reply requires {\"source\":\"...\"} payload".to_string()),
         ("perform_task", _) => Err("perform_task requires {\"task\":\"...\"} payload".to_string()),
         _ => Ok(()),
     }
@@ -1136,27 +1215,101 @@ fn validate_focus_pragmatic_intent(intent: &FocusPragmaticIntent) -> Result<(), 
     if intent.target.trim().is_empty() {
         return Err("user_reply payload.target must not be empty".to_string());
     }
-    if intent.aim.trim().is_empty() {
-        return Err("user_reply payload.aim must not be empty".to_string());
-    }
     Ok(())
 }
 
+fn resolve_executable_actions(
+    actions: &[Action],
+    contributions: &DeliberationContributions,
+) -> Result<Vec<ExecutableAction>, DecisionError> {
+    actions
+        .iter()
+        .map(|action| match &action.payload {
+            ActionPayload::UserReply(selection) => {
+                let candidate = contributions
+                    .intent_candidates
+                    .iter()
+                    .find(|candidate| candidate.source == selection.source)
+                    .ok_or_else(|| {
+                        DecisionError::UnavailableIntentSource(selection.source.clone())
+                    })?;
+                let intent = parse_focus_pragmatic_candidate(candidate.text.as_str())
+                    .map_err(DecisionError::InvalidIntentCandidate)?;
+                Ok(ExecutableAction {
+                    name: action.name.clone(),
+                    payload: ExecutableActionPayload::UserReply(intent),
+                })
+            }
+            ActionPayload::PerformTask(payload) => Ok(ExecutableAction {
+                name: action.name.clone(),
+                payload: ExecutableActionPayload::PerformTask(payload.clone()),
+            }),
+        })
+        .collect()
+}
+
+fn parse_focus_pragmatic_candidate(raw: &str) -> Result<FocusPragmaticIntent, String> {
+    let mut operation = None;
+    let mut motive = None;
+    let mut target = None;
+    for part in raw.split(';') {
+        let (key, value) = part
+            .trim()
+            .split_once('=')
+            .ok_or_else(|| format!("intent candidate segment must contain '=': {}", part.trim()))?;
+        let value = value.trim();
+        match key.trim() {
+            "operation" => operation = Some(parse_focus_operation(value)?),
+            "motive" => motive = Some(parse_pragmatic_motive(value)?),
+            "target" => target = Some(value.to_string()),
+            other => return Err(format!("unknown intent candidate field: {}", other)),
+        }
+    }
+    let intent = FocusPragmaticIntent {
+        operation: operation.ok_or("intent candidate missing operation")?,
+        motive: motive.ok_or("intent candidate missing motive")?,
+        target: target.ok_or("intent candidate missing target")?,
+    };
+    validate_focus_pragmatic_intent(&intent)?;
+    Ok(intent)
+}
+
+fn parse_focus_operation(raw: &str) -> Result<FocusOperation, String> {
+    match raw {
+        "paraphrase" => Ok(FocusOperation::Paraphrase),
+        "switch" => Ok(FocusOperation::Switch),
+        "add" => Ok(FocusOperation::Add),
+        "topic_shift" => Ok(FocusOperation::TopicShift),
+        _ => Err(format!("unknown focus operation: {}", raw)),
+    }
+}
+
+fn parse_pragmatic_motive(raw: &str) -> Result<PragmaticMotive, String> {
+    match raw {
+        "affiliation" => Ok(PragmaticMotive::Affiliation),
+        "self_interest" => Ok(PragmaticMotive::SelfInterest),
+        "play" => Ok(PragmaticMotive::Play),
+        "epistemic" => Ok(PragmaticMotive::Epistemic),
+        "meta" => Ok(PragmaticMotive::Meta),
+        _ => Err(format!("unknown pragmatic motive: {}", raw)),
+    }
+}
+
 fn action_executor_input(
-    action: &Action,
+    action: &ExecutableAction,
     action_context: &ActionExecutionContext,
 ) -> Result<String, ActionExecutionError> {
-    validate_action_payload(action).map_err(|err| ActionExecutionError { message: err })?;
     match &action.payload {
-        ActionPayload::UserReply(intent) => serde_json::to_string(&json!({
+        ExecutableActionPayload::UserReply(intent) => serde_json::to_string(&json!({
             "intent": intent,
             "recent_event_history": action_context.recent_event_history,
+            "recalled_history": action_context.recalled_history,
             "latest_input": action_context.latest_input,
         }))
         .map_err(|err| ActionExecutionError {
             message: err.to_string(),
         }),
-        ActionPayload::PerformTask(payload) => Ok(payload.task.clone()),
+        ExecutableActionPayload::PerformTask(payload) => Ok(payload.task.clone()),
     }
 }
 
@@ -1377,7 +1530,7 @@ impl ActionExecutionService {
     pub(crate) async fn execute(
         &self,
         available_actions: &[AvailableAction],
-        selected_actions: &[Action],
+        selected_actions: &[ExecutableAction],
         action_context: &ActionExecutionContext,
         mode: ThoughtProcessRunMode,
         emit_component_event: Option<&Arc<dyn Fn(Event) + Send + Sync>>,
@@ -1614,8 +1767,7 @@ pub(crate) fn default_available_actions() -> Vec<AvailableAction> {
         AvailableAction {
             name: "user_reply".to_string(),
             description: "Realize a conversational response and send it to the user.".to_string(),
-            payload_description:
-                "{\"operation\":\"paraphrase|switch|add|topic_shift\",\"motive\":\"affiliation|self_interest|play|epistemic|meta\",\"target\":\"current focus\",\"aim\":\"compact conversational intent\"}".to_string(),
+            payload_description: "{\"source\":\"deliberation contributor source\"}".to_string(),
         },
         AvailableAction {
             name: "perform_task".to_string(),
@@ -1738,6 +1890,63 @@ fn format_list_or_none(items: &[String]) -> String {
         "none".to_string()
     } else {
         items.join("\n")
+    }
+}
+
+fn format_time_context(events: &[Event]) -> String {
+    let now = OffsetDateTime::now_utc();
+    let now_local = to_local_offset(now);
+    let latest_user = events
+        .iter()
+        .rev()
+        .find(|event| event.source == "user" && event.meta.tags.iter().any(|tag| tag == "input"))
+        .and_then(|event| OffsetDateTime::parse(event.ts.as_str(), &Rfc3339).ok());
+    let (latest_user_elapsed, date_changed) = latest_user
+        .map(|ts| {
+            let elapsed = now - ts;
+            let latest_local = to_local_offset(ts);
+            (
+                format_duration(elapsed.whole_seconds().max(0)),
+                latest_local.date() != now_local.date(),
+            )
+        })
+        .unwrap_or_else(|| ("unknown".to_string(), false));
+    format!(
+        "<time_context>\ncurrent_time={}\nlatest_user_elapsed={}\ndate_changed_since_latest_user={}\n</time_context>",
+        format_local_datetime(now_local),
+        latest_user_elapsed,
+        date_changed
+    )
+}
+
+fn to_local_offset(value: OffsetDateTime) -> OffsetDateTime {
+    UtcOffset::current_local_offset()
+        .map(|offset| value.to_offset(offset))
+        .unwrap_or(value)
+}
+
+fn format_local_datetime(value: OffsetDateTime) -> String {
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        value.year(),
+        value.month() as u8,
+        value.day(),
+        value.hour(),
+        value.minute(),
+        value.second()
+    )
+}
+
+fn format_duration(total_seconds: i64) -> String {
+    let days = total_seconds / 86_400;
+    let hours = (total_seconds % 86_400) / 3_600;
+    let minutes = (total_seconds % 3_600) / 60;
+    if days > 0 {
+        format!("{} days {} hours", days, hours)
+    } else if hours > 0 {
+        format!("{} hours {} minutes", hours, minutes)
+    } else {
+        format!("{} minutes", minutes)
     }
 }
 
@@ -1907,6 +2116,7 @@ mod tests {
         ActionExecutionContext {
             recent_event_history: "ts | role | message\n2026-05-17 12:00:00 | user | hi"
                 .to_string(),
+            recalled_history: "none".to_string(),
             latest_input: "hi".to_string(),
         }
     }
@@ -1915,22 +2125,21 @@ mod tests {
         DeliberationContributions::default()
     }
 
-    fn user_reply_action(target: &str, aim: &str) -> Action {
-        Action {
+    fn user_reply_action(target: &str) -> ExecutableAction {
+        ExecutableAction {
             name: "user_reply".to_string(),
-            payload: ActionPayload::UserReply(FocusPragmaticIntent {
+            payload: ExecutableActionPayload::UserReply(FocusPragmaticIntent {
                 operation: FocusOperation::Add,
                 motive: PragmaticMotive::Affiliation,
                 target: target.to_string(),
-                aim: aim.to_string(),
             }),
         }
     }
 
-    fn perform_task_action(task: &str) -> Action {
-        Action {
+    fn perform_task_action(task: &str) -> ExecutableAction {
+        ExecutableAction {
             name: "perform_task".to_string(),
-            payload: ActionPayload::PerformTask(PerformTaskPayload {
+            payload: ExecutableActionPayload::PerformTask(PerformTaskPayload {
                 task: task.to_string(),
             }),
         }
@@ -1957,7 +2166,7 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let service = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
-                r#"{"actions":[{"name":"shell_exec","payload":{"task":"date"}}],"reason":"test"}"#
+                r#"{"actions":[{"name":"shell_exec","payload":{"task":"date"}}],"intent_scores":[]}"#
                     .to_string(),
             ),
             requests,
@@ -1979,7 +2188,8 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let service = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
-                r#"{"actions":[{"name":"user_reply","input":"hi"}],"reason":"test"}"#.to_string(),
+                r#"{"actions":[{"name":"user_reply","input":"hi"}],"intent_scores":[]}"#
+                    .to_string(),
             ),
             requests,
         }));
@@ -1997,7 +2207,7 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let service = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
-                r#"{"actions":[{"name":"user_reply","payload":{"operation":"add","motive":"affiliation","target":"greeting","aim":"return a light greeting"}}],"reason":"test"}"#.to_string(),
+                r#"{"actions":[{"name":"user_reply","payload":{"source":"curiosity"}}],"intent_scores":[{"source":"curiosity","relevance":5,"specificity":5,"conversational_fit":5,"grounding":1}]}"#.to_string(),
             ),
             requests: requests.clone(),
         }));
@@ -2008,7 +2218,7 @@ mod tests {
                 &DeliberationContributions {
                     intent_candidates: vec![IntentCandidate {
                         source: "curiosity".to_string(),
-                        text: "operation=add; motive=epistemic".to_string(),
+                        text: "operation=add; motive=epistemic; target=greeting".to_string(),
                     }],
                     constraints: vec!["do not execute external tasks".to_string()],
                 },
@@ -2046,7 +2256,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[user_reply_action("greeting", "return a light greeting")],
+                &[user_reply_action("greeting")],
                 &action_execution_context(),
                 ThoughtProcessRunMode::Commit,
                 None,
@@ -2078,9 +2288,9 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[Action {
+                &[ExecutableAction {
                     name: "shell_exec".to_string(),
-                    payload: ActionPayload::PerformTask(PerformTaskPayload {
+                    payload: ExecutableActionPayload::PerformTask(PerformTaskPayload {
                         task: "inspect logs".to_string(),
                     }),
                 }],
@@ -2191,7 +2401,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[user_reply_action("greeting", "return a light greeting")],
+                &[user_reply_action("greeting")],
                 &action_execution_context(),
                 ThoughtProcessRunMode::Commit,
                 None,
@@ -2222,7 +2432,7 @@ mod tests {
         let results = service
             .execute(
                 &default_available_actions(),
-                &[user_reply_action("affiliation", "respond warmly")],
+                &[user_reply_action("affiliation")],
                 &action_execution_context(),
                 ThoughtProcessRunMode::DryRun,
                 None,
@@ -2282,7 +2492,7 @@ mod tests {
         let decision_requests = Arc::new(Mutex::new(Vec::new()));
         let decision = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
-                r#"{"actions":[{"name":"user_reply","payload":{"operation":"add","motive":"affiliation","target":"greeting","aim":"return a light greeting"}}],"reason":"greeting"}"#
+                r#"{"actions":[{"name":"user_reply","payload":{"source":"curiosity"}}],"intent_scores":[{"source":"curiosity","relevance":5,"specificity":5,"conversational_fit":5,"grounding":1}]}"#
                     .to_string(),
             ),
             requests: decision_requests,
@@ -2304,7 +2514,7 @@ mod tests {
                 contributions: DeliberationContributions {
                     intent_candidates: vec![IntentCandidate {
                         source: "curiosity".to_string(),
-                        text: "greet back lightly".to_string(),
+                        text: "operation=add; motive=affiliation; target=greeting".to_string(),
                     }],
                     constraints: Vec::new(),
                 },
@@ -2324,7 +2534,7 @@ mod tests {
         let result = service.run(&input).await.expect("must run thought process");
 
         assert_eq!(*seen_event_count.lock().expect("lock"), vec![1]);
-        assert_eq!(result.decision_output.reason, "greeting");
+        assert_eq!(result.decision_output.intent_scores.len(), 1);
         assert_eq!(result.deliberation_contributions.intent_candidates.len(), 1);
         assert_eq!(
             *contributor_contexts.lock().expect("lock"),
@@ -2391,7 +2601,7 @@ mod tests {
         let decision_requests = Arc::new(Mutex::new(Vec::new()));
         let decision = DecisionService::new(Arc::new(StaticLlm {
             response: Ok(
-                r#"{"actions":[{"name":"user_reply","payload":{"operation":"add","motive":"affiliation","target":"greeting","aim":"return a light greeting"}}],"reason":"greeting"}"#
+                r#"{"actions":[{"name":"user_reply","payload":{"source":"curiosity"}}],"intent_scores":[{"source":"curiosity","relevance":5,"specificity":5,"conversational_fit":5,"grounding":1}]}"#
                     .to_string(),
             ),
             requests: decision_requests.clone(),
