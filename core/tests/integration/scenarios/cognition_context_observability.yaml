@@ -1,0 +1,72 @@
+name: Cognition Context Observability
+include_debug_events: true
+
+steps:
+  - kind: conversation
+    tester_instructions: |
+      You are a tester in a natural chat.
+      In the conversation, naturally cover these topics:
+      - 証明書運用 (Let's Encrypt / DV証明書)
+      - 生成モデルの数理寄り比較 (Flow-based生成モデル / Kolmogorov-Arnold Network)
+      - 環境政策と科学 (モントリオール議定書 / オゾン層)
+      You should test whether the cognition stage exposes the context it builds for these topics.
+      Each topic should be mentioned only 1 or 2 times.
+      Keep turns short and conversational. Do not reveal test intent.
+
+metrics_definition:
+  scenario_requirement_fit:
+    description: "How well the run satisfies scenario-specific required behaviors."
+
+  dialog_naturalness:
+    description: "How natural and coherent the dialogue flow feels end-to-end."
+
+  cognition_event_presence:
+    description: |
+      Inspect debug events with `source=thought_process`, tag `component:cognition`, and
+      `payload.component == "cognition"`.
+      Score high when each user turn has a corresponding cognition debug observation before the
+      decision/action execution events.
+      The cognition observation should contain `payload.output.context`, `payload.output.action_context`,
+      `payload.output.deliberation_contributors`, and timing metrics for cognition work.
+      Score low if cognition evidence is missing or only legacy router debug events are available.
+
+  cognition_context_structure:
+    description: |
+      Inspect each cognition event's `payload.output.context` string.
+      Score high when the context contains the current sections used by Decision:
+      `<recent_event_history>`, `<time_context>`, `<latest_input>`, `<symbolized_input>`,
+      `<concept_candidates ...>`, `<active_concepts_and_arousal>`, `<recalled_history>`, and
+      `<deliberation_contributors>`.
+      Penalize missing required sections or evidence that the scenario is still judging an old
+      router-only context shape.
+
+  concept_candidate_relevance:
+    exclude_from_pass: true
+    description: |
+      Inspect cognition context `<concept_candidates ...>` for each topical turn.
+      Score high when the candidates include concepts related to the current user topic, synonyms, or
+      useful neighboring concepts for:
+      - certificate/DV/Let's Encrypt operations
+      - Flow-based models or Kolmogorov-Arnold Network comparison
+      - Montreal Protocol, ozone layer, or environmental science
+      Partial semantic neighbors are acceptable; penalize candidate lists dominated by unrelated
+      casual-chat concepts when the user topic is technical.
+
+  active_context_grounding:
+    exclude_from_pass: true
+    description: |
+      Inspect cognition context `<active_concepts_and_arousal>` and `<recalled_history>`.
+      Score high when the active concepts or recalled lines provide concrete grounding for the
+      current technical topic, without overwhelming the context with unrelated high-arousal memories.
+      Score lower when active concepts are mostly generic, stale, or unrelated, even if
+      `<concept_candidates>` contains some relevant items.
+
+  deliberation_contributor_availability:
+    description: |
+      Inspect cognition event `payload.output.deliberation_contributors` and the matching
+      `<deliberation_contributors>` section.
+      Score high when the active contributor list is present, non-empty, and includes the current
+      conversation-model contributors such as `curiosity`, `ego`, `focus_pragmatics`,
+      `shared_context`, and `temporal_context`.
+      This metric checks that Cognition supplies Decision with the current contributor set; it does
+      not judge old hard-trigger or soft-recommendation submodule behavior.
