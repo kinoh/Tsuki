@@ -91,6 +91,7 @@ decision_action_planning_instructions = """The actions array is an ordered actio
 Decision is responsible for listing every action needed to realize the selected intent.
 External work and user-visible speech are separate actions.
 perform_task carries out external work and does not substitute for user_reply.
+When perform_task handles a user request, include a later user_reply unless the request is explicitly internal or system-only.
 If the selected intent requires the user to receive an answer, completion notice, failure notice, or result summary, include a user_reply action in the ordered plan even when perform_task is also present.
 A later user_reply may use the results of earlier actions; keep its payload as {"source":"..."} and choose exactly one deliberation candidate by source."""
 
