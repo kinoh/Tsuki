@@ -149,6 +149,11 @@
       }
       .dag-node.active { border-color: var(--accent); background: rgba(113, 74, 244, 0.18); }
       .dag-node:disabled { cursor: default; opacity: 0.6; }
+      body.run-in-progress .dag,
+      body.run-in-progress .inspection-stack {
+        opacity: 0.45;
+        transition: opacity 120ms ease;
+      }
       pre {
         margin: 0;
         padding: 10px;
@@ -166,9 +171,19 @@
       .muted { color: var(--muted); font-size: 12px; }
       .status { min-height: 18px; margin-top: 8px; font-size: 12px; color: var(--muted); }
       .status.error { color: var(--danger); }
+      .status.running::after {
+        content: "";
+        animation: loading-dots 1.2s steps(4, end) infinite;
+      }
       .stack { display: grid; gap: 12px; align-content: start; }
       .inspection-stack { display: grid; gap: 10px; }
       #promptEditor[readonly] { opacity: 0.75; }
+      @keyframes loading-dots {
+        0% { content: ""; }
+        25% { content: "."; }
+        50% { content: ".."; }
+        75%, 100% { content: "..."; }
+      }
       @media (max-width: 980px) {
         .layout { grid-template-columns: 1fr; }
         .dag { align-items: stretch; }
@@ -277,6 +292,7 @@
         inspecting: { kind: "event_history", name: "Event History", component: null },
         prompts: null,
         previewTimer: null,
+        runInProgress: false,
       };
 
       const $ = (id) => document.getElementById(id);
@@ -285,6 +301,13 @@
         const el = $(id);
         el.textContent = text;
         el.classList.toggle("error", error);
+      }
+
+      function setRunInProgress(value) {
+        state.runInProgress = value;
+        document.body.classList.toggle("run-in-progress", value);
+        $("runThought").disabled = value;
+        $("runStatus").classList.toggle("running", value);
       }
 
       function show(value) {
@@ -610,18 +633,21 @@
       }
 
       async function runThoughtProcess() {
-        status("runStatus", "Running...");
+        setRunInProgress(true);
+        status("runStatus", "Running");
         try {
           state.lastRun = await requestJson("/admin/thought-process/run", {
             method: "POST",
             body: JSON.stringify(runPayload()),
           });
           state.eventHistoryPreview = state.lastRun.event_history || [];
+          setRunInProgress(false);
           renderDag();
           renderInspection();
           saveSession();
           status("runStatus", "Done.");
         } catch (err) {
+          setRunInProgress(false);
           status("runStatus", err.message, true);
         }
       }
