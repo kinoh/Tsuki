@@ -1,3 +1,6 @@
 services:
+  core:
+    restart: "no"
+
   sandbox:
     runtime: runc
