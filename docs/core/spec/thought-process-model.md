@@ -435,6 +435,11 @@ Useful inspection surfaces:
 The UI should make clear whether a component run is preview-only, executed in dry-run mode, or
 executed in commit mode. Dry-run/commit is a component execution mode for observing or applying
 that component's own side effects, not a separate effect aggregation system.
+When a full dry-run produces user-facing events that can be materialized without rerunning the
+thought process, the admin UI may expose those events as a committable event list. Committing that
+list appends the same event contracts as a direct commit run for the supported actions. Tool-backed
+actions that dry-run did not execute must fail instead of pretending to have the same commit
+result.
 History preview uses a numeric history limit only; setting the limit to `0` is the way to inspect a
 run without prior event history.
 

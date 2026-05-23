@@ -375,6 +375,31 @@ paths:
         '500':
           $ref: '#/components/responses/ErrorText'
 
+  /admin/thought-process/dry-run-events/commit:
+    post:
+      tags: [Admin]
+      summary: Commit materialized events from a dry-run thought process
+      operationId: adminCommitThoughtProcessDryRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThoughtProcessCommitDryRunRequest'
+      responses:
+        '200':
+          description: Committed dry-run events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThoughtProcessCommitDryRunResponse'
+        '400':
+          $ref: '#/components/responses/ErrorText'
+        '401':
+          $ref: '#/components/responses/ErrorText'
+        '500':
+          $ref: '#/components/responses/ErrorText'
+
   /admin/thought-process/event-history:
     post:
       tags: [Admin]
@@ -694,7 +719,7 @@ components:
     ThoughtProcessRunResponse:
       type: object
       additionalProperties: false
-      required: [mode, event_history, result]
+      required: [mode, event_history, commit_events, result]
       properties:
         mode:
           $ref: '#/components/schemas/ThoughtProcessRunMode'
@@ -702,8 +727,34 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Event'
+        commit_events:
+          type: array
+          description: Events that can be appended to adopt a dry-run result without rerunning it.
+          items:
+            $ref: '#/components/schemas/Event'
         result:
           $ref: '#/components/schemas/ThoughtProcessInspection'
+
+    ThoughtProcessCommitDryRunRequest:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Event'
+
+    ThoughtProcessCommitDryRunResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
 
     ThoughtProcessEventHistoryResponse:
       type: object

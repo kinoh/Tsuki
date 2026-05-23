@@ -55,11 +55,15 @@ use crate::conversation_recall_store::ConversationRecallStore;
 use crate::db::{Db, RuntimeConfigRecord, UsageMetricsSummary};
 use crate::debug_api::{
     DebugImproveProposalRequest, DebugImproveResponse, DebugImproveReviewRequest,
-    DebugTriggerRequest, DebugTriggerResponse, ThoughtProcessComponentRunRequest,
+    DebugTriggerRequest, DebugTriggerResponse, ThoughtProcessCommitDryRunRequest,
+    ThoughtProcessCommitDryRunResponse, ThoughtProcessComponentRunRequest,
     ThoughtProcessComponentRunResponse, ThoughtProcessEventHistoryResponse,
     ThoughtProcessInspection, ThoughtProcessRunRequest, ThoughtProcessRunResponse,
 };
-use crate::event::contracts::input_text as emit_input_text;
+use crate::event::contracts::{
+    action_result as emit_action_result, input_text as emit_input_text,
+    response_text as emit_response_text,
+};
 use crate::event::Event;
 use crate::event_store::EventStore;
 use crate::llm::{build_response_api_llm, LlmUsageContext, LlmUsageRecorder, ResponseApiConfig};
@@ -529,6 +533,10 @@ pub(crate) async fn run_server() {
             post(admin_preview_thought_process_event_history),
         )
         .route("/thought-process/run", post(admin_run_thought_process))
+        .route(
+            "/thought-process/dry-run-events/commit",
+            post(admin_commit_thought_process_dry_run),
+        )
         .route(
             "/thought-process/components/{component}/run",
             post(admin_run_thought_process_component),
@@ -1200,9 +1208,16 @@ async fn admin_run_thought_process(
     )
     .await
     .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let commit_events = if mode == ThoughtProcessRunMode::DryRun {
+        materialize_thought_process_commit_events(&payload, &result.action_results)
+            .map_err(|err| (StatusCode::BAD_REQUEST, err))?
+    } else {
+        Vec::new()
+    };
     Ok(Json(ThoughtProcessRunResponse {
         mode,
         event_history,
+        commit_events,
         result: ThoughtProcessInspection {
             decision_context: result.decision_context,
             deliberation_contributions: result.deliberation_contributions,
@@ -1220,6 +1235,29 @@ async fn admin_preview_thought_process_event_history(
     let event_history =
         admin_event_history(&state, &payload, ThoughtProcessRunMode::DryRun).await?;
     Ok(Json(ThoughtProcessEventHistoryResponse { event_history }))
+}
+
+async fn admin_commit_thought_process_dry_run(
+    State(state): State<AppState>,
+    Json(payload): Json<ThoughtProcessCommitDryRunRequest>,
+) -> Result<Json<ThoughtProcessCommitDryRunResponse>, (StatusCode, String)> {
+    if payload.events.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "dry-run commit requires at least one event".to_string(),
+        ));
+    }
+    for event in &payload.events {
+        validate_dry_run_commit_event(event)?;
+    }
+    let mut committed = Vec::with_capacity(payload.events.len());
+    for event in payload.events {
+        append_admin_event(&state, &event).await?;
+        committed.push(event);
+    }
+    Ok(Json(ThoughtProcessCommitDryRunResponse {
+        events: committed,
+    }))
 }
 
 async fn admin_run_thought_process_component(
@@ -1417,6 +1455,99 @@ async fn admin_event_history(
         event_history.push(event);
     }
     Ok(event_history)
+}
+
+fn materialize_thought_process_commit_events(
+    payload: &ThoughtProcessRunRequest,
+    action_results: &[crate::application::thought_process_service::ActionResult],
+) -> Result<Vec<Event>, String> {
+    let mut events = Vec::new();
+    if let Some(input) = payload
+        .input
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        events.push(emit_input_text("user", "message", input));
+    }
+    for result in action_results {
+        if result.name == "perform_task" && result.ok {
+            return Err(
+                "dry-run commit cannot materialize perform_task because dry-run does not execute tools"
+                    .to_string(),
+            );
+        }
+        if result.name == "user_reply" && result.ok {
+            events.push(emit_response_text(result.output.clone()));
+        }
+        events.push(emit_action_result(
+            &result.name,
+            result.ok,
+            &result.output,
+            result.error.as_deref(),
+        ));
+    }
+    Ok(events)
+}
+
+fn validate_dry_run_commit_event(event: &Event) -> Result<(), (StatusCode, String)> {
+    let allowed = (event.source == "user"
+        && event.modality == "text"
+        && event.meta.tags.iter().any(|tag| tag == "input")
+        && event
+            .payload
+            .get("text")
+            .and_then(|value| value.as_str())
+            .is_some())
+        || (event.source == "assistant"
+            && event.modality == "text"
+            && event.meta.tags.iter().any(|tag| tag == "response")
+            && event
+                .payload
+                .get("text")
+                .and_then(|value| value.as_str())
+                .is_some())
+        || (event.source == "action_execution"
+            && event.modality == "state"
+            && event.meta.tags.iter().any(|tag| tag == "action.result")
+            && event
+                .payload
+                .get("action")
+                .and_then(|value| value.as_str())
+                .is_some()
+            && event
+                .payload
+                .get("ok")
+                .and_then(|value| value.as_bool())
+                .is_some());
+    if allowed {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "unsupported dry-run commit event: source={} modality={}",
+                event.source, event.modality
+            ),
+        ))
+    }
+}
+
+async fn append_admin_event(state: &AppState, event: &Event) -> Result<(), (StatusCode, String)> {
+    state
+        .services
+        .event_store
+        .append(event)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    let _ = state.services.tx.send(event.clone());
+    state
+        .services
+        .conversation_recall_store
+        .upsert_event_projection(event)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(())
 }
 
 fn internal_serialize_error(err: serde_json::Error) -> (StatusCode, String) {
@@ -2646,9 +2777,12 @@ async fn build_effective_prompts(state: &AppState) -> Result<PromptsPayload, (St
 mod tests {
     use super::{
         build_admin_session_clear_cookie, build_admin_session_cookie, event_has_any_tag,
-        event_has_tag, matches_event_for_requested_tags, normalize_event_tags,
-        parse_events_query_tags, read_spec_info_version, verify_auth,
+        event_has_tag, matches_event_for_requested_tags, materialize_thought_process_commit_events,
+        normalize_event_tags, parse_events_query_tags, read_spec_info_version,
+        validate_dry_run_commit_event, verify_auth,
     };
+    use crate::application::thought_process_service::{ActionResult, ThoughtProcessRunMode};
+    use crate::debug_api::ThoughtProcessRunRequest;
     use crate::event::contracts::response_text;
 
     #[test]
@@ -2746,5 +2880,60 @@ mod tests {
     fn parse_events_query_tags_ignores_non_standard_bracket_form() {
         let tags = parse_events_query_tags(Some("tags[]=input&tags[]=response"));
         assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn materialize_commit_events_matches_user_reply_commit_contract() {
+        let request = ThoughtProcessRunRequest {
+            input: Some("hello".to_string()),
+            history_limit: None,
+            history_cutoff_ts: None,
+            exclude_event_ids: None,
+            mode: Some(ThoughtProcessRunMode::DryRun),
+        };
+        let events = materialize_thought_process_commit_events(
+            &request,
+            &[ActionResult {
+                name: "user_reply".to_string(),
+                ok: true,
+                output: "hi".to_string(),
+                error: None,
+            }],
+        )
+        .expect("must materialize user reply");
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].source, "user");
+        assert_eq!(events[0].payload["text"], "hello");
+        assert_eq!(events[1].source, "assistant");
+        assert_eq!(events[1].payload["text"], "hi");
+        assert_eq!(events[2].source, "action_execution");
+        assert_eq!(events[2].payload["action"], "user_reply");
+        for event in events {
+            assert!(validate_dry_run_commit_event(&event).is_ok());
+        }
+    }
+
+    #[test]
+    fn materialize_commit_events_rejects_unexecuted_perform_task() {
+        let request = ThoughtProcessRunRequest {
+            input: None,
+            history_limit: None,
+            history_cutoff_ts: None,
+            exclude_event_ids: None,
+            mode: Some(ThoughtProcessRunMode::DryRun),
+        };
+        let err = materialize_thought_process_commit_events(
+            &request,
+            &[ActionResult {
+                name: "perform_task".to_string(),
+                ok: true,
+                output: "{}".to_string(),
+                error: None,
+            }],
+        )
+        .expect_err("perform_task dry-run output is not a commit result");
+
+        assert!(err.contains("perform_task"));
     }
 }

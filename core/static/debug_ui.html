@@ -230,6 +230,7 @@
             </div>
             <div class="row run-actions">
               <button id="runThought">Run Thought Process</button>
+              <button class="secondary" id="commitDryRun">Commit Dry Run</button>
               <button class="secondary" id="clearOutput">Clear</button>
             </div>
             <div class="status" id="runStatus"></div>
@@ -307,6 +308,7 @@
         state.runInProgress = value;
         document.body.classList.toggle("run-in-progress", value);
         $("runThought").disabled = value;
+        $("commitDryRun").disabled = value || !canCommitDryRun();
         $("runStatus").classList.toggle("running", value);
       }
 
@@ -392,6 +394,14 @@
           mode: $("mode").value,
           history_limit: Number($("historyLimit").value || 0),
         };
+      }
+
+      function canCommitDryRun() {
+        return state.lastRun?.mode === "dry_run" && (state.lastRun?.commit_events || []).length > 0;
+      }
+
+      function refreshCommitDryRunButton() {
+        $("commitDryRun").disabled = state.runInProgress || !canCommitDryRun();
       }
 
       function contributorNames() {
@@ -645,9 +655,36 @@
           renderDag();
           renderInspection();
           saveSession();
+          refreshCommitDryRunButton();
           status("runStatus", "Done.");
         } catch (err) {
           setRunInProgress(false);
+          refreshCommitDryRunButton();
+          status("runStatus", err.message, true);
+        }
+      }
+
+      async function commitDryRun() {
+        if (!canCommitDryRun()) {
+          status("runStatus", "No dry-run events to commit.", true);
+          return;
+        }
+        setRunInProgress(true);
+        status("runStatus", "Committing dry run...");
+        try {
+          const result = await requestJson("/admin/thought-process/dry-run-events/commit", {
+            method: "POST",
+            body: JSON.stringify({ events: state.lastRun.commit_events }),
+          });
+          state.lastRun.mode = "commit";
+          state.lastRun.committed_events = result.events || [];
+          saveSession();
+          refreshCommitDryRunButton();
+          setRunInProgress(false);
+          status("runStatus", `Committed ${result.events?.length || 0} dry-run events.`);
+        } catch (err) {
+          setRunInProgress(false);
+          refreshCommitDryRunButton();
           status("runStatus", err.message, true);
         }
       }
@@ -819,6 +856,7 @@
       }
 
       $("runThought").addEventListener("click", runThoughtProcess);
+      $("commitDryRun").addEventListener("click", commitDryRun);
       $("runComponent").addEventListener("click", () => {
         const component = componentForInspection();
         if (component) runComponent(component);
@@ -829,6 +867,7 @@
         clearSession();
         renderDag();
         renderInspection();
+        refreshCommitDryRunButton();
       });
       $("resetPrompts").addEventListener("click", refreshPrompts);
       $("loadPrompts").addEventListener("click", loadPrompts);
@@ -851,6 +890,7 @@
       restoreSession();
       renderDag();
       renderInspection();
+      refreshCommitDryRunButton();
       refreshPrompts().then(() => {
         if (state.eventHistoryPreview.length === 0) refreshEventHistoryPreview();
       });

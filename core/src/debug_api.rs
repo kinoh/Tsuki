@@ -28,7 +28,18 @@ pub(crate) struct ThoughtProcessRunRequest {
 pub(crate) struct ThoughtProcessRunResponse {
     pub(crate) mode: ThoughtProcessRunMode,
     pub(crate) event_history: Vec<Event>,
+    pub(crate) commit_events: Vec<Event>,
     pub(crate) result: ThoughtProcessInspection,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ThoughtProcessCommitDryRunRequest {
+    pub(crate) events: Vec<Event>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ThoughtProcessCommitDryRunResponse {
+    pub(crate) events: Vec<Event>,
 }
 
 #[derive(Debug, Serialize)]
